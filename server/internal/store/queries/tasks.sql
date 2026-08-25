@@ -27,6 +27,26 @@ SET status = $2
 WHERE id = $1
 RETURNING *;
 
+-- name: UpdateTaskStatusWithReason :one
+UPDATE tasks
+SET status = $2, cancel_reason = $3
+WHERE id = $1
+RETURNING *;
+
+-- name: UpdateTaskProgress :one
+UPDATE tasks
+SET progress = $2
+WHERE id = $1
+RETURNING *;
+
+-- name: ListTaskProgressByProject :many
+-- KR 层进度覆盖度的原始事实（状态与可选进度），聚合规则在 domain。
+SELECT t.key_result_id, t.status, t.progress
+FROM tasks t
+JOIN key_results k ON k.id = t.key_result_id
+JOIN objectives o ON o.id = k.objective_id
+WHERE o.project_id = $1;
+
 -- name: GetKeyResultInProject :one
 -- KR 连同项目归属（任务创建时校验所属 KR 属于本项目）。
 SELECT k.*, o.project_id

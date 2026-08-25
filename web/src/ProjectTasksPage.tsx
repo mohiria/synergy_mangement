@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Alert, Button, DatePicker, Input, Modal, Select, Spin, Transfer, message } from "antd";
+import { Alert, Button, DatePicker, Input, InputNumber, Modal, Select, Spin, Transfer, message } from "antd";
 import type { Dayjs } from "dayjs";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
@@ -142,6 +142,49 @@ export default function ProjectTasksPage({
 
   const [rejectTask, setRejectTask] = useState<Task | null>(null);
   const [rejectOpinion, setRejectOpinion] = useState("");
+  const [cancelTask, setCancelTask] = useState<Task | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [progressTask, setProgressTask] = useState<Task | null>(null);
+  const [progressValue, setProgressValue] = useState<number | null>(null);
+
+  const startTask = async (task: Task) => {
+    const res = await client.POST("/projects/{projectId}/tasks/{taskId}/update-status", {
+      params: { path: { projectId, taskId: task.id } },
+      body: { status: "in_progress" },
+    });
+    if (res.data) {
+      message.success("已开始执行");
+      load();
+    } else {
+      message.error(res.error?.message ?? "操作失败");
+    }
+  };
+
+  const doCancelTask = async (task: Task, reason: string) => {
+    const res = await client.POST("/projects/{projectId}/tasks/{taskId}/update-status", {
+      params: { path: { projectId, taskId: task.id } },
+      body: { status: "cancelled", reason },
+    });
+    if (res.data) {
+      message.success("任务已取消");
+      load();
+    } else {
+      message.error(res.error?.message ?? "操作失败");
+    }
+  };
+
+  const saveProgress = async (task: Task, progress: number | null) => {
+    const res = await client.PUT("/projects/{projectId}/tasks/{taskId}/progress", {
+      params: { path: { projectId, taskId: task.id } },
+      body: progress === null ? {} : { progress },
+    });
+    if (res.data) {
+      message.success(progress === null ? "已清除进度" : "进度已更新");
+      load();
+    } else {
+      message.error(res.error?.message ?? "操作失败");
+    }
+  };
 
   const groups = krList
     .map((kr) => ({ kr, list: filtered.filter((t) => t.keyResultId === kr.id) }))
@@ -151,6 +194,13 @@ export default function ProjectTasksPage({
     <tr key={`kr-${kr.id}`} className="table-group">
       <td colSpan={9}>
         {kr.code}　{kr.description}　<span className="muted">{list.length} 项</span>
+        {kr.progressSummary && kr.progressSummary.totalTasks > 0 && (
+          <span className="muted" style={{ fontWeight: 400 }}>
+            　·　{kr.progressSummary.filledTasks}／{kr.progressSummary.totalTasks} 个任务已填写进度
+            {kr.progressSummary.averageProgress != null &&
+              `，平均 ${kr.progressSummary.averageProgress}%`}
+          </span>
+        )}
       </td>
     </tr>,
     ...list.map((t) => (
@@ -170,13 +220,58 @@ export default function ProjectTasksPage({
               退回：{t.poolReview.opinion}
             </div>
           )}
+          {t.status === "cancelled" && t.cancelReason && (
+            <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+              原因:{t.cancelReason}
+            </div>
+          )}
         </td>
-        <td className="muted">—</td>
+        <td>
+          {t.progress != null ? (
+            <div>
+              <div className="progress">
+                <i style={{ width: `${t.progress}%` }} />
+              </div>
+              <span className="muted" style={{ fontSize: 12 }}>
+                {t.progress}%
+              </span>
+            </div>
+          ) : (
+            <span className="muted">—</span>
+          )}
+        </td>
         <td>{fmtDate(t.startDate)}</td>
         <td>{fmtDate(t.endDate)}</td>
         <td className="muted">—</td>
         <td>
           <div className="row-actions">
+            {t.canStart && (
+              <Button size="small" onClick={() => startTask(t)}>
+                开始
+              </Button>
+            )}
+            {t.canUpdateProgress && (
+              <Button
+                size="small"
+                onClick={() => {
+                  setProgressTask(t);
+                  setProgressValue(t.progress ?? null);
+                }}
+              >
+                进度
+              </Button>
+            )}
+            {t.canCancel && (
+              <Button
+                size="small"
+                onClick={() => {
+                  setCancelTask(t);
+                  setCancelReason("");
+                }}
+              >
+                取消
+              </Button>
+            )}
             {t.canSubmitPoolReview && (
               <Button size="small" onClick={() => submitPool(t)}>
                 提交入池
@@ -379,6 +474,57 @@ export default function ProjectTasksPage({
           placeholder="退回意见（选填）"
           value={rejectOpinion}
           onChange={(e) => setRejectOpinion(e.target.value)}
+        />
+      </Modal>
+      <Modal
+        title="更新进度"
+        open={!!progressTask}
+        okText="保存"
+        cancelText="取消"
+        onCancel={() => setProgressTask(null)}
+        onOk={async () => {
+          if (progressTask) {
+            await saveProgress(progressTask, progressValue);
+          }
+          setProgressTask(null);
+        }}
+      >
+        <p className="muted" style={{ marginTop: 0 }}>
+          按真实情况填写百分比；留空表示不填写，页面只展示状态。
+        </p>
+        <InputNumber
+          min={0}
+          max={100}
+          value={progressValue}
+          onChange={(v) => setProgressValue(v ?? null)}
+          addonAfter="%"
+          placeholder="未填写"
+          style={{ width: 160 }}
+        />
+      </Modal>
+      <Modal
+        title="取消任务"
+        open={!!cancelTask}
+        okText="确认取消任务"
+        cancelText="返回"
+        okButtonProps={{ danger: true, disabled: !cancelReason.trim() }}
+        onCancel={() => setCancelTask(null)}
+        onOk={async () => {
+          if (cancelTask) {
+            await doCancelTask(cancelTask, cancelReason.trim());
+          }
+          setCancelTask(null);
+        }}
+      >
+        <p className="muted" style={{ marginTop: 0 }}>
+          任务不再执行并保留原因；已取消任务不计入 KR 进度覆盖度。
+        </p>
+        <Input.TextArea
+          rows={3}
+          maxLength={500}
+          placeholder="取消原因（必填）"
+          value={cancelReason}
+          onChange={(e) => setCancelReason(e.target.value)}
         />
       </Modal>
     </ProjectShell>

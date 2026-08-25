@@ -945,6 +945,151 @@ func TestTaskInviteLifecycle(t *testing.T) {
 	}
 }
 
+// 任务状态与进度（#6，AC-12）：开始执行、可空进度、取消保留原因、KR 覆盖度派生。
+func TestTaskStatusAndProgress(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
+
+	ts := httptest.NewServer(api.NewHandler(pool, "/api/v1"))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, bob, carol := newClient(t), newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(bob, "bob", "bob-pass")
+	login(carol, "carol", "carol-pass")
+
+	sp := func(s string) *string { return &s }
+	ipt := func(v int) *int { return &v }
+
+	// alice 建项目；bob、carol 成员；bob 任 KR 负责人
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "进度试点", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	for _, uid := range []int64{bobUser.ID, carolUser.ID} {
+		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+		wantStatus(t, resp, http.StatusCreated)
+		resp.Body.Close()
+	}
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	okr := decodeBody[[]api.Objective](t, resp)
+	kr1 := okr[0].KeyResults[0].Id
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+
+	// bob（KR 负责人）免审建两个任务：一个自己负责、一个 carol 负责
+	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "验收脚本编写", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
+			{KeyResultId: kr1, Name: "联调环境准备", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	tasks := decodeBody[[]api.Task](t, resp)
+	if len(tasks) != 2 {
+		t.Fatalf("任务数量异常: %+v", tasks)
+	}
+	var bobTask, carolTask api.Task
+	for _, task := range tasks {
+		if task.OwnerId == bobUser.ID {
+			bobTask = task
+		} else {
+			carolTask = task
+		}
+	}
+	if !bobTask.CanStart || bobTask.CanUpdateProgress {
+		t.Fatalf("未开始任务派生标志异常: %+v", bobTask)
+	}
+
+	// 非负责人 carol 开始 bob 的任务 403
+	statusURL := func(id int64) string { return fmt.Sprintf("%s/%d/update-status", tasksURL, id) }
+	progressURL := func(id int64) string { return fmt.Sprintf("%s/%d/progress", tasksURL, id) }
+	resp = doJSON(t, carol, http.MethodPost, statusURL(bobTask.Id), api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+
+	// 负责人开始执行：未开始 → 进行中
+	resp = doJSON(t, bob, http.MethodPost, statusURL(bobTask.Id), api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
+	wantStatus(t, resp, http.StatusOK)
+	started := decodeBody[api.Task](t, resp)
+	if started.Status != api.TaskStatusInProgress || !started.CanUpdateProgress {
+		t.Fatalf("开始执行后状态异常: %+v", started)
+	}
+
+	// 重复开始 409
+	resp = doJSON(t, bob, http.MethodPost, statusURL(bobTask.Id), api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+
+	// 未开始的任务不能填进度 409（系统不虚构进度）
+	resp = doJSON(t, carol, http.MethodPut, progressURL(carolTask.Id), api.UpdateTaskProgressRequest{Progress: ipt(50)})
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+
+	// 负责人填进度；非法值 422；清除进度
+	resp = doJSON(t, bob, http.MethodPut, progressURL(bobTask.Id), api.UpdateTaskProgressRequest{Progress: ipt(45)})
+	wantStatus(t, resp, http.StatusOK)
+	if got := decodeBody[api.Task](t, resp); got.Progress == nil || *got.Progress != 45 {
+		t.Fatalf("进度未保存: %+v", got)
+	}
+	resp = doJSON(t, bob, http.MethodPut, progressURL(bobTask.Id), api.UpdateTaskProgressRequest{Progress: ipt(101)})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+
+	// KR 覆盖度：2 个入池任务、1 个已填，平均 45
+	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	okr = decodeBody[[]api.Objective](t, resp)
+	summary := okr[0].KeyResults[0].ProgressSummary
+	if summary == nil || summary.TotalTasks != 2 || summary.FilledTasks != 1 || summary.AverageProgress == nil || *summary.AverageProgress != 45 {
+		t.Fatalf("KR 覆盖度异常: %+v", summary)
+	}
+
+	// 清除进度后覆盖度归零
+	resp = doJSON(t, bob, http.MethodPut, progressURL(bobTask.Id), api.UpdateTaskProgressRequest{})
+	wantStatus(t, resp, http.StatusOK)
+	if got := decodeBody[api.Task](t, resp); got.Progress != nil {
+		t.Fatalf("进度未清除: %+v", got)
+	}
+
+	// 取消：原因必填 422；负责人取消保留原因；已取消不计入覆盖度
+	resp = doJSON(t, carol, http.MethodPost, statusURL(carolTask.Id), api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusCancelled})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	reason := "需求合并，不再单独执行"
+	resp = doJSON(t, carol, http.MethodPost, statusURL(carolTask.Id), api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusCancelled, Reason: &reason})
+	wantStatus(t, resp, http.StatusOK)
+	cancelled := decodeBody[api.Task](t, resp)
+	if cancelled.Status != api.TaskStatusCancelled || cancelled.CancelReason == nil || *cancelled.CancelReason != reason {
+		t.Fatalf("取消后状态异常: %+v", cancelled)
+	}
+	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	okr = decodeBody[[]api.Objective](t, resp)
+	if s2 := okr[0].KeyResults[0].ProgressSummary; s2 == nil || s2.TotalTasks != 1 || s2.FilledTasks != 0 || s2.AverageProgress != nil {
+		t.Fatalf("取消后覆盖度异常: %+v", okr[0].KeyResults[0].ProgressSummary)
+	}
+
+	// 已取消任务不可再取消 409
+	resp = doJSON(t, carol, http.MethodPost, statusURL(carolTask.Id), api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusCancelled, Reason: &reason})
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+}
+
 func TestLoginRateLimit(t *testing.T) {
 	_, pool := setupDB(t)
 

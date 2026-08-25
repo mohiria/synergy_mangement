@@ -193,6 +193,10 @@ body {
 
 .row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 3px; }
 
+/* 原型 .progress：可选进度条。 */
+.progress { height: 5px; min-width: 66px; background: #e9edf0; border-radius: 10px; overflow: hidden; }
+.progress i { display: block; height: 100%; background: #6a9aae; }
+
 .login-shell { min-height: 100vh; display: grid; place-items: center; background: var(--bg); }
 .login-brand { display: flex; align-items: center; gap: 10px; justify-content: center; margin-bottom: 18px; }
 

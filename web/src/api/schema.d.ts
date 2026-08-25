@@ -229,6 +229,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/tasks/{taskId}/update-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 手工流转任务状态：开始执行或取消（AC-12；完成走三道审批，不在此端点） */
+        post: operations["updateTaskStatus"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/tasks/{taskId}/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 更新或清除任务的可选进度百分比（AC-12；系统不产生虚构百分比） */
+        put: operations["updateTaskProgress"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/task-invites": {
         parameters: {
             query?: never;
@@ -375,6 +415,27 @@ export interface components {
             endDate?: string;
             riskLevel: components["schemas"]["RiskLevel"];
             sortOrder: number;
+            progressSummary?: components["schemas"]["ProgressSummary"];
+        };
+        /** @description KR 层进度数据覆盖度（词汇表「进度数据覆盖度」）；只统计已入池且未取消的任务，平均值任务等权 */
+        ProgressSummary: {
+            totalTasks: number;
+            filledTasks: number;
+            /** @description 已填写任务的等权平均（四舍五入）；无已填任务时不返回 */
+            averageProgress?: number;
+        };
+        UpdateTaskStatusRequest: {
+            /**
+             * @description 手工流转目标：开始执行（未开始／等待输入 → 进行中）或取消（非终态 → 已取消，需原因）
+             * @enum {string}
+             */
+            status: "in_progress" | "cancelled";
+            /** @description 取消原因；status 为 cancelled 时必填 */
+            reason?: string;
+        };
+        UpdateTaskProgressRequest: {
+            /** @description 省略或 null 表示清除进度，回到只展示状态 */
+            progress?: number;
         };
         Objective: {
             /** Format: int64 */
@@ -456,7 +517,17 @@ export interface components {
             /** Format: date */
             endDate: string;
             status: components["schemas"]["TaskStatus"];
+            /** @description 可选进度百分比（词汇表「任务进度」）；未填写时不返回，前端只展示状态 */
+            progress?: number;
+            /** @description 取消原因（已取消任务保留，PRD §5.1） */
+            cancelReason?: string;
             poolReview?: components["schemas"]["PoolReview"];
+            /** @description 当前用户能否开始执行本任务（派生字段；负责人／可编辑项目者，未开始或等待输入时） */
+            canStart: boolean;
+            /** @description 当前用户能否更新本任务进度（派生字段；负责人／可编辑项目者，执行中状态） */
+            canUpdateProgress: boolean;
+            /** @description 当前用户能否取消本任务（派生字段；负责人／创建人／可编辑项目者，非终态） */
+            canCancel: boolean;
             /** @description 当前用户能否提交本任务入池（派生字段；草稿且为创建人／负责人／可编辑项目者） */
             canSubmitPoolReview: boolean;
             /** @description 当前用户能否处理本任务的入池审批（派生字段；仅所属 KR 负责人） */
@@ -1086,6 +1157,70 @@ export interface operations {
         };
         responses: {
             /** @description 已处理，返回任务最新状态 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Task"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    updateTaskStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateTaskStatusRequest"];
+            };
+        };
+        responses: {
+            /** @description 已流转，返回任务最新状态 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Task"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    updateTaskProgress: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateTaskProgressRequest"];
+            };
+        };
+        responses: {
+            /** @description 已更新，返回任务最新状态 */
             200: {
                 headers: {
                     [name: string]: unknown;

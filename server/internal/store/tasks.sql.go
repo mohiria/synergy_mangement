@@ -55,7 +55,7 @@ func (q *Queries) CreatePoolReview(ctx context.Context, arg CreatePoolReviewPara
 const createTask = `-- name: CreateTask :one
 INSERT INTO tasks (key_result_id, name, owner_id, start_date, end_date, status, created_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, key_result_id, name, owner_id, start_date, end_date, status, created_by, created_at
+RETURNING id, key_result_id, name, owner_id, start_date, end_date, status, created_by, created_at, progress, cancel_reason
 `
 
 type CreateTaskParams struct {
@@ -89,6 +89,8 @@ func (q *Queries) CreateTask(ctx context.Context, arg CreateTaskParams) (Task, e
 		&i.Status,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.Progress,
+		&i.CancelReason,
 	)
 	return i, err
 }
@@ -200,7 +202,7 @@ func (q *Queries) GetLatestPoolReview(ctx context.Context, taskID int64) (PoolRe
 }
 
 const getTaskInProject = `-- name: GetTaskInProject :one
-SELECT t.id, t.key_result_id, t.name, t.owner_id, t.start_date, t.end_date, t.status, t.created_by, t.created_at, k.owner_id AS kr_owner_id, o.project_id
+SELECT t.id, t.key_result_id, t.name, t.owner_id, t.start_date, t.end_date, t.status, t.created_by, t.created_at, t.progress, t.cancel_reason, k.owner_id AS kr_owner_id, o.project_id
 FROM tasks t
 JOIN key_results k ON k.id = t.key_result_id
 JOIN objectives o ON o.id = k.objective_id
@@ -213,17 +215,19 @@ type GetTaskInProjectParams struct {
 }
 
 type GetTaskInProjectRow struct {
-	ID          int64
-	KeyResultID int64
-	Name        string
-	OwnerID     int64
-	StartDate   pgtype.Date
-	EndDate     pgtype.Date
-	Status      string
-	CreatedBy   int64
-	CreatedAt   pgtype.Timestamptz
-	KrOwnerID   pgtype.Int8
-	ProjectID   int64
+	ID           int64
+	KeyResultID  int64
+	Name         string
+	OwnerID      int64
+	StartDate    pgtype.Date
+	EndDate      pgtype.Date
+	Status       string
+	CreatedBy    int64
+	CreatedAt    pgtype.Timestamptz
+	Progress     pgtype.Int4
+	CancelReason string
+	KrOwnerID    pgtype.Int8
+	ProjectID    int64
 }
 
 // 任务连同所属 KR 负责人与项目归属（用于权限判定与项目内寻址）。
@@ -240,6 +244,8 @@ func (q *Queries) GetTaskInProject(ctx context.Context, arg GetTaskInProjectPara
 		&i.Status,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.Progress,
+		&i.CancelReason,
 		&i.KrOwnerID,
 		&i.ProjectID,
 	)
@@ -308,7 +314,7 @@ func (q *Queries) LatestPoolReviewsByProject(ctx context.Context, projectID int6
 }
 
 const listProjectTasks = `-- name: ListProjectTasks :many
-SELECT t.id, t.key_result_id, t.name, t.owner_id, t.start_date, t.end_date, t.status, t.created_by, t.created_at, u.display_name AS owner_name, k.owner_id AS kr_owner_id
+SELECT t.id, t.key_result_id, t.name, t.owner_id, t.start_date, t.end_date, t.status, t.created_by, t.created_at, t.progress, t.cancel_reason, u.display_name AS owner_name, k.owner_id AS kr_owner_id
 FROM tasks t
 JOIN key_results k ON k.id = t.key_result_id
 JOIN objectives o ON o.id = k.objective_id
@@ -318,17 +324,19 @@ ORDER BY t.id
 `
 
 type ListProjectTasksRow struct {
-	ID          int64
-	KeyResultID int64
-	Name        string
-	OwnerID     int64
-	StartDate   pgtype.Date
-	EndDate     pgtype.Date
-	Status      string
-	CreatedBy   int64
-	CreatedAt   pgtype.Timestamptz
-	OwnerName   string
-	KrOwnerID   pgtype.Int8
+	ID           int64
+	KeyResultID  int64
+	Name         string
+	OwnerID      int64
+	StartDate    pgtype.Date
+	EndDate      pgtype.Date
+	Status       string
+	CreatedBy    int64
+	CreatedAt    pgtype.Timestamptz
+	Progress     pgtype.Int4
+	CancelReason string
+	OwnerName    string
+	KrOwnerID    pgtype.Int8
 }
 
 // 项目全部任务，含负责人姓名与 KR 负责人（派生动作标志在 domain 判定）。
@@ -351,6 +359,8 @@ func (q *Queries) ListProjectTasks(ctx context.Context, projectID int64) ([]List
 			&i.Status,
 			&i.CreatedBy,
 			&i.CreatedAt,
+			&i.Progress,
+			&i.CancelReason,
 			&i.OwnerName,
 			&i.KrOwnerID,
 		); err != nil {
@@ -364,11 +374,77 @@ func (q *Queries) ListProjectTasks(ctx context.Context, projectID int64) ([]List
 	return items, nil
 }
 
+const listTaskProgressByProject = `-- name: ListTaskProgressByProject :many
+SELECT t.key_result_id, t.status, t.progress
+FROM tasks t
+JOIN key_results k ON k.id = t.key_result_id
+JOIN objectives o ON o.id = k.objective_id
+WHERE o.project_id = $1
+`
+
+type ListTaskProgressByProjectRow struct {
+	KeyResultID int64
+	Status      string
+	Progress    pgtype.Int4
+}
+
+// KR 层进度覆盖度的原始事实（状态与可选进度），聚合规则在 domain。
+func (q *Queries) ListTaskProgressByProject(ctx context.Context, projectID int64) ([]ListTaskProgressByProjectRow, error) {
+	rows, err := q.db.Query(ctx, listTaskProgressByProject, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTaskProgressByProjectRow
+	for rows.Next() {
+		var i ListTaskProgressByProjectRow
+		if err := rows.Scan(&i.KeyResultID, &i.Status, &i.Progress); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateTaskProgress = `-- name: UpdateTaskProgress :one
+UPDATE tasks
+SET progress = $2
+WHERE id = $1
+RETURNING id, key_result_id, name, owner_id, start_date, end_date, status, created_by, created_at, progress, cancel_reason
+`
+
+type UpdateTaskProgressParams struct {
+	ID       int64
+	Progress pgtype.Int4
+}
+
+func (q *Queries) UpdateTaskProgress(ctx context.Context, arg UpdateTaskProgressParams) (Task, error) {
+	row := q.db.QueryRow(ctx, updateTaskProgress, arg.ID, arg.Progress)
+	var i Task
+	err := row.Scan(
+		&i.ID,
+		&i.KeyResultID,
+		&i.Name,
+		&i.OwnerID,
+		&i.StartDate,
+		&i.EndDate,
+		&i.Status,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.Progress,
+		&i.CancelReason,
+	)
+	return i, err
+}
+
 const updateTaskStatus = `-- name: UpdateTaskStatus :one
 UPDATE tasks
 SET status = $2
 WHERE id = $1
-RETURNING id, key_result_id, name, owner_id, start_date, end_date, status, created_by, created_at
+RETURNING id, key_result_id, name, owner_id, start_date, end_date, status, created_by, created_at, progress, cancel_reason
 `
 
 type UpdateTaskStatusParams struct {
@@ -389,6 +465,40 @@ func (q *Queries) UpdateTaskStatus(ctx context.Context, arg UpdateTaskStatusPara
 		&i.Status,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.Progress,
+		&i.CancelReason,
+	)
+	return i, err
+}
+
+const updateTaskStatusWithReason = `-- name: UpdateTaskStatusWithReason :one
+UPDATE tasks
+SET status = $2, cancel_reason = $3
+WHERE id = $1
+RETURNING id, key_result_id, name, owner_id, start_date, end_date, status, created_by, created_at, progress, cancel_reason
+`
+
+type UpdateTaskStatusWithReasonParams struct {
+	ID           int64
+	Status       string
+	CancelReason string
+}
+
+func (q *Queries) UpdateTaskStatusWithReason(ctx context.Context, arg UpdateTaskStatusWithReasonParams) (Task, error) {
+	row := q.db.QueryRow(ctx, updateTaskStatusWithReason, arg.ID, arg.Status, arg.CancelReason)
+	var i Task
+	err := row.Scan(
+		&i.ID,
+		&i.KeyResultID,
+		&i.Name,
+		&i.OwnerID,
+		&i.StartDate,
+		&i.EndDate,
+		&i.Status,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.Progress,
+		&i.CancelReason,
 	)
 	return i, err
 }

@@ -296,6 +296,119 @@ func (s *Server) DecideTaskPoolReview(w http.ResponseWriter, r *http.Request, pr
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 
+// UpdateTaskStatus 手工流转：开始执行或取消（AC-12；完成走三道审批）。
+func (s *Server) UpdateTaskStatus(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64) {
+	var req UpdateTaskStatusRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_request", Message: "请求内容无法解析"})
+		return
+	}
+	proj, ok := s.fetchProject(w, r, projectId)
+	if !ok {
+		return
+	}
+	uid := currentUser(r).ID
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	task, facts, ok := s.fetchTask(w, r, projectId, taskId)
+	if !ok {
+		return
+	}
+	switch req.Status {
+	case UpdateTaskStatusRequestStatusInProgress:
+		if uid != task.OwnerID && !domain.CanEditProject(actor) {
+			writeForbidden(w)
+			return
+		}
+		newStatus, err := domain.StartTask(facts.Status)
+		if err != nil {
+			writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: err.Error()})
+			return
+		}
+		if _, err := s.q.UpdateTaskStatus(r.Context(), store.UpdateTaskStatusParams{ID: taskId, Status: newStatus}); err != nil {
+			writeInternalError(w)
+			return
+		}
+	case UpdateTaskStatusRequestStatusCancelled:
+		if uid != task.OwnerID && uid != task.CreatedBy && !domain.CanEditProject(actor) {
+			writeForbidden(w)
+			return
+		}
+		reason := ""
+		if req.Reason != nil {
+			reason = strings.TrimSpace(*req.Reason)
+		}
+		if err := domain.CancelTask(facts.Status, reason); err != nil {
+			if errors.Is(err, domain.ErrCannotCancel) {
+				writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: err.Error()})
+			} else {
+				writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "cancel_reason_required", Message: err.Error()})
+			}
+			return
+		}
+		if _, err := s.q.UpdateTaskStatusWithReason(r.Context(), store.UpdateTaskStatusWithReasonParams{
+			ID: taskId, Status: domain.TaskCancelled, CancelReason: reason,
+		}); err != nil {
+			writeInternalError(w)
+			return
+		}
+	default:
+		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_request", Message: "不支持的目标状态"})
+		return
+	}
+	s.writeTask(w, r, projectId, taskId, uid, actor)
+}
+
+// UpdateTaskProgress 更新或清除可选进度（AC-12）。
+func (s *Server) UpdateTaskProgress(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64) {
+	var req UpdateTaskProgressRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_request", Message: "请求内容无法解析"})
+		return
+	}
+	proj, ok := s.fetchProject(w, r, projectId)
+	if !ok {
+		return
+	}
+	uid := currentUser(r).ID
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	_, facts, ok := s.fetchTask(w, r, projectId, taskId)
+	if !ok {
+		return
+	}
+	if err := domain.ValidateProgress(req.Progress); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_progress", Message: err.Error()})
+		return
+	}
+	if !domain.CanUpdateProgress(actor, uid, facts) {
+		if facts.Status != domain.TaskInProgress {
+			writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: "仅进行中的任务可以更新进度"})
+			return
+		}
+		writeForbidden(w)
+		return
+	}
+	if _, err := s.q.UpdateTaskProgress(r.Context(), store.UpdateTaskProgressParams{ID: taskId, Progress: toPgInt4(req.Progress)}); err != nil {
+		writeInternalError(w)
+		return
+	}
+	s.writeTask(w, r, projectId, taskId, uid, actor)
+}
+
+func toPgInt4(v *int) pgtype.Int4 {
+	if v == nil {
+		return pgtype.Int4{}
+	}
+	return pgtype.Int4{Int32: int32(*v), Valid: true}
+}
+
+func fromPgInt4(v pgtype.Int4) *int {
+	if !v.Valid {
+		return nil
+	}
+	n := int(v.Int32)
+	return &n
+}
+
 // fetchTask 读取任务与流转判定所需事实；不存在时已写出 404 并返回 false。
 func (s *Server) fetchTask(w http.ResponseWriter, r *http.Request, projectID, taskID int64) (store.GetTaskInProjectRow, domain.TaskFacts, bool) {
 	task, err := s.q.GetTaskInProject(r.Context(), store.GetTaskInProjectParams{ID: taskID, ProjectID: projectID})
@@ -342,6 +455,11 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 			StartDate:           *fromPgDate(t.StartDate),
 			EndDate:             *fromPgDate(t.EndDate),
 			Status:              TaskStatus(t.Status),
+			Progress:            fromPgInt4(t.Progress),
+			CancelReason:        optString(t.CancelReason),
+			CanStart:            domain.CanStartTask(actor, userID, facts),
+			CanUpdateProgress:   domain.CanUpdateProgress(actor, userID, facts),
+			CanCancel:           domain.CanCancelTask(actor, userID, facts),
 			CanSubmitPoolReview: domain.CanSubmitPoolReview(actor, userID, facts),
 			CanDecidePoolReview: domain.CanDecidePoolReview(userID, facts),
 		}

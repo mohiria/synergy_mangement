@@ -69,15 +69,17 @@ type Session struct {
 }
 
 type Task struct {
-	ID          int64
-	KeyResultID int64
-	Name        string
-	OwnerID     int64
-	StartDate   pgtype.Date
-	EndDate     pgtype.Date
-	Status      string
-	CreatedBy   int64
-	CreatedAt   pgtype.Timestamptz
+	ID           int64
+	KeyResultID  int64
+	Name         string
+	OwnerID      int64
+	StartDate    pgtype.Date
+	EndDate      pgtype.Date
+	Status       string
+	CreatedBy    int64
+	CreatedAt    pgtype.Timestamptz
+	Progress     pgtype.Int4
+	CancelReason string
 }
 
 type TaskInvite struct {

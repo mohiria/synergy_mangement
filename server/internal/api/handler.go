@@ -539,8 +539,21 @@ func (s *Server) okrList(ctx context.Context, projectID int64) ([]Objective, err
 	if err != nil {
 		return nil, err
 	}
+	// KR 层进度数据覆盖度（AC-12）：原始事实来自任务表，聚合规则在 domain。
+	progressRows, err := s.q.ListTaskProgressByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	factsByKr := make(map[int64][]domain.TaskProgressFact)
+	for _, row := range progressRows {
+		factsByKr[row.KeyResultID] = append(factsByKr[row.KeyResultID], domain.TaskProgressFact{
+			Status:   row.Status,
+			Progress: fromPgInt4(row.Progress),
+		})
+	}
 	byObjective := make(map[int64][]KeyResult, len(objectives))
 	for _, k := range krs {
+		summary := domain.ProgressCoverage(factsByKr[k.ID])
 		byObjective[k.ObjectiveID] = append(byObjective[k.ObjectiveID], KeyResult{
 			Id:          k.ID,
 			ObjectiveId: k.ObjectiveID,
@@ -552,6 +565,11 @@ func (s *Server) okrList(ctx context.Context, projectID int64) ([]Objective, err
 			EndDate:     fromPgDate(k.EndDate),
 			RiskLevel:   RiskLevel(k.RiskLevel),
 			SortOrder:   int(k.SortOrder),
+			ProgressSummary: &ProgressSummary{
+				TotalTasks:      summary.TotalTasks,
+				FilledTasks:     summary.FilledTasks,
+				AverageProgress: summary.AverageProgress,
+			},
 		})
 	}
 	resp := make([]Objective, 0, len(objectives))
