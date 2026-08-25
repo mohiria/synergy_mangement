@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Alert, Button, Select, Spin, Switch } from "antd";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
@@ -65,6 +65,8 @@ export default function CollaborationPage({
   const [krFilter, setKrFilter] = useState<number | "all">("all");
   const [personFilter, setPersonFilter] = useState<number | "all">("all");
   const [showCompleted, setShowCompleted] = useState(false);
+  const [impactMode, setImpactMode] = useState(false);
+  const [searchParams] = useSearchParams();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -95,6 +97,19 @@ export default function CollaborationPage({
   useEffect(() => {
     load();
   }, [load]);
+
+  // 从任务详情进入：聚焦当前任务并展示一层直接关系（AC-42）。
+  const focusTaskParam = searchParams.get("task");
+  useEffect(() => {
+    if (!focusTaskParam || loading) return;
+    const t = tasks.find((x) => x.id === Number(focusTaskParam));
+    if (t) {
+      setMode({ kind: "kr", krId: t.keyResultId });
+      setHistory([{ kind: "tree" }]);
+      setSelectedTask(t.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusTaskParam, loading]);
 
   // 选中任务 → 右侧详情（AC-27）。
   useEffect(() => {
@@ -272,12 +287,26 @@ export default function CollaborationPage({
   const neighborIds = useMemo(() => {
     if (selectedTask == null) return null;
     const set = new Set<number>([selectedTask]);
+    if (impactMode) {
+      // 影响路径（AC-42）：沿下游硬前置边可达的连续链路。
+      const queue = [selectedTask];
+      while (queue.length > 0) {
+        const cur = queue.shift()!;
+        for (const e of edges) {
+          if (e.edgeType === "hard_prerequisite" && e.sourceTaskId === cur && !set.has(e.targetTaskId)) {
+            set.add(e.targetTaskId);
+            queue.push(e.targetTaskId);
+          }
+        }
+      }
+      return set;
+    }
     for (const e of edges) {
       if (e.sourceTaskId === selectedTask) set.add(e.targetTaskId);
       if (e.targetTaskId === selectedTask && e.sourceTaskId != null) set.add(e.sourceTaskId);
     }
     return set;
-  }, [selectedTask, edges]);
+  }, [selectedTask, edges, impactMode]);
 
   const edgePath = (from: NodePos, to: NodePos) => {
     const x1 = from.x + from.w;
@@ -315,7 +344,10 @@ export default function CollaborationPage({
           dimByFilter || dimBySelect ? "dimmed" : ""
         }`}
         style={{ left: pos.x, top: pos.y, width: pos.w, height: pos.h }}
-        onClick={() => setSelectedTask((prev) => (prev === t.id ? null : t.id))}
+        onClick={() => {
+          setImpactMode(false);
+          setSelectedTask((prev) => (prev === t.id ? null : t.id));
+        }}
         onDoubleClick={() => navigate(`/projects/${projectId}/tasks?task=${t.id}&tab=overview`)}
       >
         <b>{t.name}</b>
@@ -384,12 +416,17 @@ export default function CollaborationPage({
                 .map((d) => d.current!.fileName)
                 .join("、")}
         </div>
-        <Button
-          size="small"
-          onClick={() => navigate(`/projects/${projectId}/tasks?task=${selectedTask}&tab=overview`)}
-        >
-          打开任务详情
-        </Button>
+        <div style={{ display: "flex", gap: 6 }}>
+          <Button size="small" type={impactMode ? "primary" : "default"} onClick={() => setImpactMode((v) => !v)}>
+            {impactMode ? "退出影响路径" : "查看影响路径"}
+          </Button>
+          <Button
+            size="small"
+            onClick={() => navigate(`/projects/${projectId}/tasks?task=${selectedTask}&tab=overview`)}
+          >
+            打开任务详情
+          </Button>
+        </div>
       </div>
     </aside>
   );
@@ -534,7 +571,7 @@ export default function CollaborationPage({
               </aside>
             )}
             <div className="graph-shell" style={{ position: "relative" }}>
-              {mode.kind === "full" && inspector}
+              {(mode.kind === "full" || mode.kind === "kr") && inspector}
               {mode.kind === "tree" || mode.kind === "o" ? (
                 <div className="graph-canvas-inner" style={{ height: tree.height, minWidth: 700 }}>
                   <div className="graph-note">

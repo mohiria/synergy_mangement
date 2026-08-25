@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Alert,
   Button,
@@ -73,6 +73,7 @@ export default function ProjectTasksPage({
 }) {
   const { projectId: projectIdParam } = useParams();
   const projectId = Number(projectIdParam);
+  const navigate = useNavigate();
 
   const [project, setProject] = useState<Project | null>(null);
   const [objectives, setObjectives] = useState<Objective[]>([]);
@@ -814,6 +815,7 @@ export default function ProjectTasksPage({
           resolveBlocker,
           removeEdge,
           openTask: (id) => setDrawerTaskId(id),
+          openInGraph: (id) => navigate(`/projects/${projectId}/graph?task=${id}`),
         }}
       />
       <ConfigureInputModal
@@ -1439,6 +1441,7 @@ function TaskDrawer({
     resolveBlocker: (blockerId: number) => void;
     removeEdge: (edgeId: number) => void;
     openTask: (taskId: number) => void;
+    openInGraph: (taskId: number) => void;
   };
 }) {
   const [detail, setDetail] = useState<TaskDetail | null>(null);
@@ -1859,7 +1862,16 @@ function TaskDrawer({
       </section>
       {(inputs.length > 0 || outputs.length > 0) && (
         <section className="drawer-section">
-          <h3>协作关系</h3>
+          <h3 style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            协作关系
+            <Button
+              type="link"
+              size="small"
+              onClick={() => actions.openInGraph(task.id)}
+            >
+              在关系图谱中查看 →
+            </Button>
+          </h3>
           {inputs.length > 0 && (
             <div style={{ marginBottom: 8 }}>
               <b style={{ fontSize: 12, color: "var(--muted)" }}>直接上游 · {inputs.length}</b>
@@ -1875,6 +1887,8 @@ function TaskDrawer({
                       <b>{e.sourceTaskName}</b>
                       <small>
                         {EDGE_TYPE_LABEL[e.edgeType]} · {e.name}
+                        {e.sourceOwnerName ? ` · 责任人 ${e.sourceOwnerName}` : ""}
+                        {e.sourceTaskStatus ? ` · ${STATUS_LABEL[e.sourceTaskStatus]}` : ""}
                         {e.currentFileName ? ` · ${e.currentFileName}` : ""}
                       </small>
                     </span>
