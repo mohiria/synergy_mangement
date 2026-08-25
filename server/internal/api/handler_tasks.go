@@ -466,6 +466,12 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		writeInternalError(w)
 		return
 	}
+	factsForReviews := domain.TaskFacts{Status: task.Status, CreatorID: task.CreatedBy, OwnerID: task.OwnerID, KrOwnerID: fromPgInt8(task.KrOwnerID)}
+	completions, err := s.completionReviewList(r.Context(), taskId, factsForReviews, uid)
+	if err != nil {
+		writeInternalError(w)
+		return
+	}
 	list, err := s.taskList(r.Context(), projectId, uid, actor)
 	if err != nil {
 		writeInternalError(w)
@@ -505,13 +511,14 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		}, fc.SubmittedByName, fc.DecidedByName, facts, actor, uid))
 	}
 	writeJSON(w, http.StatusOK, TaskDetail{
-		Task:           *item,
-		ObjectiveTitle: obj.Title,
-		KrDescription:  kr.Description,
-		PoolReviews:    prs,
-		FieldChanges:   fcs,
-		Deliverables:   deliverables,
-		Discussions:    discussions,
+		Task:              *item,
+		ObjectiveTitle:    obj.Title,
+		KrDescription:     kr.Description,
+		PoolReviews:       prs,
+		FieldChanges:      fcs,
+		Deliverables:      deliverables,
+		Discussions:       discussions,
+		CompletionReviews: completions,
 	})
 }
 
@@ -557,6 +564,15 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 	changeByTask := make(map[int64]store.LatestFieldChangesByProjectRow, len(changeRows))
 	for _, fc := range changeRows {
 		changeByTask[fc.TaskID] = fc
+	}
+	// 候选内容数量（提交完成申请的派生标志用）。
+	candidateRows, err := s.q.CandidateCountsByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	candidatesByTask := make(map[int64]int, len(candidateRows))
+	for _, c := range candidateRows {
+		candidatesByTask[c.TaskID] = int(c.N)
 	}
 	// 「预期交付物」列：任务的交付物项名称。
 	deliverableRows, err := s.q.ListDeliverableNamesByProject(ctx, projectID)
@@ -632,6 +648,8 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 		canUploadCandidate := domain.CanUploadCandidate(actor, userID, facts)
 		item.CanManageDeliverables = &canManageDeliverables
 		item.CanUploadCandidate = &canUploadCandidate
+		canSubmitCompletion := domain.CanSubmitCompletion(actor, userID, facts, candidatesByTask[t.ID])
+		item.CanSubmitCompletion = &canSubmitCompletion
 		if names := namesByTask[t.ID]; len(names) > 0 {
 			item.DeliverableNames = &names
 		}

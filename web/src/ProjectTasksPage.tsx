@@ -206,6 +206,48 @@ export default function ProjectTasksPage({
       message.error(res.error?.message ?? "操作失败");
     }
   };
+  const [completionTask, setCompletionTask] = useState<Task | null>(null);
+  const [completionNote, setCompletionNote] = useState("");
+  const [crReject, setCrReject] = useState<{ task: Task; reviewId: number } | null>(null);
+  const [crRejectOpinion, setCrRejectOpinion] = useState("");
+
+  const submitCompletion = async (task: Task, note: string) => {
+    const res = await client.POST("/projects/{projectId}/tasks/{taskId}/completion-reviews", {
+      params: { path: { projectId, taskId: task.id } },
+      body: { note },
+    });
+    if (res.data) {
+      message.success("完成申请已提交，进入待 KR 终审");
+      load();
+    } else {
+      message.error(res.error?.message ?? "提交失败");
+    }
+  };
+
+  const decideCompletion = async (
+    task: Task,
+    reviewId: number,
+    decision: "approved" | "rejected",
+    opinion?: string,
+  ) => {
+    const res = await client.POST(
+      "/projects/{projectId}/tasks/{taskId}/completion-reviews/{reviewId}/decision",
+      {
+        params: { path: { projectId, taskId: task.id, reviewId } },
+        body: { decision, opinion },
+      },
+    );
+    if (res.data) {
+      message.success(
+        decision === "approved"
+          ? "终审通过，候选内容已覆盖当前交付物，任务完成"
+          : "已退回，候选文件删除，任务回到进行中",
+      );
+      load();
+    } else {
+      message.error(res.error?.message ?? "处理失败");
+    }
+  };
   const [cancelTask, setCancelTask] = useState<Task | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [progressTask, setProgressTask] = useState<Task | null>(null);
@@ -569,8 +611,67 @@ export default function ProjectTasksPage({
             setFcRejectOpinion("");
           },
           abandonFieldChange,
+          openSubmitCompletion: (t) => {
+            setCompletionTask(t);
+            setCompletionNote("");
+          },
+          approveCompletion: (t, id) => decideCompletion(t, id, "approved"),
+          openCrReject: (t, id) => {
+            setCrReject({ task: t, reviewId: id });
+            setCrRejectOpinion("");
+          },
         }}
       />
+      <Modal
+        title="提交完成申请"
+        open={!!completionTask}
+        okText="提交完成申请"
+        cancelText="取消"
+        okButtonProps={{ disabled: !completionNote.trim() }}
+        onCancel={() => setCompletionTask(null)}
+        onOk={async () => {
+          if (completionTask) {
+            await submitCompletion(completionTask, completionNote.trim());
+          }
+          setCompletionTask(null);
+        }}
+      >
+        <p className="muted" style={{ marginTop: 0 }}>
+          本次全部候选交付物整体提交；未配置中间审核人，提交后直接进入待 KR 终审。
+        </p>
+        <Input.TextArea
+          rows={3}
+          maxLength={500}
+          placeholder="提交说明（必填）"
+          value={completionNote}
+          onChange={(e) => setCompletionNote(e.target.value)}
+        />
+      </Modal>
+      <Modal
+        title="退回完成申请"
+        open={!!crReject}
+        okText="确认退回"
+        cancelText="取消"
+        okButtonProps={{ danger: true, disabled: !crRejectOpinion.trim() }}
+        onCancel={() => setCrReject(null)}
+        onOk={async () => {
+          if (crReject) {
+            await decideCompletion(crReject.task, crReject.reviewId, "rejected", crRejectOpinion.trim());
+          }
+          setCrReject(null);
+        }}
+      >
+        <p className="muted" style={{ marginTop: 0 }}>
+          退回后本次候选文件删除、原当前交付物保持不变，任务回到进行中；退回意见必填。
+        </p>
+        <Input.TextArea
+          rows={3}
+          maxLength={500}
+          placeholder="退回意见（必填）"
+          value={crRejectOpinion}
+          onChange={(e) => setCrRejectOpinion(e.target.value)}
+        />
+      </Modal>
       <FieldChangeModal
         task={editTask}
         members={members}
@@ -1062,6 +1163,9 @@ function TaskDrawer({
     approveFieldChange: (t: Task, changeId: number) => void;
     openFcReject: (t: Task, changeId: number) => void;
     abandonFieldChange: (t: Task, changeId: number) => void;
+    openSubmitCompletion: (t: Task) => void;
+    approveCompletion: (t: Task, reviewId: number) => void;
+    openCrReject: (t: Task, reviewId: number) => void;
   };
 }) {
   const [detail, setDetail] = useState<TaskDetail | null>(null);
@@ -1181,7 +1285,10 @@ function TaskDrawer({
   const candidateCount = (detail?.deliverables ?? []).filter((d) => d.candidate).length;
   const pendingReviews =
     (detail?.poolReviews ?? []).filter((r) => r.status === "pending").length +
-    (detail?.fieldChanges ?? []).filter((fc) => fc.state === "pending").length;
+    (detail?.fieldChanges ?? []).filter((fc) => fc.state === "pending").length +
+    (detail?.completionReviews ?? []).filter(
+      (cr) => cr.state === "pending_final" || cr.state === "intermediate_review",
+    ).length;
 
   const overview = (
     <>
@@ -1369,9 +1476,81 @@ function TaskDrawer({
 
   const audit = (
     <div style={{ paddingTop: 4 }}>
-      {(detail?.poolReviews ?? []).length === 0 && (detail?.fieldChanges ?? []).length === 0 && (
-        <div className="empty compact-empty">暂无审核记录</div>
-      )}
+      {(detail?.poolReviews ?? []).length === 0 &&
+        (detail?.fieldChanges ?? []).length === 0 &&
+        (detail?.completionReviews ?? []).length === 0 && (
+          <div className="empty compact-empty">暂无审核记录</div>
+        )}
+      {(detail?.completionReviews ?? []).map((cr) => (
+        <article key={"cr-" + cr.id} className={"audit-card " + (cr.state === "pending_final" ? "pending" : "")}>
+          <div className="audit-card-head">
+            <div>
+              <b>完成申请</b>{" "}
+              <span
+                className={
+                  "status-pill " +
+                  (cr.state === "pending_final"
+                    ? "review"
+                    : cr.state === "approved"
+                      ? "completed"
+                      : cr.state === "rejected"
+                        ? "danger"
+                        : "warning")
+                }
+              >
+                {cr.state === "pending_final"
+                  ? "待 KR 终审"
+                  : cr.state === "approved"
+                    ? "已通过"
+                    : cr.state === "rejected"
+                      ? "已退回"
+                      : "中间审核中"}
+              </span>
+            </div>
+            <span className="meta muted" style={{ fontSize: 12 }}>
+              申请人 {cr.submittedByName} · {fmtTime(cr.submittedAt)}
+            </span>
+          </div>
+          <div style={{ marginTop: 8, fontSize: 13 }}>
+            <div className="muted" style={{ fontSize: 12 }}>
+              提交说明:{cr.note}；本次 {cr.items.length} 项候选整体通过或退回。
+            </div>
+            {cr.items.map((it) => (
+              <div key={cr.id + "-" + it.deliverableId} style={{ marginTop: 4 }}>
+                <b>{it.deliverableName}</b>：
+                {it.fileId ? (
+                  <span className="file-link" onClick={() => openFile(it.fileId!)}>
+                    {it.fileName}
+                  </span>
+                ) : (
+                  <span className="muted">{it.fileName}（文件已按覆盖／退回规则删除）</span>
+                )}
+              </div>
+            ))}
+          </div>
+          {(cr.decidedByName || cr.opinion) && (
+            <div className="handled-fact">
+              {cr.decidedByName && (
+                <b>
+                  {cr.decidedByName}
+                  {cr.decidedAt ? " · " + fmtTime(cr.decidedAt) : ""}
+                </b>
+              )}
+              <div>{cr.opinion || "未填写意见"}</div>
+            </div>
+          )}
+          {cr.state === "pending_final" && cr.canDecide && (
+            <div className="audit-actions">
+              <Button size="small" danger onClick={() => actions.openCrReject(task, cr.id)}>
+                退回
+              </Button>
+              <Button size="small" type="primary" onClick={() => actions.approveCompletion(task, cr.id)}>
+                通过 / 闭环
+              </Button>
+            </div>
+          )}
+        </article>
+      ))}
       {(detail?.fieldChanges ?? []).map((fc) => (
         <article key={`fc-${fc.id}`} className={`audit-card ${fc.state === "pending" ? "pending" : ""}`}>
           <div className="audit-card-head">
@@ -1504,6 +1683,11 @@ function TaskDrawer({
           {task.canSubmitPoolReview && (
             <Button type="primary" onClick={() => actions.submitPool(task)}>
               提交入池审批
+            </Button>
+          )}
+          {task.canSubmitCompletion && (
+            <Button type="primary" onClick={() => actions.openSubmitCompletion(task)}>
+              提交完成申请
             </Button>
           )}
         </div>

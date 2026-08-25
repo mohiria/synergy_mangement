@@ -8,6 +8,26 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type CompletionReview struct {
+	ID          int64
+	TaskID      int64
+	SubmittedBy int64
+	Note        string
+	State       string
+	Opinion     string
+	SubmittedAt pgtype.Timestamptz
+	DecidedBy   pgtype.Int8
+	DecidedAt   pgtype.Timestamptz
+}
+
+type CompletionReviewItem struct {
+	ReviewID        int64
+	DeliverableID   int64
+	DeliverableName string
+	FileName        string
+	FileID          pgtype.Int8
+}
+
 type Deliverable struct {
 	ID        int64
 	TaskID    int64

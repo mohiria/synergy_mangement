@@ -1636,6 +1636,204 @@ func TestDiscussionsAndNotifications(t *testing.T) {
 	}
 }
 
+// 完成申请与 KR 终审（#10，AC-13/15/38/39/40）：提交→直接待 KR 终审→退回删候选回进行中
+// →重传重提→通过覆盖当前内容并删除旧文件、任务完成；未包含的当前交付物不变。
+func TestCompletionReviewFlow(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, bob, carol := newClient(t), newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(bob, "bob", "bob-pass")
+	login(carol, "carol", "carol-pass")
+
+	sp := func(s string) *string { return &s }
+
+	// alice 建项目；bob（KR 负责人）、carol（任务负责人）成员
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "终审试点", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	for _, uid := range []int64{bobUser.ID, carolUser.ID} {
+		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+		wantStatus(t, resp, http.StatusCreated)
+		resp.Body.Close()
+	}
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	okr := decodeBody[[]api.Objective](t, resp)
+	kr1 := okr[0].KeyResults[0].Id
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+
+	// carol 建任务（带两个交付物项）→ bob 入池通过 → carol 开始执行
+	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: carolUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("验收方案")},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	tasks := decodeBody[[]api.Task](t, resp)
+	taskID := tasks[0].Id
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, taskID),
+		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/deliverables", tasksURL, taskID),
+		api.CreateDeliverableRequest{Name: "验收记录"})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, taskID),
+		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	// 无候选提交 422
+	completionURL := fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskID)
+	resp = doJSON(t, carol, http.MethodPost, completionURL, api.SubmitCompletionRequest{Note: "第一批成果"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+
+	// 上传两项候选
+	detailURL := fmt.Sprintf("%s/%d", tasksURL, taskID)
+	resp = doJSON(t, carol, http.MethodGet, detailURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail := decodeBody[api.TaskDetail](t, resp)
+	d1, d2 := detail.Deliverables[0].Id, detail.Deliverables[1].Id
+	for i, did := range []int64{d1, d2} {
+		resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskID, did),
+			api.UploadCandidateRequest{FileName: fmt.Sprintf("成果-%d.docx", i+1)})
+		wantStatus(t, resp, http.StatusCreated)
+		resp.Body.Close()
+	}
+
+	// AC-13：提交完成申请直接进入待 KR 终审；canSubmitCompletion 派生
+	resp = doJSON(t, carol, http.MethodGet, detailURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail = decodeBody[api.TaskDetail](t, resp)
+	if detail.Task.CanSubmitCompletion == nil || !*detail.Task.CanSubmitCompletion {
+		t.Fatalf("负责人应可提交完成申请: %+v", detail.Task)
+	}
+	resp = doJSON(t, carol, http.MethodPost, completionURL, api.SubmitCompletionRequest{Note: "第一批成果，请终审"})
+	wantStatus(t, resp, http.StatusOK)
+	pending := decodeBody[api.Task](t, resp)
+	if pending.Status != api.TaskStatusPendingFinalReview || pending.CurrentStage != "KR 终审" {
+		t.Fatalf("提交后应待 KR 终审: %+v", pending)
+	}
+
+	// 审核期间不可另传候选 409
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskID, d1),
+		api.UploadCandidateRequest{FileName: "偷偷替换.docx"})
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+
+	// AC-38：非 KR 负责人不能终审；退回意见必填
+	resp = doJSON(t, carol, http.MethodGet, detailURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail = decodeBody[api.TaskDetail](t, resp)
+	reviewID := detail.CompletionReviews[0].Id
+	if len(detail.CompletionReviews[0].Items) != 2 {
+		t.Fatalf("申请应含全部候选: %+v", detail.CompletionReviews[0].Items)
+	}
+	decisionURL := fmt.Sprintf("%s/%d/decision", completionURL, reviewID)
+	resp = doJSON(t, alice, http.MethodPost, decisionURL, api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodPost, decisionURL, api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionRejected})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+
+	// AC-40：退回删除候选文件、任务回进行中、审核事实保留
+	op := "样例覆盖不足"
+	resp = doJSON(t, bob, http.MethodPost, decisionURL, api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionRejected, Opinion: &op})
+	wantStatus(t, resp, http.StatusOK)
+	rejected := decodeBody[api.Task](t, resp)
+	if rejected.Status != api.TaskStatusInProgress {
+		t.Fatalf("退回后应回进行中: %+v", rejected)
+	}
+	resp = doJSON(t, carol, http.MethodGet, detailURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail = decodeBody[api.TaskDetail](t, resp)
+	for _, d := range detail.Deliverables {
+		if d.Candidate != nil {
+			t.Fatalf("退回后候选应删除: %+v", d)
+		}
+	}
+	if detail.CompletionReviews[0].State != api.CompletionReviewStateRejected || detail.CompletionReviews[0].Opinion == nil || *detail.CompletionReviews[0].Opinion != op {
+		t.Fatalf("退回事实未保留: %+v", detail.CompletionReviews[0])
+	}
+	if detail.CompletionReviews[0].Items[0].FileId != nil {
+		t.Fatalf("已删除候选不应再提供下载: %+v", detail.CompletionReviews[0].Items[0])
+	}
+
+	// 重传候选（仅第一项）并重提 → AC-39/15：通过后候选成为当前内容、任务完成
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskID, d1),
+		api.UploadCandidateRequest{FileName: "成果-终版.docx"})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+	// 先给第二项种一份当前内容，验证「未包含的当前交付物不变」
+	seeded, err := q.CreateDeliverableFile(context.Background(), store.CreateDeliverableFileParams{
+		DeliverableID: d2, State: "current", FileName: "旧成果-2.docx", ObjectKey: "deliverables/test/old-2.docx", UploadedBy: carolUser.ID,
+	})
+	if err != nil {
+		t.Fatalf("seed current: %v", err)
+	}
+	resp = doJSON(t, carol, http.MethodPost, completionURL, api.SubmitCompletionRequest{Note: "补充样例后重提"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodGet, detailURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail = decodeBody[api.TaskDetail](t, resp)
+	newReviewID := detail.CompletionReviews[0].Id
+	if len(detail.CompletionReviews[0].Items) != 1 {
+		t.Fatalf("第二次申请只应含新候选: %+v", detail.CompletionReviews[0].Items)
+	}
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/decision", completionURL, newReviewID),
+		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusOK)
+	done := decodeBody[api.Task](t, resp)
+	if done.Status != api.TaskStatusCompleted || done.CurrentStage != "已闭环" {
+		t.Fatalf("终审通过后任务应完成: %+v", done)
+	}
+	resp = doJSON(t, alice, http.MethodGet, detailURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail = decodeBody[api.TaskDetail](t, resp)
+	var first, secondD *api.Deliverable
+	for i := range detail.Deliverables {
+		switch detail.Deliverables[i].Id {
+		case d1:
+			first = &detail.Deliverables[i]
+		case d2:
+			secondD = &detail.Deliverables[i]
+		}
+	}
+	if first == nil || first.Current == nil || first.Current.FileName != "成果-终版.docx" || first.Current.EffectiveAt == nil {
+		t.Fatalf("候选未覆盖为当前内容: %+v", first)
+	}
+	if first.Candidate != nil {
+		t.Fatalf("通过后不应残留候选: %+v", first)
+	}
+	if secondD == nil || secondD.Current == nil || secondD.Current.Id != seeded.ID {
+		t.Fatalf("未包含的当前交付物应保持不变: %+v", secondD)
+	}
+}
+
 func TestLoginRateLimit(t *testing.T) {
 	_, pool := setupDB(t)
 

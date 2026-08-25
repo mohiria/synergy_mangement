@@ -412,6 +412,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/tasks/{taskId}/completion-reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 提交完成申请（AC-13；无中间审核时直接进入待 KR 终审；含全部候选交付物与提交说明） */
+        post: operations["submitCompletion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/tasks/{taskId}/completion-reviews/{reviewId}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+                reviewId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** KR 负责人终审（AC-15／39／40）：通过则候选整体覆盖对应当前内容且旧文件永久删除、任务完成；退回则删除候选、任务回到进行中 */
+        post: operations["decideCompletion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/tasks/{taskId}/discussions": {
         parameters: {
             query?: never;
@@ -745,6 +786,8 @@ export interface components {
             canProposeFieldChange: boolean;
             /** @description 当前用户能否配置任务交付物项（派生字段；负责人／创建人／可编辑项目者，非终态） */
             canManageDeliverables?: boolean;
+            /** @description 当前用户能否提交完成申请（派生字段；负责人，进行中且有候选内容） */
+            canSubmitCompletion?: boolean;
             /** @description 当前用户能否登记候选交付物内容（派生字段；负责人，执行类状态） */
             canUploadCandidate?: boolean;
             /** @description 当前用户能否提交本任务入池（派生字段；草稿且为创建人／负责人／可编辑项目者） */
@@ -793,6 +836,8 @@ export interface components {
             deliverables: components["schemas"]["Deliverable"][];
             /** @description 任务讨论意见，按时间正序（AC-35／AC-36） */
             discussions: components["schemas"]["Discussion"][];
+            /** @description 完成申请记录，最新在前（AC-13／AC-15／AC-38～40） */
+            completionReviews: components["schemas"]["CompletionReview"][];
         };
         /** @enum {string} */
         FieldChangeState: "pending" | "approved" | "rejected";
@@ -938,6 +983,52 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             readAt?: string;
+        };
+        /**
+         * @description 完成申请状态（词汇表「完成申请」；PRD §5.2.C）
+         * @enum {string}
+         */
+        CompletionReviewState: "intermediate_review" | "pending_final" | "approved" | "rejected";
+        /** @description 申请内的候选交付物快照；文件按覆盖／退回规则删除后 fileId 不再返回 */
+        CompletionReviewItem: {
+            /** Format: int64 */
+            deliverableId: number;
+            deliverableName: string;
+            fileName: string;
+            /**
+             * Format: int64
+             * @description 仍可预览／下载的在库文件；已删除时缺省
+             */
+            fileId?: number;
+        };
+        /** @description 完成申请（词汇表）；整体通过或整体退回 */
+        CompletionReview: {
+            /** Format: int64 */
+            id: number;
+            state: components["schemas"]["CompletionReviewState"];
+            /** @description 提交说明 */
+            note: string;
+            /** @description 审核意见；退回意见必填（AC-38） */
+            opinion?: string;
+            items: components["schemas"]["CompletionReviewItem"][];
+            submittedByName?: string;
+            decidedByName?: string;
+            /** Format: date-time */
+            submittedAt?: string;
+            /** Format: date-time */
+            decidedAt?: string;
+            /** @description 当前用户能否处理本申请（派生字段；待 KR 终审时仅所属 KR 负责人） */
+            canDecide?: boolean;
+        };
+        SubmitCompletionRequest: {
+            /** @description 提交说明（§9.1 必填） */
+            note: string;
+        };
+        CompletionDecisionRequest: {
+            /** @enum {string} */
+            decision: "approved" | "rejected";
+            /** @description 通过意见选填，退回意见必填（AC-38） */
+            opinion?: string;
         };
         /**
          * @description 任务创建邀请状态（词汇表「任务创建邀请」）
@@ -1824,6 +1915,71 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    submitCompletion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubmitCompletionRequest"];
+            };
+        };
+        responses: {
+            /** @description 已提交，返回任务最新状态 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Task"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    decideCompletion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+                reviewId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompletionDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description 已处理，返回任务最新状态 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Task"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
         };
     };
     createDiscussion: {
