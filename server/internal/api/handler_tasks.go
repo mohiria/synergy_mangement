@@ -409,6 +409,65 @@ func fromPgInt4(v pgtype.Int4) *int {
 	return &n
 }
 
+// GetTaskDetail 任务详情抽屉（AC-31／AC-34）：全体项目成员可查看，动作按派生标志。
+func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64) {
+	proj, ok := s.fetchProject(w, r, projectId)
+	if !ok {
+		return
+	}
+	uid := currentUser(r).ID
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	task, _, ok := s.fetchTask(w, r, projectId, taskId)
+	if !ok {
+		return
+	}
+	kr, err := s.q.GetKeyResultInProject(r.Context(), store.GetKeyResultInProjectParams{ID: task.KeyResultID, ProjectID: projectId})
+	if err != nil {
+		writeInternalError(w)
+		return
+	}
+	obj, err := s.q.GetObjective(r.Context(), store.GetObjectiveParams{ID: kr.ObjectiveID, ProjectID: projectId})
+	if err != nil {
+		writeInternalError(w)
+		return
+	}
+	reviews, err := s.q.ListPoolReviewsByTask(r.Context(), taskId)
+	if err != nil {
+		writeInternalError(w)
+		return
+	}
+	list, err := s.taskList(r.Context(), projectId, uid, actor)
+	if err != nil {
+		writeInternalError(w)
+		return
+	}
+	var item *Task
+	for i := range list {
+		if list[i].Id == taskId {
+			item = &list[i]
+		}
+	}
+	if item == nil {
+		writeInternalError(w)
+		return
+	}
+	prs := make([]PoolReview, 0, len(reviews))
+	for _, pr := range reviews {
+		prs = append(prs, *toPoolReview(store.LatestPoolReviewsByProjectRow{
+			ID: pr.ID, TaskID: pr.TaskID, SubmittedBy: pr.SubmittedBy, Status: pr.Status,
+			Exempt: pr.Exempt, Opinion: pr.Opinion, SubmittedAt: pr.SubmittedAt,
+			DecidedBy: pr.DecidedBy, DecidedAt: pr.DecidedAt,
+			SubmittedByName: pr.SubmittedByName, DecidedByName: pr.DecidedByName,
+		}))
+	}
+	writeJSON(w, http.StatusOK, TaskDetail{
+		Task:           *item,
+		ObjectiveTitle: obj.Title,
+		KrDescription:  kr.Description,
+		PoolReviews:    prs,
+	})
+}
+
 // fetchTask 读取任务与流转判定所需事实；不存在时已写出 404 并返回 false。
 func (s *Server) fetchTask(w http.ResponseWriter, r *http.Request, projectID, taskID int64) (store.GetTaskInProjectRow, domain.TaskFacts, bool) {
 	task, err := s.q.GetTaskInProject(r.Context(), store.GetTaskInProjectParams{ID: taskID, ProjectID: projectID})
@@ -455,6 +514,8 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 			StartDate:           *fromPgDate(t.StartDate),
 			EndDate:             *fromPgDate(t.EndDate),
 			Status:              TaskStatus(t.Status),
+			Description:         optString(t.Description),
+			CompletionCriteria:  optString(t.CompletionCriteria),
 			Progress:            fromPgInt4(t.Progress),
 			CancelReason:        optString(t.CancelReason),
 			CanStart:            domain.CanStartTask(actor, userID, facts),
@@ -462,6 +523,20 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 			CanCancel:           domain.CanCancelTask(actor, userID, facts),
 			CanSubmitPoolReview: domain.CanSubmitPoolReview(actor, userID, facts),
 			CanDecidePoolReview: domain.CanDecidePoolReview(userID, facts),
+		}
+		// 当前环节与待行动人（AC-31 基础信息；名字按身份就近解析）。
+		stage, actorID := domain.CurrentStage(facts)
+		item.CurrentStage = stage
+		if actorID != nil {
+			item.PendingActorId = actorID
+			switch {
+			case *actorID == t.OwnerID:
+				item.PendingActorName = &t.OwnerName
+			case *actorID == t.CreatedBy:
+				item.PendingActorName = &t.CreatorName
+			case t.KrOwnerID.Valid && *actorID == t.KrOwnerID.Int64:
+				item.PendingActorName = fromPgText(t.KrOwnerName)
+			}
 		}
 		if pr, ok := reviewByTask[t.ID]; ok {
 			item.PoolReview = toPoolReview(pr)

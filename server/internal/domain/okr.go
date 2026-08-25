@@ -8,17 +8,17 @@ import (
 )
 
 var (
-	ErrOkrBatchEmpty          = errors.New("O／KR 批量创建内容不能为空")
-	ErrOkrItemAmbiguous       = errors.New("每一项必须在新建 O（title）和已有 O（objectiveId）中二选一")
-	ErrOkrExistingNoKRs       = errors.New("向已有 O 追加时至少要有一条 KR")
-	ErrObjectiveTitleEmpty    = errors.New("O 标题不能为空")
-	ErrObjectiveTitleTooLong  = errors.New("O 标题不能超过 100 字")
-	ErrObjectiveDescTooLong   = errors.New("O 说明不能超过 500 字")
-	ErrKrDescriptionEmpty     = errors.New("KR 描述不能为空")
-	ErrKrDescriptionTooLong   = errors.New("KR 描述不能超过 200 字")
-	ErrKrMetricTooLong        = errors.New("量化指标不能超过 100 字")
-	ErrKrOwnerNotMember       = errors.New("KR 负责人必须是项目成员")
-	ErrKrPeriodInverted       = errors.New("KR 截止日期不能早于开始日期")
+	ErrOkrBatchEmpty         = errors.New("O／KR 批量创建内容不能为空")
+	ErrOkrItemAmbiguous      = errors.New("每一项必须在新建 O（title）和已有 O（objectiveId）中二选一")
+	ErrOkrExistingNoKRs      = errors.New("向已有 O 追加时至少要有一条 KR")
+	ErrObjectiveTitleEmpty   = errors.New("O 标题不能为空")
+	ErrObjectiveTitleTooLong = errors.New("O 标题不能超过 100 字")
+	ErrObjectiveDescTooLong  = errors.New("O 说明不能超过 500 字")
+	ErrKrDescriptionEmpty    = errors.New("KR 描述不能为空")
+	ErrKrDescriptionTooLong  = errors.New("KR 描述不能超过 200 字")
+	ErrKrMetricTooLong       = errors.New("量化指标不能超过 100 字")
+	ErrKrOwnerNotMember      = errors.New("KR 负责人必须是项目成员")
+	ErrKrPeriodInverted      = errors.New("KR 截止日期不能早于开始日期")
 )
 
 // DefaultKrRiskLevel 新建 KR 的初始风险等级（词汇表：风险等级；创建弹窗不提供设置入口）。

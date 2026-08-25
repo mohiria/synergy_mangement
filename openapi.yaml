@@ -471,6 +471,36 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /projects/{projectId}/tasks/{taskId}:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: taskId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    get:
+      operationId: getTaskDetail
+      tags: [tasks]
+      summary: 任务详情（AC-31／AC-34；全体项目成员可查看，操作按钮按派生权限标志出现）
+      responses:
+        "200":
+          description: 任务详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /projects/{projectId}/tasks/{taskId}/update-status:
     parameters:
       - name: projectId
@@ -987,6 +1017,7 @@ components:
           startDate,
           endDate,
           status,
+          currentStage,
           canStart,
           canUpdateProgress,
           canCancel,
@@ -1017,6 +1048,21 @@ components:
           format: date
         status:
           $ref: "#/components/schemas/TaskStatus"
+        description:
+          type: string
+          description: 任务说明，选填
+        completionCriteria:
+          type: string
+          description: 完成标准，选填
+        currentStage:
+          type: string
+          description: 当前环节（词汇表「当前环节」；中文标签，派生字段）
+        pendingActorId:
+          type: integer
+          format: int64
+          description: 待行动人（词汇表「待行动人」；派生字段，无待行动人时不返回）
+        pendingActorName:
+          type: string
         progress:
           type: integer
           minimum: 0
@@ -1079,6 +1125,24 @@ components:
           type: integer
           format: int64
           description: 通过任务创建邀请响应时携带（AC-03）；须为发给当前用户的待处理邀请，且本批至少一项任务属于邀请指定的 KR 并提交入池，成功后邀请变为已完成
+    TaskDetail:
+      type: object
+      description: 任务详情抽屉数据（AC-31／AC-34）：任务事实、O／KR 归属与全部审核记录
+      required: [task, objectiveTitle, krDescription, poolReviews]
+      properties:
+        task:
+          $ref: "#/components/schemas/Task"
+        objectiveTitle:
+          type: string
+          description: 所属 O 标题（派生字段）
+        krDescription:
+          type: string
+          description: 所属 KR 描述（派生字段）
+        poolReviews:
+          type: array
+          description: 入池审批记录，最新在前（词汇表「审核记录」；后续票补充变更与完成审核）
+          items:
+            $ref: "#/components/schemas/PoolReview"
     TaskInviteState:
       type: string
       description: 任务创建邀请状态（词汇表「任务创建邀请」）

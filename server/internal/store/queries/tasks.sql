@@ -12,14 +12,26 @@ JOIN objectives o ON o.id = k.objective_id
 WHERE t.id = $1 AND o.project_id = $2;
 
 -- name: ListProjectTasks :many
--- 项目全部任务，含负责人姓名与 KR 负责人（派生动作标志在 domain 判定）。
-SELECT t.*, u.display_name AS owner_name, k.owner_id AS kr_owner_id
+-- 项目全部任务，含负责人／创建人／KR 负责人姓名（派生动作标志与待行动人在 domain 判定）。
+SELECT t.*, u.display_name AS owner_name, cu.display_name AS creator_name,
+    k.owner_id AS kr_owner_id, ku.display_name AS kr_owner_name
 FROM tasks t
 JOIN key_results k ON k.id = t.key_result_id
 JOIN objectives o ON o.id = k.objective_id
 JOIN users u ON u.id = t.owner_id
+JOIN users cu ON cu.id = t.created_by
+LEFT JOIN users ku ON ku.id = k.owner_id
 WHERE o.project_id = $1
 ORDER BY t.id;
+
+-- name: ListPoolReviewsByTask :many
+-- 任务全部入池审批记录（词汇表「审核记录」），最新在前。
+SELECT pr.*, su.display_name AS submitted_by_name, du.display_name AS decided_by_name
+FROM pool_reviews pr
+JOIN users su ON su.id = pr.submitted_by
+LEFT JOIN users du ON du.id = pr.decided_by
+WHERE pr.task_id = $1
+ORDER BY pr.id DESC;
 
 -- name: UpdateTaskStatus :one
 UPDATE tasks

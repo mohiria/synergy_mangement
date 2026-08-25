@@ -197,6 +197,26 @@ body {
 .progress { height: 5px; min-width: 66px; background: #e9edf0; border-radius: 10px; overflow: hidden; }
 .progress i { display: block; height: 100%; background: #6a9aae; }
 
+/* 任务详情抽屉（原型 task-drawer）。 */
+.drawer-sub { font-size: var(--type-aux); color: var(--muted); font-weight: 400; margin-top: 3px; }
+.drawer-section { margin-top: 18px; }
+.drawer-section h3 { margin: 0 0 10px; font-size: var(--type-body); font-weight: 600; }
+.task-info-list { border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.task-info-row {
+  display: grid; grid-template-columns: 130px minmax(0, 1fr); align-items: start;
+  min-height: 40px; padding: 9px 12px; border-bottom: 1px solid #edf0f4; gap: 10px;
+}
+.task-info-row:last-child { border-bottom: 0; }
+.task-info-row > span { color: var(--muted); font-size: var(--type-aux); padding-top: 2px; }
+.task-info-row > strong { font-weight: 500; }
+.audit-card { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 12px 14px; margin-bottom: 10px; }
+.audit-card.pending { border-color: #d9c48a; background: #fffdf5; }
+.audit-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.audit-card-head .meta { color: var(--muted); font-size: var(--type-aux); }
+.handled-fact { margin-top: 8px; padding: 8px 10px; border-radius: 6px; background: #f7f9fb; font-size: var(--type-aux); color: #52606d; }
+.audit-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+.compact-empty { padding: 26px 16px; }
+
 .login-shell { min-height: 100vh; display: grid; place-items: center; background: var(--bg); }
 .login-brand { display: flex; align-items: center; gap: 10px; justify-content: center; margin-bottom: 18px; }
 

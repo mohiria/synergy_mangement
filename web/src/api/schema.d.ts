@@ -229,6 +229,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/tasks/{taskId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        /** 任务详情（AC-31／AC-34；全体项目成员可查看，操作按钮按派生权限标志出现） */
+        get: operations["getTaskDetail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/tasks/{taskId}/update-status": {
         parameters: {
             query?: never;
@@ -517,6 +537,18 @@ export interface components {
             /** Format: date */
             endDate: string;
             status: components["schemas"]["TaskStatus"];
+            /** @description 任务说明，选填 */
+            description?: string;
+            /** @description 完成标准，选填 */
+            completionCriteria?: string;
+            /** @description 当前环节（词汇表「当前环节」；中文标签，派生字段） */
+            currentStage: string;
+            /**
+             * Format: int64
+             * @description 待行动人（词汇表「待行动人」；派生字段，无待行动人时不返回）
+             */
+            pendingActorId?: number;
+            pendingActorName?: string;
             /** @description 可选进度百分比（词汇表「任务进度」）；未填写时不返回，前端只展示状态 */
             progress?: number;
             /** @description 取消原因（已取消任务保留，PRD §5.1） */
@@ -556,6 +588,16 @@ export interface components {
              * @description 通过任务创建邀请响应时携带（AC-03）；须为发给当前用户的待处理邀请，且本批至少一项任务属于邀请指定的 KR 并提交入池，成功后邀请变为已完成
              */
             taskInviteId?: number;
+        };
+        /** @description 任务详情抽屉数据（AC-31／AC-34）：任务事实、O／KR 归属与全部审核记录 */
+        TaskDetail: {
+            task: components["schemas"]["Task"];
+            /** @description 所属 O 标题（派生字段） */
+            objectiveTitle: string;
+            /** @description 所属 KR 描述（派生字段） */
+            krDescription: string;
+            /** @description 入池审批记录，最新在前（词汇表「审核记录」；后续票补充变更与完成审核） */
+            poolReviews: components["schemas"]["PoolReview"][];
         };
         /**
          * @description 任务创建邀请状态（词汇表「任务创建邀请」）
@@ -1170,6 +1212,31 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["ValidationError"];
+        };
+    };
+    getTaskDetail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 任务详情 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
         };
     };
     updateTaskStatus: {

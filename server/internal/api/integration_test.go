@@ -1090,6 +1090,113 @@ func TestTaskStatusAndProgress(t *testing.T) {
 	resp.Body.Close()
 }
 
+// 任务详情（#7，AC-31/AC-34）：全体成员（含只读）可查看基础信息与审核记录，
+// 当前环节/待行动人派生，动作标志按业务权限区分。
+func TestTaskDetail(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	daveUser := seedUser(t, q, "dave", "赵六", "dave-pass")
+
+	ts := httptest.NewServer(api.NewHandler(pool, "/api/v1"))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, bob, dave := newClient(t), newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(bob, "bob", "bob-pass")
+	login(dave, "dave", "dave-pass")
+
+	sp := func(s string) *string { return &s }
+
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "详情试点", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+		api.AddProjectMemberRequest{UserId: bobUser.ID, Role: api.Member})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+		api.AddProjectMemberRequest{UserId: daveUser.ID, Role: api.Viewer})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	okr := decodeBody[[]api.Objective](t, resp)
+	kr1 := okr[0].KeyResults[0].Id
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+
+	// alice 创建任务（负责人 bob）→ 待入池审批
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "验证现场联动异常回退", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	tasks := decodeBody[[]api.Task](t, resp)
+	taskID := tasks[0].Id
+	if tasks[0].CurrentStage != "创建入池审批" || tasks[0].PendingActorName == nil || *tasks[0].PendingActorName != "李四" {
+		t.Fatalf("当前环节/待行动人派生异常: %+v", tasks[0])
+	}
+
+	// 只读成员 dave 可查看详情（AC-34），但无任何动作标志
+	detailURL := fmt.Sprintf("%s/%d", tasksURL, taskID)
+	resp = doJSON(t, dave, http.MethodGet, detailURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail := decodeBody[api.TaskDetail](t, resp)
+	if detail.ObjectiveTitle != "提升交付质量" || detail.KrDescription != "上线自动验收" {
+		t.Fatalf("O/KR 归属派生异常: %+v", detail)
+	}
+	if len(detail.PoolReviews) != 1 || detail.PoolReviews[0].Status != api.PoolReviewStatusPending {
+		t.Fatalf("审核记录异常: %+v", detail.PoolReviews)
+	}
+	if detail.Task.CanDecidePoolReview || detail.Task.CanSubmitPoolReview || detail.Task.CanStart || detail.Task.CanCancel {
+		t.Fatalf("只读成员不应有任何动作标志: %+v", detail.Task)
+	}
+
+	// KR 负责人 bob 视角出现审批动作（AC-34 操作按钮按权限出现）
+	resp = doJSON(t, bob, http.MethodGet, detailURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	if d := decodeBody[api.TaskDetail](t, resp); !d.Task.CanDecidePoolReview {
+		t.Fatalf("KR 负责人应可处理审批: %+v", d.Task)
+	}
+
+	// 审核历史累积：退回→重提后详情含两条记录
+	decisionURL := fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, taskID)
+	op := "先补充完成标准"
+	resp = doJSON(t, bob, http.MethodPost, decisionURL, api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionRejected, Opinion: &op})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/submit-pool-review", tasksURL, taskID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, dave, http.MethodGet, detailURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail = decodeBody[api.TaskDetail](t, resp)
+	if len(detail.PoolReviews) != 2 || detail.PoolReviews[0].Status != api.PoolReviewStatusPending || detail.PoolReviews[1].Status != api.PoolReviewStatusRejected {
+		t.Fatalf("审核记录顺序异常: %+v", detail.PoolReviews)
+	}
+	if detail.PoolReviews[1].Opinion == nil || *detail.PoolReviews[1].Opinion != op {
+		t.Fatalf("退回意见未保留: %+v", detail.PoolReviews[1])
+	}
+
+	// 不存在的任务 404
+	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/99999", tasksURL), nil)
+	wantStatus(t, resp, http.StatusNotFound)
+	resp.Body.Close()
+}
+
 func TestLoginRateLimit(t *testing.T) {
 	_, pool := setupDB(t)
 

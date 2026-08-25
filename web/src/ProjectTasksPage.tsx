@@ -1,6 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Alert, Button, DatePicker, Input, InputNumber, Modal, Select, Spin, Transfer, message } from "antd";
+import {
+  Alert,
+  Button,
+  DatePicker,
+  Drawer,
+  Input,
+  InputNumber,
+  Modal,
+  Select,
+  Spin,
+  Tabs,
+  Transfer,
+  message,
+} from "antd";
 import type { Dayjs } from "dayjs";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
@@ -14,6 +27,7 @@ type TaskStatus = components["schemas"]["TaskStatus"];
 type CreateTaskItem = components["schemas"]["CreateTaskItem"];
 type ProjectMember = components["schemas"]["ProjectMember"];
 type TaskInvite = components["schemas"]["TaskInvite"];
+type TaskDetail = components["schemas"]["TaskDetail"];
 
 // 任务生命周期状态的中文标签与徽章样式（PRD §5.1；配色按原型 statusClass 规则）。
 const STATUS_LABEL: Record<TaskStatus, string> = {
@@ -142,6 +156,7 @@ export default function ProjectTasksPage({
 
   const [rejectTask, setRejectTask] = useState<Task | null>(null);
   const [rejectOpinion, setRejectOpinion] = useState("");
+  const [drawerTaskId, setDrawerTaskId] = useState<number | null>(null);
   const [cancelTask, setCancelTask] = useState<Task | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [progressTask, setProgressTask] = useState<Task | null>(null);
@@ -206,7 +221,11 @@ export default function ProjectTasksPage({
     ...list.map((t) => (
       <tr key={t.id}>
         <td className="mono">{taskCode.get(t.id)}</td>
-        <td>{t.name}</td>
+        <td>
+          <Button type="link" size="small" style={{ padding: 0 }} onClick={() => setDrawerTaskId(t.id)}>
+            {t.name}
+          </Button>
+        </td>
         <td>
           <span className="owner-cell">
             <span className="avatar">{t.ownerName.slice(0, 1)}</span>
@@ -449,6 +468,29 @@ export default function ProjectTasksPage({
           setInvites(latest);
           setInviteModalOpen(false);
           message.success("邀请已发出，受邀成员将在其任务页看到该邀请");
+        }}
+      />
+      <TaskDrawer
+        projectId={projectId}
+        task={tasks.find((t) => t.id === drawerTaskId) ?? null}
+        code={drawerTaskId != null ? taskCode.get(drawerTaskId) : undefined}
+        onClose={() => setDrawerTaskId(null)}
+        actions={{
+          start: startTask,
+          submitPool,
+          approvePool: (t) => decidePool(t, "approved"),
+          openReject: (t) => {
+            setRejectTask(t);
+            setRejectOpinion("");
+          },
+          openCancel: (t) => {
+            setCancelTask(t);
+            setCancelReason("");
+          },
+          openProgress: (t) => {
+            setProgressTask(t);
+            setProgressValue(t.progress ?? null);
+          },
         }}
       />
       <Modal
@@ -862,5 +904,213 @@ function InviteOwnersModal({
         </div>
       </div>
     </Modal>
+  );
+}
+
+const fmtTime = (s?: string) => (s ? s.slice(0, 16).replace("T", " ") : "");
+
+// 任务详情抽屉（AC-31/AC-34）：任务概况、讨论、审核三 Tab；
+// PRD §7.5 规定 Tab 顺序为概况、讨论、审核（原型 nav 顺序与 PRD 不一致，以 PRD 为准）。
+function TaskDrawer({
+  projectId,
+  task,
+  code,
+  onClose,
+  actions,
+}: {
+  projectId: number;
+  task: Task | null;
+  code?: string;
+  onClose: () => void;
+  actions: {
+    start: (t: Task) => void;
+    submitPool: (t: Task) => void;
+    approvePool: (t: Task) => void;
+    openReject: (t: Task) => void;
+    openCancel: (t: Task) => void;
+    openProgress: (t: Task) => void;
+  };
+}) {
+  const [detail, setDetail] = useState<TaskDetail | null>(null);
+
+  useEffect(() => {
+    if (!task) {
+      setDetail(null);
+      return;
+    }
+    let alive = true;
+    client
+      .GET("/projects/{projectId}/tasks/{taskId}", {
+        params: { path: { projectId, taskId: task.id } },
+      })
+      .then((res) => {
+        if (alive && res.data) setDetail(res.data);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [projectId, task]);
+
+  if (!task) return null;
+  const pendingReviews = (detail?.poolReviews ?? []).filter((r) => r.status === "pending");
+
+  const overview = (
+    <>
+      <section className="drawer-section" style={{ marginTop: 4 }}>
+        <h3>基础信息</h3>
+        <div className="task-info-list">
+          <div className="task-info-row">
+            <span>状态</span>
+            <div>
+              <span className={`status-pill ${STATUS_CLASS[task.status]}`}>
+                {STATUS_LABEL[task.status]}
+              </span>
+              {task.status === "cancelled" && task.cancelReason && (
+                <span className="muted" style={{ marginLeft: 8, fontSize: 12 }}>
+                  原因：{task.cancelReason}
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="task-info-row">
+            <span>负责人</span>
+            <strong>{task.ownerName}</strong>
+          </div>
+          <div className="task-info-row">
+            <span>参与人</span>
+            <strong className="muted">未设置</strong>
+          </div>
+          <div className="task-info-row">
+            <span>开始／截止</span>
+            <strong>
+              {task.startDate} — {task.endDate}
+            </strong>
+          </div>
+          <div className="task-info-row">
+            <span>进度</span>
+            <strong>{task.progress != null ? `${task.progress}%` : "未填写"}</strong>
+          </div>
+          <div className="task-info-row">
+            <span>当前环节／待行动人</span>
+            <strong>
+              {task.currentStage}
+              {task.pendingActorName ? ` · ${task.pendingActorName}` : ""}
+            </strong>
+          </div>
+          <div className="task-info-row">
+            <span>任务说明</span>
+            <strong className={task.description ? "" : "muted"}>
+              {task.description || "未填写"}
+            </strong>
+          </div>
+          <div className="task-info-row">
+            <span>完成标准</span>
+            <strong className={task.completionCriteria ? "" : "muted"}>
+              {task.completionCriteria || "未填写"}
+            </strong>
+          </div>
+        </div>
+      </section>
+      <section className="drawer-section">
+        <h3>
+          当前交付物 <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>0 项</span>
+        </h3>
+        <div className="empty compact-empty">尚无已生效的当前交付物</div>
+      </section>
+    </>
+  );
+
+  const discussion = (
+    <div>
+      <div className="empty compact-empty">尚无讨论意见</div>
+      <div className="notice">任务讨论将随后续版本开放；意见提交后不可编辑或删除。</div>
+    </div>
+  );
+
+  const audit = (
+    <div style={{ paddingTop: 4 }}>
+      {(detail?.poolReviews ?? []).length === 0 && (
+        <div className="empty compact-empty">暂无审核记录</div>
+      )}
+      {(detail?.poolReviews ?? []).map((r, i) => (
+        <article key={i} className={`audit-card ${r.status === "pending" ? "pending" : ""}`}>
+          <div className="audit-card-head">
+            <div>
+              <b>创建入池审批</b>{" "}
+              <span
+                className={`status-pill ${
+                  r.status === "pending" ? "warning" : r.status === "approved" ? "completed" : "danger"
+                }`}
+              >
+                {r.exempt ? "免审通过" : r.status === "pending" ? "待审批" : r.status === "approved" ? "已通过" : "已退回"}
+              </span>
+            </div>
+            <span className="meta muted" style={{ fontSize: 12 }}>
+              申请人 {r.submittedByName} · {fmtTime(r.submittedAt)}
+            </span>
+          </div>
+          {(r.decidedByName || r.opinion) && (
+            <div className="handled-fact">
+              {r.decidedByName && (
+                <b>
+                  {r.decidedByName}
+                  {r.decidedAt ? ` · ${fmtTime(r.decidedAt)}` : ""}
+                </b>
+              )}
+              <div>{r.opinion || "未填写意见"}</div>
+            </div>
+          )}
+          {r.status === "pending" && task.canDecidePoolReview && (
+            <div className="audit-actions">
+              <Button size="small" danger onClick={() => actions.openReject(task)}>
+                退回
+              </Button>
+              <Button size="small" type="primary" onClick={() => actions.approvePool(task)}>
+                通过
+              </Button>
+            </div>
+          )}
+        </article>
+      ))}
+    </div>
+  );
+
+  return (
+    <Drawer
+      open={!!task}
+      onClose={onClose}
+      width={720}
+      title={
+        <div>
+          {code} · {task.name}
+          <div className="drawer-sub">
+            所属 O / KR：{detail ? `${detail.objectiveTitle} / ${detail.krDescription}` : "…"}
+          </div>
+        </div>
+      }
+      footer={
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          {task.canStart && <Button onClick={() => actions.start(task)}>开始执行</Button>}
+          {task.canUpdateProgress && (
+            <Button onClick={() => actions.openProgress(task)}>更新进度</Button>
+          )}
+          {task.canCancel && <Button onClick={() => actions.openCancel(task)}>取消任务</Button>}
+          {task.canSubmitPoolReview && (
+            <Button type="primary" onClick={() => actions.submitPool(task)}>
+              提交入池审批
+            </Button>
+          )}
+        </div>
+      }
+    >
+      <Tabs
+        defaultActiveKey="overview"
+        items={[
+          { key: "overview", label: "任务概况", children: overview },
+          { key: "discussion", label: "讨论 0", children: discussion },
+          { key: "audit", label: `审核 ${pendingReviews.length}`, children: audit },
+        ]}
+      />
+    </Drawer>
   );
 }
