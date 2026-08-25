@@ -257,7 +257,7 @@ func (s *Server) DecideTaskPoolReview(w http.ResponseWriter, r *http.Request, pr
 	}
 	uid := currentUser(r).ID
 	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
-	_, facts, ok := s.fetchTask(w, r, projectId, taskId)
+	task, facts, ok := s.fetchTask(w, r, projectId, taskId)
 	if !ok {
 		return
 	}
@@ -307,6 +307,10 @@ func (s *Server) DecideTaskPoolReview(w http.ResponseWriter, r *http.Request, pr
 	if err := tx.Commit(r.Context()); err != nil {
 		writeInternalError(w)
 		return
+	}
+	if approve {
+		// AC-29：首次入池通过后补发指定成员的输入请求通知。
+		s.notifyPendingInputRequests(r, projectId, task)
 	}
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
@@ -591,14 +595,29 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 	for _, fc := range changeRows {
 		changeByTask[fc.TaskID] = fc
 	}
-	// 必要输入未就绪的任务显示「等待输入」（AC-48、§5.1）。
+	// 必要输入未就绪的任务显示「等待输入」（AC-48、§5.1）；成员来源按输入请求状态判定就绪。
 	edgeRows, err := s.q.ListEdgesByProject(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
+	requestRows, err := s.q.ListInputRequestsByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	requestStateByEdge := make(map[int64]string, len(requestRows))
+	for _, ir := range requestRows {
+		requestStateByEdge[ir.EdgeID] = ir.State
+	}
 	unmetByTask := make(map[int64]bool)
 	for _, e := range edgeRows {
-		if e.Necessity == domain.NecessityRequired && !domain.EdgeReady(e.CurrentFileID.Valid, e.HasCandidate) {
+		if e.Necessity != domain.NecessityRequired {
+			continue
+		}
+		ready := domain.EdgeReady(e.CurrentFileID.Valid, e.HasCandidate)
+		if state, ok := requestStateByEdge[e.ID]; ok {
+			ready = domain.MemberEdgeReady(state)
+		}
+		if !ready {
 			unmetByTask[e.TargetTaskID] = true
 		}
 	}

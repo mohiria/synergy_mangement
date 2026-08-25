@@ -1,0 +1,99 @@
+package domain
+
+import (
+	"errors"
+	"strings"
+	"unicode/utf8"
+)
+
+// 输入请求状态（词汇表「输入请求」）。
+const (
+	InputRequestPending  = "pending"
+	InputRequestAccepted = "accepted"
+	InputRequestProvided = "provided"
+)
+
+// NotifyInputRequest 站内通知类型。
+const NotifyInputRequest = "input_request"
+
+var (
+	ErrProviderNotEligible  = errors.New("对接人必须是非只读的项目成员")
+	ErrContentNoteRequired  = errors.New("请填写所需内容说明")
+	ErrExpectedDateRequired = errors.New("请填写期望时间")
+	ErrNotProvider          = errors.New("只有指定的对接人可以处理该输入请求")
+	ErrInputStateConflict   = errors.New("输入请求不在可处理状态")
+	ErrInputNotAccepted     = errors.New("请先同意接收，再提交内容")
+	ErrInputContentRequired = errors.New("请提交文字内容或文件")
+)
+
+// MemberInput 指定项目成员输入的请求输入（§9.1）。
+type MemberInput struct {
+	Name            string
+	Necessity       string
+	ProviderID      int64
+	ContentNote     string
+	HasExpectedDate bool
+}
+
+// ValidateMemberInput 校验指定项目成员输入（AC-29、§9.1：名称、必要性、对接人、所需内容、期望时间必填）。
+func ValidateMemberInput(m MemberInput, roleOf func(int64) string) error {
+	name := strings.TrimSpace(m.Name)
+	if name == "" {
+		return ErrEdgeNameEmpty
+	}
+	if utf8.RuneCountInString(name) > 100 {
+		return ErrEdgeNameTooLong
+	}
+	switch m.Necessity {
+	case NecessityRequired, NecessityReference:
+	default:
+		return ErrNecessityInvalid
+	}
+	if role := roleOf(m.ProviderID); role != RoleAdmin && role != RoleMember {
+		return ErrProviderNotEligible
+	}
+	if strings.TrimSpace(m.ContentNote) == "" {
+		return ErrContentNoteRequired
+	}
+	if !m.HasExpectedDate {
+		return ErrExpectedDateRequired
+	}
+	return nil
+}
+
+// AcceptInputRule 同意接收（AC-30）：仅对接人本人、仅待接收状态；接收只表示承担责任。
+func AcceptInputRule(state string, providerID, actorID int64) error {
+	if state != InputRequestPending {
+		return ErrInputStateConflict
+	}
+	if actorID != providerID {
+		return ErrNotProvider
+	}
+	return nil
+}
+
+// ProvideInputRule 提交内容（AC-30）：仅对接人、须先同意接收、内容或文件至少其一。
+func ProvideInputRule(state string, providerID, actorID int64, hasContent bool) error {
+	switch state {
+	case InputRequestAccepted:
+	case InputRequestPending:
+		if actorID != providerID {
+			return ErrNotProvider
+		}
+		return ErrInputNotAccepted
+	default:
+		return ErrInputStateConflict
+	}
+	if actorID != providerID {
+		return ErrNotProvider
+	}
+	if !hasContent {
+		return ErrInputContentRequired
+	}
+	return nil
+}
+
+// MemberEdgeReady 成员来源的交付物边就绪判定（词汇表「输入就绪」）：已提供才就绪。
+func MemberEdgeReady(state string) bool {
+	return state == InputRequestProvided
+}

@@ -108,6 +108,21 @@ type FieldChangeRequest struct {
 	DecidedAt             pgtype.Timestamptz
 }
 
+type InputRequest struct {
+	ID           int64
+	EdgeID       int64
+	ProviderID   int64
+	ContentNote  string
+	State        string
+	NotifiedAt   pgtype.Timestamptz
+	AcceptedAt   pgtype.Timestamptz
+	ProvidedAt   pgtype.Timestamptz
+	ProvidedText string
+	FileName     string
+	ObjectKey    string
+	CreatedAt    pgtype.Timestamptz
+}
+
 type KeyResult struct {
 	ID          int64
 	ObjectiveID int64

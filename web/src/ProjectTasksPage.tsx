@@ -216,6 +216,59 @@ export default function ProjectTasksPage({
   };
   const [inputTask, setInputTask] = useState<Task | null>(null);
   const [reviewerTask, setReviewerTask] = useState<Task | null>(null);
+  const [provideReq, setProvideReq] = useState<number | null>(null);
+  const [provideText, setProvideText] = useState("");
+  const [provideFile, setProvideFile] = useState<File | null>(null);
+  const [providing, setProviding] = useState(false);
+
+  const acceptInput = async (requestId: number) => {
+    const res = await client.POST("/projects/{projectId}/input-requests/{requestId}/accept", {
+      params: { path: { projectId, requestId } },
+    });
+    if (res.data) {
+      message.success("已同意接收；提交内容后输入才更新为就绪");
+      load();
+    } else {
+      message.error(res.error?.message ?? "操作失败");
+    }
+  };
+
+  const provideInput = async () => {
+    if (provideReq == null) return;
+    setProviding(true);
+    const res = await client.POST("/projects/{projectId}/input-requests/{requestId}/provide", {
+      params: { path: { projectId, requestId: provideReq } },
+      body: {
+        text: provideText.trim() || undefined,
+        fileName: provideFile?.name,
+      },
+    });
+    if (res.data) {
+      if (res.data.uploadUrl && provideFile) {
+        try {
+          const put = await fetch(res.data.uploadUrl, { method: "PUT", body: provideFile });
+          if (!put.ok) throw new Error(String(put.status));
+        } catch {
+          message.error("文件上传失败，请确认文件服务可用后重试");
+        }
+      }
+      message.success("已提交，目标任务输入更新为就绪");
+      setProvideReq(null);
+      setProvideText("");
+      setProvideFile(null);
+      load();
+    } else {
+      message.error(res.error?.message ?? "提交失败");
+    }
+    setProviding(false);
+  };
+
+  const openInputFile = async (requestId: number) => {
+    const res = await client.GET("/projects/{projectId}/input-requests/{requestId}/file-url", {
+      params: { path: { projectId, requestId } },
+    });
+    if (res.data) window.open(res.data.url, "_blank");
+  };
 
   const removeEdge = async (edgeId: number) => {
     const res = await client.DELETE("/projects/{projectId}/edges/{edgeId}", {
@@ -644,6 +697,13 @@ export default function ProjectTasksPage({
           },
           openConfigureInput: (t) => setInputTask(t),
           openReviewers: (t) => setReviewerTask(t),
+          acceptInput,
+          openProvide: (id) => {
+            setProvideReq(id);
+            setProvideText("");
+            setProvideFile(null);
+          },
+          openInputFile,
           removeEdge,
           openTask: (id) => setDrawerTaskId(id),
         }}
@@ -653,6 +713,7 @@ export default function ProjectTasksPage({
         task={inputTask}
         tasks={tasks}
         taskCode={taskCode}
+        members={members}
         onClose={() => setInputTask(null)}
         onSaved={() => {
           setInputTask(null);
@@ -669,6 +730,43 @@ export default function ProjectTasksPage({
           load();
         }}
       />
+      <Modal
+        title="提交输入内容"
+        open={provideReq != null}
+        okText="提交"
+        cancelText="取消"
+        confirmLoading={providing}
+        okButtonProps={{ disabled: !provideText.trim() && !provideFile }}
+        onCancel={() => setProvideReq(null)}
+        onOk={provideInput}
+      >
+        <p className="muted" style={{ marginTop: 0 }}>
+          提交后输入请求变为已提供，目标任务输入更新为就绪；文字内容与文件至少提交其一。
+        </p>
+        <Input.TextArea
+          rows={3}
+          maxLength={2000}
+          placeholder="文字内容"
+          value={provideText}
+          onChange={(e) => setProvideText(e.target.value)}
+        />
+        <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+          <Button
+            size="small"
+            onClick={() => {
+              const input = document.createElement("input");
+              input.type = "file";
+              input.onchange = () => setProvideFile(input.files?.[0] ?? null);
+              input.click();
+            }}
+          >
+            选择文件
+          </Button>
+          <span className="muted" style={{ fontSize: 12 }}>
+            {provideFile ? provideFile.name : "未选择文件"}
+          </span>
+        </div>
+      </Modal>
       <Modal
         title="提交完成申请"
         open={!!completionTask}
@@ -1215,6 +1313,9 @@ function TaskDrawer({
     openCrReject: (t: Task, reviewId: number) => void;
     openConfigureInput: (t: Task) => void;
     openReviewers: (t: Task) => void;
+    acceptInput: (requestId: number) => void;
+    openProvide: (requestId: number) => void;
+    openInputFile: (requestId: number) => void;
     removeEdge: (edgeId: number) => void;
     openTask: (taskId: number) => void;
   };
@@ -1429,15 +1530,61 @@ function TaskDrawer({
               <div>
                 <b>{e.name}</b>
                 <small>
-                  已有任务 · {e.sourceTaskName ?? "—"}
-                  {e.deliverableName ? ` · ${e.deliverableName}` : ""}
-                  {e.sourceOwnerName ? ` · 提供人 ${e.sourceOwnerName}` : ""}
+                  {e.inputRequest
+                    ? `指定项目成员提供 · 对接人 ${e.inputRequest.providerName}` +
+                      (e.inputRequest.contentNote ? ` · ${e.inputRequest.contentNote}` : "")
+                    : `已有任务 · ${e.sourceTaskName ?? "—"}` +
+                      (e.deliverableName ? ` · ${e.deliverableName}` : "") +
+                      (e.sourceOwnerName ? ` · 提供人 ${e.sourceOwnerName}` : "")}
                 </small>
+                {e.inputRequest?.state === "provided" && (
+                  <small>
+                    已提供:{e.inputRequest.providedText || ""}
+                    {e.inputRequest.providedFileName && (
+                      <span
+                        className="file-link"
+                        style={{ marginLeft: 6 }}
+                        onClick={() => actions.openInputFile(e.inputRequest!.id)}
+                      >
+                        {e.inputRequest.providedFileName}
+                      </span>
+                    )}
+                  </small>
+                )}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span className={`status-pill ${e.ready ? "completed" : "warning"}`}>
-                  {e.ready ? "已就绪" : "未就绪"}
-                </span>
+                {e.inputRequest && (
+                  <span
+                    className={`status-pill ${
+                      e.inputRequest.state === "provided"
+                        ? "completed"
+                        : e.inputRequest.state === "accepted"
+                          ? "review"
+                          : "warning"
+                    }`}
+                  >
+                    {e.inputRequest.state === "provided"
+                      ? "已提供"
+                      : e.inputRequest.state === "accepted"
+                        ? "已接收"
+                        : "待接收"}
+                  </span>
+                )}
+                {!e.inputRequest && (
+                  <span className={`status-pill ${e.ready ? "completed" : "warning"}`}>
+                    {e.ready ? "已就绪" : "未就绪"}
+                  </span>
+                )}
+                {e.inputRequest?.canAccept && (
+                  <Button size="small" onClick={() => actions.acceptInput(e.inputRequest!.id)}>
+                    同意接收
+                  </Button>
+                )}
+                {e.inputRequest?.canProvide && (
+                  <Button size="small" type="primary" onClick={() => actions.openProvide(e.inputRequest!.id)}>
+                    提交内容
+                  </Button>
+                )}
                 {e.canRemove && (
                   <Button size="small" type="text" onClick={() => actions.removeEdge(e.id)}>
                     解除
@@ -2048,6 +2195,7 @@ function ConfigureInputModal({
   task,
   tasks,
   taskCode,
+  members,
   onClose,
   onSaved,
 }: {
@@ -2055,9 +2203,13 @@ function ConfigureInputModal({
   task: Task | null;
   tasks: Task[];
   taskCode: Map<number, string>;
+  members: ProjectMember[];
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const [mode, setMode] = useState<"task" | "member">("task");
+  const [providerId, setProviderId] = useState<number | undefined>(undefined);
+  const [contentNote, setContentNote] = useState("");
   const [sourceTaskId, setSourceTaskId] = useState<number | undefined>(undefined);
   const [sourceDeliverables, setSourceDeliverables] = useState<{ id: number; name: string }[]>([]);
   const [deliverableId, setDeliverableId] = useState<number | undefined>(undefined);
@@ -2070,6 +2222,9 @@ function ConfigureInputModal({
 
   useEffect(() => {
     if (task) {
+      setMode("task");
+      setProviderId(undefined);
+      setContentNote("");
       setSourceTaskId(undefined);
       setSourceDeliverables([]);
       setDeliverableId(undefined);
@@ -2102,12 +2257,46 @@ function ConfigureInputModal({
   const candidates = tasks.filter((t) => t.id !== task.id && t.status !== "cancelled");
 
   const save = async () => {
-    if (!sourceTaskId) {
-      setError("请选择来源任务");
-      return;
-    }
     if (!name.trim()) {
       setError("请填写输入名称");
+      return;
+    }
+    if (mode === "member") {
+      if (!providerId) {
+        setError("请选择对接人");
+        return;
+      }
+      if (!contentNote.trim()) {
+        setError("请填写所需内容");
+        return;
+      }
+      if (!expectedDate) {
+        setError("请填写期望时间");
+        return;
+      }
+      setSaving(true);
+      setError(null);
+      const res = await client.POST("/projects/{projectId}/tasks/{taskId}/member-inputs", {
+        params: { path: { projectId, taskId: task.id } },
+        body: {
+          name: name.trim(),
+          necessity,
+          providerId,
+          contentNote: contentNote.trim(),
+          expectedDate: expectedDate.format("YYYY-MM-DD"),
+        },
+      });
+      setSaving(false);
+      if (res.data) {
+        message.success("已建立「成员 → 本任务」的输入请求；入池后对接人会收到通知");
+        onSaved();
+      } else {
+        setError(res.error?.message ?? "保存失败");
+      }
+      return;
+    }
+    if (!sourceTaskId) {
+      setError("请选择来源任务");
       return;
     }
     setSaving(true);
@@ -2152,6 +2341,46 @@ function ConfigureInputModal({
       {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
       <div style={{ display: "grid", gap: 12 }}>
         <div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>来源模式（二选一）</div>
+          <Select
+            style={{ width: "100%" }}
+            value={mode}
+            onChange={setMode}
+            options={[
+              { value: "task", label: "已有任务（默认搜索系统内任务）" },
+              { value: "member", label: "指定项目成员提供" },
+            ]}
+          />
+        </div>
+        {mode === "member" && (
+          <>
+            <div>
+              <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>对接人</div>
+              <Select
+                style={{ width: "100%" }}
+                showSearch
+                optionFilterProp="label"
+                placeholder="选择项目成员"
+                value={providerId}
+                onChange={setProviderId}
+                options={members
+                  .filter((m) => m.role !== "viewer")
+                  .map((m) => ({ value: m.userId, label: `${m.displayName}（${m.username}）` }))}
+              />
+            </div>
+            <div>
+              <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>所需内容（必填）</div>
+              <Input.TextArea
+                rows={2}
+                maxLength={500}
+                value={contentNote}
+                onChange={(e) => setContentNote(e.target.value)}
+              />
+            </div>
+          </>
+        )}
+        {mode === "task" && (
+        <div>
           <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>来源任务</div>
           <Select
             style={{ width: "100%" }}
@@ -2166,6 +2395,8 @@ function ConfigureInputModal({
             }))}
           />
         </div>
+        )}
+        {mode === "task" && (
         <div>
           <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
             对应交付物（选填；无文件的条件可不选）
@@ -2183,6 +2414,7 @@ function ConfigureInputModal({
             options={sourceDeliverables.map((d) => ({ value: d.id, label: d.name }))}
           />
         </div>
+        )}
         <div>
           <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>输入名称</div>
           <Input maxLength={100} value={name} onChange={(e) => setName(e.target.value)} />
@@ -2190,6 +2422,9 @@ function ConfigureInputModal({
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
           <div>
             <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>关系类型</div>
+            {mode === "member" ? (
+              <Input disabled value="信息输入（成员提供）" />
+            ) : (
             <Select
               style={{ width: "100%" }}
               value={edgeType}
@@ -2199,6 +2434,7 @@ function ConfigureInputModal({
                 label: EDGE_TYPE_LABEL[k],
               }))}
             />
+            )}
           </div>
           <div>
             <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>必要性</div>

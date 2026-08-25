@@ -145,6 +145,14 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 	if err != nil {
 		return nil, err
 	}
+	requestRows, err := s.q.ListInputRequestsByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	requestByEdge := make(map[int64]store.ListInputRequestsByProjectRow, len(requestRows))
+	for _, ir := range requestRows {
+		requestByEdge[ir.EdgeID] = ir
+	}
 	out := make([]DeliverableEdge, 0, len(rows))
 	for _, e := range rows {
 		hasCurrent := e.CurrentFileID.Valid
@@ -181,6 +189,16 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 			item.CurrentFileName = fromPgText(e.CurrentFileName)
 		}
 		item.ExpectedDate = fromPgDate(e.ExpectedDate)
+		// 成员来源：附输入请求，就绪按「已提供」判定（AC-30、词汇表「输入就绪」）。
+		if ir, ok := requestByEdge[e.ID]; ok {
+			view := s.inputRequestView(store.InputRequest{
+				ID: ir.ID, EdgeID: ir.EdgeID, ProviderID: ir.ProviderID, ContentNote: ir.ContentNote,
+				State: ir.State, NotifiedAt: ir.NotifiedAt, AcceptedAt: ir.AcceptedAt, ProvidedAt: ir.ProvidedAt,
+				ProvidedText: ir.ProvidedText, FileName: ir.FileName, ObjectKey: ir.ObjectKey, CreatedAt: ir.CreatedAt,
+			}, ir.ProviderName, userID)
+			item.InputRequest = &view
+			item.Ready = domain.MemberEdgeReady(ir.State)
+		}
 		out = append(out, item)
 	}
 	return out, nil

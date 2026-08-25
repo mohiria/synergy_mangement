@@ -493,6 +493,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/tasks/{taskId}/member-inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 指定项目成员提供输入（AC-29）：建立「成员 → 目标任务」交付物边并生成输入请求；任务已入池时立即发站内通知，否则待入池审批通过后发送 */
+        post: operations["createMemberInput"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/input-requests/{requestId}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                requestId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 对接人同意接收（AC-30）；接收只表示承担责任，不代表输入就绪 */
+        post: operations["acceptInputRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/input-requests/{requestId}/provide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                requestId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 对接人提交内容或文件（AC-30）；提交后输入请求变为已提供，目标任务输入更新为就绪 */
+        post: operations["provideInput"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/input-requests/{requestId}/file-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                requestId: number;
+            };
+            cookie?: never;
+        };
+        /** 输入请求已提交文件的预签名下载地址 */
+        get: operations["getInputRequestFileUrl"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/edges/{edgeId}": {
         parameters: {
             query?: never;
@@ -1124,6 +1204,8 @@ export interface components {
             expectedDate?: string;
             /** @description 当前用户能否解除该边（派生字段；目标任务负责人／可编辑项目者） */
             canRemove?: boolean;
+            /** @description 来源为指定项目成员时的输入请求（AC-29／30） */
+            inputRequest?: components["schemas"]["InputRequest"];
         };
         /** @description 新增输入要求（来源＝系统内已有任务，AC-28；指定项目成员来源见 */
         CreateTaskInputRequest: {
@@ -1140,6 +1222,68 @@ export interface components {
             deliverableId?: number;
             /** Format: date */
             expectedDate?: string;
+        };
+        /**
+         * @description 输入请求状态（词汇表「输入请求」；PRD §5.5）
+         * @enum {string}
+         */
+        InputRequestState: "pending" | "accepted" | "provided";
+        /** @description 指定项目成员的输入请求（附着在成员 → 目标任务的交付物边上） */
+        InputRequest: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            edgeId: number;
+            /** Format: int64 */
+            providerId: number;
+            providerName: string;
+            /** @description 所需内容说明 */
+            contentNote?: string;
+            state: components["schemas"]["InputRequestState"];
+            /**
+             * Format: date-time
+             * @description 站内通知发送时间（入池审批通过后才发送）
+             */
+            notifiedAt?: string;
+            /** Format: date-time */
+            acceptedAt?: string;
+            /** Format: date-time */
+            providedAt?: string;
+            /** @description 对接人提交的文字内容 */
+            providedText?: string;
+            providedFileName?: string;
+            /** @description 当前用户能否同意接收（派生字段；对接人本人且待接收） */
+            canAccept?: boolean;
+            /** @description 当前用户能否提交内容（派生字段；对接人本人且已接收） */
+            canProvide?: boolean;
+        };
+        /** @description 新增输入要求（来源＝指定项目成员，AC-29） */
+        CreateMemberInputRequest: {
+            name: string;
+            necessity: components["schemas"]["Necessity"];
+            /**
+             * Format: int64
+             * @description 对接人（非只读项目成员）
+             */
+            providerId: number;
+            /** @description 所需内容（§9.1 必填） */
+            contentNote: string;
+            /**
+             * Format: date
+             * @description 期望时间（§9.1 必填）
+             */
+            expectedDate: string;
+        };
+        ProvideInputRequest: {
+            /** @description 文字内容；与文件至少提交其一 */
+            text?: string;
+            /** @description 上传文件名；返回预签名上传地址 */
+            fileName?: string;
+        };
+        ProvideInputResponse: {
+            request: components["schemas"]["InputRequest"];
+            /** @description 提交了 fileName 时返回的预签名上传地址 */
+            uploadUrl?: string;
         };
         /**
          * @description 完成申请状态（词汇表「完成申请」；PRD §5.2.C）
@@ -2216,6 +2360,121 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["ValidationError"];
+        };
+    };
+    createMemberInput: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateMemberInputRequest"];
+            };
+        };
+        responses: {
+            /** @description 已建立 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliverableEdge"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    acceptInputRequest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                requestId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已接收 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InputRequest"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    provideInput: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                requestId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProvideInputRequest"];
+            };
+        };
+        responses: {
+            /** @description 已提交 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProvideInputResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    getInputRequestFileUrl: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                requestId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 预签名地址 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DownloadUrlResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
         };
     };
     removeEdge: {

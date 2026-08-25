@@ -2192,6 +2192,165 @@ func TestIntermediateReviewOrSign(t *testing.T) {
 	}
 }
 
+// 指定成员输入请求（#14，AC-29/30）：草稿阶段不通知→入池通过后带上下文通知→同意接收（不就绪）
+// →提交内容后输入就绪；无拒绝/转派端点。
+func TestMemberInputRequests(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
+	daveUser := seedUser(t, q, "dave", "赵六", "dave-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, bob, carol, dave := newClient(t), newClient(t), newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(bob, "bob", "bob-pass")
+	login(carol, "carol", "carol-pass")
+	login(dave, "dave", "dave-pass")
+
+	sp := func(s string) *string { return &s }
+
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "对接试点", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	for _, uid := range []int64{bobUser.ID, carolUser.ID, daveUser.ID} {
+		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+		wantStatus(t, resp, http.StatusCreated)
+		resp.Body.Close()
+	}
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	okr := decodeBody[[]api.Objective](t, resp)
+	kr1 := okr[0].KeyResults[0].Id
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+
+	// carol 建草稿（不提交）→ 配置成员输入（dave）→ 通知不发（AC-29 前半）
+	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: false,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "回归验证分析", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	tasks := decodeBody[[]api.Task](t, resp)
+	taskID := tasks[0].Id
+	expected := openapiDate(t, "2026-09-10")
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/member-inputs", tasksURL, taskID),
+		api.CreateMemberInputRequest{
+			Name: "接口字段口径", Necessity: api.Required, ProviderId: daveUser.ID,
+			ContentNote: "请提供最新接口字段口径说明", ExpectedDate: expected,
+		})
+	wantStatus(t, resp, http.StatusCreated)
+	edge := decodeBody[api.DeliverableEdge](t, resp)
+	if edge.InputRequest == nil || edge.InputRequest.State != api.InputRequestStatePending || edge.Ready {
+		t.Fatalf("成员输入边异常: %+v", edge)
+	}
+	requestID := edge.InputRequest.Id
+	resp = doJSON(t, dave, http.MethodGet, base+"/notifications", nil)
+	wantStatus(t, resp, http.StatusOK)
+	if got := decodeBody[[]api.Notification](t, resp); len(got) != 0 {
+		t.Fatalf("草稿阶段不应打扰对接人: %+v", got)
+	}
+
+	// 期望时间必填 422
+	bad := api.CreateMemberInputRequest{Name: "缺期望时间", Necessity: api.Required, ProviderId: daveUser.ID, ContentNote: "x"}
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/member-inputs", tasksURL, taskID), map[string]any{
+		"name": bad.Name, "necessity": bad.Necessity, "providerId": bad.ProviderId, "contentNote": bad.ContentNote,
+	})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+
+	// 提交入池 → KR 负责人通过 → dave 收到带上下文通知（AC-29 后半）
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/submit-pool-review", tasksURL, taskID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, dave, http.MethodGet, base+"/notifications", nil)
+	wantStatus(t, resp, http.StatusOK)
+	if got := decodeBody[[]api.Notification](t, resp); len(got) != 0 {
+		t.Fatalf("待审批阶段仍不应通知: %+v", got)
+	}
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, taskID),
+		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusOK)
+	afterPool := decodeBody[api.Task](t, resp)
+	if afterPool.Status != api.TaskStatusWaitingInput {
+		t.Fatalf("必要输入未到应显示等待输入: %+v", afterPool.Status)
+	}
+	resp = doJSON(t, dave, http.MethodGet, base+"/notifications", nil)
+	wantStatus(t, resp, http.StatusOK)
+	notes := decodeBody[[]api.Notification](t, resp)
+	if len(notes) != 1 || notes[0].Kind != "input_request" || notes[0].TaskId == nil || *notes[0].TaskId != taskID {
+		t.Fatalf("入池通过后应发带上下文通知: %+v", notes)
+	}
+
+	// AC-30：他人不能接收；dave 同意接收（接收≠就绪）；未接收不能提交
+	acceptURL := fmt.Sprintf("%s/projects/%d/input-requests/%d/accept", base, created.Id, requestID)
+	provideURL := fmt.Sprintf("%s/projects/%d/input-requests/%d/provide", base, created.Id, requestID)
+	resp = doJSON(t, carol, http.MethodPost, acceptURL, nil)
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	resp = doJSON(t, dave, http.MethodPost, provideURL, api.ProvideInputRequest{Text: sp("先提交试试")})
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+	resp = doJSON(t, dave, http.MethodPost, acceptURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	accepted := decodeBody[api.InputRequest](t, resp)
+	if accepted.State != api.InputRequestStateAccepted {
+		t.Fatalf("接收状态异常: %+v", accepted)
+	}
+	resp = doJSON(t, carol, http.MethodGet, tasksURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	for _, task := range decodeBody[[]api.Task](t, resp) {
+		if task.Id == taskID && task.Status != api.TaskStatusWaitingInput {
+			t.Fatalf("接收不等于就绪，应仍等待输入: %+v", task.Status)
+		}
+	}
+
+	// 空内容提交 422；提交文字+文件 → 已提供、输入就绪、任务不再等待输入
+	resp = doJSON(t, dave, http.MethodPost, provideURL, api.ProvideInputRequest{})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	resp = doJSON(t, dave, http.MethodPost, provideURL, api.ProvideInputRequest{Text: sp("口径见附件"), FileName: sp("接口口径.xlsx")})
+	wantStatus(t, resp, http.StatusOK)
+	provided := decodeBody[api.ProvideInputResponse](t, resp)
+	if provided.Request.State != api.InputRequestStateProvided || provided.UploadUrl == nil {
+		t.Fatalf("提交结果异常: %+v", provided)
+	}
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail := decodeBody[api.TaskDetail](t, resp)
+	if !detail.Inputs[0].Ready || detail.Task.Status != api.TaskStatusNotStarted {
+		t.Fatalf("提交后输入应就绪: %+v %v", detail.Inputs[0], detail.Task.Status)
+	}
+	if detail.Inputs[0].InputRequest == nil || detail.Inputs[0].InputRequest.ProvidedText == nil {
+		t.Fatalf("提交内容缺失: %+v", detail.Inputs[0].InputRequest)
+	}
+
+	// 文件下载地址；重复提交冲突
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/projects/%d/input-requests/%d/file-url", base, created.Id, requestID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if u := decodeBody[api.DownloadUrlResponse](t, resp); u.Url == "" {
+		t.Fatalf("文件地址为空")
+	}
+	resp = doJSON(t, dave, http.MethodPost, provideURL, api.ProvideInputRequest{Text: sp("再提一次")})
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+}
+
 func TestLoginRateLimit(t *testing.T) {
 	_, pool := setupDB(t)
 
