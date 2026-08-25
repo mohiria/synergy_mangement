@@ -3183,6 +3183,170 @@ func TestImportAndBatchPool(t *testing.T) {
 	}
 }
 
+// 统一权限验收与外部边界（#28，AC-21/22）：切换身份后项目事实不变，只改变动作权限与
+// 个人工作内容；全流程只依赖内部账号，外部传递由内部成员（协调人）以输入请求代录。
+func TestUnifiedPermissionsAcrossIdentities(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
+	daveUser := seedUser(t, q, "dave", "赵六", "dave-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, bob, carol, dave := newClient(t), newClient(t), newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(bob, "bob", "bob-pass")
+	login(carol, "carol", "carol-pass")
+	login(dave, "dave", "dave-pass")
+
+	sp := func(s string) *string { return &s }
+
+	// alice 管理员/项目负责人；bob KR 负责人（普通成员）；carol 普通成员；dave 只读成员
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "权限验收", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	for uid, role := range map[int64]api.MemberRole{bobUser.ID: api.Member, carolUser.ID: api.Member, daveUser.ID: api.Viewer} {
+		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+			api.AddProjectMemberRequest{UserId: uid, Role: role})
+		wantStatus(t, resp, http.StatusCreated)
+		resp.Body.Close()
+	}
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	okr := decodeBody[[]api.Objective](t, resp)
+	kr1 := okr[0].KeyResults[0].Id
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+
+	// carol 提交任务（待入池审批）
+	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+
+	// AC-21：四个身份看到的项目事实一致（任务清单核心字段逐项相等）
+	type factRow struct {
+		Id      int64
+		Name    string
+		Status  api.TaskStatus
+		OwnerId int64
+	}
+	factsOf := func(c *http.Client) []factRow {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodGet, tasksURL, nil)
+		wantStatus(t, resp, http.StatusOK)
+		list := decodeBody[[]api.Task](t, resp)
+		out := make([]factRow, 0, len(list))
+		for _, task := range list {
+			out = append(out, factRow{Id: task.Id, Name: task.Name, Status: task.Status, OwnerId: task.OwnerId})
+		}
+		return out
+	}
+	ref := factsOf(alice)
+	for name, c := range map[string]*http.Client{"bob": bob, "carol": carol, "dave": dave} {
+		got := factsOf(c)
+		if len(got) != len(ref) {
+			t.Fatalf("%s 看到的任务数量不同: %d vs %d", name, len(got), len(ref))
+		}
+		for i := range ref {
+			if got[i] != ref[i] {
+				t.Fatalf("%s 看到的项目事实不同: %+v vs %+v", name, got[i], ref[i])
+			}
+		}
+	}
+
+	// AC-21：动作权限随身份变化——同一任务的派生标志
+	flagsOf := func(c *http.Client) api.Task {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodGet, tasksURL, nil)
+		wantStatus(t, resp, http.StatusOK)
+		return decodeBody[[]api.Task](t, resp)[0]
+	}
+	if ft := flagsOf(bob); !ft.CanDecidePoolReview {
+		t.Fatalf("KR 负责人应可审批: %+v", ft)
+	}
+	if ft := flagsOf(carol); ft.CanDecidePoolReview {
+		t.Fatalf("提交人不应可审批: %+v", ft)
+	}
+	if ft := flagsOf(alice); ft.CanDecidePoolReview {
+		t.Fatalf("管理员不能替代 KR 负责人审批: %+v", ft)
+	}
+	if ft := flagsOf(dave); ft.CanDecidePoolReview || ft.CanProposeFieldChange || ft.CanReportBlocker == nil || *ft.CanReportBlocker {
+		t.Fatalf("只读成员不应有业务动作标志: %+v", ft)
+	}
+
+	// 只读成员：不能建任务/建 OKR/建卡点，但可讨论、可查看下载（§3.4）
+	resp = doJSON(t, dave, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: false,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "越权任务", OwnerId: daveUser.ID, StartDate: start, EndDate: end},
+		},
+	})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	resp = doJSON(t, dave, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{{Title: sp("越权 O")}}})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	taskID := ref[0].Id
+	resp = doJSON(t, dave, http.MethodPost, fmt.Sprintf("%s/%d/discussions", tasksURL, taskID),
+		api.CreateDiscussionRequest{Content: "只读成员也可以提意见"})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+
+	// AC-21：个人工作内容随身份变化
+	myWorkURL := fmt.Sprintf("%s/projects/%d/my-work", base, created.Id)
+	getWork := func(c *http.Client) api.MyWork {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodGet, myWorkURL, nil)
+		wantStatus(t, resp, http.StatusOK)
+		return decodeBody[api.MyWork](t, resp)
+	}
+	if w := getWork(bob); len(w.Approvals) != 1 {
+		t.Fatalf("KR 负责人的待我审批异常: %+v", w.Approvals)
+	}
+	if w := getWork(carol); len(w.Approvals) != 0 || len(w.Waiting) != 1 {
+		t.Fatalf("提交人的分组异常: 审批 %d 等待 %d", len(w.Approvals), len(w.Waiting))
+	}
+	if w := getWork(dave); len(w.Pending)+len(w.Approvals)+len(w.Waiting)+len(w.Blockers) != 0 {
+		t.Fatalf("只读成员不应有行动事项: %+v", w)
+	}
+
+	// AC-22：外部传递不产生外部账号——对接人必须是项目内非只读成员；
+	// 外部材料由内部协调人（成员）代为接收与提交。
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, taskID),
+		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	expected := openapiDate(t, "2026-09-10")
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/member-inputs", tasksURL, taskID),
+		api.CreateMemberInputRequest{Name: "外部厂商接口说明", Necessity: api.Required, ProviderId: daveUser.ID,
+			ContentNote: "外部材料需由内部协调人代录", ExpectedDate: expected})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/member-inputs", tasksURL, taskID),
+		api.CreateMemberInputRequest{Name: "外部厂商接口说明", Necessity: api.Required, ProviderId: bobUser.ID,
+			ContentNote: "外部材料由协调人李四收集后代录", ExpectedDate: expected})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+}
+
 func TestLoginRateLimit(t *testing.T) {
 	_, pool := setupDB(t)
 

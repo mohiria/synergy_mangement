@@ -2637,6 +2637,7 @@ function ConfigureInputModal({
         </div>
         <div className="notice">
           某项信息不到位会阻止下游开始或完成时，请选择「硬前置交付」；必要输入未就绪的任务显示“等待输入”。
+          偶发的外部材料不产生外部账号：由内部协调人（项目成员）作为对接人收集后代为提交。
         </div>
       </div>
     </Modal>
