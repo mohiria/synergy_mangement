@@ -61,14 +61,14 @@ func TestDecideIntermediateRule(t *testing.T) {
 	reviewers := map[int64]bool{11: true, 12: true}
 	isReviewer := func(id int64) bool { return reviewers[id] }
 	cases := []struct {
-		name        string
-		t           TaskFacts
-		actor       int64
-		approve     bool
-		opinion     string
-		wantTask    string
-		wantReview  string
-		wantErr     error
+		name       string
+		t          TaskFacts
+		actor      int64
+		approve    bool
+		opinion    string
+		wantTask   string
+		wantReview string
+		wantErr    error
 	}{
 		{"任一审核人通过进入待终审", facts, 11, true, "", TaskPendingFinalReview, CompletionPendingFinal, nil},
 		{"任一审核人退回整体退回", facts, 12, false, "口径不一致", TaskInProgress, CompletionRejected, nil},

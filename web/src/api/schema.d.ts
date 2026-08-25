@@ -745,6 +745,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/artifacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        /** 统一归档视角（AC-17）：按 O／KR／任务组织当前成果、候选状态与审批记录数 */
+        get: operations["getArtifacts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/packages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        /** 成果包列表（目录与来源清单；全员可查看/下载） */
+        get: operations["listPackages"];
+        put?: never;
+        /** 勾选当前成果生成成果包（AC-18；仅项目管理员／项目负责人） */
+        post: operations["createPackage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/packages/{packageId}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                packageId: number;
+            };
+            cookie?: never;
+        };
+        /** 整包下载（AC-18）：按目录解析当前内容并流式打包为 zip */
+        get: operations["downloadPackage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/my-work": {
         parameters: {
             query?: never;
@@ -1334,6 +1393,58 @@ export interface components {
             deliverableId?: number;
             /** Format: date */
             expectedDate?: string;
+        };
+        /** @description 归档视角的任务节点（AC-17）：当前成果、候选状态与审批记录数，无历史版本入口 */
+        ArtifactTask: {
+            /** Format: int64 */
+            taskId: number;
+            name: string;
+            status: components["schemas"]["TaskStatus"];
+            /** @description 完成审核记录条数（详情在任务抽屉审核 Tab） */
+            reviewCount: number;
+            deliverables: components["schemas"]["Deliverable"][];
+        };
+        ArtifactKr: {
+            /** Format: int64 */
+            keyResultId: number;
+            description: string;
+            tasks: components["schemas"]["ArtifactTask"][];
+        };
+        ArtifactObjective: {
+            /** Format: int64 */
+            objectiveId: number;
+            title: string;
+            krs: components["schemas"]["ArtifactKr"][];
+        };
+        /** @description 成果包目录项：引用交付物项并解析为当前内容（不复制旧文件，AC-18） */
+        PackageItem: {
+            /** Format: int64 */
+            deliverableId: number;
+            deliverableName: string;
+            taskName: string;
+            /**
+             * Format: int64
+             * @description 当前内容（被覆盖后自动解析为新内容；无当前内容时缺省）
+             */
+            fileId?: number;
+            fileName?: string;
+            /** Format: date-time */
+            effectiveAt?: string;
+        };
+        /** @description 轻量成果包（词汇表「成果包」） */
+        ArtifactPackage: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+            createdByName?: string;
+            /** Format: date-time */
+            createdAt: string;
+            items: components["schemas"]["PackageItem"][];
+        };
+        CreatePackageRequest: {
+            name: string;
+            /** @description 勾选的当前成果（须有已生效当前内容的交付物项） */
+            deliverableIds: number[];
         };
         /** @description 我的工作事项（词汇表「我的工作事项」）；卡片派生事实，动作在任务详情抽屉完成 */
         WorkItem: {
@@ -2915,6 +3026,118 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    getArtifacts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 归档结构 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactObjective"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listPackages: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成果包列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactPackage"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createPackage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePackageRequest"];
+            };
+        };
+        responses: {
+            /** @description 已生成 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactPackage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    downloadPackage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                packageId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description zip 文件 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/zip": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            /** @description 文件服务不可用 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     getMyWork: {

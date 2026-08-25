@@ -4,6 +4,7 @@ package filestore
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/url"
 	"time"
 
@@ -11,15 +12,17 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
-// Store 文件存取接口：预签名上传／下载与对象删除。
+// Store 文件存取接口：预签名上传／下载、对象读取（成果包打包）与删除。
 type Store interface {
 	PresignPut(ctx context.Context, key string, expiry time.Duration) (string, error)
 	PresignGet(ctx context.Context, key, downloadName string, expiry time.Duration) (string, error)
+	Get(ctx context.Context, key string) (io.ReadCloser, error)
+	Put(ctx context.Context, key string, r io.Reader, size int64) error
 	Remove(ctx context.Context, key string) error
 }
 
 // Minio 基于 MinIO 的实现。presign 客户端可用对浏览器可达的公开地址签名
-//（compose 内网地址与浏览器地址不同时经 MINIO_PUBLIC_ENDPOINT 区分）。
+// （compose 内网地址与浏览器地址不同时经 MINIO_PUBLIC_ENDPOINT 区分）。
 type Minio struct {
 	client  *minio.Client
 	presign *minio.Client
@@ -78,4 +81,24 @@ func (m *Minio) PresignGet(ctx context.Context, key, downloadName string, expiry
 
 func (m *Minio) Remove(ctx context.Context, key string) error {
 	return m.client.RemoveObject(ctx, m.bucket, key, minio.RemoveObjectOptions{})
+}
+
+// Get 读取对象内容（成果包整包下载用；调用方负责 Close）。
+func (m *Minio) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+	obj, err := m.client.GetObject(ctx, m.bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, err
+	}
+	// GetObject 懒连接：Stat 一次确认对象可读。
+	if _, err := obj.Stat(); err != nil {
+		_ = obj.Close()
+		return nil, err
+	}
+	return obj, nil
+}
+
+// Put 直接写入对象（服务端生成内容或测试种子用）。
+func (m *Minio) Put(ctx context.Context, key string, r io.Reader, size int64) error {
+	_, err := m.client.PutObject(ctx, m.bucket, key, r, size, minio.PutObjectOptions{})
+	return err
 }

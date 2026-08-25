@@ -17,6 +17,7 @@ const NAV_ITEMS = [
   { key: "tasks", label: "全部任务", path: "/tasks" },
   { key: "graph", label: "协作关系", path: "/graph" },
   { key: "mywork", label: "我的工作", path: "/my-work" },
+  { key: "artifacts", label: "成果", path: "/artifacts" },
   { key: "settings", label: "项目设置", path: "/settings" },
 ];
 

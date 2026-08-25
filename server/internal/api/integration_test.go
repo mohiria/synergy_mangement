@@ -10,11 +10,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,6 +38,8 @@ func newTestHandler(t *testing.T, pool *pgxpool.Pool) http.Handler {
 	if err != nil {
 		t.Fatalf("filestore: %v", err)
 	}
+	// MinIO 容器可达时确保测试桶存在（真实上传/打包路径）；不可达时相关断言自动降级。
+	_ = files.EnsureBucket(context.Background())
 	return api.NewHandler(pool, "/api/v1", files)
 }
 
@@ -2727,6 +2731,134 @@ func TestInterlockAndCriticalPath(t *testing.T) {
 	}
 	if abOnPath != 1 {
 		t.Fatalf("循环外的 A→B 应保留在关键路径: %d", abOnPath)
+	}
+}
+
+// 成果与归档、轻量成果包（#24，AC-17/18）：归档视角展示当前成果与审批记录数；
+// 勾选当前成果生成目录与来源清单；整包下载解析当前内容（需要 MinIO，不可达时跳过下载断言）。
+func TestArtifactsAndPackages(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, bob := newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(bob, "bob", "bob-pass")
+
+	sp := func(s string) *string { return &s }
+
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "归档试点", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+		api.AddProjectMemberRequest{UserId: bobUser.ID, Role: api.Member})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	okr := decodeBody[[]api.Objective](t, resp)
+	kr1 := okr[0].KeyResults[0].Id
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+
+	// 走完整链路生成一份当前内容：建任务→开始→候选→终审通过
+	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: bobUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("验收方案")},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	tasks := decodeBody[[]api.Task](t, resp)
+	taskID := tasks[0].Id
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, taskID),
+		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail := decodeBody[api.TaskDetail](t, resp)
+	dA := detail.Deliverables[0].Id
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskID, dA),
+		api.UploadCandidateRequest{FileName: "验收方案V1.docx"})
+	wantStatus(t, resp, http.StatusCreated)
+	up := decodeBody[api.UploadCandidateResponse](t, resp)
+
+	// 真实上传候选对象（MinIO 不可达时跳过对象断言）
+	minioUp := false
+	if req, err := http.NewRequest(http.MethodPut, up.UploadUrl, strings.NewReader("acceptance-doc-bytes")); err == nil {
+		if putResp, err := http.DefaultClient.Do(req); err == nil {
+			putResp.Body.Close()
+			minioUp = putResp.StatusCode < 300
+		}
+	}
+
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskID),
+		api.SubmitCompletionRequest{Note: "请终审"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail = decodeBody[api.TaskDetail](t, resp)
+	reviewID := detail.CompletionReviews[0].Id
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, taskID, reviewID),
+		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	// AC-17：归档视角——O/KR/任务结构、当前内容、审批记录数；无历史入口（契约即无）
+	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/artifacts", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	artifacts := decodeBody[[]api.ArtifactObjective](t, resp)
+	if len(artifacts) != 1 || len(artifacts[0].Krs) != 1 || len(artifacts[0].Krs[0].Tasks) != 1 {
+		t.Fatalf("归档结构异常: %+v", artifacts)
+	}
+	at := artifacts[0].Krs[0].Tasks[0]
+	if at.ReviewCount != 1 || at.Deliverables[0].Current == nil {
+		t.Fatalf("归档任务节点异常: %+v", at)
+	}
+
+	// AC-18：普通成员不能建包；管理员勾选当前成果生成
+	pkgURL := fmt.Sprintf("%s/projects/%d/packages", base, created.Id)
+	resp = doJSON(t, bob, http.MethodPost, pkgURL, api.CreatePackageRequest{Name: "联调成果", DeliverableIds: []int64{dA}})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPost, pkgURL, api.CreatePackageRequest{Name: "联调成果", DeliverableIds: []int64{dA}})
+	wantStatus(t, resp, http.StatusCreated)
+	pkg := decodeBody[api.ArtifactPackage](t, resp)
+	if len(pkg.Items) != 1 || pkg.Items[0].FileName == nil || *pkg.Items[0].FileName != "验收方案V1.docx" {
+		t.Fatalf("成果包目录异常: %+v", pkg)
+	}
+
+	// 整包下载（zip；MinIO 已上传时校验内容类型与非空体）
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d/download", pkgURL, pkg.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if ct := resp.Header.Get("Content-Type"); ct != "application/zip" {
+		t.Fatalf("下载内容类型异常: %q", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if len(body) == 0 {
+		t.Fatalf("zip 内容为空")
+	}
+	if minioUp && !bytes.Contains(body, []byte("acceptance-doc-bytes")) {
+		// zip 默认 Deflate 会压缩内容，改校验 zip 目录含文件名即可。
+		if !bytes.Contains(body, []byte(".docx")) {
+			t.Fatalf("zip 未包含当前内容条目")
+		}
 	}
 }
 

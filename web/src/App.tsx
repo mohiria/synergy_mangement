@@ -11,6 +11,7 @@ import MyWorkPage from "./MyWorkPage";
 import ProjectOverviewPage from "./ProjectOverviewPage";
 import ProjectSettingsPage from "./ProjectSettingsPage";
 import CollaborationPage from "./CollaborationPage";
+import ArtifactsPage from "./ArtifactsPage";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 
@@ -40,6 +41,7 @@ export default function App() {
       <Route path="/projects/:projectId/okr" element={<ProjectOkrPage user={user} onLogout={logout} />} />
       <Route path="/projects/:projectId/tasks" element={<ProjectTasksPage user={user} onLogout={logout} />} />
       <Route path="/projects/:projectId/graph" element={<CollaborationPage user={user} onLogout={logout} />} />
+      <Route path="/projects/:projectId/artifacts" element={<ArtifactsPage user={user} onLogout={logout} />} />
       <Route path="/projects/:projectId/my-work" element={<MyWorkPage user={user} onLogout={logout} />} />
       <Route path="/projects/:projectId/settings" element={<ProjectSettingsPage user={user} onLogout={logout} />} />
       <Route path="*" element={<Navigate to="/" replace />} />

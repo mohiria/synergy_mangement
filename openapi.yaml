@@ -1417,6 +1417,120 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /projects/{projectId}/artifacts:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    get:
+      operationId: getArtifacts
+      tags: [tasks]
+      summary: 统一归档视角（AC-17）：按 O／KR／任务组织当前成果、候选状态与审批记录数
+      responses:
+        "200":
+          description: 归档结构
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ArtifactObjective"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /projects/{projectId}/packages:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    get:
+      operationId: listPackages
+      tags: [tasks]
+      summary: 成果包列表（目录与来源清单；全员可查看/下载）
+      responses:
+        "200":
+          description: 成果包列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ArtifactPackage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: createPackage
+      tags: [tasks]
+      summary: 勾选当前成果生成成果包（AC-18；仅项目管理员／项目负责人）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePackageRequest"
+      responses:
+        "201":
+          description: 已生成
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArtifactPackage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /projects/{projectId}/packages/{packageId}/download:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: packageId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    get:
+      operationId: downloadPackage
+      tags: [tasks]
+      summary: 整包下载（AC-18）：按目录解析当前内容并流式打包为 zip
+      responses:
+        "200":
+          description: zip 文件
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          description: 文件服务不可用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /projects/{projectId}/my-work:
     parameters:
       - name: projectId
@@ -2441,6 +2555,106 @@ components:
         expectedDate:
           type: string
           format: date
+    ArtifactTask:
+      type: object
+      description: 归档视角的任务节点（AC-17）：当前成果、候选状态与审批记录数，无历史版本入口
+      required: [taskId, name, status, reviewCount, deliverables]
+      properties:
+        taskId:
+          type: integer
+          format: int64
+        name:
+          type: string
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        reviewCount:
+          type: integer
+          description: 完成审核记录条数（详情在任务抽屉审核 Tab）
+        deliverables:
+          type: array
+          items:
+            $ref: "#/components/schemas/Deliverable"
+    ArtifactKr:
+      type: object
+      required: [keyResultId, description, tasks]
+      properties:
+        keyResultId:
+          type: integer
+          format: int64
+        description:
+          type: string
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactTask"
+    ArtifactObjective:
+      type: object
+      required: [objectiveId, title, krs]
+      properties:
+        objectiveId:
+          type: integer
+          format: int64
+        title:
+          type: string
+        krs:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactKr"
+    PackageItem:
+      type: object
+      description: 成果包目录项：引用交付物项并解析为当前内容（不复制旧文件，AC-18）
+      required: [deliverableId, deliverableName, taskName]
+      properties:
+        deliverableId:
+          type: integer
+          format: int64
+        deliverableName:
+          type: string
+        taskName:
+          type: string
+        fileId:
+          type: integer
+          format: int64
+          description: 当前内容（被覆盖后自动解析为新内容；无当前内容时缺省）
+        fileName:
+          type: string
+        effectiveAt:
+          type: string
+          format: date-time
+    ArtifactPackage:
+      type: object
+      description: 轻量成果包（词汇表「成果包」）
+      required: [id, name, createdAt, items]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        createdByName:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PackageItem"
+    CreatePackageRequest:
+      type: object
+      required: [name, deliverableIds]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        deliverableIds:
+          type: array
+          minItems: 1
+          items:
+            type: integer
+            format: int64
+          description: 勾选的当前成果（须有已生效当前内容的交付物项）
     WorkItem:
       type: object
       description: 我的工作事项（词汇表「我的工作事项」）；卡片派生事实，动作在任务详情抽屉完成

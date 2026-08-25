@@ -65,10 +65,10 @@ func TestEdgeReady(t *testing.T) {
 // §4.4.7／§5.1：必要输入未就绪时页面显示「等待输入」；参考输入不影响；执行外状态不改写。
 func TestDeriveDisplayStatus(t *testing.T) {
 	cases := []struct {
-		name      string
-		stored    string
-		hasUnmet  bool
-		want      string
+		name     string
+		stored   string
+		hasUnmet bool
+		want     string
 	}{
 		{"未开始且必要输入未到", TaskNotStarted, true, TaskWaitingInput},
 		{"进行中且必要输入未到", TaskInProgress, true, TaskWaitingInput},
