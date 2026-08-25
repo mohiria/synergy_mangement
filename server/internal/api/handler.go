@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
@@ -153,7 +154,8 @@ func (s *Server) GetCurrentUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) ListProjects(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.q.ListProjects(r.Context())
+	uid := currentUser(r).ID
+	rows, err := s.q.ListProjects(r.Context(), uid)
 	if err != nil {
 		writeInternalError(w)
 		return
@@ -170,7 +172,7 @@ func (s *Server) ListProjects(w http.ResponseWriter, r *http.Request) {
 			Stage:            p.Stage,
 			PlannedStartDate: p.PlannedStartDate,
 			PlannedEndDate:   p.PlannedEndDate,
-		}, p.OwnerName))
+		}, p.OwnerName, projectActor(uid, p.OwnerID, p.MyRole)))
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -191,26 +193,48 @@ func (s *Server) CreateProject(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_owner", Message: "项目负责人不存在"})
 		return
 	}
+	uid := currentUser(r).ID
 	p, err := s.q.CreateProject(r.Context(), store.CreateProjectParams{
 		Name:             name,
-		CreatedBy:        currentUser(r).ID,
+		CreatedBy:        uid,
 		OwnerID:          owner.ID,
 		Status:           domain.DefaultProjectStatus,
 		Stage:            toPgText(stage),
 		PlannedStartDate: toPgDate(req.PlannedStartDate),
 		PlannedEndDate:   toPgDate(req.PlannedEndDate),
+		Role:             domain.RoleAdmin, // 创建人自动成为项目管理员成员（bootstrap）
 	})
 	if err != nil {
 		writeInternalError(w)
 		return
 	}
-	writeJSON(w, http.StatusCreated, toProject(p, owner.DisplayName))
+	actor := domain.Actor{IsOwner: owner.ID == uid, Role: domain.RoleAdmin}
+	writeJSON(w, http.StatusCreated, toProject(store.Project{
+		ID:               p.ID,
+		Name:             p.Name,
+		CreatedBy:        p.CreatedBy,
+		CreatedAt:        p.CreatedAt,
+		OwnerID:          p.OwnerID,
+		Status:           p.Status,
+		Stage:            p.Stage,
+		PlannedStartDate: p.PlannedStartDate,
+		PlannedEndDate:   p.PlannedEndDate,
+	}, owner.DisplayName, actor))
 }
 
 func (s *Server) UpdateProject(w http.ResponseWriter, r *http.Request, projectId int64) {
 	var req UpdateProjectRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_request", Message: "请求内容无法解析"})
+		return
+	}
+	uid := currentUser(r).ID
+	existing, ok := s.fetchProject(w, r, projectId)
+	if !ok {
+		return
+	}
+	if !domain.CanEditProject(projectActor(uid, existing.OwnerID, existing.MyRole)) {
+		writeForbidden(w)
 		return
 	}
 	name := strings.TrimSpace(req.Name)
@@ -240,7 +264,161 @@ func (s *Server) UpdateProject(w http.ResponseWriter, r *http.Request, projectId
 		writeInternalError(w)
 		return
 	}
-	writeJSON(w, http.StatusOK, toProject(p, owner.DisplayName))
+	// 派生字段按更新后的负责人重新判定（负责人可能已易主）。
+	writeJSON(w, http.StatusOK, toProject(p, owner.DisplayName, projectActor(uid, p.OwnerID, existing.MyRole)))
+}
+
+func (s *Server) ListProjectMembers(w http.ResponseWriter, r *http.Request, projectId int64) {
+	if _, ok := s.fetchProject(w, r, projectId); !ok {
+		return
+	}
+	rows, err := s.q.ListProjectMembers(r.Context(), projectId)
+	if err != nil {
+		writeInternalError(w)
+		return
+	}
+	resp := make([]ProjectMember, 0, len(rows))
+	for _, m := range rows {
+		resp = append(resp, ProjectMember{
+			UserId:      m.UserID,
+			Username:    m.Username,
+			DisplayName: m.DisplayName,
+			Role:        MemberRole(m.Role),
+		})
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) AddProjectMember(w http.ResponseWriter, r *http.Request, projectId int64) {
+	var req AddProjectMemberRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_request", Message: "请求内容无法解析"})
+		return
+	}
+	proj, ok := s.fetchProject(w, r, projectId)
+	if !ok {
+		return
+	}
+	if !domain.CanManageMembers(projectActor(currentUser(r).ID, proj.OwnerID, proj.MyRole)) {
+		writeForbidden(w)
+		return
+	}
+	if err := domain.ValidateMemberRole(string(req.Role)); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_member_role", Message: err.Error()})
+		return
+	}
+	user, err := s.q.GetUserByID(r.Context(), req.UserId)
+	if err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_user", Message: "用户不存在"})
+		return
+	}
+	m, err := s.q.AddProjectMember(r.Context(), store.AddProjectMemberParams{
+		ProjectID: projectId,
+		UserID:    user.ID,
+		Role:      string(req.Role),
+	})
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			writeJSON(w, http.StatusConflict, Error{Code: "already_member", Message: "该用户已是项目成员"})
+			return
+		}
+		writeInternalError(w)
+		return
+	}
+	writeJSON(w, http.StatusCreated, ProjectMember{
+		UserId:      m.UserID,
+		Username:    user.Username,
+		DisplayName: user.DisplayName,
+		Role:        MemberRole(m.Role),
+	})
+}
+
+func (s *Server) UpdateProjectMemberRole(w http.ResponseWriter, r *http.Request, projectId int64, userId int64) {
+	var req UpdateProjectMemberRoleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_request", Message: "请求内容无法解析"})
+		return
+	}
+	proj, ok := s.fetchProject(w, r, projectId)
+	if !ok {
+		return
+	}
+	if !domain.CanManageMembers(projectActor(currentUser(r).ID, proj.OwnerID, proj.MyRole)) {
+		writeForbidden(w)
+		return
+	}
+	if err := domain.ValidateMemberRole(string(req.Role)); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_member_role", Message: err.Error()})
+		return
+	}
+	m, err := s.q.UpdateProjectMemberRole(r.Context(), store.UpdateProjectMemberRoleParams{
+		ProjectID: projectId,
+		UserID:    userId,
+		Role:      string(req.Role),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, Error{Code: "member_not_found", Message: "该用户不是项目成员"})
+			return
+		}
+		writeInternalError(w)
+		return
+	}
+	user, err := s.q.GetUserByID(r.Context(), m.UserID)
+	if err != nil {
+		writeInternalError(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, ProjectMember{
+		UserId:      m.UserID,
+		Username:    user.Username,
+		DisplayName: user.DisplayName,
+		Role:        MemberRole(m.Role),
+	})
+}
+
+func (s *Server) RemoveProjectMember(w http.ResponseWriter, r *http.Request, projectId int64, userId int64) {
+	proj, ok := s.fetchProject(w, r, projectId)
+	if !ok {
+		return
+	}
+	if !domain.CanManageMembers(projectActor(currentUser(r).ID, proj.OwnerID, proj.MyRole)) {
+		writeForbidden(w)
+		return
+	}
+	n, err := s.q.DeleteProjectMember(r.Context(), store.DeleteProjectMemberParams{
+		ProjectID: projectId,
+		UserID:    userId,
+	})
+	if err != nil {
+		writeInternalError(w)
+		return
+	}
+	if n == 0 {
+		writeJSON(w, http.StatusNotFound, Error{Code: "member_not_found", Message: "该用户不是项目成员"})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// fetchProject 读取项目与当前用户在其中的成员角色；项目不存在时已写出 404 并返回 false。
+func (s *Server) fetchProject(w http.ResponseWriter, r *http.Request, projectID int64) (store.GetProjectRow, bool) {
+	row, err := s.q.GetProject(r.Context(), store.GetProjectParams{ID: projectID, UserID: currentUser(r).ID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, Error{Code: "not_found", Message: "项目不存在"})
+		} else {
+			writeInternalError(w)
+		}
+		return store.GetProjectRow{}, false
+	}
+	return row, true
+}
+
+// projectActor 组装当前用户在某项目内的身份事实（domain.Actor）。
+func projectActor(userID, ownerID int64, myRole pgtype.Text) domain.Actor {
+	return domain.Actor{IsOwner: userID == ownerID, Role: myRole.String}
 }
 
 func (s *Server) ListUsers(w http.ResponseWriter, r *http.Request) {
@@ -281,7 +459,7 @@ func toCurrentUser(u store.User) CurrentUser {
 	return CurrentUser{Id: u.ID, Username: u.Username, DisplayName: u.DisplayName}
 }
 
-func toProject(p store.Project, ownerName string) Project {
+func toProject(p store.Project, ownerName string, actor domain.Actor) Project {
 	return Project{
 		Id:               p.ID,
 		Name:             p.Name,
@@ -292,6 +470,8 @@ func toProject(p store.Project, ownerName string) Project {
 		PlannedStartDate: fromPgDate(p.PlannedStartDate),
 		PlannedEndDate:   fromPgDate(p.PlannedEndDate),
 		CreatedAt:        p.CreatedAt.Time,
+		CanEdit:          domain.CanEditProject(actor),
+		CanManageMembers: domain.CanManageMembers(actor),
 	}
 }
 
@@ -364,6 +544,10 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeUnauthorized(w http.ResponseWriter) {
 	writeJSON(w, http.StatusUnauthorized, Error{Code: "unauthorized", Message: "未登录或会话已过期"})
+}
+
+func writeForbidden(w http.ResponseWriter) {
+	writeJSON(w, http.StatusForbidden, Error{Code: "forbidden", Message: "无权执行该动作"})
 }
 
 func writeInternalError(w http.ResponseWriter) {

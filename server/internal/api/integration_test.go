@@ -296,6 +296,131 @@ func TestAuthAndProjectsEndToEnd(t *testing.T) {
 	resp.Body.Close()
 }
 
+// 成员与角色权限骨架（#2，AC-21/AC-22）：管理员加成员赋角色，动作权限按角色在 domain 判定；
+// 项目负责人与管理员独立同权（V4.4.2），负责人不自动成为成员。
+func TestProjectMembersAndPermissions(t *testing.T) {
+	q := setupDB(t)
+	seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
+
+	ts := httptest.NewServer(api.NewHandler(q, "/api/v1"))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, bob, carol := newClient(t), newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(bob, "bob", "bob-pass")
+	login(carol, "carol", "carol-pass")
+
+	// alice 创建项目，负责人指定 bob；创建人自动成为管理员成员，负责人不自动入成员表
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "成员试点", OwnerId: bobUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	if !created.CanEdit || !created.CanManageMembers {
+		t.Fatalf("创建人应可编辑并管理成员: %+v", created)
+	}
+	membersURL := fmt.Sprintf("%s/projects/%d/members", base, created.Id)
+
+	resp = doJSON(t, alice, http.MethodGet, membersURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	members := decodeBody[[]api.ProjectMember](t, resp)
+	if len(members) != 1 || members[0].Username != "alice" || members[0].Role != api.Admin {
+		t.Fatalf("创建人应为唯一管理员成员: %+v", members)
+	}
+
+	// 管理员把 carol 加为只读成员
+	resp = doJSON(t, alice, http.MethodPost, membersURL, api.AddProjectMemberRequest{UserId: carolUser.ID, Role: api.Viewer})
+	wantStatus(t, resp, http.StatusCreated)
+	added := decodeBody[api.ProjectMember](t, resp)
+	if added.DisplayName != "王五" || added.Role != api.Viewer {
+		t.Fatalf("加入成员返回异常: %+v", added)
+	}
+
+	// 只读成员既不能管理成员也不能编辑项目 → 403
+	resp = doJSON(t, carol, http.MethodPost, membersURL, api.AddProjectMemberRequest{UserId: bobUser.ID, Role: api.Member})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodPut, fmt.Sprintf("%s/projects/%d", base, created.Id), api.UpdateProjectRequest{
+		Name: "成员试点", OwnerId: bobUser.ID, Status: api.NotStarted,
+	})
+	wantStatus(t, resp, http.StatusForbidden)
+	if e := decodeBody[api.Error](t, resp); e.Code != "forbidden" {
+		t.Fatalf("code = %q, want forbidden", e.Code)
+	}
+
+	// carol 视角的派生字段为不可操作
+	resp = doJSON(t, carol, http.MethodGet, base+"/projects", nil)
+	wantStatus(t, resp, http.StatusOK)
+	if list := decodeBody[[]api.Project](t, resp); list[0].CanEdit || list[0].CanManageMembers {
+		t.Fatalf("只读成员派生字段异常: %+v", list[0])
+	}
+
+	// 项目负责人 bob 非成员，但享有与管理员同等权限（V4.4.2）：可编辑项目、可调整成员角色
+	resp = doJSON(t, bob, http.MethodGet, base+"/projects", nil)
+	wantStatus(t, resp, http.StatusOK)
+	if list := decodeBody[[]api.Project](t, resp); !list[0].CanEdit || !list[0].CanManageMembers {
+		t.Fatalf("负责人派生字段异常: %+v", list[0])
+	}
+	resp = doJSON(t, bob, http.MethodPut, fmt.Sprintf("%s/projects/%d/members/%d", base, created.Id, carolUser.ID),
+		api.UpdateProjectMemberRoleRequest{Role: api.Editor})
+	wantStatus(t, resp, http.StatusOK)
+	if m := decodeBody[api.ProjectMember](t, resp); m.Role != api.Editor {
+		t.Fatalf("角色调整返回异常: %+v", m)
+	}
+
+	// 可编辑成员仍不能管理成员 → 403
+	resp = doJSON(t, carol, http.MethodPost, membersURL, api.AddProjectMemberRequest{UserId: bobUser.ID, Role: api.Member})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+
+	// 重复加入 409
+	resp = doJSON(t, alice, http.MethodPost, membersURL, api.AddProjectMemberRequest{UserId: carolUser.ID, Role: api.Member})
+	wantStatus(t, resp, http.StatusConflict)
+	if e := decodeBody[api.Error](t, resp); e.Code != "already_member" {
+		t.Fatalf("code = %q, want already_member", e.Code)
+	}
+
+	// 非法角色 422
+	resp = doJSON(t, alice, http.MethodPost, membersURL, map[string]any{"userId": bobUser.ID, "role": "boss"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	if e := decodeBody[api.Error](t, resp); e.Code != "invalid_member_role" {
+		t.Fatalf("code = %q, want invalid_member_role", e.Code)
+	}
+
+	// 用户不存在 422
+	resp = doJSON(t, alice, http.MethodPost, membersURL, api.AddProjectMemberRequest{UserId: 99999, Role: api.Member})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	if e := decodeBody[api.Error](t, resp); e.Code != "invalid_user" {
+		t.Fatalf("code = %q, want invalid_user", e.Code)
+	}
+
+	// 调整非成员（bob）角色 404
+	resp = doJSON(t, alice, http.MethodPut, fmt.Sprintf("%s/projects/%d/members/%d", base, created.Id, bobUser.ID),
+		api.UpdateProjectMemberRoleRequest{Role: api.Member})
+	wantStatus(t, resp, http.StatusNotFound)
+	resp.Body.Close()
+
+	// 移出成员：204，再移一次 404
+	resp = doJSON(t, alice, http.MethodDelete, fmt.Sprintf("%s/projects/%d/members/%d", base, created.Id, carolUser.ID), nil)
+	wantStatus(t, resp, http.StatusNoContent)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodDelete, fmt.Sprintf("%s/projects/%d/members/%d", base, created.Id, carolUser.ID), nil)
+	wantStatus(t, resp, http.StatusNotFound)
+	resp.Body.Close()
+
+	// 项目不存在 404
+	resp = doJSON(t, alice, http.MethodGet, base+"/projects/99999/members", nil)
+	wantStatus(t, resp, http.StatusNotFound)
+	resp.Body.Close()
+}
+
 func TestLoginRateLimit(t *testing.T) {
 	q := setupDB(t)
 

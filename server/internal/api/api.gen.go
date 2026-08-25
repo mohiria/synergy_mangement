@@ -36,6 +36,30 @@ func (e HealthStatus) Valid() bool {
 	}
 }
 
+// Defines values for MemberRole.
+const (
+	Admin  MemberRole = "admin"
+	Editor MemberRole = "editor"
+	Member MemberRole = "member"
+	Viewer MemberRole = "viewer"
+)
+
+// Valid indicates whether the value is a known member of the MemberRole enum.
+func (e MemberRole) Valid() bool {
+	switch e {
+	case Admin:
+		return true
+	case Editor:
+		return true
+	case Member:
+		return true
+	case Viewer:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ProjectStatus.
 const (
 	Archived   ProjectStatus = "archived"
@@ -58,6 +82,13 @@ func (e ProjectStatus) Valid() bool {
 	default:
 		return false
 	}
+}
+
+// AddProjectMemberRequest defines model for AddProjectMemberRequest.
+type AddProjectMemberRequest struct {
+	// Role 成员角色（项目管理员／可编辑成员／普通成员／只读成员），见词汇表「成员角色」
+	Role   MemberRole `json:"role"`
+	UserId int64      `json:"userId"`
 }
 
 // CreateProjectRequest defines model for CreateProjectRequest.
@@ -99,11 +130,19 @@ type LoginRequest struct {
 	Username string `json:"username"`
 }
 
+// MemberRole 成员角色（项目管理员／可编辑成员／普通成员／只读成员），见词汇表「成员角色」
+type MemberRole string
+
 // Project defines model for Project.
 type Project struct {
-	CreatedAt time.Time `json:"createdAt"`
-	Id        int64     `json:"id"`
-	Name      string    `json:"name"`
+	// CanEdit 当前用户能否编辑本项目（派生字段，按成员角色与项目负责人身份在 domain 层判定）
+	CanEdit bool `json:"canEdit"`
+
+	// CanManageMembers 当前用户能否管理本项目成员和权限（派生字段，同上）
+	CanManageMembers bool      `json:"canManageMembers"`
+	CreatedAt        time.Time `json:"createdAt"`
+	Id               int64     `json:"id"`
+	Name             string    `json:"name"`
 
 	// OwnerId 项目负责人（单人；与项目管理员为独立角色）
 	OwnerId int64 `json:"ownerId"`
@@ -120,8 +159,24 @@ type Project struct {
 	Status ProjectStatus `json:"status"`
 }
 
+// ProjectMember defines model for ProjectMember.
+type ProjectMember struct {
+	DisplayName string `json:"displayName"`
+
+	// Role 成员角色（项目管理员／可编辑成员／普通成员／只读成员），见词汇表「成员角色」
+	Role     MemberRole `json:"role"`
+	UserId   int64      `json:"userId"`
+	Username string     `json:"username"`
+}
+
 // ProjectStatus 项目状态（未开始／进行中／已完成／已归档），与自由文本“阶段”正交
 type ProjectStatus string
+
+// UpdateProjectMemberRoleRequest defines model for UpdateProjectMemberRoleRequest.
+type UpdateProjectMemberRoleRequest struct {
+	// Role 成员角色（项目管理员／可编辑成员／普通成员／只读成员），见词汇表「成员角色」
+	Role MemberRole `json:"role"`
+}
 
 // UpdateProjectRequest defines model for UpdateProjectRequest.
 type UpdateProjectRequest struct {
@@ -141,6 +196,12 @@ type UserSummary struct {
 	Id          int64  `json:"id"`
 	Username    string `json:"username"`
 }
+
+// Conflict defines model for Conflict.
+type Conflict = Error
+
+// Forbidden defines model for Forbidden.
+type Forbidden = Error
 
 // NotFound defines model for NotFound.
 type NotFound = Error
@@ -162,6 +223,12 @@ type CreateProjectJSONRequestBody = CreateProjectRequest
 
 // UpdateProjectJSONRequestBody defines body for UpdateProject for application/json ContentType.
 type UpdateProjectJSONRequestBody = UpdateProjectRequest
+
+// AddProjectMemberJSONRequestBody defines body for AddProjectMember for application/json ContentType.
+type AddProjectMemberJSONRequestBody = AddProjectMemberRequest
+
+// UpdateProjectMemberRoleJSONRequestBody defines body for UpdateProjectMemberRole for application/json ContentType.
+type UpdateProjectMemberRoleJSONRequestBody = UpdateProjectMemberRoleRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -186,6 +253,18 @@ type ServerInterface interface {
 	// UpdateProject 更新项目（全量字段）
 	// (PUT /projects/{projectId})
 	UpdateProject(w http.ResponseWriter, r *http.Request, projectId int64)
+	// ListProjectMembers 项目成员列表（含成员角色）
+	// (GET /projects/{projectId}/members)
+	ListProjectMembers(w http.ResponseWriter, r *http.Request, projectId int64)
+	// AddProjectMember 将用户加入项目并赋予成员角色（仅项目管理员／项目负责人）
+	// (POST /projects/{projectId}/members)
+	AddProjectMember(w http.ResponseWriter, r *http.Request, projectId int64)
+	// RemoveProjectMember 将成员移出项目（仅项目管理员／项目负责人）
+	// (DELETE /projects/{projectId}/members/{userId})
+	RemoveProjectMember(w http.ResponseWriter, r *http.Request, projectId int64, userId int64)
+	// UpdateProjectMemberRole 调整成员角色（仅项目管理员／项目负责人）
+	// (PUT /projects/{projectId}/members/{userId})
+	UpdateProjectMemberRole(w http.ResponseWriter, r *http.Request, projectId int64, userId int64)
 	// ListUsers 全部用户（用于人员选择）
 	// (GET /users)
 	ListUsers(w http.ResponseWriter, r *http.Request)
@@ -301,6 +380,128 @@ func (siw *ServerInterfaceWrapper) UpdateProject(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UpdateProject(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListProjectMembers operation middleware
+func (siw *ServerInterfaceWrapper) ListProjectMembers(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListProjectMembers(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AddProjectMember operation middleware
+func (siw *ServerInterfaceWrapper) AddProjectMember(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AddProjectMember(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RemoveProjectMember operation middleware
+func (siw *ServerInterfaceWrapper) RemoveProjectMember(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "userId" -------------
+	var userId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", r.PathValue("userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "userId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RemoveProjectMember(w, r, projectId, userId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateProjectMemberRole operation middleware
+func (siw *ServerInterfaceWrapper) UpdateProjectMemberRole(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "userId" -------------
+	var userId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", r.PathValue("userId"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "userId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateProjectMemberRole(w, r, projectId, userId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -451,6 +652,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects", wrapper.ListProjects)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects", wrapper.CreateProject)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/projects/{projectId}", wrapper.UpdateProject)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}/members", wrapper.ListProjectMembers)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/members", wrapper.AddProjectMember)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/projects/{projectId}/members/{userId}", wrapper.RemoveProjectMember)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/projects/{projectId}/members/{userId}", wrapper.UpdateProjectMemberRole)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/users", wrapper.ListUsers)
 
 	return m
@@ -461,39 +666,48 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"clpeL9UGqHDbx2fj/w4AAP//",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

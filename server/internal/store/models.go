@@ -20,6 +20,13 @@ type Project struct {
 	PlannedEndDate   pgtype.Date
 }
 
+type ProjectMember struct {
+	ProjectID int64
+	UserID    int64
+	Role      string
+	CreatedAt pgtype.Timestamptz
+}
+
 type Session struct {
 	Token     string
 	UserID    int64

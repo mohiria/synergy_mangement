@@ -107,6 +107,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        /** 项目成员列表（含成员角色） */
+        get: operations["listProjectMembers"];
+        put?: never;
+        /** 将用户加入项目并赋予成员角色（仅项目管理员／项目负责人） */
+        post: operations["addProjectMember"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/members/{userId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                userId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 调整成员角色（仅项目管理员／项目负责人） */
+        put: operations["updateProjectMemberRole"];
+        post?: never;
+        /** 将成员移出项目（仅项目管理员／项目负责人） */
+        delete: operations["removeProjectMember"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/users": {
         parameters: {
             query?: never;
@@ -160,6 +201,26 @@ export interface components {
          * @enum {string}
          */
         ProjectStatus: "not_started" | "in_progress" | "completed" | "archived";
+        /**
+         * @description 成员角色（项目管理员／可编辑成员／普通成员／只读成员），见词汇表「成员角色」
+         * @enum {string}
+         */
+        MemberRole: "admin" | "editor" | "member" | "viewer";
+        ProjectMember: {
+            /** Format: int64 */
+            userId: number;
+            username: string;
+            displayName: string;
+            role: components["schemas"]["MemberRole"];
+        };
+        AddProjectMemberRequest: {
+            /** Format: int64 */
+            userId: number;
+            role: components["schemas"]["MemberRole"];
+        };
+        UpdateProjectMemberRoleRequest: {
+            role: components["schemas"]["MemberRole"];
+        };
         Project: {
             /** Format: int64 */
             id: number;
@@ -180,6 +241,10 @@ export interface components {
             plannedEndDate?: string;
             /** Format: date-time */
             createdAt: string;
+            /** @description 当前用户能否编辑本项目（派生字段，按成员角色与项目负责人身份在 domain 层判定） */
+            canEdit: boolean;
+            /** @description 当前用户能否管理本项目成员和权限（派生字段，同上） */
+            canManageMembers: boolean;
         };
         CreateProjectRequest: {
             name: string;
@@ -233,6 +298,24 @@ export interface components {
         };
         /** @description 资源不存在 */
         NotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description 当前用户无权执行该动作（动作权限按成员角色在 domain 层统一判定） */
+        Forbidden: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description 与现有资源状态冲突 */
+        Conflict: {
             headers: {
                 [name: string]: unknown;
             };
@@ -405,8 +488,119 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["ValidationError"];
+        };
+    };
+    listProjectMembers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成员列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectMember"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    addProjectMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddProjectMemberRequest"];
+            };
+        };
+        responses: {
+            /** @description 已加入 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectMember"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    updateProjectMemberRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                userId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateProjectMemberRoleRequest"];
+            };
+        };
+        responses: {
+            /** @description 已调整 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectMember"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    removeProjectMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                userId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已移出 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listUsers: {

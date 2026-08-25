@@ -12,9 +12,15 @@ import (
 )
 
 const createProject = `-- name: CreateProject :one
-INSERT INTO projects (name, created_by, owner_id, status, stage, planned_start_date, planned_end_date)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, name, created_by, created_at, owner_id, status, stage, planned_start_date, planned_end_date
+WITH new_project AS (
+    INSERT INTO projects (name, created_by, owner_id, status, stage, planned_start_date, planned_end_date)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
+    RETURNING id, name, created_by, created_at, owner_id, status, stage, planned_start_date, planned_end_date
+), creator_member AS (
+    INSERT INTO project_members (project_id, user_id, role)
+    SELECT id, created_by, $8 FROM new_project
+)
+SELECT id, name, created_by, created_at, owner_id, status, stage, planned_start_date, planned_end_date FROM new_project
 `
 
 type CreateProjectParams struct {
@@ -25,9 +31,23 @@ type CreateProjectParams struct {
 	Stage            pgtype.Text
 	PlannedStartDate pgtype.Date
 	PlannedEndDate   pgtype.Date
+	Role             string
 }
 
-func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error) {
+type CreateProjectRow struct {
+	ID               int64
+	Name             string
+	CreatedBy        int64
+	CreatedAt        pgtype.Timestamptz
+	OwnerID          int64
+	Status           string
+	Stage            pgtype.Text
+	PlannedStartDate pgtype.Date
+	PlannedEndDate   pgtype.Date
+}
+
+// 创建项目并在同一语句内把创建人写入成员表（角色由调用方传入，domain 定为 admin）。
+func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (CreateProjectRow, error) {
 	row := q.db.QueryRow(ctx, createProject,
 		arg.Name,
 		arg.CreatedBy,
@@ -36,8 +56,9 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		arg.Stage,
 		arg.PlannedStartDate,
 		arg.PlannedEndDate,
+		arg.Role,
 	)
-	var i Project
+	var i CreateProjectRow
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
@@ -53,11 +74,17 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 }
 
 const getProject = `-- name: GetProject :one
-SELECT p.id, p.name, p.created_by, p.created_at, p.owner_id, p.status, p.stage, p.planned_start_date, p.planned_end_date, u.display_name AS owner_name
+SELECT p.id, p.name, p.created_by, p.created_at, p.owner_id, p.status, p.stage, p.planned_start_date, p.planned_end_date, u.display_name AS owner_name, m.role AS my_role
 FROM projects p
 JOIN users u ON u.id = p.owner_id
+LEFT JOIN project_members m ON m.project_id = p.id AND m.user_id = $2
 WHERE p.id = $1
 `
+
+type GetProjectParams struct {
+	ID     int64
+	UserID int64
+}
 
 type GetProjectRow struct {
 	ID               int64
@@ -70,10 +97,11 @@ type GetProjectRow struct {
 	PlannedStartDate pgtype.Date
 	PlannedEndDate   pgtype.Date
 	OwnerName        string
+	MyRole           pgtype.Text
 }
 
-func (q *Queries) GetProject(ctx context.Context, id int64) (GetProjectRow, error) {
-	row := q.db.QueryRow(ctx, getProject, id)
+func (q *Queries) GetProject(ctx context.Context, arg GetProjectParams) (GetProjectRow, error) {
+	row := q.db.QueryRow(ctx, getProject, arg.ID, arg.UserID)
 	var i GetProjectRow
 	err := row.Scan(
 		&i.ID,
@@ -86,14 +114,16 @@ func (q *Queries) GetProject(ctx context.Context, id int64) (GetProjectRow, erro
 		&i.PlannedStartDate,
 		&i.PlannedEndDate,
 		&i.OwnerName,
+		&i.MyRole,
 	)
 	return i, err
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT p.id, p.name, p.created_by, p.created_at, p.owner_id, p.status, p.stage, p.planned_start_date, p.planned_end_date, u.display_name AS owner_name
+SELECT p.id, p.name, p.created_by, p.created_at, p.owner_id, p.status, p.stage, p.planned_start_date, p.planned_end_date, u.display_name AS owner_name, m.role AS my_role
 FROM projects p
 JOIN users u ON u.id = p.owner_id
+LEFT JOIN project_members m ON m.project_id = p.id AND m.user_id = $1
 ORDER BY p.created_at DESC
 `
 
@@ -108,10 +138,12 @@ type ListProjectsRow struct {
 	PlannedStartDate pgtype.Date
 	PlannedEndDate   pgtype.Date
 	OwnerName        string
+	MyRole           pgtype.Text
 }
 
-func (q *Queries) ListProjects(ctx context.Context) ([]ListProjectsRow, error) {
-	rows, err := q.db.Query(ctx, listProjects)
+// my_role：当前用户在各项目中的成员角色（非成员为 NULL），供 domain 层判定动作权限。
+func (q *Queries) ListProjects(ctx context.Context, userID int64) ([]ListProjectsRow, error) {
+	rows, err := q.db.Query(ctx, listProjects, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -130,6 +162,7 @@ func (q *Queries) ListProjects(ctx context.Context) ([]ListProjectsRow, error) {
 			&i.PlannedStartDate,
 			&i.PlannedEndDate,
 			&i.OwnerName,
+			&i.MyRole,
 		); err != nil {
 			return nil, err
 		}

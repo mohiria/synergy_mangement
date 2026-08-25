@@ -146,10 +146,118 @@ paths:
                 $ref: "#/components/schemas/Project"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "422":
           $ref: "#/components/responses/ValidationError"
+
+  /projects/{projectId}/members:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    get:
+      operationId: listProjectMembers
+      tags: [projects]
+      summary: 项目成员列表（含成员角色）
+      responses:
+        "200":
+          description: 成员列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProjectMember"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: addProjectMember
+      tags: [projects]
+      summary: 将用户加入项目并赋予成员角色（仅项目管理员／项目负责人）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddProjectMemberRequest"
+      responses:
+        "201":
+          description: 已加入
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectMember"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /projects/{projectId}/members/{userId}:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    put:
+      operationId: updateProjectMemberRole
+      tags: [projects]
+      summary: 调整成员角色（仅项目管理员／项目负责人）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProjectMemberRoleRequest"
+      responses:
+        "200":
+          description: 已调整
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectMember"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    delete:
+      operationId: removeProjectMember
+      tags: [projects]
+      summary: 将成员移出项目（仅项目管理员／项目负责人）
+      responses:
+        "204":
+          description: 已移出
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /users:
     get:
@@ -195,6 +303,18 @@ components:
             $ref: "#/components/schemas/Error"
     NotFound:
       description: 资源不存在
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: 当前用户无权执行该动作（动作权限按成员角色在 domain 层统一判定）
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Conflict:
+      description: 与现有资源状态冲突
       content:
         application/json:
           schema:
@@ -254,9 +374,41 @@ components:
       type: string
       description: 项目状态（未开始／进行中／已完成／已归档），与自由文本“阶段”正交
       enum: [not_started, in_progress, completed, archived]
+    MemberRole:
+      type: string
+      description: 成员角色（项目管理员／可编辑成员／普通成员／只读成员），见词汇表「成员角色」
+      enum: [admin, editor, member, viewer]
+    ProjectMember:
+      type: object
+      required: [userId, username, displayName, role]
+      properties:
+        userId:
+          type: integer
+          format: int64
+        username:
+          type: string
+        displayName:
+          type: string
+        role:
+          $ref: "#/components/schemas/MemberRole"
+    AddProjectMemberRequest:
+      type: object
+      required: [userId, role]
+      properties:
+        userId:
+          type: integer
+          format: int64
+        role:
+          $ref: "#/components/schemas/MemberRole"
+    UpdateProjectMemberRoleRequest:
+      type: object
+      required: [role]
+      properties:
+        role:
+          $ref: "#/components/schemas/MemberRole"
     Project:
       type: object
-      required: [id, name, ownerId, ownerName, status, createdAt]
+      required: [id, name, ownerId, ownerName, status, createdAt, canEdit, canManageMembers]
       properties:
         id:
           type: integer
@@ -284,6 +436,12 @@ components:
         createdAt:
           type: string
           format: date-time
+        canEdit:
+          type: boolean
+          description: 当前用户能否编辑本项目（派生字段，按成员角色与项目负责人身份在 domain 层判定）
+        canManageMembers:
+          type: boolean
+          description: 当前用户能否管理本项目成员和权限（派生字段，同上）
     CreateProjectRequest:
       type: object
       required: [name, ownerId]
