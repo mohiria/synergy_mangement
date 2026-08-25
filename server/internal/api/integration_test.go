@@ -1197,6 +1197,182 @@ func TestTaskDetail(t *testing.T) {
 	resp.Body.Close()
 }
 
+// 关键字段修改审批（#12，AC-23）：审批期间旧值生效，通过后新值生效，退回后拟议值作废并
+// 派生退回待处理事项；KR 负责人本人免审即时生效；草稿直接完善。
+func TestFieldChangeApproval(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
+
+	ts := httptest.NewServer(api.NewHandler(pool, "/api/v1"))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, bob, carol := newClient(t), newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(bob, "bob", "bob-pass")
+	login(carol, "carol", "carol-pass")
+
+	sp := func(s string) *string { return &s }
+
+	// alice 建项目；bob、carol 成员；bob 任 KR 负责人
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "变更试点", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	for _, uid := range []int64{bobUser.ID, carolUser.ID} {
+		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+		wantStatus(t, resp, http.StatusCreated)
+		resp.Body.Close()
+	}
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	okr := decodeBody[[]api.Objective](t, resp)
+	kr1 := okr[0].KeyResults[0].Id
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+
+	// carol 创建草稿（不提交）→ 草稿直接完善不生成变更单
+	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: false,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "初稿任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	tasks := decodeBody[[]api.Task](t, resp)
+	taskID := tasks[0].Id
+	changeURL := func(id int64) string { return fmt.Sprintf("%s/%d/field-changes", tasksURL, id) }
+	draftEdit := api.SubmitFieldChangeRequest{}
+	draftEdit.Changes.Name = sp("验证现场联动异常回退")
+	draftEdit.Changes.Description = sp("覆盖联动断链后的自动回退")
+	resp = doJSON(t, carol, http.MethodPost, changeURL(taskID), draftEdit)
+	wantStatus(t, resp, http.StatusOK)
+	edited := decodeBody[api.Task](t, resp)
+	if edited.Name != "验证现场联动异常回退" || edited.FieldChange != nil {
+		t.Fatalf("草稿完善异常: %+v", edited)
+	}
+
+	// 提交入池并通过，任务进入未开始
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/submit-pool-review", tasksURL, taskID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, taskID),
+		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	// carol 提交关键字段修改（改截止时间）：原因必填 422
+	newEnd := openapiDate(t, "2026-10-15")
+	noReason := api.SubmitFieldChangeRequest{}
+	noReason.Changes.EndDate = &newEnd
+	resp = doJSON(t, carol, http.MethodPost, changeURL(taskID), noReason)
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+
+	// 带原因提交 → 待审批，旧值继续生效（AC-23）
+	withReason := api.SubmitFieldChangeRequest{Reason: sp("联调窗口顺延")}
+	withReason.Changes.EndDate = &newEnd
+	resp = doJSON(t, carol, http.MethodPost, changeURL(taskID), withReason)
+	wantStatus(t, resp, http.StatusOK)
+	pendingTask := decodeBody[api.Task](t, resp)
+	if pendingTask.EndDate.Time.Format("2006-01-02") != "2026-09-30" {
+		t.Fatalf("审批期间旧值应继续生效: %+v", pendingTask.EndDate)
+	}
+	if pendingTask.FieldChange == nil || pendingTask.FieldChange.State != api.FieldChangeStatePending {
+		t.Fatalf("拟议值标示缺失: %+v", pendingTask.FieldChange)
+	}
+	if len(pendingTask.FieldChange.Changes) != 1 || pendingTask.FieldChange.Changes[0].NewValue != "2026-10-15" {
+		t.Fatalf("差异快照异常: %+v", pendingTask.FieldChange.Changes)
+	}
+	changeID := pendingTask.FieldChange.Id
+
+	// 重复提交 409
+	resp = doJSON(t, carol, http.MethodPost, changeURL(taskID), withReason)
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+
+	// 管理员 alice 不能替代 KR 负责人审批 403
+	decisionURL := fmt.Sprintf("%s/%d/decision", changeURL(taskID), changeID)
+	resp = doJSON(t, alice, http.MethodPost, decisionURL, api.FieldChangeDecisionRequest{Decision: api.FieldChangeDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+
+	// KR 负责人退回 → 拟议值作废、旧值不变、退回待处理事项出现（AC-23）
+	op := "顺延理由不充分"
+	resp = doJSON(t, bob, http.MethodPost, decisionURL, api.FieldChangeDecisionRequest{Decision: api.FieldChangeDecisionRequestDecisionRejected, Opinion: &op})
+	wantStatus(t, resp, http.StatusOK)
+	rejected := decodeBody[api.Task](t, resp)
+	if rejected.EndDate.Time.Format("2006-01-02") != "2026-09-30" {
+		t.Fatalf("退回后旧值应保持不变: %+v", rejected.EndDate)
+	}
+	if rejected.FieldChange == nil || rejected.FieldChange.State != api.FieldChangeStateRejected || rejected.FieldChange.Resolved {
+		t.Fatalf("退回待处理事项缺失: %+v", rejected.FieldChange)
+	}
+	if rejected.FieldChange.CanAbandon == nil || *rejected.FieldChange.CanAbandon {
+		t.Fatalf("非提交人视角不应可放弃: %+v", rejected.FieldChange)
+	}
+
+	// carol 重新提交 → 旧退回单 resolved，新单待审批；KR 负责人通过 → 新值生效
+	resp = doJSON(t, carol, http.MethodPost, changeURL(taskID), withReason)
+	wantStatus(t, resp, http.StatusOK)
+	pendingTask = decodeBody[api.Task](t, resp)
+	if pendingTask.FieldChange == nil || pendingTask.FieldChange.State != api.FieldChangeStatePending {
+		t.Fatalf("重新提交后应有新待审批单: %+v", pendingTask.FieldChange)
+	}
+	newChangeID := pendingTask.FieldChange.Id
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/decision", changeURL(taskID), newChangeID),
+		api.FieldChangeDecisionRequest{Decision: api.FieldChangeDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusOK)
+	approved := decodeBody[api.Task](t, resp)
+	if approved.EndDate.Time.Format("2006-01-02") != "2026-10-15" {
+		t.Fatalf("通过后新值应生效: %+v", approved.EndDate)
+	}
+	if approved.FieldChange != nil {
+		t.Fatalf("已通过后不应再有需要关注的变更单: %+v", approved.FieldChange)
+	}
+
+	// 详情含全部变更历史（含旧退回单已 resolved）
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail := decodeBody[api.TaskDetail](t, resp)
+	if len(detail.FieldChanges) != 2 {
+		t.Fatalf("变更历史数量异常: %+v", detail.FieldChanges)
+	}
+	if detail.FieldChanges[1].State != api.FieldChangeStateRejected || !detail.FieldChanges[1].Resolved {
+		t.Fatalf("旧退回单应已随重新提交处理: %+v", detail.FieldChanges[1])
+	}
+
+	// KR 负责人 bob 免审即时生效并留一张已通过免审变更单
+	exemptEdit := api.SubmitFieldChangeRequest{Reason: sp("负责人调整")}
+	exemptEdit.Changes.OwnerId = &bobUser.ID
+	resp = doJSON(t, bob, http.MethodPost, changeURL(taskID), exemptEdit)
+	wantStatus(t, resp, http.StatusOK)
+	exempted := decodeBody[api.Task](t, resp)
+	if exempted.OwnerId != bobUser.ID {
+		t.Fatalf("免审修改应即时生效: %+v", exempted)
+	}
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail = decodeBody[api.TaskDetail](t, resp)
+	if detail.FieldChanges[0].State != api.FieldChangeStateApproved || !detail.FieldChanges[0].Exempt {
+		t.Fatalf("免审变更单异常: %+v", detail.FieldChanges[0])
+	}
+	if detail.FieldChanges[0].Changes[0].OldValue != "王五" || detail.FieldChanges[0].Changes[0].NewValue != "李四" {
+		t.Fatalf("负责人差异应显示姓名: %+v", detail.FieldChanges[0].Changes)
+	}
+}
+
 func TestLoginRateLimit(t *testing.T) {
 	_, pool := setupDB(t)
 

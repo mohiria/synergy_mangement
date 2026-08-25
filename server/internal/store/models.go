@@ -8,6 +8,30 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type FieldChangeRequest struct {
+	ID                    int64
+	TaskID                int64
+	SubmittedBy           int64
+	Reason                string
+	State                 string
+	Exempt                bool
+	Opinion               string
+	Resolved              bool
+	OldName               pgtype.Text
+	NewName               pgtype.Text
+	OldDescription        pgtype.Text
+	NewDescription        pgtype.Text
+	OldCompletionCriteria pgtype.Text
+	NewCompletionCriteria pgtype.Text
+	OldOwnerID            pgtype.Int8
+	NewOwnerID            pgtype.Int8
+	OldEndDate            pgtype.Date
+	NewEndDate            pgtype.Date
+	SubmittedAt           pgtype.Timestamptz
+	DecidedBy             pgtype.Int8
+	DecidedAt             pgtype.Timestamptz
+}
+
 type KeyResult struct {
 	ID          int64
 	ObjectiveID int64

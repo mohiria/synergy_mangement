@@ -21,6 +21,45 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for FieldChangeDecisionRequestDecision.
+const (
+	FieldChangeDecisionRequestDecisionApproved FieldChangeDecisionRequestDecision = "approved"
+	FieldChangeDecisionRequestDecisionRejected FieldChangeDecisionRequestDecision = "rejected"
+)
+
+// Valid indicates whether the value is a known member of the FieldChangeDecisionRequestDecision enum.
+func (e FieldChangeDecisionRequestDecision) Valid() bool {
+	switch e {
+	case FieldChangeDecisionRequestDecisionApproved:
+		return true
+	case FieldChangeDecisionRequestDecisionRejected:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for FieldChangeState.
+const (
+	FieldChangeStateApproved FieldChangeState = "approved"
+	FieldChangeStatePending  FieldChangeState = "pending"
+	FieldChangeStateRejected FieldChangeState = "rejected"
+)
+
+// Valid indicates whether the value is a known member of the FieldChangeState enum.
+func (e FieldChangeState) Valid() bool {
+	switch e {
+	case FieldChangeStateApproved:
+		return true
+	case FieldChangeStatePending:
+		return true
+	case FieldChangeStateRejected:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for HealthStatus.
 const (
 	Ok HealthStatus = "ok"
@@ -307,6 +346,58 @@ type Error struct {
 	Message string `json:"message"`
 }
 
+// FieldChange 关键字段变更单（词汇表）；rejected 且 resolved=false 即「退回待处理事项」
+type FieldChange struct {
+	// CanAbandon 当前用户能否放弃本次变更（派生字段；退回未处理且为提交人／可编辑项目者）
+	CanAbandon *bool `json:"canAbandon,omitempty"`
+
+	// CanDecide 当前用户能否处理本变更单（派生字段；仅所属 KR 负责人且待审批）
+	CanDecide     *bool             `json:"canDecide,omitempty"`
+	Changes       []FieldChangeDiff `json:"changes"`
+	DecidedAt     *time.Time        `json:"decidedAt,omitempty"`
+	DecidedByName *string           `json:"decidedByName,omitempty"`
+
+	// Exempt KR 负责人本人修改免审即时生效时由系统标记
+	Exempt bool  `json:"exempt"`
+	Id     int64 `json:"id"`
+
+	// Opinion 审批意见
+	Opinion *string `json:"opinion,omitempty"`
+
+	// Reason 修改原因
+	Reason string `json:"reason"`
+
+	// Resolved 退回后是否已处理（重新提交或放弃）
+	Resolved        bool             `json:"resolved"`
+	State           FieldChangeState `json:"state"`
+	SubmittedAt     *time.Time       `json:"submittedAt,omitempty"`
+	SubmittedById   *int64           `json:"submittedById,omitempty"`
+	SubmittedByName *string          `json:"submittedByName,omitempty"`
+}
+
+// FieldChangeDecisionRequest defines model for FieldChangeDecisionRequest.
+type FieldChangeDecisionRequest struct {
+	Decision FieldChangeDecisionRequestDecision `json:"decision"`
+	Opinion  *string                            `json:"opinion,omitempty"`
+}
+
+// FieldChangeDecisionRequestDecision defines model for FieldChangeDecisionRequest.Decision.
+type FieldChangeDecisionRequestDecision string
+
+// FieldChangeDiff 单个关键字段的修改前后差异（展示用字符串）
+type FieldChangeDiff struct {
+	// Field 字段名（name／description／completionCriteria／ownerId／endDate）
+	Field string `json:"field"`
+
+	// Label 中文字段名（派生字段）
+	Label    string `json:"label"`
+	NewValue string `json:"newValue"`
+	OldValue string `json:"oldValue"`
+}
+
+// FieldChangeState defines model for FieldChangeState.
+type FieldChangeState string
+
 // Health defines model for Health.
 type Health struct {
 	Status HealthStatus `json:"status"`
@@ -450,6 +541,21 @@ type ProjectStatus string
 // RiskLevel 风险等级（正常／预警／高风险），见词汇表「风险等级」；不由任务生命周期状态自动推导
 type RiskLevel string
 
+// SubmitFieldChangeRequest defines model for SubmitFieldChangeRequest.
+type SubmitFieldChangeRequest struct {
+	// Changes 拟议值；至少一项。草稿任务直接生效；KR 负责人改本人 KR 下任务免审即时生效
+	Changes struct {
+		CompletionCriteria *string             `json:"completionCriteria,omitempty"`
+		Description        *string             `json:"description,omitempty"`
+		EndDate            *openapi_types.Date `json:"endDate,omitempty"`
+		Name               *string             `json:"name,omitempty"`
+		OwnerId            *int64              `json:"ownerId,omitempty"`
+	} `json:"changes"`
+
+	// Reason 修改原因；进入审批（含免审留痕）时必填，草稿直接完善可不填
+	Reason *string `json:"reason,omitempty"`
+}
+
 // Task defines model for Task.
 type Task struct {
 	// CanCancel 当前用户能否取消本任务（派生字段；负责人／创建人／可编辑项目者，非终态）
@@ -457,6 +563,9 @@ type Task struct {
 
 	// CanDecidePoolReview 当前用户能否处理本任务的入池审批（派生字段；仅所属 KR 负责人）
 	CanDecidePoolReview bool `json:"canDecidePoolReview"`
+
+	// CanProposeFieldChange 当前用户能否编辑任务／提交关键字段修改（派生字段）
+	CanProposeFieldChange bool `json:"canProposeFieldChange"`
 
 	// CanStart 当前用户能否开始执行本任务（派生字段；负责人／可编辑项目者，未开始或等待输入时）
 	CanStart bool `json:"canStart"`
@@ -479,9 +588,12 @@ type Task struct {
 	// Description 任务说明，选填
 	Description *string            `json:"description,omitempty"`
 	EndDate     openapi_types.Date `json:"endDate"`
-	Id          int64              `json:"id"`
-	KeyResultId int64              `json:"keyResultId"`
-	Name        string             `json:"name"`
+
+	// FieldChange 关键字段变更单（词汇表）；rejected 且 resolved=false 即「退回待处理事项」
+	FieldChange *FieldChange `json:"fieldChange,omitempty"`
+	Id          int64        `json:"id"`
+	KeyResultId int64        `json:"keyResultId"`
+	Name        string       `json:"name"`
 
 	// OwnerId 任务负责人
 	OwnerId int64 `json:"ownerId"`
@@ -506,13 +618,16 @@ type Task struct {
 
 // TaskDetail 任务详情抽屉数据（AC-31／AC-34）：任务事实、O／KR 归属与全部审核记录
 type TaskDetail struct {
+	// FieldChanges 关键字段变更单记录，最新在前（词汇表「关键字段变更单」）
+	FieldChanges []FieldChange `json:"fieldChanges"`
+
 	// KrDescription 所属 KR 描述（派生字段）
 	KrDescription string `json:"krDescription"`
 
 	// ObjectiveTitle 所属 O 标题（派生字段）
 	ObjectiveTitle string `json:"objectiveTitle"`
 
-	// PoolReviews 入池审批记录，最新在前（词汇表「审核记录」；后续票补充变更与完成审核）
+	// PoolReviews 入池审批记录，最新在前（词汇表「审核记录」）
 	PoolReviews []PoolReview `json:"poolReviews"`
 	Task        Task         `json:"task"`
 }
@@ -634,6 +749,12 @@ type CreateTaskInvitesJSONRequestBody = CreateTaskInvitesRequest
 // CreateTaskBatchJSONRequestBody defines body for CreateTaskBatch for application/json ContentType.
 type CreateTaskBatchJSONRequestBody = CreateTaskBatchRequest
 
+// SubmitFieldChangeJSONRequestBody defines body for SubmitFieldChange for application/json ContentType.
+type SubmitFieldChangeJSONRequestBody = SubmitFieldChangeRequest
+
+// DecideFieldChangeJSONRequestBody defines body for DecideFieldChange for application/json ContentType.
+type DecideFieldChangeJSONRequestBody = FieldChangeDecisionRequest
+
 // DecideTaskPoolReviewJSONRequestBody defines body for DecideTaskPoolReview for application/json ContentType.
 type DecideTaskPoolReviewJSONRequestBody = PoolReviewDecisionRequest
 
@@ -705,6 +826,15 @@ type ServerInterface interface {
 	// GetTaskDetail 任务详情（AC-31／AC-34；全体项目成员可查看，操作按钮按派生权限标志出现）
 	// (GET /projects/{projectId}/tasks/{taskId})
 	GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64)
+	// SubmitFieldChange 编辑任务／提交关键字段修改（AC-23；草稿直接完善，KR 负责人本人免审即时生效，其余进入审批且旧值继续生效）
+	// (POST /projects/{projectId}/tasks/{taskId}/field-changes)
+	SubmitFieldChange(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64)
+	// AbandonFieldChange 放弃已退回的本次变更（清除退回待处理事项）
+	// (POST /projects/{projectId}/tasks/{taskId}/field-changes/{changeId}/abandon)
+	AbandonFieldChange(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64, changeId int64)
+	// DecideFieldChange 所属 KR 负责人通过或退回关键字段修改（AC-23；通过后拟议值生效，退回后拟议值作废）
+	// (POST /projects/{projectId}/tasks/{taskId}/field-changes/{changeId}/decision)
+	DecideFieldChange(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64, changeId int64)
 	// DecideTaskPoolReview 所属 KR 负责人通过或退回入池审批（AC-04；管理员不能替代 KR 负责人）
 	// (POST /projects/{projectId}/tasks/{taskId}/pool-review-decision)
 	DecideTaskPoolReview(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64)
@@ -1215,6 +1345,129 @@ func (siw *ServerInterfaceWrapper) GetTaskDetail(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// SubmitFieldChange operation middleware
+func (siw *ServerInterfaceWrapper) SubmitFieldChange(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "taskId" -------------
+	var taskId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "taskId", r.PathValue("taskId"), &taskId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "taskId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SubmitFieldChange(w, r, projectId, taskId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AbandonFieldChange operation middleware
+func (siw *ServerInterfaceWrapper) AbandonFieldChange(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "taskId" -------------
+	var taskId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "taskId", r.PathValue("taskId"), &taskId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "taskId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "changeId" -------------
+	var changeId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "changeId", r.PathValue("changeId"), &changeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "changeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AbandonFieldChange(w, r, projectId, taskId, changeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DecideFieldChange operation middleware
+func (siw *ServerInterfaceWrapper) DecideFieldChange(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "taskId" -------------
+	var taskId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "taskId", r.PathValue("taskId"), &taskId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "taskId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "changeId" -------------
+	var changeId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "changeId", r.PathValue("changeId"), &changeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "changeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DecideFieldChange(w, r, projectId, taskId, changeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // DecideTaskPoolReview operation middleware
 func (siw *ServerInterfaceWrapper) DecideTaskPoolReview(w http.ResponseWriter, r *http.Request) {
 
@@ -1510,6 +1763,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}", wrapper.GetTaskDetail)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/update-status", wrapper.UpdateTaskStatus)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/progress", wrapper.UpdateTaskProgress)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/field-changes", wrapper.SubmitFieldChange)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/field-changes/{changeId}/decision", wrapper.DecideFieldChange)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/field-changes/{changeId}/abandon", wrapper.AbandonFieldChange)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}/task-invites", wrapper.ListTaskInvites)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/task-invites", wrapper.CreateTaskInvites)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/task-invites/{inviteId}/revoke", wrapper.RevokeTaskInvite)
@@ -1523,105 +1779,117 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"enf0/wIAAP//",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

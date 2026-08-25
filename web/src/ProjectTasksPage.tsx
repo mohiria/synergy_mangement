@@ -157,6 +157,43 @@ export default function ProjectTasksPage({
   const [rejectTask, setRejectTask] = useState<Task | null>(null);
   const [rejectOpinion, setRejectOpinion] = useState("");
   const [drawerTaskId, setDrawerTaskId] = useState<number | null>(null);
+  const [editTask, setEditTask] = useState<Task | null>(null);
+  const [fcReject, setFcReject] = useState<{ task: Task; changeId: number } | null>(null);
+  const [fcRejectOpinion, setFcRejectOpinion] = useState("");
+
+  const decideFieldChange = async (
+    task: Task,
+    changeId: number,
+    decision: "approved" | "rejected",
+    opinion?: string,
+  ) => {
+    const res = await client.POST(
+      "/projects/{projectId}/tasks/{taskId}/field-changes/{changeId}/decision",
+      {
+        params: { path: { projectId, taskId: task.id, changeId } },
+        body: { decision, opinion },
+      },
+    );
+    if (res.data) {
+      message.success(decision === "approved" ? "已通过，新值生效" : "已退回，拟议值作废");
+      load();
+    } else {
+      message.error(res.error?.message ?? "处理失败");
+    }
+  };
+
+  const abandonFieldChange = async (task: Task, changeId: number) => {
+    const res = await client.POST(
+      "/projects/{projectId}/tasks/{taskId}/field-changes/{changeId}/abandon",
+      { params: { path: { projectId, taskId: task.id, changeId } } },
+    );
+    if (res.data) {
+      message.success("已放弃本次变更");
+      load();
+    } else {
+      message.error(res.error?.message ?? "操作失败");
+    }
+  };
   const [cancelTask, setCancelTask] = useState<Task | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [progressTask, setProgressTask] = useState<Task | null>(null);
@@ -242,6 +279,17 @@ export default function ProjectTasksPage({
           {t.status === "cancelled" && t.cancelReason && (
             <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
               原因:{t.cancelReason}
+            </div>
+          )}
+          {t.fieldChange?.state === "pending" && (
+            <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+              变更审批中：
+              {t.fieldChange.changes.map((c) => `${c.label} ${c.oldValue || "—"}→${c.newValue}`).join("；")}
+            </div>
+          )}
+          {t.fieldChange?.state === "rejected" && !t.fieldChange.resolved && (
+            <div style={{ fontSize: 12, marginTop: 2, color: "var(--red)" }}>
+              变更已退回{t.fieldChange.opinion ? `：${t.fieldChange.opinion}` : ""}
             </div>
           )}
         </td>
@@ -491,8 +539,50 @@ export default function ProjectTasksPage({
             setProgressTask(t);
             setProgressValue(t.progress ?? null);
           },
+          openEdit: (t) => setEditTask(t),
+          approveFieldChange: (t, id) => decideFieldChange(t, id, "approved"),
+          openFcReject: (t, id) => {
+            setFcReject({ task: t, changeId: id });
+            setFcRejectOpinion("");
+          },
+          abandonFieldChange,
         }}
       />
+      <FieldChangeModal
+        task={editTask}
+        members={members}
+        onClose={() => setEditTask(null)}
+        onSaved={() => {
+          setEditTask(null);
+          load();
+        }}
+        projectId={projectId}
+      />
+      <Modal
+        title="退回关键字段修改"
+        open={!!fcReject}
+        okText="确认退回"
+        cancelText="取消"
+        okButtonProps={{ danger: true }}
+        onCancel={() => setFcReject(null)}
+        onOk={async () => {
+          if (fcReject) {
+            await decideFieldChange(fcReject.task, fcReject.changeId, "rejected", fcRejectOpinion.trim() || undefined);
+          }
+          setFcReject(null);
+        }}
+      >
+        <p className="muted" style={{ marginTop: 0 }}>
+          退回后拟议值作废，旧值保持不变；提交人会看到退回待处理事项。
+        </p>
+        <Input.TextArea
+          rows={3}
+          maxLength={500}
+          placeholder="审批意见（选填）"
+          value={fcRejectOpinion}
+          onChange={(e) => setFcRejectOpinion(e.target.value)}
+        />
+      </Modal>
       <Modal
         title="退回入池申请"
         open={!!rejectTask}
@@ -929,6 +1019,10 @@ function TaskDrawer({
     openReject: (t: Task) => void;
     openCancel: (t: Task) => void;
     openProgress: (t: Task) => void;
+    openEdit: (t: Task) => void;
+    approveFieldChange: (t: Task, changeId: number) => void;
+    openFcReject: (t: Task, changeId: number) => void;
+    abandonFieldChange: (t: Task, changeId: number) => void;
   };
 }) {
   const [detail, setDetail] = useState<TaskDetail | null>(null);
@@ -952,7 +1046,9 @@ function TaskDrawer({
   }, [projectId, task]);
 
   if (!task) return null;
-  const pendingReviews = (detail?.poolReviews ?? []).filter((r) => r.status === "pending");
+  const pendingReviews =
+    (detail?.poolReviews ?? []).filter((r) => r.status === "pending").length +
+    (detail?.fieldChanges ?? []).filter((fc) => fc.state === "pending").length;
 
   const overview = (
     <>
@@ -1029,9 +1125,72 @@ function TaskDrawer({
 
   const audit = (
     <div style={{ paddingTop: 4 }}>
-      {(detail?.poolReviews ?? []).length === 0 && (
+      {(detail?.poolReviews ?? []).length === 0 && (detail?.fieldChanges ?? []).length === 0 && (
         <div className="empty compact-empty">暂无审核记录</div>
       )}
+      {(detail?.fieldChanges ?? []).map((fc) => (
+        <article key={`fc-${fc.id}`} className={`audit-card ${fc.state === "pending" ? "pending" : ""}`}>
+          <div className="audit-card-head">
+            <div>
+              <b>关键字段修改</b>{" "}
+              <span
+                className={`status-pill ${
+                  fc.state === "pending" ? "warning" : fc.state === "approved" ? "completed" : "danger"
+                }`}
+              >
+                {fc.exempt ? "免审生效" : fc.state === "pending" ? "待审批" : fc.state === "approved" ? "已通过" : "已退回"}
+              </span>
+            </div>
+            <span className="meta muted" style={{ fontSize: 12 }}>
+              申请人 {fc.submittedByName} · {fmtTime(fc.submittedAt)}
+            </span>
+          </div>
+          <div style={{ marginTop: 8, fontSize: 13 }}>
+            {fc.changes.map((c) => (
+              <div key={c.field}>
+                <span className="muted">{c.label}：</span>
+                {c.oldValue || "—"} → <b>{c.newValue}</b>
+              </div>
+            ))}
+            {fc.reason && (
+              <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                修改原因:{fc.reason}；审批完成前旧值继续生效。
+              </div>
+            )}
+          </div>
+          {(fc.decidedByName || fc.opinion) && (
+            <div className="handled-fact">
+              {fc.decidedByName && (
+                <b>
+                  {fc.decidedByName}
+                  {fc.decidedAt ? ` · ${fmtTime(fc.decidedAt)}` : ""}
+                </b>
+              )}
+              <div>{fc.opinion || "未填写意见"}</div>
+            </div>
+          )}
+          {fc.state === "pending" && fc.canDecide && (
+            <div className="audit-actions">
+              <Button size="small" danger onClick={() => actions.openFcReject(task, fc.id)}>
+                退回
+              </Button>
+              <Button size="small" type="primary" onClick={() => actions.approveFieldChange(task, fc.id)}>
+                通过
+              </Button>
+            </div>
+          )}
+          {fc.state === "rejected" && !fc.resolved && fc.canAbandon && (
+            <div className="audit-actions">
+              <Button size="small" onClick={() => actions.abandonFieldChange(task, fc.id)}>
+                放弃本次变更
+              </Button>
+              <Button size="small" type="primary" onClick={() => actions.openEdit(task)}>
+                修改并重提
+              </Button>
+            </div>
+          )}
+        </article>
+      ))}
       {(detail?.poolReviews ?? []).map((r, i) => (
         <article key={i} className={`audit-card ${r.status === "pending" ? "pending" : ""}`}>
           <div className="audit-card-head">
@@ -1090,6 +1249,9 @@ function TaskDrawer({
       }
       footer={
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          {task.canProposeFieldChange && (
+            <Button onClick={() => actions.openEdit(task)}>编辑任务</Button>
+          )}
           {task.canStart && <Button onClick={() => actions.start(task)}>开始执行</Button>}
           {task.canUpdateProgress && (
             <Button onClick={() => actions.openProgress(task)}>更新进度</Button>
@@ -1108,9 +1270,151 @@ function TaskDrawer({
         items={[
           { key: "overview", label: "任务概况", children: overview },
           { key: "discussion", label: "讨论 0", children: discussion },
-          { key: "audit", label: `审核 ${pendingReviews.length}`, children: audit },
+          { key: "audit", label: `审核 ${pendingReviews}`, children: audit },
         ]}
       />
     </Drawer>
+  );
+}
+
+// 编辑任务／提交关键字段修改（AC-23）：草稿直接生效；已入池任务进入审批（KR 负责人本人免审）。
+function FieldChangeModal({
+  projectId,
+  task,
+  members,
+  onClose,
+  onSaved,
+}: {
+  projectId: number;
+  task: Task | null;
+  members: ProjectMember[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [completionCriteria, setCompletionCriteria] = useState("");
+  const [ownerId, setOwnerId] = useState<number | undefined>(undefined);
+  const [endDate, setEndDate] = useState<Dayjs | null>(null);
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (task) {
+      setName(task.name);
+      setDescription(task.description ?? "");
+      setCompletionCriteria(task.completionCriteria ?? "");
+      setOwnerId(task.ownerId);
+      setEndDate(null);
+      setReason("");
+      setError(null);
+    }
+  }, [task]);
+
+  if (!task) return null;
+  const isDraft = task.status === "draft";
+  const ownerOptions = members
+    .filter((m) => m.role !== "viewer")
+    .map((m) => ({ value: m.userId, label: `${m.displayName}（${m.username}）` }));
+
+  const save = async () => {
+    const changes: Record<string, unknown> = {};
+    if (name.trim() !== task.name) changes.name = name.trim();
+    if (description.trim() !== (task.description ?? "")) changes.description = description.trim();
+    if (completionCriteria.trim() !== (task.completionCriteria ?? ""))
+      changes.completionCriteria = completionCriteria.trim();
+    if (ownerId !== undefined && ownerId !== task.ownerId) changes.ownerId = ownerId;
+    if (endDate) changes.endDate = endDate.format("YYYY-MM-DD");
+    if (Object.keys(changes).length === 0) {
+      setError("没有任何修改");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    const res = await client.POST("/projects/{projectId}/tasks/{taskId}/field-changes", {
+      params: { path: { projectId, taskId: task.id } },
+      body: { changes, reason: reason.trim() || undefined },
+    });
+    setSaving(false);
+    if (res.data) {
+      message.success(
+        isDraft
+          ? "草稿已更新"
+          : res.data.fieldChange?.state === "pending"
+            ? "已提交所属 KR 负责人审批，审批期间旧值继续生效"
+            : "修改已生效",
+      );
+      onSaved();
+    } else {
+      setError(res.error?.message ?? "保存失败");
+    }
+  };
+
+  return (
+    <Modal
+      title={
+        <div>
+          编辑任务
+          <span className="modal-sub">
+            {isDraft
+              ? "草稿阶段可直接完善，保存后立即生效"
+              : "名称、说明、完成标准、负责人与截止时间为关键字段，提交后由所属 KR 负责人审批"}
+          </span>
+        </div>
+      }
+      open={!!task}
+      width={640}
+      confirmLoading={saving}
+      onOk={save}
+      onCancel={onClose}
+      okText={isDraft ? "保存" : "提交变更审批"}
+      cancelText="取消"
+      destroyOnClose
+    >
+      {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
+      <div style={{ display: "grid", gap: 12 }}>
+        <div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>任务名称</div>
+          <Input maxLength={200} value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>任务说明</div>
+          <Input.TextArea rows={2} maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)} />
+        </div>
+        <div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>完成标准</div>
+          <Input.TextArea rows={2} maxLength={2000} value={completionCriteria} onChange={(e) => setCompletionCriteria(e.target.value)} />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div>
+            <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>任务负责人</div>
+            <Select
+              style={{ width: "100%" }}
+              options={ownerOptions}
+              value={ownerId}
+              onChange={setOwnerId}
+              showSearch
+              optionFilterProp="label"
+            />
+          </div>
+          <div>
+            <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+              截止时间（当前 {task.endDate}，不改可留空）
+            </div>
+            <DatePicker style={{ width: "100%" }} value={endDate} onChange={setEndDate} />
+          </div>
+        </div>
+        {!isDraft && (
+          <div>
+            <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>修改原因（必填）</div>
+            <Input.TextArea rows={2} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
+          </div>
+        )}
+        {!isDraft && (
+          <div className="notice">提交后由所属 KR 负责人审批；审批期间旧值继续生效，任务不暂停执行。</div>
+        )}
+      </div>
+    </Modal>
   );
 }

@@ -436,6 +436,11 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		writeInternalError(w)
 		return
 	}
+	changeRows, err := s.q.ListFieldChangesByTask(r.Context(), taskId)
+	if err != nil {
+		writeInternalError(w)
+		return
+	}
 	list, err := s.taskList(r.Context(), projectId, uid, actor)
 	if err != nil {
 		writeInternalError(w)
@@ -460,11 +465,26 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 			SubmittedByName: pr.SubmittedByName, DecidedByName: pr.DecidedByName,
 		}))
 	}
+	facts := domain.TaskFacts{Status: string(item.Status), CreatorID: task.CreatedBy, OwnerID: task.OwnerID, KrOwnerID: fromPgInt8(task.KrOwnerID)}
+	fcs := make([]FieldChange, 0, len(changeRows))
+	for _, fc := range changeRows {
+		fcs = append(fcs, s.fieldChangeView(r.Context(), store.FieldChangeRequest{
+			ID: fc.ID, TaskID: fc.TaskID, SubmittedBy: fc.SubmittedBy, Reason: fc.Reason,
+			State: fc.State, Exempt: fc.Exempt, Opinion: fc.Opinion, Resolved: fc.Resolved,
+			OldName: fc.OldName, NewName: fc.NewName,
+			OldDescription: fc.OldDescription, NewDescription: fc.NewDescription,
+			OldCompletionCriteria: fc.OldCompletionCriteria, NewCompletionCriteria: fc.NewCompletionCriteria,
+			OldOwnerID: fc.OldOwnerID, NewOwnerID: fc.NewOwnerID,
+			OldEndDate: fc.OldEndDate, NewEndDate: fc.NewEndDate,
+			SubmittedAt: fc.SubmittedAt, DecidedBy: fc.DecidedBy, DecidedAt: fc.DecidedAt,
+		}, fc.SubmittedByName, fc.DecidedByName, facts, actor, uid))
+	}
 	writeJSON(w, http.StatusOK, TaskDetail{
 		Task:           *item,
 		ObjectiveTitle: obj.Title,
 		KrDescription:  kr.Description,
 		PoolReviews:    prs,
+		FieldChanges:   fcs,
 	})
 }
 
@@ -501,6 +521,15 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 	reviewByTask := make(map[int64]store.LatestPoolReviewsByProjectRow, len(reviews))
 	for _, pr := range reviews {
 		reviewByTask[pr.TaskID] = pr
+	}
+	// 每个任务最近一张需要关注的变更单（待审批＝拟议值标示，退回未处理＝退回待处理事项）。
+	changeRows, err := s.q.LatestFieldChangesByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	changeByTask := make(map[int64]store.LatestFieldChangesByProjectRow, len(changeRows))
+	for _, fc := range changeRows {
+		changeByTask[fc.TaskID] = fc
 	}
 	resp := make([]Task, 0, len(rows))
 	for _, t := range rows {
@@ -541,6 +570,28 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 		if pr, ok := reviewByTask[t.ID]; ok {
 			item.PoolReview = toPoolReview(pr)
 		}
+		// 编辑／关键字段修改动作标志与需要关注的变更单（AC-23）。
+		hasPending := false
+		if fc, ok := changeByTask[t.ID]; ok {
+			hasPending = fc.State == domain.FieldChangePendingState
+			// 任务终止后退回待处理事项随之结束（词汇表）。
+			terminal := t.Status == domain.TaskCompleted || t.Status == domain.TaskCancelled
+			if hasPending || !terminal {
+				view := s.fieldChangeView(ctx, store.FieldChangeRequest{
+					ID: fc.ID, TaskID: fc.TaskID, SubmittedBy: fc.SubmittedBy, Reason: fc.Reason,
+					State: fc.State, Exempt: fc.Exempt, Opinion: fc.Opinion, Resolved: fc.Resolved,
+					OldName: fc.OldName, NewName: fc.NewName,
+					OldDescription: fc.OldDescription, NewDescription: fc.NewDescription,
+					OldCompletionCriteria: fc.OldCompletionCriteria, NewCompletionCriteria: fc.NewCompletionCriteria,
+					OldOwnerID: fc.OldOwnerID, NewOwnerID: fc.NewOwnerID,
+					OldEndDate: fc.OldEndDate, NewEndDate: fc.NewEndDate,
+					SubmittedAt: fc.SubmittedAt, DecidedBy: fc.DecidedBy, DecidedAt: fc.DecidedAt,
+				}, fc.SubmittedByName, fc.DecidedByName, facts, actor, userID)
+				item.FieldChange = &view
+			}
+		}
+		_, routeErr := domain.FieldChangeRoute(actor, userID, facts, hasPending)
+		item.CanProposeFieldChange = routeErr == nil
 		resp = append(resp, item)
 	}
 	return resp, nil

@@ -585,6 +585,136 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /projects/{projectId}/tasks/{taskId}/field-changes:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: taskId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    post:
+      operationId: submitFieldChange
+      tags: [tasks]
+      summary: 编辑任务／提交关键字段修改（AC-23；草稿直接完善，KR 负责人本人免审即时生效，其余进入审批且旧值继续生效）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitFieldChangeRequest"
+      responses:
+        "200":
+          description: 已受理，返回任务最新状态（含拟议值标示）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /projects/{projectId}/tasks/{taskId}/field-changes/{changeId}/decision:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: taskId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: changeId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    post:
+      operationId: decideFieldChange
+      tags: [tasks]
+      summary: 所属 KR 负责人通过或退回关键字段修改（AC-23；通过后拟议值生效，退回后拟议值作废）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FieldChangeDecisionRequest"
+      responses:
+        "200":
+          description: 已处理，返回任务最新状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /projects/{projectId}/tasks/{taskId}/field-changes/{changeId}/abandon:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: taskId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: changeId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    post:
+      operationId: abandonFieldChange
+      tags: [tasks]
+      summary: 放弃已退回的本次变更（清除退回待处理事项）
+      responses:
+        "200":
+          description: 已放弃，返回任务最新状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
   /projects/{projectId}/task-invites:
     parameters:
       - name: projectId
@@ -1018,6 +1148,7 @@ components:
           endDate,
           status,
           currentStage,
+          canProposeFieldChange,
           canStart,
           canUpdateProgress,
           canCancel,
@@ -1082,6 +1213,12 @@ components:
         canCancel:
           type: boolean
           description: 当前用户能否取消本任务（派生字段；负责人／创建人／可编辑项目者，非终态）
+        fieldChange:
+          $ref: "#/components/schemas/FieldChange"
+          description: 最近一张需要关注的变更单（待审批＝拟议值标示，或退回未处理＝退回待处理事项）；无则不返回
+        canProposeFieldChange:
+          type: boolean
+          description: 当前用户能否编辑任务／提交关键字段修改（派生字段）
         canSubmitPoolReview:
           type: boolean
           description: 当前用户能否提交本任务入池（派生字段；草稿且为创建人／负责人／可编辑项目者）
@@ -1128,7 +1265,7 @@ components:
     TaskDetail:
       type: object
       description: 任务详情抽屉数据（AC-31／AC-34）：任务事实、O／KR 归属与全部审核记录
-      required: [task, objectiveTitle, krDescription, poolReviews]
+      required: [task, objectiveTitle, krDescription, poolReviews, fieldChanges]
       properties:
         task:
           $ref: "#/components/schemas/Task"
@@ -1140,9 +1277,115 @@ components:
           description: 所属 KR 描述（派生字段）
         poolReviews:
           type: array
-          description: 入池审批记录，最新在前（词汇表「审核记录」；后续票补充变更与完成审核）
+          description: 入池审批记录，最新在前（词汇表「审核记录」）
           items:
             $ref: "#/components/schemas/PoolReview"
+        fieldChanges:
+          type: array
+          description: 关键字段变更单记录，最新在前（词汇表「关键字段变更单」）
+          items:
+            $ref: "#/components/schemas/FieldChange"
+    FieldChangeState:
+      type: string
+      enum: [pending, approved, rejected]
+    FieldChangeDiff:
+      type: object
+      description: 单个关键字段的修改前后差异（展示用字符串）
+      required: [field, label, oldValue, newValue]
+      properties:
+        field:
+          type: string
+          description: 字段名（name／description／completionCriteria／ownerId／endDate）
+        label:
+          type: string
+          description: 中文字段名（派生字段）
+        oldValue:
+          type: string
+        newValue:
+          type: string
+    FieldChange:
+      type: object
+      description: 关键字段变更单（词汇表）；rejected 且 resolved=false 即「退回待处理事项」
+      required: [id, state, reason, resolved, exempt, changes]
+      properties:
+        id:
+          type: integer
+          format: int64
+        state:
+          $ref: "#/components/schemas/FieldChangeState"
+        reason:
+          type: string
+          description: 修改原因
+        opinion:
+          type: string
+          description: 审批意见
+        resolved:
+          type: boolean
+          description: 退回后是否已处理（重新提交或放弃）
+        exempt:
+          type: boolean
+          description: KR 负责人本人修改免审即时生效时由系统标记
+        changes:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldChangeDiff"
+        submittedById:
+          type: integer
+          format: int64
+        submittedByName:
+          type: string
+        decidedByName:
+          type: string
+        submittedAt:
+          type: string
+          format: date-time
+        decidedAt:
+          type: string
+          format: date-time
+        canDecide:
+          type: boolean
+          description: 当前用户能否处理本变更单（派生字段；仅所属 KR 负责人且待审批）
+        canAbandon:
+          type: boolean
+          description: 当前用户能否放弃本次变更（派生字段；退回未处理且为提交人／可编辑项目者）
+    SubmitFieldChangeRequest:
+      type: object
+      required: [changes]
+      properties:
+        changes:
+          type: object
+          description: 拟议值；至少一项。草稿任务直接生效；KR 负责人改本人 KR 下任务免审即时生效
+          properties:
+            name:
+              type: string
+              minLength: 1
+              maxLength: 200
+            description:
+              type: string
+              maxLength: 2000
+            completionCriteria:
+              type: string
+              maxLength: 2000
+            ownerId:
+              type: integer
+              format: int64
+            endDate:
+              type: string
+              format: date
+        reason:
+          type: string
+          maxLength: 500
+          description: 修改原因；进入审批（含免审留痕）时必填，草稿直接完善可不填
+    FieldChangeDecisionRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approved, rejected]
+        opinion:
+          type: string
+          maxLength: 500
     TaskInviteState:
       type: string
       description: 任务创建邀请状态（词汇表「任务创建邀请」）

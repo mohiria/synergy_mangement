@@ -289,6 +289,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/tasks/{taskId}/field-changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 编辑任务／提交关键字段修改（AC-23；草稿直接完善，KR 负责人本人免审即时生效，其余进入审批且旧值继续生效） */
+        post: operations["submitFieldChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/tasks/{taskId}/field-changes/{changeId}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+                changeId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 所属 KR 负责人通过或退回关键字段修改（AC-23；通过后拟议值生效，退回后拟议值作废） */
+        post: operations["decideFieldChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/tasks/{taskId}/field-changes/{changeId}/abandon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+                changeId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 放弃已退回的本次变更（清除退回待处理事项） */
+        post: operations["abandonFieldChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/task-invites": {
         parameters: {
             query?: never;
@@ -560,6 +622,10 @@ export interface components {
             canUpdateProgress: boolean;
             /** @description 当前用户能否取消本任务（派生字段；负责人／创建人／可编辑项目者，非终态） */
             canCancel: boolean;
+            /** @description 最近一张需要关注的变更单（待审批＝拟议值标示，或退回未处理＝退回待处理事项）；无则不返回 */
+            fieldChange?: components["schemas"]["FieldChange"];
+            /** @description 当前用户能否编辑任务／提交关键字段修改（派生字段） */
+            canProposeFieldChange: boolean;
             /** @description 当前用户能否提交本任务入池（派生字段；草稿且为创建人／负责人／可编辑项目者） */
             canSubmitPoolReview: boolean;
             /** @description 当前用户能否处理本任务的入池审批（派生字段；仅所属 KR 负责人） */
@@ -596,8 +662,67 @@ export interface components {
             objectiveTitle: string;
             /** @description 所属 KR 描述（派生字段） */
             krDescription: string;
-            /** @description 入池审批记录，最新在前（词汇表「审核记录」；后续票补充变更与完成审核） */
+            /** @description 入池审批记录，最新在前（词汇表「审核记录」） */
             poolReviews: components["schemas"]["PoolReview"][];
+            /** @description 关键字段变更单记录，最新在前（词汇表「关键字段变更单」） */
+            fieldChanges: components["schemas"]["FieldChange"][];
+        };
+        /** @enum {string} */
+        FieldChangeState: "pending" | "approved" | "rejected";
+        /** @description 单个关键字段的修改前后差异（展示用字符串） */
+        FieldChangeDiff: {
+            /** @description 字段名（name／description／completionCriteria／ownerId／endDate） */
+            field: string;
+            /** @description 中文字段名（派生字段） */
+            label: string;
+            oldValue: string;
+            newValue: string;
+        };
+        /** @description 关键字段变更单（词汇表）；rejected 且 resolved=false 即「退回待处理事项」 */
+        FieldChange: {
+            /** Format: int64 */
+            id: number;
+            state: components["schemas"]["FieldChangeState"];
+            /** @description 修改原因 */
+            reason: string;
+            /** @description 审批意见 */
+            opinion?: string;
+            /** @description 退回后是否已处理（重新提交或放弃） */
+            resolved: boolean;
+            /** @description KR 负责人本人修改免审即时生效时由系统标记 */
+            exempt: boolean;
+            changes: components["schemas"]["FieldChangeDiff"][];
+            /** Format: int64 */
+            submittedById?: number;
+            submittedByName?: string;
+            decidedByName?: string;
+            /** Format: date-time */
+            submittedAt?: string;
+            /** Format: date-time */
+            decidedAt?: string;
+            /** @description 当前用户能否处理本变更单（派生字段；仅所属 KR 负责人且待审批） */
+            canDecide?: boolean;
+            /** @description 当前用户能否放弃本次变更（派生字段；退回未处理且为提交人／可编辑项目者） */
+            canAbandon?: boolean;
+        };
+        SubmitFieldChangeRequest: {
+            /** @description 拟议值；至少一项。草稿任务直接生效；KR 负责人改本人 KR 下任务免审即时生效 */
+            changes: {
+                name?: string;
+                description?: string;
+                completionCriteria?: string;
+                /** Format: int64 */
+                ownerId?: number;
+                /** Format: date */
+                endDate?: string;
+            };
+            /** @description 修改原因；进入审批（含免审留痕）时必填，草稿直接完善可不填 */
+            reason?: string;
+        };
+        FieldChangeDecisionRequest: {
+            /** @enum {string} */
+            decision: "approved" | "rejected";
+            opinion?: string;
         };
         /**
          * @description 任务创建邀请状态（词汇表「任务创建邀请」）
@@ -1301,6 +1426,99 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["ValidationError"];
+        };
+    };
+    submitFieldChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubmitFieldChangeRequest"];
+            };
+        };
+        responses: {
+            /** @description 已受理，返回任务最新状态（含拟议值标示） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Task"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    decideFieldChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+                changeId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FieldChangeDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description 已处理，返回任务最新状态 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Task"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    abandonFieldChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+                changeId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已放弃，返回任务最新状态 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Task"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     listTaskInvites: {
