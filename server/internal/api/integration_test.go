@@ -1834,6 +1834,187 @@ func TestCompletionReviewFlow(t *testing.T) {
 	}
 }
 
+// 必要输入与交付物边（#13，AC-07/28/48）：选择已有任务及交付物建边、复杂关系（双向/循环/跨 KR）、
+// 就绪状态派生（候选不提前满足、当前生效后自动就绪）、必要输入未到显示等待输入。
+func TestDeliverableEdgesAndReadiness(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, bob, carol := newClient(t), newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(bob, "bob", "bob-pass")
+	login(carol, "carol", "carol-pass")
+
+	sp := func(s string) *string { return &s }
+
+	// 项目：bob 任 KR1 负责人、carol 成员；两个 KR 支持跨 KR 关系
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "关系试点", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	for _, uid := range []int64{bobUser.ID, carolUser.ID} {
+		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+		wantStatus(t, resp, http.StatusCreated)
+		resp.Body.Close()
+	}
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{
+				{Description: "上线自动验收", OwnerId: &bobUser.ID},
+				{Description: "现场回归通过", OwnerId: &bobUser.ID},
+			}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	okr := decodeBody[[]api.Objective](t, resp)
+	kr1, kr2 := okr[0].KeyResults[0].Id, okr[0].KeyResults[1].Id
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+
+	// bob 免审建上游任务 A（带交付物）与跨 KR 下游任务 B（carol 负责）
+	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "采集现场数据", OwnerId: bobUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("现场数据包")},
+			{KeyResultId: kr2, Name: "回归验证分析", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	tasks := decodeBody[[]api.Task](t, resp)
+	var taskA, taskB api.Task
+	for _, task := range tasks {
+		if task.Name == "采集现场数据" {
+			taskA = task
+		} else {
+			taskB = task
+		}
+	}
+
+	// 取 A 的交付物项
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskA.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	detailA := decodeBody[api.TaskDetail](t, resp)
+	dA := detailA.Deliverables[0].Id
+
+	// AC-28：B 的负责人 carol 选择 A 及其交付物建立必要输入边
+	inputsURL := func(id int64) string { return fmt.Sprintf("%s/%d/inputs", tasksURL, id) }
+	resp = doJSON(t, carol, http.MethodPost, inputsURL(taskB.Id), api.CreateTaskInputRequest{
+		Name: "现场数据包", Necessity: api.Required, EdgeType: api.HardPrerequisite,
+		SourceTaskId: taskA.Id, DeliverableId: &dA,
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	edge := decodeBody[api.DeliverableEdge](t, resp)
+	if edge.Ready || edge.SourceTaskName == nil || *edge.SourceTaskName != "采集现场数据" {
+		t.Fatalf("新建边应未就绪且含来源信息: %+v", edge)
+	}
+
+	// AC-07：反向再建一条反馈边（双向/循环关系保留真实连线）
+	resp = doJSON(t, bob, http.MethodPost, inputsURL(taskA.Id), api.CreateTaskInputRequest{
+		Name: "回归问题清单", Necessity: api.Reference, EdgeType: api.Feedback, SourceTaskId: taskB.Id,
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/projects/%d/edges", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if edges := decodeBody[[]api.DeliverableEdge](t, resp); len(edges) != 2 {
+		t.Fatalf("交付物边数量异常: %+v", edges)
+	}
+
+	// 必要输入未到：B 显示等待输入（存储态未变）
+	resp = doJSON(t, carol, http.MethodGet, tasksURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	list := decodeBody[[]api.Task](t, resp)
+	for _, task := range list {
+		if task.Id == taskB.Id && task.Status != api.TaskStatusWaitingInput {
+			t.Fatalf("必要输入未到应显示等待输入: %+v", task)
+		}
+		if task.Id == taskA.Id && task.Status != api.TaskStatusNotStarted {
+			t.Fatalf("参考输入不应影响 A 的状态: %+v", task)
+		}
+	}
+
+	// 自环 422；无关成员建边 403
+	resp = doJSON(t, carol, http.MethodPost, inputsURL(taskB.Id), api.CreateTaskInputRequest{
+		Name: "自环", Necessity: api.Required, EdgeType: api.Information, SourceTaskId: taskB.Id,
+	})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+
+	// AC-48：A 走完成终审后当前内容生效 → 边自动就绪、B 不再等待输入
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, taskA.Id),
+		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskA.Id, dA),
+		api.UploadCandidateRequest{FileName: "现场数据包.zip"})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+
+	// 仅候选时仍未就绪（AC-48）
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/projects/%d/edges", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	for _, e := range decodeBody[[]api.DeliverableEdge](t, resp) {
+		if e.TargetTaskId == taskB.Id {
+			if e.Ready || !e.HasCandidate {
+				t.Fatalf("仅候选不应就绪: %+v", e)
+			}
+		}
+	}
+
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskA.Id),
+		api.SubmitCompletionRequest{Note: "数据包齐"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskA.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	detailA = decodeBody[api.TaskDetail](t, resp)
+	reviewID := detailA.CompletionReviews[0].Id
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, taskA.Id, reviewID),
+		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskB.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	detailB := decodeBody[api.TaskDetail](t, resp)
+	if len(detailB.Inputs) != 1 || !detailB.Inputs[0].Ready {
+		t.Fatalf("当前内容生效后输入应自动就绪: %+v", detailB.Inputs)
+	}
+	if detailB.Inputs[0].CurrentFileId == nil {
+		t.Fatalf("边上应关联当前交付物: %+v", detailB.Inputs[0])
+	}
+	if detailB.Task.Status != api.TaskStatusNotStarted {
+		t.Fatalf("输入就绪后应回未开始显示: %+v", detailB.Task.Status)
+	}
+	if len(detailB.Outputs) != 1 || detailB.Outputs[0].EdgeType != api.Feedback {
+		t.Fatalf("B 的下游反馈边异常: %+v", detailB.Outputs)
+	}
+
+	// 解除边：A 已完成（终态）目标边不可再配置 → 409/403；改由 B 的负责人解除指向 B 的输入边
+	resp = doJSON(t, bob, http.MethodDelete, fmt.Sprintf("%s/projects/%d/edges/%d", base, created.Id, detailB.Outputs[0].Id), nil)
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodDelete, fmt.Sprintf("%s/projects/%d/edges/%d", base, created.Id, detailB.Inputs[0].Id), nil)
+	wantStatus(t, resp, http.StatusNoContent)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/projects/%d/edges", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if edges := decodeBody[[]api.DeliverableEdge](t, resp); len(edges) != 1 {
+		t.Fatalf("解除后边数量异常: %+v", edges)
+	}
+}
+
 func TestLoginRateLimit(t *testing.T) {
 	_, pool := setupDB(t)
 

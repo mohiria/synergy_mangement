@@ -453,6 +453,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/tasks/{taskId}/inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 新增输入要求并自动建立「来源任务 → 目标任务」交付物边（AC-28；任务负责人／可编辑项目者） */
+        post: operations["createTaskInput"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/edges/{edgeId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                edgeId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 解除交付物边（目标任务负责人／可编辑项目者） */
+        delete: operations["removeEdge"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/edges": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        /** 项目全部交付物边（关系数据源；图谱与列表 */
+        get: operations["listEdges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/tasks/{taskId}/discussions": {
         parameters: {
             query?: never;
@@ -838,6 +897,10 @@ export interface components {
             discussions: components["schemas"]["Discussion"][];
             /** @description 完成申请记录，最新在前（AC-13／AC-15／AC-38～40） */
             completionReviews: components["schemas"]["CompletionReview"][];
+            /** @description 指向本任务的交付物边（必要输入与参考输入，AC-07／28） */
+            inputs: components["schemas"]["DeliverableEdge"][];
+            /** @description 从本任务出发的交付物边（直接下游） */
+            outputs: components["schemas"]["DeliverableEdge"][];
         };
         /** @enum {string} */
         FieldChangeState: "pending" | "approved" | "rejected";
@@ -983,6 +1046,76 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             readAt?: string;
+        };
+        /**
+         * @description 交付物边类型（PRD §4.3；词汇表「交付物边」）
+         * @enum {string}
+         */
+        EdgeType: "hard_prerequisite" | "information" | "handover" | "feedback";
+        /**
+         * @description 输入必要性（必要／参考）
+         * @enum {string}
+         */
+        Necessity: "required" | "reference";
+        /** @description 交付物边（词汇表）；边上关联当前与候选交付物，就绪状态派生（AC-48） */
+        DeliverableEdge: {
+            /** Format: int64 */
+            id: number;
+            /** @description 输入／交付物名称 */
+            name: string;
+            edgeType: components["schemas"]["EdgeType"];
+            necessity: components["schemas"]["Necessity"];
+            /**
+             * Format: int64
+             * @description 来源任务（来源为指定项目成员时缺省，见
+             */
+            sourceTaskId?: number;
+            sourceTaskName?: string;
+            sourceTaskStatus?: components["schemas"]["TaskStatus"];
+            /** @description 提供方姓名（派生字段） */
+            sourceOwnerName?: string;
+            /** Format: int64 */
+            targetTaskId: number;
+            targetTaskName?: string;
+            /**
+             * Format: int64
+             * @description 对应来源任务的交付物项
+             */
+            deliverableId?: number;
+            deliverableName?: string;
+            /**
+             * Format: int64
+             * @description 已生效当前内容（可下载；派生字段）
+             */
+            currentFileId?: number;
+            currentFileName?: string;
+            /** @description 关系就绪状态（AC-48）：仅当前内容生效时就绪；候选不提前满足输入 */
+            ready: boolean;
+            /** @description 审核期间存在候选更新（不改变原有就绪状态） */
+            hasCandidate: boolean;
+            /**
+             * Format: date
+             * @description 期望时间
+             */
+            expectedDate?: string;
+            /** @description 当前用户能否解除该边（派生字段；目标任务负责人／可编辑项目者） */
+            canRemove?: boolean;
+        };
+        /** @description 新增输入要求（来源＝系统内已有任务，AC-28；指定项目成员来源见 */
+        CreateTaskInputRequest: {
+            /** @description 输入名称 */
+            name: string;
+            necessity: components["schemas"]["Necessity"];
+            edgeType: components["schemas"]["EdgeType"];
+            /** Format: int64 */
+            sourceTaskId: number;
+            /**
+             * Format: int64
+             * @description 来源任务的交付物项（选填；未选时以边本身表达结构化条件）
+             */
+            deliverableId?: number;
+            /** Format: date */
+            expectedDate?: string;
         };
         /**
          * @description 完成申请状态（词汇表「完成申请」；PRD §5.2.C）
@@ -1980,6 +2113,85 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["ValidationError"];
+        };
+    };
+    createTaskInput: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTaskInputRequest"];
+            };
+        };
+        responses: {
+            /** @description 已建立 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliverableEdge"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    removeEdge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                edgeId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已解除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listEdges: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 交付物边列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliverableEdge"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
         };
     };
     createDiscussion: {

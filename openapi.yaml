@@ -927,6 +927,100 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /projects/{projectId}/tasks/{taskId}/inputs:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: taskId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    post:
+      operationId: createTaskInput
+      tags: [tasks]
+      summary: 新增输入要求并自动建立「来源任务 → 目标任务」交付物边（AC-28；任务负责人／可编辑项目者）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTaskInputRequest"
+      responses:
+        "201":
+          description: 已建立
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliverableEdge"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /projects/{projectId}/edges/{edgeId}:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: edgeId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    delete:
+      operationId: removeEdge
+      tags: [tasks]
+      summary: 解除交付物边（目标任务负责人／可编辑项目者）
+      responses:
+        "204":
+          description: 已解除
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /projects/{projectId}/edges:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    get:
+      operationId: listEdges
+      tags: [tasks]
+      summary: 项目全部交付物边（关系数据源；图谱与列表 #18+ 复用）
+      responses:
+        "200":
+          description: 交付物边列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DeliverableEdge"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /projects/{projectId}/tasks/{taskId}/discussions:
     parameters:
       - name: projectId
@@ -1564,7 +1658,18 @@ components:
       type: object
       description: 任务详情抽屉数据（AC-31／AC-34）：任务事实、O／KR 归属与全部审核记录
       required:
-        [task, objectiveTitle, krDescription, poolReviews, fieldChanges, deliverables, discussions, completionReviews]
+        [
+          task,
+          objectiveTitle,
+          krDescription,
+          poolReviews,
+          fieldChanges,
+          deliverables,
+          discussions,
+          completionReviews,
+          inputs,
+          outputs,
+        ]
       properties:
         task:
           $ref: "#/components/schemas/Task"
@@ -1599,6 +1704,16 @@ components:
           description: 完成申请记录，最新在前（AC-13／AC-15／AC-38～40）
           items:
             $ref: "#/components/schemas/CompletionReview"
+        inputs:
+          type: array
+          description: 指向本任务的交付物边（必要输入与参考输入，AC-07／28）
+          items:
+            $ref: "#/components/schemas/DeliverableEdge"
+        outputs:
+          type: array
+          description: 从本任务出发的交付物边（直接下游）
+          items:
+            $ref: "#/components/schemas/DeliverableEdge"
     FieldChangeState:
       type: string
       enum: [pending, approved, rejected]
@@ -1850,6 +1965,94 @@ components:
         readAt:
           type: string
           format: date-time
+    EdgeType:
+      type: string
+      description: 交付物边类型（PRD §4.3；词汇表「交付物边」）
+      enum: [hard_prerequisite, information, handover, feedback]
+    Necessity:
+      type: string
+      description: 输入必要性（必要／参考）
+      enum: [required, reference]
+    DeliverableEdge:
+      type: object
+      description: 交付物边（词汇表）；边上关联当前与候选交付物，就绪状态派生（AC-48）
+      required: [id, name, edgeType, necessity, targetTaskId, ready, hasCandidate]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+          description: 输入／交付物名称
+        edgeType:
+          $ref: "#/components/schemas/EdgeType"
+        necessity:
+          $ref: "#/components/schemas/Necessity"
+        sourceTaskId:
+          type: integer
+          format: int64
+          description: 来源任务（来源为指定项目成员时缺省，见 #14）
+        sourceTaskName:
+          type: string
+        sourceTaskStatus:
+          $ref: "#/components/schemas/TaskStatus"
+        sourceOwnerName:
+          type: string
+          description: 提供方姓名（派生字段）
+        targetTaskId:
+          type: integer
+          format: int64
+        targetTaskName:
+          type: string
+        deliverableId:
+          type: integer
+          format: int64
+          description: 对应来源任务的交付物项
+        deliverableName:
+          type: string
+        currentFileId:
+          type: integer
+          format: int64
+          description: 已生效当前内容（可下载；派生字段）
+        currentFileName:
+          type: string
+        ready:
+          type: boolean
+          description: 关系就绪状态（AC-48）：仅当前内容生效时就绪；候选不提前满足输入
+        hasCandidate:
+          type: boolean
+          description: 审核期间存在候选更新（不改变原有就绪状态）
+        expectedDate:
+          type: string
+          format: date
+          description: 期望时间
+        canRemove:
+          type: boolean
+          description: 当前用户能否解除该边（派生字段；目标任务负责人／可编辑项目者）
+    CreateTaskInputRequest:
+      type: object
+      description: 新增输入要求（来源＝系统内已有任务，AC-28；指定项目成员来源见 #14）
+      required: [name, necessity, edgeType, sourceTaskId]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: 输入名称
+        necessity:
+          $ref: "#/components/schemas/Necessity"
+        edgeType:
+          $ref: "#/components/schemas/EdgeType"
+        sourceTaskId:
+          type: integer
+          format: int64
+        deliverableId:
+          type: integer
+          format: int64
+          description: 来源任务的交付物项（选填；未选时以边本身表达结构化条件）
+        expectedDate:
+          type: string
+          format: date
     CompletionReviewState:
       type: string
       description: 完成申请状态（词汇表「完成申请」；PRD §5.2.C）

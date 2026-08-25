@@ -1,0 +1,88 @@
+package domain
+
+import (
+	"errors"
+	"strings"
+	"unicode/utf8"
+)
+
+// 交付物边类型与必要性（词汇表「交付物边」；PRD §4.3）。
+const (
+	EdgeHardPrerequisite = "hard_prerequisite"
+	EdgeInformation      = "information"
+	EdgeHandover         = "handover"
+	EdgeFeedback         = "feedback"
+
+	NecessityRequired  = "required"
+	NecessityReference = "reference"
+)
+
+var (
+	ErrEdgeNameEmpty     = errors.New("输入名称不能为空")
+	ErrEdgeNameTooLong   = errors.New("输入名称不能超过 100 字")
+	ErrEdgeTypeInvalid   = errors.New("交付物边类型不合法")
+	ErrNecessityInvalid  = errors.New("必要性不合法")
+	ErrEdgeSelfLoop      = errors.New("不能以任务自身作为输入来源")
+	ErrEdgeSourceMissing = errors.New("必须指定来源任务或对接成员")
+)
+
+// NewEdge 待建立的交付物边输入。
+type NewEdge struct {
+	Name         string
+	EdgeType     string
+	Necessity    string
+	SourceTaskID *int64
+	SourceUserID *int64
+	TargetTaskID int64
+}
+
+// ValidateNewEdge 校验交付物边输入（AC-28、§4.4）；循环关系经多任务表达，自环禁止。
+func ValidateNewEdge(e NewEdge) error {
+	name := strings.TrimSpace(e.Name)
+	if name == "" {
+		return ErrEdgeNameEmpty
+	}
+	if utf8.RuneCountInString(name) > 100 {
+		return ErrEdgeNameTooLong
+	}
+	switch e.EdgeType {
+	case EdgeHardPrerequisite, EdgeInformation, EdgeHandover, EdgeFeedback:
+	default:
+		return ErrEdgeTypeInvalid
+	}
+	switch e.Necessity {
+	case NecessityRequired, NecessityReference:
+	default:
+		return ErrNecessityInvalid
+	}
+	if e.SourceTaskID == nil && e.SourceUserID == nil {
+		return ErrEdgeSourceMissing
+	}
+	if e.SourceTaskID != nil && *e.SourceTaskID == e.TargetTaskID {
+		return ErrEdgeSelfLoop
+	}
+	return nil
+}
+
+// CanConfigureInputs 判定能否配置任务输入（§3.4）：负责人／创建人／可编辑项目者，终态不可。
+func CanConfigureInputs(a Actor, userID int64, t TaskFacts) bool {
+	if t.Status == TaskCompleted || t.Status == TaskCancelled {
+		return false
+	}
+	return userID == t.OwnerID || userID == t.CreatorID || CanEditProject(a)
+}
+
+// EdgeReady 关系就绪状态（AC-48）：只有已生效的当前内容使关系就绪；候选不提前满足输入，
+// 已有当前内容时的候选更新不改变原有就绪状态。
+func EdgeReady(hasCurrent, hasCandidate bool) bool {
+	return hasCurrent
+}
+
+// DeriveDisplayStatus 页面主状态派生（§5.1 等待输入）：执行前后台状态存真实值，
+// 未开始／进行中且必要输入未就绪时汇总显示「等待输入」。
+func DeriveDisplayStatus(stored string, hasUnmetRequiredInput bool) string {
+	if hasUnmetRequiredInput && (stored == TaskNotStarted || stored == TaskInProgress) {
+		return TaskWaitingInput
+	}
+	return stored
+}

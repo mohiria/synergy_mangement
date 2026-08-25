@@ -224,6 +224,21 @@ body {
 .deliverable-card b { display: block; }
 .deliverable-card .file-link { color: var(--accent); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; font-size: 13px; }
 .notice.warning { background: var(--amber-soft); color: var(--amber); border-left-color: #d9a94a; }
+.input-fact {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  border: 1px solid var(--line); border-radius: 8px; background: #fff;
+  padding: 9px 12px; margin-bottom: 8px; font-size: 13px;
+}
+.input-fact b { display: block; }
+.input-fact small { display: block; color: var(--muted); font-size: 12px; }
+.relation-card {
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  border: 1px solid var(--line); border-radius: 8px; background: #fff;
+  padding: 9px 12px; margin-bottom: 6px; cursor: pointer; text-align: left; font: inherit;
+}
+.relation-card:hover { border-color: #aeb9c7; background: #fafbff; }
+.relation-card b { display: block; font-size: 13px; }
+.relation-card small { display: block; color: var(--muted); font-size: 12px; }
 
 .login-shell { min-height: 100vh; display: grid; place-items: center; background: var(--bg); }
 .login-brand { display: flex; align-items: center; gap: 10px; justify-content: center; margin-bottom: 18px; }

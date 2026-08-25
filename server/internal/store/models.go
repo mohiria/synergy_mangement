@@ -36,6 +36,20 @@ type Deliverable struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+type DeliverableEdge struct {
+	ID            int64
+	TargetTaskID  int64
+	SourceTaskID  pgtype.Int8
+	SourceUserID  pgtype.Int8
+	DeliverableID pgtype.Int8
+	Name          string
+	EdgeType      string
+	Necessity     string
+	ExpectedDate  pgtype.Date
+	CreatedBy     int64
+	CreatedAt     pgtype.Timestamptz
+}
+
 type DeliverableFile struct {
 	ID            int64
 	DeliverableID int64

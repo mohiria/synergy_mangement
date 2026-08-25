@@ -29,6 +29,7 @@ type CreateTaskItem = components["schemas"]["CreateTaskItem"];
 type ProjectMember = components["schemas"]["ProjectMember"];
 type TaskInvite = components["schemas"]["TaskInvite"];
 type TaskDetail = components["schemas"]["TaskDetail"];
+type EdgeType = components["schemas"]["EdgeType"];
 
 // 任务生命周期状态的中文标签与徽章样式（PRD §5.1；配色按原型 statusClass 规则）。
 const STATUS_LABEL: Record<TaskStatus, string> = {
@@ -55,6 +56,13 @@ const STATUS_CLASS: Record<TaskStatus, string> = {
 };
 
 const fmtDate = (d?: string | null) => (d ? d.slice(5).replace("-", ".") : "—");
+
+const EDGE_TYPE_LABEL: Record<EdgeType, string> = {
+  hard_prerequisite: "硬前置交付",
+  information: "信息输入",
+  handover: "正式成果接收",
+  feedback: "迭代／反馈",
+};
 
 export default function ProjectTasksPage({
   user,
@@ -204,6 +212,19 @@ export default function ProjectTasksPage({
       load();
     } else {
       message.error(res.error?.message ?? "操作失败");
+    }
+  };
+  const [inputTask, setInputTask] = useState<Task | null>(null);
+
+  const removeEdge = async (edgeId: number) => {
+    const res = await client.DELETE("/projects/{projectId}/edges/{edgeId}", {
+      params: { path: { projectId, edgeId } },
+    });
+    if (res.response.ok) {
+      message.success("已解除该输入关系");
+      load();
+    } else {
+      message.error(res.error?.message ?? "解除失败");
     }
   };
   const [completionTask, setCompletionTask] = useState<Task | null>(null);
@@ -620,6 +641,20 @@ export default function ProjectTasksPage({
             setCrReject({ task: t, reviewId: id });
             setCrRejectOpinion("");
           },
+          openConfigureInput: (t) => setInputTask(t),
+          removeEdge,
+          openTask: (id) => setDrawerTaskId(id),
+        }}
+      />
+      <ConfigureInputModal
+        projectId={projectId}
+        task={inputTask}
+        tasks={tasks}
+        taskCode={taskCode}
+        onClose={() => setInputTask(null)}
+        onSaved={() => {
+          setInputTask(null);
+          load();
         }}
       />
       <Modal
@@ -1166,6 +1201,9 @@ function TaskDrawer({
     openSubmitCompletion: (t: Task) => void;
     approveCompletion: (t: Task, reviewId: number) => void;
     openCrReject: (t: Task, reviewId: number) => void;
+    openConfigureInput: (t: Task) => void;
+    removeEdge: (edgeId: number) => void;
+    openTask: (taskId: number) => void;
   };
 }) {
   const [detail, setDetail] = useState<TaskDetail | null>(null);
@@ -1279,6 +1317,10 @@ function TaskDrawer({
   };
 
   if (!task) return null;
+  const inputs = detail?.inputs ?? [];
+  const outputs = detail?.outputs ?? [];
+  const requiredInputs = inputs.filter((e) => e.necessity === "required");
+  const referenceInputs = inputs.filter((e) => e.necessity === "reference");
   const currentFiles = (detail?.deliverables ?? [])
     .filter((d) => d.current)
     .map((d) => ({ d, f: d.current! }));
@@ -1347,6 +1389,63 @@ function TaskDrawer({
           </div>
         </div>
       </section>
+      {requiredInputs.length > 0 && (
+        <section className="drawer-section">
+          <h3>
+            必要输入{" "}
+            <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>
+              {requiredInputs.length} 项
+            </span>
+          </h3>
+          {requiredInputs.map((e) => (
+            <div key={e.id} className="input-fact">
+              <div>
+                <b>{e.name}</b>
+                <small>
+                  已有任务 · {e.sourceTaskName ?? "—"}
+                  {e.deliverableName ? ` · ${e.deliverableName}` : ""}
+                  {e.sourceOwnerName ? ` · 提供人 ${e.sourceOwnerName}` : ""}
+                </small>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span className={`status-pill ${e.ready ? "completed" : "warning"}`}>
+                  {e.ready ? "已就绪" : "未就绪"}
+                </span>
+                {e.canRemove && (
+                  <Button size="small" type="text" onClick={() => actions.removeEdge(e.id)}>
+                    解除
+                  </Button>
+                )}
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
+      {referenceInputs.length > 0 && (
+        <section className="drawer-section">
+          <h3>
+            参考输入{" "}
+            <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>
+              仅提示，不产生“等待他人”事项
+            </span>
+          </h3>
+          {referenceInputs.map((e) => (
+            <div key={e.id} className="input-fact">
+              <div>
+                <b>{e.name}</b>
+                <small>
+                  {e.sourceTaskName ?? "—"} · {EDGE_TYPE_LABEL[e.edgeType]}
+                </small>
+              </div>
+              {e.canRemove && (
+                <Button size="small" type="text" onClick={() => actions.removeEdge(e.id)}>
+                  解除
+                </Button>
+              )}
+            </div>
+          ))}
+        </section>
+      )}
       <section className="drawer-section">
         <h3>
           当前交付物{" "}
@@ -1419,6 +1518,60 @@ function TaskDrawer({
           </div>
         )}
       </section>
+      {(inputs.length > 0 || outputs.length > 0) && (
+        <section className="drawer-section">
+          <h3>协作关系</h3>
+          {inputs.length > 0 && (
+            <div style={{ marginBottom: 8 }}>
+              <b style={{ fontSize: 12, color: "var(--muted)" }}>直接上游 · {inputs.length}</b>
+              {inputs.map((e) =>
+                e.sourceTaskId ? (
+                  <button
+                    key={e.id}
+                    type="button"
+                    className="relation-card"
+                    onClick={() => actions.openTask(e.sourceTaskId!)}
+                  >
+                    <span>
+                      <b>{e.sourceTaskName}</b>
+                      <small>
+                        {EDGE_TYPE_LABEL[e.edgeType]} · {e.name}
+                        {e.currentFileName ? ` · ${e.currentFileName}` : ""}
+                      </small>
+                    </span>
+                    <span className={`status-pill ${e.ready ? "completed" : "warning"}`}>
+                      {e.ready ? "已就绪" : "未就绪"}
+                    </span>
+                  </button>
+                ) : null,
+              )}
+            </div>
+          )}
+          {outputs.length > 0 && (
+            <div>
+              <b style={{ fontSize: 12, color: "var(--muted)" }}>直接下游 · {outputs.length}</b>
+              {outputs.map((e) => (
+                <button
+                  key={e.id}
+                  type="button"
+                  className="relation-card"
+                  onClick={() => actions.openTask(e.targetTaskId)}
+                >
+                  <span>
+                    <b>{e.targetTaskName}</b>
+                    <small>
+                      {EDGE_TYPE_LABEL[e.edgeType]} · {e.name}
+                    </small>
+                  </span>
+                  <span className={`status-pill ${e.ready ? "completed" : "warning"}`}>
+                    {e.ready ? "已就绪" : "未就绪"}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
     </>
   );
 
@@ -1675,6 +1828,9 @@ function TaskDrawer({
           {task.canProposeFieldChange && (
             <Button onClick={() => actions.openEdit(task)}>编辑任务</Button>
           )}
+          {task.canManageDeliverables && (
+            <Button onClick={() => actions.openConfigureInput(task)}>配置输入</Button>
+          )}
           {task.canStart && <Button onClick={() => actions.start(task)}>开始执行</Button>}
           {task.canUpdateProgress && (
             <Button onClick={() => actions.openProgress(task)}>更新进度</Button>
@@ -1843,6 +1999,189 @@ function FieldChangeModal({
         {!isDraft && (
           <div className="notice">提交后由所属 KR 负责人审批；审批期间旧值继续生效，任务不暂停执行。</div>
         )}
+      </div>
+    </Modal>
+  );
+}
+
+// 配置输入（AC-28）：默认搜索系统内已有任务，选择来源任务及其交付物建立交付物边。
+function ConfigureInputModal({
+  projectId,
+  task,
+  tasks,
+  taskCode,
+  onClose,
+  onSaved,
+}: {
+  projectId: number;
+  task: Task | null;
+  tasks: Task[];
+  taskCode: Map<number, string>;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [sourceTaskId, setSourceTaskId] = useState<number | undefined>(undefined);
+  const [sourceDeliverables, setSourceDeliverables] = useState<{ id: number; name: string }[]>([]);
+  const [deliverableId, setDeliverableId] = useState<number | undefined>(undefined);
+  const [name, setName] = useState("");
+  const [edgeType, setEdgeType] = useState<EdgeType>("hard_prerequisite");
+  const [necessity, setNecessity] = useState<"required" | "reference">("required");
+  const [expectedDate, setExpectedDate] = useState<Dayjs | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (task) {
+      setSourceTaskId(undefined);
+      setSourceDeliverables([]);
+      setDeliverableId(undefined);
+      setName("");
+      setEdgeType("hard_prerequisite");
+      setNecessity("required");
+      setExpectedDate(null);
+      setError(null);
+    }
+  }, [task]);
+
+  useEffect(() => {
+    if (!sourceTaskId) {
+      setSourceDeliverables([]);
+      setDeliverableId(undefined);
+      return;
+    }
+    client
+      .GET("/projects/{projectId}/tasks/{taskId}", {
+        params: { path: { projectId, taskId: sourceTaskId } },
+      })
+      .then((res) => {
+        if (res.data) {
+          setSourceDeliverables(res.data.deliverables.map((d) => ({ id: d.id, name: d.name })));
+        }
+      });
+  }, [projectId, sourceTaskId]);
+
+  if (!task) return null;
+  const candidates = tasks.filter((t) => t.id !== task.id && t.status !== "cancelled");
+
+  const save = async () => {
+    if (!sourceTaskId) {
+      setError("请选择来源任务");
+      return;
+    }
+    if (!name.trim()) {
+      setError("请填写输入名称");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    const res = await client.POST("/projects/{projectId}/tasks/{taskId}/inputs", {
+      params: { path: { projectId, taskId: task.id } },
+      body: {
+        name: name.trim(),
+        necessity,
+        edgeType,
+        sourceTaskId,
+        deliverableId,
+        expectedDate: expectedDate ? expectedDate.format("YYYY-MM-DD") : undefined,
+      },
+    });
+    setSaving(false);
+    if (res.data) {
+      message.success("已建立「来源任务 → 本任务」的交付物边");
+      onSaved();
+    } else {
+      setError(res.error?.message ?? "保存失败");
+    }
+  };
+
+  return (
+    <Modal
+      title={
+        <div>
+          配置输入
+          <span className="modal-sub">来源为系统内已有任务；当前交付物生效后输入自动就绪</span>
+        </div>
+      }
+      open={!!task}
+      width={640}
+      confirmLoading={saving}
+      onOk={save}
+      onCancel={onClose}
+      okText="建立输入关系"
+      cancelText="取消"
+      destroyOnClose
+    >
+      {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
+      <div style={{ display: "grid", gap: 12 }}>
+        <div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>来源任务</div>
+          <Select
+            style={{ width: "100%" }}
+            showSearch
+            optionFilterProp="label"
+            placeholder="按任务名称、编号或负责人搜索"
+            value={sourceTaskId}
+            onChange={setSourceTaskId}
+            options={candidates.map((t) => ({
+              value: t.id,
+              label: `${taskCode.get(t.id) ?? ""} ${t.name}（${t.ownerName} · ${STATUS_LABEL[t.status]}）`,
+            }))}
+          />
+        </div>
+        <div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+            对应交付物（选填；无文件的条件可不选）
+          </div>
+          <Select
+            style={{ width: "100%" }}
+            allowClear
+            placeholder="选择来源任务的交付物项"
+            value={deliverableId}
+            onChange={(v) => {
+              setDeliverableId(v);
+              const d = sourceDeliverables.find((x) => x.id === v);
+              if (d && !name.trim()) setName(d.name);
+            }}
+            options={sourceDeliverables.map((d) => ({ value: d.id, label: d.name }))}
+          />
+        </div>
+        <div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>输入名称</div>
+          <Input maxLength={100} value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+          <div>
+            <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>关系类型</div>
+            <Select
+              style={{ width: "100%" }}
+              value={edgeType}
+              onChange={setEdgeType}
+              options={(Object.keys(EDGE_TYPE_LABEL) as EdgeType[]).map((k) => ({
+                value: k,
+                label: EDGE_TYPE_LABEL[k],
+              }))}
+            />
+          </div>
+          <div>
+            <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>必要性</div>
+            <Select
+              style={{ width: "100%" }}
+              value={necessity}
+              onChange={setNecessity}
+              options={[
+                { value: "required", label: "必要" },
+                { value: "reference", label: "参考" },
+              ]}
+            />
+          </div>
+          <div>
+            <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>期望时间（选填）</div>
+            <DatePicker style={{ width: "100%" }} value={expectedDate} onChange={setExpectedDate} />
+          </div>
+        </div>
+        <div className="notice">
+          某项信息不到位会阻止下游开始或完成时，请选择「硬前置交付」；必要输入未就绪的任务显示“等待输入”。
+        </div>
       </div>
     </Modal>
   );

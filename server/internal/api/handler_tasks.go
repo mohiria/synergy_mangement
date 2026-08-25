@@ -472,6 +472,20 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		writeInternalError(w)
 		return
 	}
+	allEdges, err := s.edgeViews(r.Context(), projectId, uid, actor)
+	if err != nil {
+		writeInternalError(w)
+		return
+	}
+	inputs, outputs := []DeliverableEdge{}, []DeliverableEdge{}
+	for _, e := range allEdges {
+		if e.TargetTaskId == taskId {
+			inputs = append(inputs, e)
+		}
+		if e.SourceTaskId != nil && *e.SourceTaskId == taskId {
+			outputs = append(outputs, e)
+		}
+	}
 	list, err := s.taskList(r.Context(), projectId, uid, actor)
 	if err != nil {
 		writeInternalError(w)
@@ -519,6 +533,8 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		Deliverables:      deliverables,
 		Discussions:       discussions,
 		CompletionReviews: completions,
+		Inputs:            inputs,
+		Outputs:           outputs,
 	})
 }
 
@@ -565,6 +581,17 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 	for _, fc := range changeRows {
 		changeByTask[fc.TaskID] = fc
 	}
+	// 必要输入未就绪的任务显示「等待输入」（AC-48、§5.1）。
+	edgeRows, err := s.q.ListEdgesByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	unmetByTask := make(map[int64]bool)
+	for _, e := range edgeRows {
+		if e.Necessity == domain.NecessityRequired && !domain.EdgeReady(e.CurrentFileID.Valid, e.HasCandidate) {
+			unmetByTask[e.TargetTaskID] = true
+		}
+	}
 	// 候选内容数量（提交完成申请的派生标志用）。
 	candidateRows, err := s.q.CandidateCountsByProject(ctx, projectID)
 	if err != nil {
@@ -605,8 +632,12 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 			CanSubmitPoolReview: domain.CanSubmitPoolReview(actor, userID, facts),
 			CanDecidePoolReview: domain.CanDecidePoolReview(userID, facts),
 		}
+		// 页面主状态汇总：必要输入未到显示「等待输入」（存储态保持真实执行状态）。
+		displayFacts := facts
+		displayFacts.Status = domain.DeriveDisplayStatus(t.Status, unmetByTask[t.ID])
+		item.Status = TaskStatus(displayFacts.Status)
 		// 当前环节与待行动人（AC-31 基础信息；名字按身份就近解析）。
-		stage, actorID := domain.CurrentStage(facts)
+		stage, actorID := domain.CurrentStage(displayFacts)
 		item.CurrentStage = stage
 		if actorID != nil {
 			item.PendingActorId = actorID
