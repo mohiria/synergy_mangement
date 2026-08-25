@@ -1314,6 +1314,10 @@ export interface components {
             canRemove?: boolean;
             /** @description 来源为指定项目成员时的输入请求（AC-29／30） */
             inputRequest?: components["schemas"]["InputRequest"];
+            /** @description 硬前置循环互锁风险（派生字段，AC-10）；循环部分暂停关键路径计算 */
+            interlockRisk?: boolean;
+            /** @description 位于硬前置关键路径上（派生字段，AC-10）；日期不足时不派生（此时仅硬依赖链） */
+            onCriticalPath?: boolean;
         };
         /** @description 新增输入要求（来源＝系统内已有任务，AC-28；指定项目成员来源见 */
         CreateTaskInputRequest: {

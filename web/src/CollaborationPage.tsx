@@ -331,7 +331,7 @@ export default function CollaborationPage({
                   style={{ height: krLayer.height, minWidth: 700 }}
                 >
                   <div className="graph-note">
-                    {krLayer.kr.code} 任务关系层：本 KR 全部任务与直接相连的其他 KR 任务；环形与双向关系保留真实连线
+                    {krLayer.kr.code} 任务关系层：硬前置加粗、关键路径最粗、互锁风险红色虚线、反馈紫色虚线；环形与双向关系保留真实连线
                   </div>
                   <svg className="graph-svg" width="700" height={krLayer.height}>
                     {krLayer.relevantEdges.map((e) => {
@@ -343,14 +343,18 @@ export default function CollaborationPage({
                       if (!from || !to) return null;
                       const hard = e.edgeType === "hard_prerequisite";
                       const feedback = e.edgeType === "feedback";
+                      const interlock = !!e.interlockRisk;
+                      const critical = !!e.onCriticalPath;
                       return (
                         <path
                           key={e.id}
                           d={edgePath(from, to)}
                           fill="none"
-                          stroke={feedback ? "#5a62c9" : hard ? "#436d84" : "#8ea3b0"}
-                          strokeWidth={hard ? 2.6 : 1.6}
-                          strokeDasharray={feedback ? "4 4" : undefined}
+                          stroke={
+                            interlock ? "#c44752" : feedback ? "#5a62c9" : hard ? "#436d84" : "#8ea3b0"
+                          }
+                          strokeWidth={critical ? 3.2 : hard ? 2.4 : 1.6}
+                          strokeDasharray={interlock ? "5 3" : feedback ? "4 4" : undefined}
                         />
                       );
                     })}

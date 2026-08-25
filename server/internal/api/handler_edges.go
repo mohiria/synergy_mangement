@@ -153,6 +153,28 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 	for _, ir := range requestRows {
 		requestByEdge[ir.EdgeID] = ir
 	}
+	// 硬依赖分析（AC-10）：循环互锁与关键路径。工期取任务计划天数（截止-开始+1）。
+	taskRows, err := s.q.ListProjectTasks(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	durations := make(map[int64]int, len(taskRows))
+	for _, t := range taskRows {
+		if t.StartDate.Valid && t.EndDate.Valid {
+			d := int(t.EndDate.Time.Sub(t.StartDate.Time).Hours()/24) + 1
+			if d < 1 {
+				d = 1
+			}
+			durations[t.ID] = d
+		}
+	}
+	hardEdges := []domain.HardEdge{}
+	for _, e := range rows {
+		if e.EdgeType == domain.EdgeHardPrerequisite && e.SourceTaskID.Valid {
+			hardEdges = append(hardEdges, domain.HardEdge{ID: e.ID, Source: e.SourceTaskID.Int64, Target: e.TargetTaskID})
+		}
+	}
+	analysis := domain.AnalyzeHardEdges(hardEdges, durations)
 	out := make([]DeliverableEdge, 0, len(rows))
 	for _, e := range rows {
 		hasCurrent := e.CurrentFileID.Valid
@@ -189,6 +211,14 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 			item.CurrentFileName = fromPgText(e.CurrentFileName)
 		}
 		item.ExpectedDate = fromPgDate(e.ExpectedDate)
+		if e.EdgeType == domain.EdgeHardPrerequisite {
+			interlock := analysis.Interlocked[e.ID]
+			item.InterlockRisk = &interlock
+			if analysis.CriticalPathAvailable {
+				onPath := analysis.OnCriticalPath[e.ID]
+				item.OnCriticalPath = &onPath
+			}
+		}
 		// 成员来源：附输入请求，就绪按「已提供」判定（AC-30、词汇表「输入就绪」）。
 		if ir, ok := requestByEdge[e.ID]; ok {
 			view := s.inputRequestView(store.InputRequest{

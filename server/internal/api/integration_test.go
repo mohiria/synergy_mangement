@@ -2616,6 +2616,120 @@ func TestMyWorkFiveGroups(t *testing.T) {
 	}
 }
 
+// 循环互锁与关键路径（#23，AC-10）：硬前置循环标互锁并暂停该部分关键路径；
+// 反馈循环不入关键路径；链上硬前置边派生 onCriticalPath。
+func TestInterlockAndCriticalPath(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, bob := newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(bob, "bob", "bob-pass")
+
+	sp := func(s string) *string { return &s }
+
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "互锁试点", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+		api.AddProjectMemberRequest{UserId: bobUser.ID, Role: api.Member})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	okr := decodeBody[[]api.Objective](t, resp)
+	kr1 := okr[0].KeyResults[0].Id
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-10")
+
+	// 三个任务：A→B→C 硬前置链；再加 C→B 硬前置构成循环；B→A 反馈边不影响。
+	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "任务A", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
+			{KeyResultId: kr1, Name: "任务B", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
+			{KeyResultId: kr1, Name: "任务C", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	tasks := decodeBody[[]api.Task](t, resp)
+	byName := map[string]int64{}
+	for _, task := range tasks {
+		byName[task.Name] = task.Id
+	}
+	mkEdge := func(name string, src, dst int64, et api.EdgeType) api.DeliverableEdge {
+		t.Helper()
+		resp := doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, dst), api.CreateTaskInputRequest{
+			Name: name, Necessity: api.Required, EdgeType: et, SourceTaskId: src,
+		})
+		wantStatus(t, resp, http.StatusCreated)
+		return decodeBody[api.DeliverableEdge](t, resp)
+	}
+	eAB := mkEdge("A产物", byName["任务A"], byName["任务B"], api.HardPrerequisite)
+	eBC := mkEdge("B产物", byName["任务B"], byName["任务C"], api.HardPrerequisite)
+	_ = eAB
+	_ = eBC
+
+	// 链上边应派生 onCriticalPath（日期齐备）
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/projects/%d/edges", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	edges := decodeBody[[]api.DeliverableEdge](t, resp)
+	for _, e := range edges {
+		if e.InterlockRisk == nil || *e.InterlockRisk {
+			t.Fatalf("无循环不应互锁: %+v", e)
+		}
+		if e.OnCriticalPath == nil || !*e.OnCriticalPath {
+			t.Fatalf("链上硬前置边应在关键路径: %+v", e)
+		}
+	}
+
+	// 加 C→B 硬前置构成循环，再加 B→A 反馈边
+	mkEdge("C回写", byName["任务C"], byName["任务B"], api.HardPrerequisite)
+	mkEdge("B反馈", byName["任务B"], byName["任务A"], api.Feedback)
+
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/projects/%d/edges", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	edges = decodeBody[[]api.DeliverableEdge](t, resp)
+	var interlocked, feedbackOnPath, abOnPath int
+	for _, e := range edges {
+		if e.InterlockRisk != nil && *e.InterlockRisk {
+			interlocked++
+			if e.OnCriticalPath != nil && *e.OnCriticalPath {
+				t.Fatalf("互锁边不应进入关键路径: %+v", e)
+			}
+		}
+		if e.EdgeType == api.Feedback && e.OnCriticalPath != nil {
+			feedbackOnPath++
+		}
+		if e.Id == eAB.Id && e.OnCriticalPath != nil && *e.OnCriticalPath {
+			abOnPath++
+		}
+	}
+	if interlocked != 2 {
+		t.Fatalf("B↔C 两条硬前置边应标互锁: %d", interlocked)
+	}
+	if feedbackOnPath != 0 {
+		t.Fatalf("反馈边不应派生关键路径字段")
+	}
+	if abOnPath != 1 {
+		t.Fatalf("循环外的 A→B 应保留在关键路径: %d", abOnPath)
+	}
+}
+
 func TestLoginRateLimit(t *testing.T) {
 	_, pool := setupDB(t)
 
