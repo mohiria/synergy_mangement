@@ -913,6 +913,8 @@ export interface components {
             progressSummary?: components["schemas"]["ProgressSummary"];
             /** @description 预警／高风险的一行原因（派生字段；来自 KR 下任务的开放卡点，AC-05） */
             riskNote?: string;
+            /** @description KR 下任务的开放卡点数量（派生字段；图谱 KR 节点展示，AC-08） */
+            openBlockerCount?: number;
         };
         /** @description KR 层进度数据覆盖度（词汇表「进度数据覆盖度」）；只统计已入池且未取消的任务，平均值任务等权 */
         ProgressSummary: {

@@ -593,6 +593,13 @@ func (s *Server) okrList(ctx context.Context, projectID int64) ([]Objective, err
 				AverageProgress: summary.AverageProgress,
 			},
 			RiskNote: optString(domain.KrRiskNote(k.RiskLevel, notesByKr[k.ID])),
+			OpenBlockerCount: func() *int {
+				n := len(notesByKr[k.ID])
+				if n == 0 {
+					return nil
+				}
+				return &n
+			}(),
 		})
 	}
 	resp := make([]Objective, 0, len(objectives))

@@ -231,6 +231,36 @@ body {
 }
 .mini-task > * { min-width: 0; }
 
+/* 协作关系图谱（原型 graph-shell 生效样式；手绘 SVG + 绝对定位节点）。 */
+.graph-layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 12px; }
+.risk-queue { background: #fff; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; align-self: start; }
+.risk-queue-head { padding: 10px 14px; border-bottom: 1px solid var(--line); font-weight: 600; font-size: var(--type-body); background: #f8fafc; }
+.risk-queue-item { width: 100%; text-align: left; border: 0; background: #fff; padding: 10px 14px; border-bottom: 1px solid #edf0f2; cursor: pointer; font: inherit; }
+.risk-queue-item:hover { background: #fafbff; }
+.risk-queue-item b { display: block; font-size: 13px; }
+.risk-queue-item small { display: block; color: var(--muted); font-size: 12px; }
+.graph-shell {
+  position: relative; min-height: 560px; height: calc(100vh - 250px);
+  background: #f9fbfc; border: 1px solid var(--line); border-radius: 10px; overflow: auto;
+  background-image: radial-gradient(#d9e1e6 0.7px, transparent 0.7px); background-size: 18px 18px;
+}
+.graph-canvas-inner { position: relative; }
+.graph-svg { position: absolute; inset: 0; pointer-events: none; }
+.gnode { position: absolute; border-radius: 9px; background: #fff; border: 1px solid var(--line-strong); box-shadow: 0 2px 6px rgba(25, 50, 65, 0.08); padding: 8px 10px; cursor: pointer; font-size: 13px; }
+.gnode.dimmed { opacity: 0.25; }
+.gnode.selected { border-color: #183b56; box-shadow: 0 0 0 2px rgba(24, 59, 86, 0.25); }
+.gnode.risk-warning { border-color: var(--amber); }
+.gnode.risk-high_risk { border-color: var(--red); }
+.gnode-o { background: #edf4f7; border-color: #b9cad3; font-weight: 700; color: var(--navy); }
+.gnode b { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gnode small { display: block; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gnode-member { background: #f4f5ff; border-color: #aab5ee; }
+.graph-note {
+  position: sticky; top: 10px; margin: 10px; z-index: 4; display: inline-block;
+  background: rgba(255, 255, 255, 0.94); border: 1px solid var(--line); border-radius: 6px;
+  padding: 7px 10px; font-size: var(--type-aux); color: var(--muted);
+}
+
 /* 任务详情抽屉（原型 task-drawer）。 */
 .drawer-sub { font-size: var(--type-aux); color: var(--muted); font-weight: 400; margin-top: 3px; }
 .drawer-section { margin-top: 18px; }

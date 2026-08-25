@@ -15,6 +15,7 @@ const NAV_ITEMS = [
   { key: "overview", label: "项目总览", path: "" },
   { key: "okr", label: "OKR 管理", path: "/okr" },
   { key: "tasks", label: "全部任务", path: "/tasks" },
+  { key: "graph", label: "协作关系", path: "/graph" },
   { key: "mywork", label: "我的工作", path: "/my-work" },
   { key: "settings", label: "项目设置", path: "/settings" },
 ];
