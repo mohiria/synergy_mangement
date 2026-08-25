@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Alert, Button, Select, Spin, Switch } from "antd";
+import { Alert, AutoComplete, Button, Select, Spin, Switch } from "antd";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import ProjectShell from "./ProjectShell";
@@ -30,6 +30,13 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
   pending_final_review: "待 KR 终审",
   completed: "已完成",
   cancelled: "已取消",
+};
+
+const EDGE_TYPE_LABEL: Record<string, string> = {
+  hard_prerequisite: "硬前置交付",
+  information: "信息输入",
+  handover: "正式成果接收",
+  feedback: "迭代／反馈",
 };
 
 type Mode = { kind: "tree" } | { kind: "o"; objectiveId: number } | { kind: "kr"; krId: number } | { kind: "full" };
@@ -66,6 +73,9 @@ export default function CollaborationPage({
   const [personFilter, setPersonFilter] = useState<number | "all">("all");
   const [showCompleted, setShowCompleted] = useState(false);
   const [impactMode, setImpactMode] = useState(false);
+  const [selectedEdge, setSelectedEdge] = useState<number | null>(null);
+  const [dragOffsets, setDragOffsets] = useState<Map<number, { dx: number; dy: number }>>(new Map());
+  const [searchText, setSearchText] = useState("");
   const [searchParams] = useSearchParams();
 
   const load = useCallback(async () => {
@@ -285,6 +295,14 @@ export default function CollaborationPage({
 
   // 选中聚焦：一层邻居强化，其余降噪（AC-27）。
   const neighborIds = useMemo(() => {
+    if (selectedEdge != null) {
+      const e = edges.find((x) => x.id === selectedEdge);
+      if (e) {
+        const set = new Set<number>([e.targetTaskId]);
+        if (e.sourceTaskId != null) set.add(e.sourceTaskId);
+        return set;
+      }
+    }
     if (selectedTask == null) return null;
     const set = new Set<number>([selectedTask]);
     if (impactMode) {
@@ -306,7 +324,70 @@ export default function CollaborationPage({
       if (e.targetTaskId === selectedTask && e.sourceTaskId != null) set.add(e.sourceTaskId);
     }
     return set;
-  }, [selectedTask, edges, impactMode]);
+  }, [selectedTask, selectedEdge, edges, impactMode]);
+
+  // 候选式搜索（AC-44）：按类型进入对应层级；卡点候选定位所属任务。
+  const searchOptions = useMemo(() => {
+    const opts: { value: string; label: string }[] = [];
+    objectives.forEach((o) => opts.push({ value: `o:${o.id}`, label: `O · ${o.title}` }));
+    krList.forEach((k) => opts.push({ value: `kr:${k.id}`, label: `${k.code} · ${k.description}` }));
+    tasks.forEach((t) => opts.push({ value: `task:${t.id}`, label: `任务 · ${t.name}` }));
+    const providers = new Map<number, string>();
+    edges.forEach((e) => {
+      if (e.inputRequest) providers.set(e.inputRequest.providerId, e.inputRequest.providerName);
+    });
+    providers.forEach((name, id) => opts.push({ value: `member:${id}`, label: `成员 · ${name}` }));
+    edges.forEach((e) => opts.push({ value: `edge:${e.id}`, label: `关系 · ${e.name}（→ ${e.targetTaskName ?? ""}）` }));
+    openBlockers.forEach((b) =>
+      opts.push({ value: `blocker:${b.id}`, label: `卡点 · ${taskById.get(b.taskId)?.name ?? ""}：缺 ${b.missing}` }),
+    );
+    return opts;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [objectives, krList, tasks, edges, blockers]);
+
+  const onSearchSelect = (v: string) => {
+    const [kind, idStr] = v.split(":");
+    const id = Number(idStr);
+    setSelectedEdge(null);
+    setImpactMode(false);
+    switch (kind) {
+      case "o":
+        enter({ kind: "o", objectiveId: id });
+        break;
+      case "kr":
+        enter({ kind: "kr", krId: id });
+        break;
+      case "task": {
+        const t = taskById.get(id);
+        if (t) {
+          enter({ kind: "kr", krId: t.keyResultId });
+          setSelectedTask(id);
+        }
+        break;
+      }
+      case "member":
+        enter({ kind: "full" });
+        break;
+      case "edge": {
+        const e = edges.find((x) => x.id === id);
+        const t = e ? taskById.get(e.targetTaskId) : undefined;
+        if (t) {
+          enter({ kind: "kr", krId: t.keyResultId });
+          setSelectedEdge(id);
+        }
+        break;
+      }
+      case "blocker": {
+        const b = blockers.find((x) => x.id === id);
+        const t = b ? taskById.get(b.taskId) : undefined;
+        if (t) {
+          enter({ kind: "kr", krId: t.keyResultId });
+          setSelectedTask(t.id);
+        }
+        break;
+      }
+    }
+  };
 
   const edgePath = (from: NodePos, to: NodePos) => {
     const x1 = from.x + from.w;
@@ -328,7 +409,37 @@ export default function CollaborationPage({
     };
   };
 
-  const taskNode = (t: Task, pos: NodePos) => {
+  const startDrag = (taskId: number, startX: number, startY: number) => {
+    if (mode.kind !== "full") return;
+    const base = dragOffsets.get(taskId) ?? { dx: 0, dy: 0 };
+    let moved = false;
+    const onMove = (ev: MouseEvent) => {
+      const dx = base.dx + (ev.clientX - startX) / zoom;
+      const dy = base.dy + (ev.clientY - startY) / zoom;
+      if (Math.abs(dx - base.dx) > 3 || Math.abs(dy - base.dy) > 3) moved = true;
+      setDragOffsets((prev) => {
+        const next = new Map(prev);
+        next.set(taskId, { dx, dy });
+        return next;
+      });
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      void moved;
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
+
+  const withOffset = (taskId: number, pos: NodePos): NodePos => {
+    const off = dragOffsets.get(taskId);
+    if (!off || mode.kind !== "full") return pos;
+    return { ...pos, x: pos.x + off.dx, y: pos.y + off.dy };
+  };
+
+  const taskNode = (t: Task, posBase: NodePos) => {
+    const pos = withOffset(t.id, posBase);
     const taskBlockers = openBlockers.filter((b) => b.taskId === t.id);
     const risk = taskBlockers.some((b) => b.level === "high_risk")
       ? "high_risk"
@@ -344,8 +455,10 @@ export default function CollaborationPage({
           dimByFilter || dimBySelect ? "dimmed" : ""
         }`}
         style={{ left: pos.x, top: pos.y, width: pos.w, height: pos.h }}
+        onMouseDown={(ev) => startDrag(t.id, ev.clientX, ev.clientY)}
         onClick={() => {
           setImpactMode(false);
+          setSelectedEdge(null);
           setSelectedTask((prev) => (prev === t.id ? null : t.id));
         }}
         onDoubleClick={() => navigate(`/projects/${projectId}/tasks?task=${t.id}&tab=overview`)}
@@ -358,6 +471,75 @@ export default function CollaborationPage({
       </div>
     );
   };
+
+  const selectedEdgeObj = selectedEdge != null ? edges.find((e) => e.id === selectedEdge) : null;
+  const edgeInspector = selectedEdgeObj && (
+    <aside
+      style={{
+        position: "absolute",
+        right: 0,
+        top: 0,
+        bottom: 0,
+        width: 300,
+        background: "#fff",
+        borderLeft: "1px solid var(--line)",
+        overflow: "auto",
+        padding: 14,
+        zIndex: 5,
+      }}
+    >
+      <b style={{ fontSize: 14 }}>交付物边 · {selectedEdgeObj.name}</b>
+      <div style={{ fontSize: 13, display: "grid", gap: 6, marginTop: 8 }}>
+        <div>关系类型：{EDGE_TYPE_LABEL[selectedEdgeObj.edgeType]}</div>
+        <div>必要性：{selectedEdgeObj.necessity === "required" ? "必要" : "参考"}</div>
+        <div>
+          提供方：
+          {selectedEdgeObj.sourceTaskName ??
+            selectedEdgeObj.inputRequest?.providerName ??
+            selectedEdgeObj.sourceOwnerName ??
+            "—"}
+        </div>
+        <div>接收方：{selectedEdgeObj.targetTaskName ?? "—"}</div>
+        <div>
+          就绪状态：
+          <span className={`status-pill ${selectedEdgeObj.ready ? "completed" : "warning"}`}>
+            {selectedEdgeObj.ready ? "已就绪" : "未就绪"}
+          </span>
+          {selectedEdgeObj.hasCandidate && <span className="muted">　候选更新审核中</span>}
+        </div>
+        {selectedEdgeObj.interlockRisk && (
+          <div style={{ color: "var(--red)" }}>硬前置循环：互锁风险</div>
+        )}
+        <div>
+          当前交付物：
+          {selectedEdgeObj.currentFileName ?? "（暂无已生效内容）"}
+        </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {selectedEdgeObj.sourceTaskId != null && (
+            <Button
+              size="small"
+              onClick={() =>
+                navigate(`/projects/${projectId}/tasks?task=${selectedEdgeObj.sourceTaskId}&tab=overview`)
+              }
+            >
+              打开来源任务
+            </Button>
+          )}
+          <Button
+            size="small"
+            onClick={() =>
+              navigate(`/projects/${projectId}/tasks?task=${selectedEdgeObj.targetTaskId}&tab=overview`)
+            }
+          >
+            打开目标任务
+          </Button>
+        </div>
+        <div className="muted" style={{ fontSize: 12 }}>
+          关系详情为只读；关系维护从任务详情的「配置输入」进入。
+        </div>
+      </div>
+    </aside>
+  );
 
   const inspector = selectedTask != null && inspectorDetail && (
     <aside
@@ -460,7 +642,21 @@ export default function CollaborationPage({
               <h1>协作关系</h1>
               <p>交付物作为关系边连接来源和目标；本模块只读，业务处理从任务相关页面进入。</p>
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <AutoComplete
+                style={{ width: 240 }}
+                placeholder="搜索 O / KR / 任务 / 成员 / 关系"
+                value={searchText}
+                onChange={setSearchText}
+                options={searchOptions}
+                onSelect={(v) => {
+                  onSearchSelect(String(v));
+                  setSearchText("");
+                }}
+                filterOption={(input, option) =>
+                  String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())
+                }
+              />
               <Button disabled={history.length === 0} onClick={back}>
                 ← 返回上一级
               </Button>
@@ -525,6 +721,9 @@ export default function CollaborationPage({
                 <Button size="small" onClick={() => setZoom(1)}>
                   适应
                 </Button>
+                <Button size="small" onClick={() => setDragOffsets(new Map())}>
+                  重新布局
+                </Button>
               </div>
             </div>
           )}
@@ -571,7 +770,7 @@ export default function CollaborationPage({
               </aside>
             )}
             <div className="graph-shell" style={{ position: "relative" }}>
-              {(mode.kind === "full" || mode.kind === "kr") && inspector}
+              {(mode.kind === "full" || mode.kind === "kr") && (edgeInspector || inspector)}
               {mode.kind === "tree" || mode.kind === "o" ? (
                 <div className="graph-canvas-inner" style={{ height: tree.height, minWidth: 700 }}>
                   <div className="graph-note">
@@ -626,8 +825,24 @@ export default function CollaborationPage({
                       const to = krLayer.positions.get(e.targetTaskId);
                       if (!from || !to) return null;
                       const st = edgeStroke(e);
+                      const d = edgePath(from, to);
+                      const isSel = selectedEdge === e.id;
                       return (
-                        <path key={e.id} d={edgePath(from, to)} fill="none" stroke={st.stroke} strokeWidth={st.width} strokeDasharray={st.dash} />
+                        <g key={e.id}>
+                          <path d={d} fill="none" stroke={st.stroke} strokeWidth={isSel ? st.width + 1.5 : st.width} strokeDasharray={st.dash} />
+                          <path
+                            d={d}
+                            fill="none"
+                            stroke="transparent"
+                            strokeWidth={14}
+                            style={{ pointerEvents: "stroke", cursor: "pointer" }}
+                            onClick={() => {
+                              setSelectedTask(null);
+                              setImpactMode(false);
+                              setSelectedEdge((prev) => (prev === e.id ? null : e.id));
+                            }}
+                          />
+                        </g>
                       );
                     })}
                   </svg>
@@ -665,8 +880,10 @@ export default function CollaborationPage({
                   >
                     <svg className="graph-svg" width={full.width} height={full.height}>
                       {full.visibleEdges.map((e) => {
-                        const from = e.sourceTaskId != null ? full.positions.get(e.sourceTaskId) : full.positions.get(-e.id);
-                        const to = full.positions.get(e.targetTaskId);
+                        const fromBase = e.sourceTaskId != null ? full.positions.get(e.sourceTaskId) : full.positions.get(-e.id);
+                        const toBase = full.positions.get(e.targetTaskId);
+                        const from = fromBase && e.sourceTaskId != null ? withOffset(e.sourceTaskId, fromBase) : fromBase;
+                        const to = toBase ? withOffset(e.targetTaskId, toBase) : toBase;
                         if (!from || !to) return null;
                         const st = edgeStroke(e);
                         const dim =
@@ -681,16 +898,30 @@ export default function CollaborationPage({
                               (e.sourceTaskId != null && taskMatchesFilter(taskById.get(e.sourceTaskId)!)) ||
                               taskMatchesFilter(taskById.get(e.targetTaskId)!)
                             ));
+                        const isSel = selectedEdge === e.id;
                         return (
-                          <path
-                            key={e.id}
-                            d={edgePath(from, to)}
-                            fill="none"
-                            stroke={st.stroke}
-                            strokeWidth={st.width}
-                            strokeDasharray={st.dash}
-                            opacity={dim ? 0.15 : 1}
-                          />
+                          <g key={e.id}>
+                            <path
+                              d={edgePath(from, to)}
+                              fill="none"
+                              stroke={st.stroke}
+                              strokeWidth={isSel ? st.width + 1.5 : st.width}
+                              strokeDasharray={st.dash}
+                              opacity={dim ? 0.15 : 1}
+                            />
+                            <path
+                              d={edgePath(from, to)}
+                              fill="none"
+                              stroke="transparent"
+                              strokeWidth={14}
+                              style={{ pointerEvents: "stroke", cursor: "pointer" }}
+                              onClick={() => {
+                                setSelectedTask(null);
+                                setImpactMode(false);
+                                setSelectedEdge((prev) => (prev === e.id ? null : e.id));
+                              }}
+                            />
+                          </g>
                         );
                       })}
                     </svg>
