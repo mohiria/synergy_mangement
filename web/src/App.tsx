@@ -7,6 +7,7 @@ import LoginPage from "./LoginPage";
 import ProjectsPage from "./ProjectsPage";
 import ProjectOkrPage from "./ProjectOkrPage";
 import ProjectTasksPage from "./ProjectTasksPage";
+import MyWorkPage from "./MyWorkPage";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 
@@ -34,6 +35,7 @@ export default function App() {
       <Route path="/" element={<ProjectsPage user={user} onLogout={logout} />} />
       <Route path="/projects/:projectId" element={<ProjectOkrPage user={user} onLogout={logout} />} />
       <Route path="/projects/:projectId/tasks" element={<ProjectTasksPage user={user} onLogout={logout} />} />
+      <Route path="/projects/:projectId/my-work" element={<MyWorkPage user={user} onLogout={logout} />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

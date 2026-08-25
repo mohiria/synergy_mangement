@@ -745,6 +745,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/my-work": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        /** 我的工作五分组（AC-16）：按当前成员职责派生个人行动与等待事实 */
+        get: operations["getMyWork"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/task-invites": {
         parameters: {
             query?: never;
@@ -1307,6 +1326,45 @@ export interface components {
             deliverableId?: number;
             /** Format: date */
             expectedDate?: string;
+        };
+        /** @description 我的工作事项（词汇表「我的工作事项」）；卡片派生事实，动作在任务详情抽屉完成 */
+        WorkItem: {
+            /** @description 事项类型（task/pool_review/field_change/intermediate_review/final_review/input_request/invite/upstream/blocker 等） */
+            kind: string;
+            title: string;
+            /** Format: int64 */
+            taskId?: number;
+            taskName?: string;
+            /**
+             * Format: int64
+             * @description 事项自身 ID（审批单／输入请求／邀请／卡点）
+             */
+            refId?: number;
+            /**
+             * Format: date
+             * @description 任务截止或输入期望时间
+             */
+            dueDate?: string;
+            /** @description 审批件与输入请求的已等待天数 */
+            waitingDays?: number;
+            /** @description 超期标红（模块 PRD §5.4） */
+            overdue?: boolean;
+            /** @description 被退回事项的「已退回：理由」 */
+            rejectedReason?: string;
+            /** @description 「上游未就绪：缺 XX」标记 */
+            unreadyNote?: string;
+            /** @description 当前环节（等待他人卡片显示停在谁手里） */
+            stage?: string;
+            /** @description 建议打开的任务详情 Tab（overview/audit/discussion） */
+            drawerTab?: string;
+        };
+        /** @description 我的工作五分组（AC-16；KR 终审归入待我审批） */
+        MyWork: {
+            pending: components["schemas"]["WorkItem"][];
+            approvals: components["schemas"]["WorkItem"][];
+            receipts: components["schemas"]["WorkItem"][];
+            waiting: components["schemas"]["WorkItem"][];
+            blockers: components["schemas"]["WorkItem"][];
         };
         /**
          * @description 卡点类型（词汇表「结构化卡点」）
@@ -2849,6 +2907,30 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    getMyWork: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 五分组事项 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyWork"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
         };
     };
     listTaskInvites: {

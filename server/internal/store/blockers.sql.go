@@ -117,7 +117,8 @@ func (q *Queries) GetBlockerInProject(ctx context.Context, arg GetBlockerInProje
 
 const listBlockersByProject = `-- name: ListBlockersByProject :many
 SELECT b.id, b.task_id, b.kind, b.missing, b.reason, b.action_owner_id, b.level, b.expected_recovery_date, b.state, b.created_by, b.created_at, b.resolved_at, b.resolved_note, au.display_name AS action_owner_name, cu.display_name AS created_by_name,
-    t.owner_id AS task_owner_id, t.created_by AS task_created_by
+    t.owner_id AS task_owner_id, t.created_by AS task_created_by,
+    t.name AS task_name, k.owner_id AS kr_owner_id
 FROM blockers b
 JOIN tasks t ON t.id = b.task_id
 JOIN key_results k ON k.id = t.key_result_id
@@ -146,6 +147,8 @@ type ListBlockersByProjectRow struct {
 	CreatedByName        string
 	TaskOwnerID          int64
 	TaskCreatedBy        int64
+	TaskName             string
+	KrOwnerID            pgtype.Int8
 }
 
 func (q *Queries) ListBlockersByProject(ctx context.Context, projectID int64) ([]ListBlockersByProjectRow, error) {
@@ -175,6 +178,8 @@ func (q *Queries) ListBlockersByProject(ctx context.Context, projectID int64) ([
 			&i.CreatedByName,
 			&i.TaskOwnerID,
 			&i.TaskCreatedBy,
+			&i.TaskName,
+			&i.KrOwnerID,
 		); err != nil {
 			return nil, err
 		}

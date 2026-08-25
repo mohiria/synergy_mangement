@@ -72,6 +72,18 @@ JOIN deliverables d ON d.id = df.deliverable_id
 WHERE d.task_id = $1 AND df.state = 'candidate'
 ORDER BY df.id;
 
+-- name: LatestCompletionReviewsByProject :many
+-- 每个任务最近一次完成申请（我的工作分组用），含任务事实。
+SELECT DISTINCT ON (cr.task_id) cr.*,
+    t.name AS task_name, t.owner_id AS task_owner_id, t.end_date AS task_end_date,
+    k.owner_id AS kr_owner_id
+FROM completion_reviews cr
+JOIN tasks t ON t.id = cr.task_id
+JOIN key_results k ON k.id = t.key_result_id
+JOIN objectives o ON o.id = k.objective_id
+WHERE o.project_id = $1
+ORDER BY cr.task_id, cr.id DESC;
+
 -- name: CandidateCountsByProject :many
 -- 每个任务的候选内容数量（canSubmitCompletion 派生用）。
 SELECT d.task_id, COUNT(*) AS n

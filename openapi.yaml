@@ -1417,6 +1417,30 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /projects/{projectId}/my-work:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    get:
+      operationId: getMyWork
+      tags: [tasks]
+      summary: 我的工作五分组（AC-16）：按当前成员职责派生个人行动与等待事实
+      responses:
+        "200":
+          description: 五分组事项
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyWork"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /projects/{projectId}/task-invites:
     parameters:
       - name: projectId
@@ -2405,6 +2429,72 @@ components:
         expectedDate:
           type: string
           format: date
+    WorkItem:
+      type: object
+      description: 我的工作事项（词汇表「我的工作事项」）；卡片派生事实，动作在任务详情抽屉完成
+      required: [kind, title]
+      properties:
+        kind:
+          type: string
+          description: 事项类型（task/pool_review/field_change/intermediate_review/final_review/input_request/invite/upstream/blocker 等）
+        title:
+          type: string
+        taskId:
+          type: integer
+          format: int64
+        taskName:
+          type: string
+        refId:
+          type: integer
+          format: int64
+          description: 事项自身 ID（审批单／输入请求／邀请／卡点）
+        dueDate:
+          type: string
+          format: date
+          description: 任务截止或输入期望时间
+        waitingDays:
+          type: integer
+          description: 审批件与输入请求的已等待天数
+        overdue:
+          type: boolean
+          description: 超期标红（模块 PRD §5.4）
+        rejectedReason:
+          type: string
+          description: 被退回事项的「已退回：理由」
+        unreadyNote:
+          type: string
+          description: 「上游未就绪：缺 XX」标记
+        stage:
+          type: string
+          description: 当前环节（等待他人卡片显示停在谁手里）
+        drawerTab:
+          type: string
+          description: 建议打开的任务详情 Tab（overview/audit/discussion）
+    MyWork:
+      type: object
+      description: 我的工作五分组（AC-16；KR 终审归入待我审批）
+      required: [pending, approvals, receipts, waiting, blockers]
+      properties:
+        pending:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkItem"
+        approvals:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkItem"
+        receipts:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkItem"
+        waiting:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkItem"
+        blockers:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkItem"
     BlockerKind:
       type: string
       description: 卡点类型（词汇表「结构化卡点」）

@@ -2471,6 +2471,151 @@ func TestBlockersAndRemind(t *testing.T) {
 	}
 }
 
+// 我的工作五分组（#16，AC-16）：五组齐备；KR 终审归入待我审批；提交人视角在等待他人。
+func TestMyWorkFiveGroups(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, bob, carol := newClient(t), newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(bob, "bob", "bob-pass")
+	login(carol, "carol", "carol-pass")
+
+	sp := func(s string) *string { return &s }
+
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "工作台试点", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	for _, uid := range []int64{bobUser.ID, carolUser.ID} {
+		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+		wantStatus(t, resp, http.StatusCreated)
+		resp.Body.Close()
+	}
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	okr := decodeBody[[]api.Objective](t, resp)
+	kr1 := okr[0].KeyResults[0].Id
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	myWorkURL := fmt.Sprintf("%s/projects/%d/my-work", base, created.Id)
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+
+	// carol 提交任务入池（待审批）→ carol 等待他人、bob（KR 负责人）待我审批
+	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: carolUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("验收方案")},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	tasks := decodeBody[[]api.Task](t, resp)
+	taskID := tasks[0].Id
+
+	resp = doJSON(t, bob, http.MethodGet, myWorkURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	bobWork := decodeBody[api.MyWork](t, resp)
+	if len(bobWork.Approvals) != 1 || bobWork.Approvals[0].Kind != "pool_review" {
+		t.Fatalf("入池审批应在待我审批: %+v", bobWork.Approvals)
+	}
+	resp = doJSON(t, carol, http.MethodGet, myWorkURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	carolWork := decodeBody[api.MyWork](t, resp)
+	if len(carolWork.Waiting) != 1 || carolWork.Waiting[0].Kind != "waiting_pool" {
+		t.Fatalf("入池申请应在等待他人: %+v", carolWork.Waiting)
+	}
+	if len(carolWork.Pending) != 0 {
+		t.Fatalf("待审批任务不应在待我处理: %+v", carolWork.Pending)
+	}
+
+	// 通过入池 → carol 待我处理出现任务卡；走到 KR 终审 → bob 待我审批出现 final_review（AC-16）
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, taskID),
+		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodGet, myWorkURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	carolWork = decodeBody[api.MyWork](t, resp)
+	if len(carolWork.Pending) != 1 || carolWork.Pending[0].Kind != "task" {
+		t.Fatalf("入池后任务应在待我处理: %+v", carolWork.Pending)
+	}
+
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, taskID),
+		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail := decodeBody[api.TaskDetail](t, resp)
+	dA := detail.Deliverables[0].Id
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskID, dA),
+		api.UploadCandidateRequest{FileName: "验收方案.docx"})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskID),
+		api.SubmitCompletionRequest{Note: "请终审"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	resp = doJSON(t, bob, http.MethodGet, myWorkURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	bobWork = decodeBody[api.MyWork](t, resp)
+	var hasFinal bool
+	for _, it := range bobWork.Approvals {
+		if it.Kind == "final_review" {
+			hasFinal = true
+		}
+	}
+	if !hasFinal {
+		t.Fatalf("KR 终审应归入待我审批: %+v", bobWork.Approvals)
+	}
+	resp = doJSON(t, carol, http.MethodGet, myWorkURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	carolWork = decodeBody[api.MyWork](t, resp)
+	if len(carolWork.Pending) != 0 {
+		t.Fatalf("完成审批中的任务不应在待我处理: %+v", carolWork.Pending)
+	}
+	var hasWaitingCompletion bool
+	for _, it := range carolWork.Waiting {
+		if it.Kind == "waiting_completion" && it.Stage != nil && *it.Stage == "KR 终审" {
+			hasWaitingCompletion = true
+		}
+	}
+	if !hasWaitingCompletion {
+		t.Fatalf("完成申请应在等待他人并显示当前环节: %+v", carolWork.Waiting)
+	}
+
+	// 卡点：carol 上报（行动人 alice）→ alice 与我相关的卡点
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/blockers", tasksURL, taskID),
+		api.CreateBlockerRequest{Kind: api.Resource, Missing: "验收环境", Reason: "环境未申请", ActionOwnerId: aliceUser.ID, Level: api.Warning})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodGet, myWorkURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	aliceWork := decodeBody[api.MyWork](t, resp)
+	if len(aliceWork.Blockers) != 1 || aliceWork.Blockers[0].Kind != "blocker" {
+		t.Fatalf("卡点应在与我相关的卡点: %+v", aliceWork.Blockers)
+	}
+	// 五组字段齐备（待我接收当前恒空）
+	if aliceWork.Receipts == nil {
+		t.Fatalf("五组应齐备: %+v", aliceWork)
+	}
+}
+
 func TestLoginRateLimit(t *testing.T) {
 	_, pool := setupDB(t)
 

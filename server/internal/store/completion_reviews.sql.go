@@ -231,6 +231,75 @@ func (q *Queries) GetCurrentFile(ctx context.Context, deliverableID int64) (Deli
 	return i, err
 }
 
+const latestCompletionReviewsByProject = `-- name: LatestCompletionReviewsByProject :many
+SELECT DISTINCT ON (cr.task_id) cr.id, cr.task_id, cr.submitted_by, cr.note, cr.state, cr.opinion, cr.submitted_at, cr.decided_by, cr.decided_at, cr.intermediate_by, cr.intermediate_at, cr.intermediate_opinion,
+    t.name AS task_name, t.owner_id AS task_owner_id, t.end_date AS task_end_date,
+    k.owner_id AS kr_owner_id
+FROM completion_reviews cr
+JOIN tasks t ON t.id = cr.task_id
+JOIN key_results k ON k.id = t.key_result_id
+JOIN objectives o ON o.id = k.objective_id
+WHERE o.project_id = $1
+ORDER BY cr.task_id, cr.id DESC
+`
+
+type LatestCompletionReviewsByProjectRow struct {
+	ID                  int64
+	TaskID              int64
+	SubmittedBy         int64
+	Note                string
+	State               string
+	Opinion             string
+	SubmittedAt         pgtype.Timestamptz
+	DecidedBy           pgtype.Int8
+	DecidedAt           pgtype.Timestamptz
+	IntermediateBy      pgtype.Int8
+	IntermediateAt      pgtype.Timestamptz
+	IntermediateOpinion string
+	TaskName            string
+	TaskOwnerID         int64
+	TaskEndDate         pgtype.Date
+	KrOwnerID           pgtype.Int8
+}
+
+// 每个任务最近一次完成申请（我的工作分组用），含任务事实。
+func (q *Queries) LatestCompletionReviewsByProject(ctx context.Context, projectID int64) ([]LatestCompletionReviewsByProjectRow, error) {
+	rows, err := q.db.Query(ctx, latestCompletionReviewsByProject, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LatestCompletionReviewsByProjectRow
+	for rows.Next() {
+		var i LatestCompletionReviewsByProjectRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TaskID,
+			&i.SubmittedBy,
+			&i.Note,
+			&i.State,
+			&i.Opinion,
+			&i.SubmittedAt,
+			&i.DecidedBy,
+			&i.DecidedAt,
+			&i.IntermediateBy,
+			&i.IntermediateAt,
+			&i.IntermediateOpinion,
+			&i.TaskName,
+			&i.TaskOwnerID,
+			&i.TaskEndDate,
+			&i.KrOwnerID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCandidateFilesByTask = `-- name: ListCandidateFilesByTask :many
 SELECT df.id, df.deliverable_id, df.state, df.file_name, df.file_type, df.file_size, df.object_key, df.uploaded_by, df.uploaded_at, df.effective_at, d.name AS deliverable_name
 FROM deliverable_files df

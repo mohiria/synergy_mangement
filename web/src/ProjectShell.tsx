@@ -14,6 +14,7 @@ type Notification = components["schemas"]["Notification"];
 const NAV_ITEMS = [
   { key: "okr", label: "OKR 管理", path: "" },
   { key: "tasks", label: "全部任务", path: "/tasks" },
+  { key: "mywork", label: "我的工作", path: "/my-work" },
 ];
 
 export default function ProjectShell({
