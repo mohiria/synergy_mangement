@@ -1531,6 +1531,37 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /projects/{projectId}/report:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: range
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/ReportRange"
+    get:
+      operationId: getReport
+      tags: [tasks]
+      summary: 生成项目报告（AC-19）：今天／近 7 天／近 30 天／项目整体
+      responses:
+        "200":
+          description: 报告
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Report"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
   /projects/{projectId}/my-work:
     parameters:
       - name: projectId
@@ -2555,6 +2586,118 @@ components:
         expectedDate:
           type: string
           format: date
+    ReportRange:
+      type: string
+      description: 报告时间范围（PRD §7.8）
+      enum: [today, week, month, all]
+    ReportKrProgress:
+      type: object
+      required: [keyResultId, description, riskLevel, totalTasks, filledTasks, completedInRange]
+      properties:
+        keyResultId:
+          type: integer
+          format: int64
+        description:
+          type: string
+        riskLevel:
+          $ref: "#/components/schemas/RiskLevel"
+        totalTasks:
+          type: integer
+        filledTasks:
+          type: integer
+        averageProgress:
+          type: integer
+        completedInRange:
+          type: integer
+          description: 范围内终审通过的任务数
+    ReportDeliverable:
+      type: object
+      required: [taskName, deliverableName, fileName]
+      properties:
+        taskName:
+          type: string
+        deliverableName:
+          type: string
+        fileName:
+          type: string
+        effectiveAt:
+          type: string
+          format: date-time
+    ReportBlocker:
+      type: object
+      required: [taskName, missing, reason, level, state]
+      properties:
+        taskName:
+          type: string
+        missing:
+          type: string
+        reason:
+          type: string
+        level:
+          $ref: "#/components/schemas/RiskLevel"
+        state:
+          $ref: "#/components/schemas/BlockerState"
+        actionOwnerName:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    ReportNextStep:
+      type: object
+      required: [taskName, ownerName, status]
+      properties:
+        taskName:
+          type: string
+        ownerName:
+          type: string
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        endDate:
+          type: string
+          format: date
+        overdue:
+          type: boolean
+    Report:
+      type: object
+      description: 项目报告（AC-19）：从同一份项目事实生成，不要求成员重复填报
+      required:
+        [range, generatedAt, krProgress, completedDeliverables, blockers, pendingApprovals, nextSteps]
+      properties:
+        range:
+          $ref: "#/components/schemas/ReportRange"
+        generatedAt:
+          type: string
+          format: date-time
+        krProgress:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportKrProgress"
+        completedDeliverables:
+          type: array
+          description: 范围内生效的当前成果
+          items:
+            $ref: "#/components/schemas/ReportDeliverable"
+        blockers:
+          type: array
+          description: 开放中的卡点 + 范围内解除的卡点
+          items:
+            $ref: "#/components/schemas/ReportBlocker"
+        pendingApprovals:
+          type: object
+          description: 待决策：停留在审批队列中的事项数
+          required: [poolReviews, fieldChanges, completions]
+          properties:
+            poolReviews:
+              type: integer
+            fieldChanges:
+              type: integer
+            completions:
+              type: integer
+        nextSteps:
+          type: array
+          description: 下一步：临近截止或已超期的未完成任务（按截止时间升序）
+          items:
+            $ref: "#/components/schemas/ReportNextStep"
     ArtifactTask:
       type: object
       description: 归档视角的任务节点（AC-17）：当前成果、候选状态与审批记录数，无历史版本入口

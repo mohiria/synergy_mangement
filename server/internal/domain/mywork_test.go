@@ -165,3 +165,23 @@ func TestKrRiskNote(t *testing.T) {
 		t.Fatalf("有卡点应取首个卡点事实: %q", got)
 	}
 }
+
+// AC-19：报告时间范围解析。
+func TestReportRangeFrom(t *testing.T) {
+	now := time.Date(2026, 9, 10, 15, 30, 0, 0, time.UTC)
+	if from, err := ReportRangeFrom("today", now); err != nil || from == nil || !from.Equal(time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("today 解析异常: %v %v", from, err)
+	}
+	if from, err := ReportRangeFrom("week", now); err != nil || from == nil || !from.Equal(now.AddDate(0, 0, -7)) {
+		t.Fatalf("week 解析异常: %v %v", from, err)
+	}
+	if from, err := ReportRangeFrom("month", now); err != nil || from == nil || !from.Equal(now.AddDate(0, 0, -30)) {
+		t.Fatalf("month 解析异常: %v %v", from, err)
+	}
+	if from, err := ReportRangeFrom("all", now); err != nil || from != nil {
+		t.Fatalf("all 应为无下界: %v %v", from, err)
+	}
+	if _, err := ReportRangeFrom("year", now); err == nil {
+		t.Fatal("非法范围应报错")
+	}
+}

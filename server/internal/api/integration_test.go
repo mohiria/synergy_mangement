@@ -2862,6 +2862,127 @@ func TestArtifactsAndPackages(t *testing.T) {
 	}
 }
 
+// 项目报告（#25，AC-19）：四档范围切换生成真实报告（KR 进展、完成成果、卡点、待决策、下一步）。
+func TestProjectReport(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, bob := newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(bob, "bob", "bob-pass")
+
+	sp := func(s string) *string { return &s }
+
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "报告试点", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+		api.AddProjectMemberRequest{UserId: bobUser.ID, Role: api.Member})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	okr := decodeBody[[]api.Objective](t, resp)
+	kr1 := okr[0].KeyResults[0].Id
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	start := openapiDate(t, "2026-08-01")
+	soon := openapiDate(t, time.Now().AddDate(0, 0, 2).Format("2006-01-02"))
+
+	// 任务 A：走完整链路到完成（产生完成成果与 completedInRange）；任务 B：临近截止（下一步）
+	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: bobUser.ID, StartDate: start, EndDate: soon, ExpectedDeliverable: sp("验收方案")},
+			{KeyResultId: kr1, Name: "临近截止任务", OwnerId: bobUser.ID, StartDate: start, EndDate: soon},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	tasks := decodeBody[[]api.Task](t, resp)
+	var taskA api.Task
+	for _, task := range tasks {
+		if task.Name == "输出验收方案" {
+			taskA = task
+		}
+	}
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, taskA.Id),
+		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskA.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail := decodeBody[api.TaskDetail](t, resp)
+	dA := detail.Deliverables[0].Id
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskA.Id, dA),
+		api.UploadCandidateRequest{FileName: "验收方案V1.docx"})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskA.Id),
+		api.SubmitCompletionRequest{Note: "请终审"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskA.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail = decodeBody[api.TaskDetail](t, resp)
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, taskA.Id, detail.CompletionReviews[0].Id),
+		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	// 卡点一枚（开放中）
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/blockers", tasksURL, tasks[1].Id),
+		api.CreateBlockerRequest{Kind: api.Resource, Missing: "环境", Reason: "未申请", ActionOwnerId: aliceUser.ID, Level: api.Warning})
+	if tasks[1].Name != "临近截止任务" {
+		// 保障 blocker 打在 B 上（顺序可能不同）
+	}
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+
+	reportURL := fmt.Sprintf("%s/projects/%d/report", base, created.Id)
+	// 今天范围：完成成果与 completedInRange 均可见（刚刚发生）
+	resp = doJSON(t, alice, http.MethodGet, reportURL+"?range=today", nil)
+	wantStatus(t, resp, http.StatusOK)
+	rep := decodeBody[api.Report](t, resp)
+	if rep.Range != api.Today || len(rep.KrProgress) != 1 {
+		t.Fatalf("报告基本结构异常: %+v", rep.Range)
+	}
+	if rep.KrProgress[0].CompletedInRange != 1 {
+		t.Fatalf("范围内完成任务数异常: %+v", rep.KrProgress[0])
+	}
+	if len(rep.CompletedDeliverables) != 1 || rep.CompletedDeliverables[0].FileName != "验收方案V1.docx" {
+		t.Fatalf("完成成果异常: %+v", rep.CompletedDeliverables)
+	}
+	if len(rep.Blockers) != 1 || rep.Blockers[0].State != api.Open {
+		t.Fatalf("卡点异常: %+v", rep.Blockers)
+	}
+	if len(rep.NextSteps) == 0 {
+		t.Fatalf("下一步为空: %+v", rep.NextSteps)
+	}
+
+	// 项目整体（默认 all）与非法范围
+	resp = doJSON(t, alice, http.MethodGet, reportURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	if rep := decodeBody[api.Report](t, resp); rep.Range != api.All {
+		t.Fatalf("默认范围应为 all: %+v", rep.Range)
+	}
+	resp = doJSON(t, alice, http.MethodGet, reportURL+"?range=year", nil)
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+}
+
 func TestLoginRateLimit(t *testing.T) {
 	_, pool := setupDB(t)
 

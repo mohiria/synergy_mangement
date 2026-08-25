@@ -804,6 +804,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/report": {
+        parameters: {
+            query?: {
+                range?: components["schemas"]["ReportRange"];
+            };
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        /** 生成项目报告（AC-19）：今天／近 7 天／近 30 天／项目整体 */
+        get: operations["getReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/my-work": {
         parameters: {
             query?: never;
@@ -1393,6 +1414,66 @@ export interface components {
             deliverableId?: number;
             /** Format: date */
             expectedDate?: string;
+        };
+        /**
+         * @description 报告时间范围（PRD §7.8）
+         * @enum {string}
+         */
+        ReportRange: "today" | "week" | "month" | "all";
+        ReportKrProgress: {
+            /** Format: int64 */
+            keyResultId: number;
+            description: string;
+            riskLevel: components["schemas"]["RiskLevel"];
+            totalTasks: number;
+            filledTasks: number;
+            averageProgress?: number;
+            /** @description 范围内终审通过的任务数 */
+            completedInRange: number;
+        };
+        ReportDeliverable: {
+            taskName: string;
+            deliverableName: string;
+            fileName: string;
+            /** Format: date-time */
+            effectiveAt?: string;
+        };
+        ReportBlocker: {
+            taskName: string;
+            missing: string;
+            reason: string;
+            level: components["schemas"]["RiskLevel"];
+            state: components["schemas"]["BlockerState"];
+            actionOwnerName?: string;
+            /** Format: date-time */
+            createdAt?: string;
+        };
+        ReportNextStep: {
+            taskName: string;
+            ownerName: string;
+            status: components["schemas"]["TaskStatus"];
+            /** Format: date */
+            endDate?: string;
+            overdue?: boolean;
+        };
+        /** @description 项目报告（AC-19）：从同一份项目事实生成，不要求成员重复填报 */
+        Report: {
+            range: components["schemas"]["ReportRange"];
+            /** Format: date-time */
+            generatedAt: string;
+            krProgress: components["schemas"]["ReportKrProgress"][];
+            /** @description 范围内生效的当前成果 */
+            completedDeliverables: components["schemas"]["ReportDeliverable"][];
+            /** @description 开放中的卡点 + 范围内解除的卡点 */
+            blockers: components["schemas"]["ReportBlocker"][];
+            /** @description 待决策：停留在审批队列中的事项数 */
+            pendingApprovals: {
+                poolReviews: number;
+                fieldChanges: number;
+                completions: number;
+            };
+            /** @description 下一步：临近截止或已超期的未完成任务（按截止时间升序） */
+            nextSteps: components["schemas"]["ReportNextStep"][];
         };
         /** @description 归档视角的任务节点（AC-17）：当前成果、候选状态与审批记录数，无历史版本入口 */
         ArtifactTask: {
@@ -3138,6 +3219,33 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+        };
+    };
+    getReport: {
+        parameters: {
+            query?: {
+                range?: components["schemas"]["ReportRange"];
+            };
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 报告 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Report"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
         };
     };
     getMyWork: {

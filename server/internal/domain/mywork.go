@@ -345,3 +345,29 @@ func KrRiskNote(riskLevel string, blockerNotes []string) string {
 	}
 	return ""
 }
+
+// ErrReportRangeInvalid 报告时间范围非法。
+var ErrReportRangeInvalid = errReportRange{}
+
+type errReportRange struct{}
+
+func (errReportRange) Error() string { return "报告时间范围不合法" }
+
+// ReportRangeFrom 解析报告时间范围下界（AC-19）：today＝当日零点、week＝近 7 天、
+// month＝近 30 天、all＝项目整体（无下界）。
+func ReportRangeFrom(name string, now time.Time) (*time.Time, error) {
+	switch name {
+	case "today":
+		from := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		return &from, nil
+	case "week":
+		from := now.AddDate(0, 0, -7)
+		return &from, nil
+	case "month":
+		from := now.AddDate(0, 0, -30)
+		return &from, nil
+	case "all", "":
+		return nil, nil
+	}
+	return nil, ErrReportRangeInvalid
+}
