@@ -612,6 +612,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/tasks/{taskId}/blockers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 主动上报结构化卡点（AC-11）：类型、缺失输入／条件、阻塞原因、希望行动人必填 */
+        post: operations["createBlocker"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/blockers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        /** 项目全部结构化卡点（风险队列数据源；开放在前） */
+        get: operations["listBlockers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/blockers/{blockerId}/remind": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                blockerId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 一键提醒希望行动人（AC-11）：发送带卡点上下文的站内通知 */
+        post: operations["remindBlocker"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/blockers/{blockerId}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                blockerId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 解除卡点；处理事实保留 */
+        post: operations["resolveBlocker"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/tasks/{taskId}/discussions": {
         parameters: {
             query?: never;
@@ -949,6 +1028,10 @@ export interface components {
             canSubmitCompletion?: boolean;
             /** @description 当前用户能否调整中间审核人配置（派生字段；负责人／创建人／可编辑项目者，审核中与终态不可） */
             canManageReviewers?: boolean;
+            /** @description 开放中的结构化卡点数量（派生字段） */
+            openBlockerCount?: number;
+            /** @description 当前用户能否上报卡点（派生字段；负责人／创建人／可编辑项目者，已入池执行类状态） */
+            canReportBlocker?: boolean;
             /** @description 当前用户能否登记候选交付物内容（派生字段；负责人，执行类状态） */
             canUploadCandidate?: boolean;
             /** @description 当前用户能否提交本任务入池（派生字段；草稿且为创建人／负责人／可编辑项目者） */
@@ -1001,6 +1084,8 @@ export interface components {
             completionReviews: components["schemas"]["CompletionReview"][];
             /** @description 任务级中间审核人配置（或签组；提交完成申请时快照进申请） */
             reviewers: components["schemas"]["ReviewerInfo"][];
+            /** @description 结构化卡点，开放在前（AC-11） */
+            blockers: components["schemas"]["Blocker"][];
             /** @description 指向本任务的交付物边（必要输入与参考输入，AC-07／28） */
             inputs: components["schemas"]["DeliverableEdge"][];
             /** @description 从本任务出发的交付物边（直接下游） */
@@ -1222,6 +1307,64 @@ export interface components {
             deliverableId?: number;
             /** Format: date */
             expectedDate?: string;
+        };
+        /**
+         * @description 卡点类型（词汇表「结构化卡点」）
+         * @enum {string}
+         */
+        BlockerKind: "input_missing" | "approval_waiting" | "resource" | "other";
+        /** @enum {string} */
+        BlockerState: "open" | "resolved";
+        /** @description 结构化卡点（词汇表）；解除后保留处理事实 */
+        Blocker: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            taskId: number;
+            kind: components["schemas"]["BlockerKind"];
+            /** @description 缺失的输入或条件 */
+            missing: string;
+            /** @description 阻塞原因 */
+            reason: string;
+            /**
+             * Format: int64
+             * @description 希望行动人
+             */
+            actionOwnerId?: number;
+            actionOwnerName?: string;
+            /** @description 预警或高风险（结构化卡点不使用 normal） */
+            level: components["schemas"]["RiskLevel"];
+            /** Format: date */
+            expectedRecoveryDate?: string;
+            state: components["schemas"]["BlockerState"];
+            createdByName?: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            resolvedAt?: string;
+            /** @description 解除说明（处理事实） */
+            resolvedNote?: string;
+            /** @description 当前用户能否一键提醒（派生字段；上报人／任务负责人／可编辑项目者，开放中） */
+            canRemind?: boolean;
+            /** @description 当前用户能否解除（派生字段；上报人／希望行动人／任务负责人／可编辑项目者，开放中） */
+            canResolve?: boolean;
+        };
+        CreateBlockerRequest: {
+            kind: components["schemas"]["BlockerKind"];
+            missing: string;
+            reason: string;
+            /** Format: int64 */
+            actionOwnerId: number;
+            level: components["schemas"]["RiskLevel"];
+            /**
+             * Format: date
+             * @description 预计恢复时间，选填
+             */
+            expectedRecoveryDate?: string;
+        };
+        ResolveBlockerRequest: {
+            /** @description 解除说明，选填 */
+            note?: string;
         };
         /**
          * @description 输入请求状态（词汇表「输入请求」；PRD §5.5）
@@ -2523,6 +2666,118 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    createBlocker: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateBlockerRequest"];
+            };
+        };
+        responses: {
+            /** @description 已上报 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Blocker"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    listBlockers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 卡点列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Blocker"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    remindBlocker: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                blockerId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已提醒 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    resolveBlocker: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                blockerId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveBlockerRequest"];
+            };
+        };
+        responses: {
+            /** @description 已解除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Blocker"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     createDiscussion: {

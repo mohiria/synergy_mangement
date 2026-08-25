@@ -2351,6 +2351,126 @@ func TestMemberInputRequests(t *testing.T) {
 	resp.Body.Close()
 }
 
+// 结构化卡点与一键提醒（#15，AC-11）：执行者填写类型/缺失/原因/希望行动人上报，
+// 一键提醒发定向通知；解除后保留处理事实且不可再动作。
+func TestBlockersAndRemind(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, bob, carol := newClient(t), newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(bob, "bob", "bob-pass")
+	login(carol, "carol", "carol-pass")
+
+	sp := func(s string) *string { return &s }
+
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "卡点试点", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	for _, uid := range []int64{bobUser.ID, carolUser.ID} {
+		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+		wantStatus(t, resp, http.StatusCreated)
+		resp.Body.Close()
+	}
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	okr := decodeBody[[]api.Objective](t, resp)
+	kr1 := okr[0].KeyResults[0].Id
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+
+	// bob 免审建任务（carol 负责）
+	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "回归验证分析", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	tasks := decodeBody[[]api.Task](t, resp)
+	taskID := tasks[0].Id
+	blockersURL := fmt.Sprintf("%s/%d/blockers", tasksURL, taskID)
+
+	// AC-11：负责人 carol 上报卡点（缺失/原因/希望行动人 bob）
+	resp = doJSON(t, carol, http.MethodPost, blockersURL, api.CreateBlockerRequest{
+		Kind: api.InputMissing, Missing: "现场数据包", Reason: "上游未交付且无预计时间",
+		ActionOwnerId: bobUser.ID, Level: api.Warning,
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	blocker := decodeBody[api.Blocker](t, resp)
+	if blocker.State != api.Open || blocker.ActionOwnerName == nil || *blocker.ActionOwnerName != "李四" {
+		t.Fatalf("卡点创建异常: %+v", blocker)
+	}
+
+	// 校验：等级 normal 422；无关成员上报 403
+	resp = doJSON(t, carol, http.MethodPost, blockersURL, api.CreateBlockerRequest{
+		Kind: api.InputMissing, Missing: "x", Reason: "y", ActionOwnerId: bobUser.ID, Level: api.Normal,
+	})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+
+	// 任务列表出现卡点计数
+	resp = doJSON(t, carol, http.MethodGet, tasksURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	list := decodeBody[[]api.Task](t, resp)
+	if list[0].OpenBlockerCount == nil || *list[0].OpenBlockerCount != 1 {
+		t.Fatalf("开放卡点计数异常: %+v", list[0])
+	}
+
+	// AC-11：一键提醒 → bob 收到带上下文通知；行动人自己不能提醒自己
+	remindURL := fmt.Sprintf("%s/projects/%d/blockers/%d/remind", base, created.Id, blocker.Id)
+	resp = doJSON(t, bob, http.MethodPost, remindURL, nil)
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodPost, remindURL, nil)
+	wantStatus(t, resp, http.StatusNoContent)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
+	wantStatus(t, resp, http.StatusOK)
+	notes := decodeBody[[]api.Notification](t, resp)
+	if len(notes) != 1 || notes[0].Kind != "blocker_remind" || *notes[0].TaskId != taskID {
+		t.Fatalf("提醒通知异常: %+v", notes)
+	}
+
+	// 解除：希望行动人 bob 可解除，处理事实保留；再动作冲突
+	resolveURL := fmt.Sprintf("%s/projects/%d/blockers/%d/resolve", base, created.Id, blocker.Id)
+	resp = doJSON(t, bob, http.MethodPost, resolveURL, api.ResolveBlockerRequest{Note: sp("数据包已补交")})
+	wantStatus(t, resp, http.StatusOK)
+	resolved := decodeBody[api.Blocker](t, resp)
+	if resolved.State != api.Resolved || resolved.ResolvedNote == nil || *resolved.ResolvedNote != "数据包已补交" {
+		t.Fatalf("解除事实异常: %+v", resolved)
+	}
+	resp = doJSON(t, carol, http.MethodPost, remindURL, nil)
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodPost, resolveURL, api.ResolveBlockerRequest{})
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+
+	// 项目卡点列表（解除后仍保留）
+	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/blockers", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if got := decodeBody[[]api.Blocker](t, resp); len(got) != 1 || got[0].State != api.Resolved {
+		t.Fatalf("卡点列表异常: %+v", got)
+	}
+}
+
 func TestLoginRateLimit(t *testing.T) {
 	_, pool := setupDB(t)
 
