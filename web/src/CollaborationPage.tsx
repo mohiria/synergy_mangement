@@ -76,6 +76,9 @@ export default function CollaborationPage({
   const [selectedEdge, setSelectedEdge] = useState<number | null>(null);
   const [dragOffsets, setDragOffsets] = useState<Map<number, { dx: number; dy: number }>>(new Map());
   const [searchText, setSearchText] = useState("");
+  const [viewMode, setViewMode] = useState<"graph" | "list">("graph");
+  const [listSearch, setListSearch] = useState("");
+  const [listSort, setListSort] = useState<"id" | "ready" | "type">("id");
   const [searchParams] = useSearchParams();
 
   const load = useCallback(async () => {
@@ -389,6 +392,37 @@ export default function CollaborationPage({
     }
   };
 
+  // 关系列表（AC-46）：与图谱同一份关系数据与筛选状态。
+  const listRows = useMemo(() => {
+    let rows = edges.filter((e) => {
+      const target = taskById.get(e.targetTaskId);
+      const source = e.sourceTaskId != null ? taskById.get(e.sourceTaskId) : undefined;
+      if (!showCompleted) {
+        if (target?.status === "completed" || source?.status === "completed") return false;
+      }
+      if (hasFilter) {
+        const match = (target ? taskMatchesFilter(target) : false) || (source ? taskMatchesFilter(source) : false);
+        if (!match) return false;
+      }
+      const q = listSearch.trim().toLowerCase();
+      if (q) {
+        const hay = `${e.name}${e.sourceTaskName ?? ""}${e.targetTaskName ?? ""}${e.inputRequest?.providerName ?? ""}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+    rows = [...rows];
+    if (listSort === "ready") {
+      rows.sort((a, b) => Number(a.ready) - Number(b.ready));
+    } else if (listSort === "type") {
+      rows.sort((a, b) => a.edgeType.localeCompare(b.edgeType));
+    } else {
+      rows.sort((a, b) => a.id - b.id);
+    }
+    return rows;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edges, taskById, showCompleted, oFilter, krFilter, personFilter, listSearch, listSort]);
+
   const edgePath = (from: NodePos, to: NodePos) => {
     const x1 = from.x + from.w;
     const y1 = from.y + from.h / 2;
@@ -657,6 +691,14 @@ export default function CollaborationPage({
                   String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())
                 }
               />
+              <Button.Group>
+                <Button size="middle" type={viewMode === "graph" ? "primary" : "default"} onClick={() => setViewMode("graph")}>
+                  关系图谱
+                </Button>
+                <Button size="middle" type={viewMode === "list" ? "primary" : "default"} onClick={() => setViewMode("list")}>
+                  关系列表
+                </Button>
+              </Button.Group>
               <Button disabled={history.length === 0} onClick={back}>
                 ← 返回上一级
               </Button>
@@ -671,7 +713,7 @@ export default function CollaborationPage({
               )}
             </div>
           </div>
-          {mode.kind === "full" && (
+          {(mode.kind === "full" || viewMode === "list") && (
             <div className="toolbar">
               <div className="toolbar-group">
                 <Select
@@ -727,6 +769,107 @@ export default function CollaborationPage({
               </div>
             </div>
           )}
+          {viewMode === "list" ? (
+            <>
+              <div className="toolbar" style={{ marginTop: -4 }}>
+                <div className="toolbar-group">
+                  <AutoComplete
+                    style={{ width: 240 }}
+                    placeholder="搜索关系、任务或成员"
+                    value={listSearch}
+                    onChange={setListSearch}
+                    options={[]}
+                  />
+                  <Select
+                    size="small"
+                    style={{ width: 140 }}
+                    value={listSort}
+                    onChange={setListSort}
+                    options={[
+                      { value: "id", label: "按创建顺序" },
+                      { value: "ready", label: "按就绪状态" },
+                      { value: "type", label: "按关系类型" },
+                    ]}
+                  />
+                </div>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  只读呈现：不提供新增、修改、解除或批量维护；业务处理从任务相关页面进入
+                </span>
+              </div>
+              <div className="data-table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>来源任务／成员</th>
+                      <th>交付物边</th>
+                      <th style={{ width: 110 }}>类型</th>
+                      <th style={{ width: 70 }}>必要性</th>
+                      <th style={{ width: 150 }}>当前交付物</th>
+                      <th>目标任务</th>
+                      <th style={{ width: 110 }}>提供方</th>
+                      <th style={{ width: 80 }}>就绪</th>
+                      <th style={{ width: 90 }}>期望时间</th>
+                      <th style={{ width: 150 }} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {listRows.length === 0 && (
+                      <tr>
+                        <td colSpan={10}>
+                          <div className="empty">没有匹配的协作关系</div>
+                        </td>
+                      </tr>
+                    )}
+                    {listRows.map((e) => (
+                      <tr key={e.id}>
+                        <td>{e.sourceTaskName ?? e.inputRequest?.providerName ?? "—"}</td>
+                        <td>{e.name}</td>
+                        <td>{EDGE_TYPE_LABEL[e.edgeType]}</td>
+                        <td>{e.necessity === "required" ? "必要" : "参考"}</td>
+                        <td>
+                          {e.currentFileName ?? <span className="muted">暂无</span>}
+                          {e.hasCandidate && (
+                            <div className="muted" style={{ fontSize: 12 }}>
+                              候选审核中
+                            </div>
+                          )}
+                        </td>
+                        <td>{e.targetTaskName}</td>
+                        <td>{e.sourceOwnerName ?? e.inputRequest?.providerName ?? "—"}</td>
+                        <td>
+                          <span className={`status-pill ${e.ready ? "completed" : "warning"}`}>
+                            {e.ready ? "已就绪" : "未就绪"}
+                          </span>
+                        </td>
+                        <td>{e.expectedDate ?? "—"}</td>
+                        <td>
+                          <Button
+                            type="link"
+                            size="small"
+                            onClick={() =>
+                              navigate(`/projects/${projectId}/tasks?task=${e.targetTaskId}&tab=overview`)
+                            }
+                          >
+                            跳转任务
+                          </Button>
+                          <Button
+                            type="link"
+                            size="small"
+                            onClick={() => {
+                              setViewMode("graph");
+                              onSearchSelect(`edge:${e.id}`);
+                            }}
+                          >
+                            图谱聚焦
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
           <div className="graph-layout" style={mode.kind === "full" ? { gridTemplateColumns: "minmax(0,1fr)" } : {}}>
             {mode.kind !== "full" && (
               <aside className="risk-queue">
@@ -978,6 +1121,7 @@ export default function CollaborationPage({
               ) : null}
             </div>
           </div>
+          )}
         </>
       )}
     </ProjectShell>
