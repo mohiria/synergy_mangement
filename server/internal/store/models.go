@@ -30,6 +30,18 @@ type Objective struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
+type PoolReview struct {
+	ID          int64
+	TaskID      int64
+	SubmittedBy int64
+	Status      string
+	Exempt      bool
+	Opinion     string
+	SubmittedAt pgtype.Timestamptz
+	DecidedBy   pgtype.Int8
+	DecidedAt   pgtype.Timestamptz
+}
+
 type Project struct {
 	ID               int64
 	Name             string
@@ -54,6 +66,18 @@ type Session struct {
 	UserID    int64
 	ExpiresAt pgtype.Timestamptz
 	CreatedAt pgtype.Timestamptz
+}
+
+type Task struct {
+	ID          int64
+	KeyResultID int64
+	Name        string
+	OwnerID     int64
+	StartDate   pgtype.Date
+	EndDate     pgtype.Date
+	Status      string
+	CreatedBy   int64
+	CreatedAt   pgtype.Timestamptz
 }
 
 type User struct {

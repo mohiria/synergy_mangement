@@ -19,6 +19,8 @@ tags:
     description: O／KR 层级的建立与查询（表格式创建，AC-01）
   - name: users
     description: 用户目录（人员选择用）
+  - name: tasks
+    description: 任务的创建、入池审批与 KR 负责人免审（AC-04、AC-26）
 
 paths:
   /healthz:
@@ -336,6 +338,137 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /projects/{projectId}/tasks:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    get:
+      operationId: listTasks
+      tags: [tasks]
+      summary: 项目全部任务（含派生动作标志与最近一次入池审批单）
+      responses:
+        "200":
+          description: 任务列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Task"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: createTaskBatch
+      tags: [tasks]
+      summary: 表格式批量创建任务草稿（可选一并提交入池；KR 负责人本人创建免审直接进入未开始，AC-26）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTaskBatchRequest"
+      responses:
+        "201":
+          description: 创建成功，返回项目最新的完整任务列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Task"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /projects/{projectId}/tasks/{taskId}/submit-pool-review:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: taskId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    post:
+      operationId: submitTaskPoolReview
+      tags: [tasks]
+      summary: 将草稿任务提交所属 KR 负责人入池审批（AC-04；退回后可修改重新提交）
+      responses:
+        "200":
+          description: 已提交，任务进入待入池审批
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /projects/{projectId}/tasks/{taskId}/pool-review-decision:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: taskId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    post:
+      operationId: decideTaskPoolReview
+      tags: [tasks]
+      summary: 所属 KR 负责人通过或退回入池审批（AC-04；管理员不能替代 KR 负责人）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PoolReviewDecisionRequest"
+      responses:
+        "200":
+          description: 已处理，返回任务最新状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
   /users:
     get:
       operationId: listUsers
@@ -591,6 +724,129 @@ components:
           minItems: 1
           items:
             $ref: "#/components/schemas/CreateOkrBatchItem"
+    TaskStatus:
+      type: string
+      description: 任务生命周期状态（词汇表「任务生命周期状态」）；页面主状态汇总，审批原始状态在审批单中
+      enum:
+        [
+          draft,
+          pending_pool_review,
+          not_started,
+          waiting_input,
+          in_progress,
+          pending_intermediate_review,
+          pending_final_review,
+          completed,
+          cancelled,
+        ]
+    PoolReviewStatus:
+      type: string
+      description: 入池审批单状态（词汇表「入池审批单」）；未提交即无审批单
+      enum: [pending, approved, rejected]
+    PoolReview:
+      type: object
+      description: 任务最近一次入池审批单
+      required: [status, exempt]
+      properties:
+        status:
+          $ref: "#/components/schemas/PoolReviewStatus"
+        exempt:
+          type: boolean
+          description: KR 负责人本人创建免审时由系统自动生成并标记（AC-26）
+        opinion:
+          type: string
+          description: 审批意见；免审时为系统记录的免审原因
+        submittedByName:
+          type: string
+          description: 提交人姓名（派生字段）
+        decidedByName:
+          type: string
+          description: 处理人姓名（派生字段）
+        submittedAt:
+          type: string
+          format: date-time
+        decidedAt:
+          type: string
+          format: date-time
+    Task:
+      type: object
+      required:
+        [id, keyResultId, name, ownerId, ownerName, startDate, endDate, status, canSubmitPoolReview, canDecidePoolReview]
+      properties:
+        id:
+          type: integer
+          format: int64
+        keyResultId:
+          type: integer
+          format: int64
+        name:
+          type: string
+        ownerId:
+          type: integer
+          format: int64
+          description: 任务负责人
+        ownerName:
+          type: string
+          description: 任务负责人姓名（派生字段）
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        poolReview:
+          $ref: "#/components/schemas/PoolReview"
+        canSubmitPoolReview:
+          type: boolean
+          description: 当前用户能否提交本任务入池（派生字段；草稿且为创建人／负责人／可编辑项目者）
+        canDecidePoolReview:
+          type: boolean
+          description: 当前用户能否处理本任务的入池审批（派生字段；仅所属 KR 负责人）
+    CreateTaskItem:
+      type: object
+      required: [keyResultId, name, ownerId, startDate, endDate]
+      properties:
+        keyResultId:
+          type: integer
+          format: int64
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        ownerId:
+          type: integer
+          format: int64
+          description: 任务负责人，必须是项目成员
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+    CreateTaskBatchRequest:
+      type: object
+      required: [items, submitForReview]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/CreateTaskItem"
+        submitForReview:
+          type: boolean
+          description: true 时保存后立即提交各自所属 KR 的入池审批（原型「提交入池审批」按钮）；KR 负责人本人创建的任务始终免审直接进入未开始
+    PoolReviewDecisionRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approved, rejected]
+        opinion:
+          type: string
+          maxLength: 500
     Project:
       type: object
       required: [id, name, ownerId, ownerName, status, createdAt, canEdit, canManageMembers]

@@ -169,6 +169,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        /** 项目全部任务（含派生动作标志与最近一次入池审批单） */
+        get: operations["listTasks"];
+        put?: never;
+        /** 表格式批量创建任务草稿（可选一并提交入池；KR 负责人本人创建免审直接进入未开始，AC-26） */
+        post: operations["createTaskBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/tasks/{taskId}/submit-pool-review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 将草稿任务提交所属 KR 负责人入池审批（AC-04；退回后可修改重新提交） */
+        post: operations["submitTaskPoolReview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/tasks/{taskId}/pool-review-decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 所属 KR 负责人通过或退回入池审批（AC-04；管理员不能替代 KR 负责人） */
+        post: operations["decideTaskPoolReview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/users": {
         parameters: {
             query?: never;
@@ -311,6 +371,80 @@ export interface components {
         };
         CreateOkrBatchRequest: {
             items: components["schemas"]["CreateOkrBatchItem"][];
+        };
+        /**
+         * @description 任务生命周期状态（词汇表「任务生命周期状态」）；页面主状态汇总，审批原始状态在审批单中
+         * @enum {string}
+         */
+        TaskStatus: "draft" | "pending_pool_review" | "not_started" | "waiting_input" | "in_progress" | "pending_intermediate_review" | "pending_final_review" | "completed" | "cancelled";
+        /**
+         * @description 入池审批单状态（词汇表「入池审批单」）；未提交即无审批单
+         * @enum {string}
+         */
+        PoolReviewStatus: "pending" | "approved" | "rejected";
+        /** @description 任务最近一次入池审批单 */
+        PoolReview: {
+            status: components["schemas"]["PoolReviewStatus"];
+            /** @description KR 负责人本人创建免审时由系统自动生成并标记（AC-26） */
+            exempt: boolean;
+            /** @description 审批意见；免审时为系统记录的免审原因 */
+            opinion?: string;
+            /** @description 提交人姓名（派生字段） */
+            submittedByName?: string;
+            /** @description 处理人姓名（派生字段） */
+            decidedByName?: string;
+            /** Format: date-time */
+            submittedAt?: string;
+            /** Format: date-time */
+            decidedAt?: string;
+        };
+        Task: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            keyResultId: number;
+            name: string;
+            /**
+             * Format: int64
+             * @description 任务负责人
+             */
+            ownerId: number;
+            /** @description 任务负责人姓名（派生字段） */
+            ownerName: string;
+            /** Format: date */
+            startDate: string;
+            /** Format: date */
+            endDate: string;
+            status: components["schemas"]["TaskStatus"];
+            poolReview?: components["schemas"]["PoolReview"];
+            /** @description 当前用户能否提交本任务入池（派生字段；草稿且为创建人／负责人／可编辑项目者） */
+            canSubmitPoolReview: boolean;
+            /** @description 当前用户能否处理本任务的入池审批（派生字段；仅所属 KR 负责人） */
+            canDecidePoolReview: boolean;
+        };
+        CreateTaskItem: {
+            /** Format: int64 */
+            keyResultId: number;
+            name: string;
+            /**
+             * Format: int64
+             * @description 任务负责人，必须是项目成员
+             */
+            ownerId: number;
+            /** Format: date */
+            startDate: string;
+            /** Format: date */
+            endDate: string;
+        };
+        CreateTaskBatchRequest: {
+            items: components["schemas"]["CreateTaskItem"][];
+            /** @description true 时保存后立即提交各自所属 KR 的入池审批（原型「提交入池审批」按钮）；KR 负责人本人创建的任务始终免审直接进入未开始 */
+            submitForReview: boolean;
+        };
+        PoolReviewDecisionRequest: {
+            /** @enum {string} */
+            decision: "approved" | "rejected";
+            opinion?: string;
         };
         Project: {
             /** Format: int64 */
@@ -769,6 +903,120 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    listTasks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 任务列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Task"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createTaskBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTaskBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description 创建成功，返回项目最新的完整任务列表 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Task"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    submitTaskPoolReview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已提交，任务进入待入池审批 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Task"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    decideTaskPoolReview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PoolReviewDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description 已处理，返回任务最新状态 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Task"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["ValidationError"];
         };
     };

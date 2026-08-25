@@ -111,6 +111,9 @@ body {
 .status-pill.in_progress { background: var(--blue-soft); color: var(--blue); }
 .status-pill.completed { background: var(--green-soft); color: var(--green); }
 .status-pill.archived { background: #eef1f4; color: var(--subtle); }
+.status-pill.warning { background: var(--amber-soft); color: var(--amber); }
+.status-pill.review { background: var(--violet-soft); color: var(--violet); }
+.status-pill.danger { background: var(--red-soft); color: var(--red); }
 .status-pill.risk-normal { background: var(--green-soft); color: var(--green); }
 .status-pill.risk-warning { background: var(--amber-soft); color: var(--amber); }
 .status-pill.risk-high_risk { background: var(--red-soft); color: var(--red); }
@@ -161,6 +164,34 @@ body {
 .sheet-placeholder { color: var(--muted); font-size: var(--type-aux); }
 .okr-sheet-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
 .modal-sub { display: block; font-size: var(--type-aux); color: var(--muted); font-weight: 400; margin-top: 3px; }
+
+/* 原型 toolbar：任务页搜索与筛选条。 */
+.toolbar {
+  min-height: 48px; margin-bottom: 12px; padding: 7px 10px;
+  background: #fff; border: 1px solid var(--line); border-radius: 10px;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+}
+.toolbar-group { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+
+/* 原型 task-sheet：创建任务表格式弹窗（无预期交付物列的数据模型，列宽按内容宽 1032px 适配）。 */
+.task-sheet { border: 1px solid var(--line); border-radius: 8px; overflow: auto; background: #fff; margin-top: 12px; }
+.task-sheet-head, .task-sheet-row {
+  display: grid;
+  grid-template-columns: minmax(230px, 1.1fr) minmax(260px, 1.3fr) 180px 260px 36px;
+  min-width: 996px;
+  align-items: center;
+}
+.task-sheet-head {
+  height: 38px; background: #f5f7fa; color: #657184;
+  font-size: var(--type-aux); font-weight: 600; border-bottom: 1px solid var(--line);
+}
+.task-sheet-head span { padding: 0 10px; }
+.task-sheet-row { min-height: 56px; border-bottom: 1px solid #edf0f4; }
+.task-sheet-row:last-child { border-bottom: 0; }
+.task-sheet-cell { padding: 8px 10px; min-width: 0; }
+.task-sheet-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+
+.row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 3px; }
 
 .login-shell { min-height: 100vh; display: grid; place-items: center; background: var(--bg); }
 .login-brand { display: flex; align-items: center; gap: 10px; justify-content: center; margin-bottom: 18px; }

@@ -4,6 +4,7 @@ import { Alert, Button, DatePicker, Input, Modal, Select, Spin } from "antd";
 import type { Dayjs } from "dayjs";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
+import ProjectShell from "./ProjectShell";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
@@ -65,11 +66,6 @@ export default function ProjectOkrPage({
     load();
   }, [load]);
 
-  const logout = async () => {
-    await client.POST("/auth/logout");
-    onLogout();
-  };
-
   // 展示编号按列表顺序派生（O1…、KR 全局连续），仅用于界面呈现。
   let krSeq = 0;
   const rows = objectives.flatMap((o, oIndex) => [
@@ -114,41 +110,14 @@ export default function ProjectOkrPage({
   ]);
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <span className="brand-mark">协</span>
-          <div className="brand-name">
-            <b>协同管理工具</b>
-            <span>O／KR／任务协同推进</span>
-          </div>
-        </div>
-        <nav>
-          <Link className="nav-row" to="/">
-            ← 项目列表
-          </Link>
-          <button className="nav-row active" type="button">
-            OKR 管理
-          </button>
-        </nav>
-      </aside>
-      <section className="workspace">
-        <header className="topbar">
-          <div className="breadcrumbs">
-            <Link to="/">项目列表</Link>
-            <span className="sep">/</span>
-            <b>{project?.name ?? "…"}</b>
-          </div>
-          <div className="identity">
-            <span className="avatar">{user.displayName.slice(0, 1)}</span>
-            <span>{user.displayName}</span>
-            <Button size="small" onClick={logout}>
-              登出
-            </Button>
-          </div>
-        </header>
-        <main className="page">
-          {notFound ? (
+    <ProjectShell
+      user={user}
+      project={project}
+      projectId={projectId}
+      pageLabel="OKR 管理"
+      onLogout={onLogout}
+    >
+      {notFound ? (
             <Alert
               type="error"
               message="项目不存在"
@@ -194,10 +163,8 @@ export default function ProjectOkrPage({
                   </tbody>
                 </table>
               </div>
-            </>
-          )}
-        </main>
-      </section>
+        </>
+      )}
       {project && (
         <OkrBatchModal
           open={modalOpen}
@@ -211,7 +178,7 @@ export default function ProjectOkrPage({
           }}
         />
       )}
-    </div>
+    </ProjectShell>
   );
 }
 

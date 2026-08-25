@@ -4,6 +4,14 @@
 
 ## Language
 
+**任务生命周期状态**：
+任务此刻所处的生命周期汇总状态，九值枚举：草稿（draft）、待入池审批（pending_pool_review）、未开始（not_started）、等待输入（waiting_input）、进行中（in_progress）、待中间审核（pending_intermediate_review）、待 KR 终审（pending_final_review）、已完成（completed）、已取消（cancelled）。它是页面主状态的汇总显示；入池、关键字段修改和完成审批的原始状态分别记录在对应审批单中。API 字段用 status。
+_Avoid_: 审批单状态、风险等级、项目状态
+
+**入池审批单**：
+新任务进入正式 KR 任务池的审批事实，由所属 KR 负责人处理；同一任务被退回后重新提交会生成新的审批单，旧单保留。KR 负责人在本人负责的 KR 下创建任务免审，系统自动生成一条已通过并标记免审的审批单以记录免审原因。API 用 poolReview，状态取值 pending／approved／rejected（待审批／已通过／已退回，未提交即无审批单），免审标记用 exempt。
+_Avoid_: 完成审批、关键字段变更单、任务状态
+
 **任务概况**：
 面向项目整体查看场景的任务只读摘要，包含任务事实、当前交付物和协作上下文；不承载编辑、审批或状态变更。存在候选交付物时只提示有更新正在审核，不把候选内容展示为正式成果。
 _Avoid_: 任务编辑面板、任务操作台

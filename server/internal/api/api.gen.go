@@ -57,24 +57,63 @@ func (e MemberRole) Valid() bool {
 	}
 }
 
+// Defines values for PoolReviewDecisionRequestDecision.
+const (
+	PoolReviewDecisionRequestDecisionApproved PoolReviewDecisionRequestDecision = "approved"
+	PoolReviewDecisionRequestDecisionRejected PoolReviewDecisionRequestDecision = "rejected"
+)
+
+// Valid indicates whether the value is a known member of the PoolReviewDecisionRequestDecision enum.
+func (e PoolReviewDecisionRequestDecision) Valid() bool {
+	switch e {
+	case PoolReviewDecisionRequestDecisionApproved:
+		return true
+	case PoolReviewDecisionRequestDecisionRejected:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PoolReviewStatus.
+const (
+	PoolReviewStatusApproved PoolReviewStatus = "approved"
+	PoolReviewStatusPending  PoolReviewStatus = "pending"
+	PoolReviewStatusRejected PoolReviewStatus = "rejected"
+)
+
+// Valid indicates whether the value is a known member of the PoolReviewStatus enum.
+func (e PoolReviewStatus) Valid() bool {
+	switch e {
+	case PoolReviewStatusApproved:
+		return true
+	case PoolReviewStatusPending:
+		return true
+	case PoolReviewStatusRejected:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ProjectStatus.
 const (
-	Archived   ProjectStatus = "archived"
-	Completed  ProjectStatus = "completed"
-	InProgress ProjectStatus = "in_progress"
-	NotStarted ProjectStatus = "not_started"
+	ProjectStatusArchived   ProjectStatus = "archived"
+	ProjectStatusCompleted  ProjectStatus = "completed"
+	ProjectStatusInProgress ProjectStatus = "in_progress"
+	ProjectStatusNotStarted ProjectStatus = "not_started"
 )
 
 // Valid indicates whether the value is a known member of the ProjectStatus enum.
 func (e ProjectStatus) Valid() bool {
 	switch e {
-	case Archived:
+	case ProjectStatusArchived:
 		return true
-	case Completed:
+	case ProjectStatusCompleted:
 		return true
-	case InProgress:
+	case ProjectStatusInProgress:
 		return true
-	case NotStarted:
+	case ProjectStatusNotStarted:
 		return true
 	default:
 		return false
@@ -96,6 +135,45 @@ func (e RiskLevel) Valid() bool {
 	case Normal:
 		return true
 	case Warning:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TaskStatus.
+const (
+	TaskStatusCancelled                 TaskStatus = "cancelled"
+	TaskStatusCompleted                 TaskStatus = "completed"
+	TaskStatusDraft                     TaskStatus = "draft"
+	TaskStatusInProgress                TaskStatus = "in_progress"
+	TaskStatusNotStarted                TaskStatus = "not_started"
+	TaskStatusPendingFinalReview        TaskStatus = "pending_final_review"
+	TaskStatusPendingIntermediateReview TaskStatus = "pending_intermediate_review"
+	TaskStatusPendingPoolReview         TaskStatus = "pending_pool_review"
+	TaskStatusWaitingInput              TaskStatus = "waiting_input"
+)
+
+// Valid indicates whether the value is a known member of the TaskStatus enum.
+func (e TaskStatus) Valid() bool {
+	switch e {
+	case TaskStatusCancelled:
+		return true
+	case TaskStatusCompleted:
+		return true
+	case TaskStatusDraft:
+		return true
+	case TaskStatusInProgress:
+		return true
+	case TaskStatusNotStarted:
+		return true
+	case TaskStatusPendingFinalReview:
+		return true
+	case TaskStatusPendingIntermediateReview:
+		return true
+	case TaskStatusPendingPoolReview:
+		return true
+	case TaskStatusWaitingInput:
 		return true
 	default:
 		return false
@@ -140,6 +218,25 @@ type CreateProjectRequest struct {
 	PlannedEndDate   *openapi_types.Date `json:"plannedEndDate,omitempty"`
 	PlannedStartDate *openapi_types.Date `json:"plannedStartDate,omitempty"`
 	Stage            *string             `json:"stage,omitempty"`
+}
+
+// CreateTaskBatchRequest defines model for CreateTaskBatchRequest.
+type CreateTaskBatchRequest struct {
+	Items []CreateTaskItem `json:"items"`
+
+	// SubmitForReview true 时保存后立即提交各自所属 KR 的入池审批（原型「提交入池审批」按钮）；KR 负责人本人创建的任务始终免审直接进入未开始
+	SubmitForReview bool `json:"submitForReview"`
+}
+
+// CreateTaskItem defines model for CreateTaskItem.
+type CreateTaskItem struct {
+	EndDate     openapi_types.Date `json:"endDate"`
+	KeyResultId int64              `json:"keyResultId"`
+	Name        string             `json:"name"`
+
+	// OwnerId 任务负责人，必须是项目成员
+	OwnerId   int64              `json:"ownerId"`
+	StartDate openapi_types.Date `json:"startDate"`
 }
 
 // CurrentUser defines model for CurrentUser.
@@ -215,6 +312,39 @@ type Objective struct {
 	Title string `json:"title"`
 }
 
+// PoolReview 任务最近一次入池审批单
+type PoolReview struct {
+	DecidedAt *time.Time `json:"decidedAt,omitempty"`
+
+	// DecidedByName 处理人姓名（派生字段）
+	DecidedByName *string `json:"decidedByName,omitempty"`
+
+	// Exempt KR 负责人本人创建免审时由系统自动生成并标记（AC-26）
+	Exempt bool `json:"exempt"`
+
+	// Opinion 审批意见；免审时为系统记录的免审原因
+	Opinion *string `json:"opinion,omitempty"`
+
+	// Status 入池审批单状态（词汇表「入池审批单」）；未提交即无审批单
+	Status      PoolReviewStatus `json:"status"`
+	SubmittedAt *time.Time       `json:"submittedAt,omitempty"`
+
+	// SubmittedByName 提交人姓名（派生字段）
+	SubmittedByName *string `json:"submittedByName,omitempty"`
+}
+
+// PoolReviewDecisionRequest defines model for PoolReviewDecisionRequest.
+type PoolReviewDecisionRequest struct {
+	Decision PoolReviewDecisionRequestDecision `json:"decision"`
+	Opinion  *string                           `json:"opinion,omitempty"`
+}
+
+// PoolReviewDecisionRequestDecision defines model for PoolReviewDecisionRequest.Decision.
+type PoolReviewDecisionRequestDecision string
+
+// PoolReviewStatus 入池审批单状态（词汇表「入池审批单」）；未提交即无审批单
+type PoolReviewStatus string
+
 // Project defines model for Project.
 type Project struct {
 	// CanEdit 当前用户能否编辑本项目（派生字段，按成员角色与项目负责人身份在 domain 层判定）
@@ -256,6 +386,35 @@ type ProjectStatus string
 
 // RiskLevel 风险等级（正常／预警／高风险），见词汇表「风险等级」；不由任务生命周期状态自动推导
 type RiskLevel string
+
+// Task defines model for Task.
+type Task struct {
+	// CanDecidePoolReview 当前用户能否处理本任务的入池审批（派生字段；仅所属 KR 负责人）
+	CanDecidePoolReview bool `json:"canDecidePoolReview"`
+
+	// CanSubmitPoolReview 当前用户能否提交本任务入池（派生字段；草稿且为创建人／负责人／可编辑项目者）
+	CanSubmitPoolReview bool               `json:"canSubmitPoolReview"`
+	EndDate             openapi_types.Date `json:"endDate"`
+	Id                  int64              `json:"id"`
+	KeyResultId         int64              `json:"keyResultId"`
+	Name                string             `json:"name"`
+
+	// OwnerId 任务负责人
+	OwnerId int64 `json:"ownerId"`
+
+	// OwnerName 任务负责人姓名（派生字段）
+	OwnerName string `json:"ownerName"`
+
+	// PoolReview 任务最近一次入池审批单
+	PoolReview *PoolReview        `json:"poolReview,omitempty"`
+	StartDate  openapi_types.Date `json:"startDate"`
+
+	// Status 任务生命周期状态（词汇表「任务生命周期状态」）；页面主状态汇总，审批原始状态在审批单中
+	Status TaskStatus `json:"status"`
+}
+
+// TaskStatus 任务生命周期状态（词汇表「任务生命周期状态」）；页面主状态汇总，审批原始状态在审批单中
+type TaskStatus string
 
 // UpdateProjectMemberRoleRequest defines model for UpdateProjectMemberRoleRequest.
 type UpdateProjectMemberRoleRequest struct {
@@ -318,6 +477,12 @@ type UpdateProjectMemberRoleJSONRequestBody = UpdateProjectMemberRoleRequest
 // CreateOkrBatchJSONRequestBody defines body for CreateOkrBatch for application/json ContentType.
 type CreateOkrBatchJSONRequestBody = CreateOkrBatchRequest
 
+// CreateTaskBatchJSONRequestBody defines body for CreateTaskBatch for application/json ContentType.
+type CreateTaskBatchJSONRequestBody = CreateTaskBatchRequest
+
+// DecideTaskPoolReviewJSONRequestBody defines body for DecideTaskPoolReview for application/json ContentType.
+type DecideTaskPoolReviewJSONRequestBody = PoolReviewDecisionRequest
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// Login 登录，成功后通过 HttpOnly Cookie 建立会话
@@ -362,6 +527,18 @@ type ServerInterface interface {
 	// CreateOkrBatch 表格式批量创建 O／KR（仅项目管理员／项目负责人；整批一个事务，全部成功或全部失败）
 	// (POST /projects/{projectId}/objectives)
 	CreateOkrBatch(w http.ResponseWriter, r *http.Request, projectId int64)
+	// ListTasks 项目全部任务（含派生动作标志与最近一次入池审批单）
+	// (GET /projects/{projectId}/tasks)
+	ListTasks(w http.ResponseWriter, r *http.Request, projectId int64)
+	// CreateTaskBatch 表格式批量创建任务草稿（可选一并提交入池；KR 负责人本人创建免审直接进入未开始，AC-26）
+	// (POST /projects/{projectId}/tasks)
+	CreateTaskBatch(w http.ResponseWriter, r *http.Request, projectId int64)
+	// DecideTaskPoolReview 所属 KR 负责人通过或退回入池审批（AC-04；管理员不能替代 KR 负责人）
+	// (POST /projects/{projectId}/tasks/{taskId}/pool-review-decision)
+	DecideTaskPoolReview(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64)
+	// SubmitTaskPoolReview 将草稿任务提交所属 KR 负责人入池审批（AC-04；退回后可修改重新提交）
+	// (POST /projects/{projectId}/tasks/{taskId}/submit-pool-review)
+	SubmitTaskPoolReview(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64)
 	// ListUsers 全部用户（用于人员选择）
 	// (GET /users)
 	ListUsers(w http.ResponseWriter, r *http.Request)
@@ -686,6 +863,128 @@ func (siw *ServerInterfaceWrapper) CreateOkrBatch(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// ListTasks operation middleware
+func (siw *ServerInterfaceWrapper) ListTasks(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListTasks(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateTaskBatch operation middleware
+func (siw *ServerInterfaceWrapper) CreateTaskBatch(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateTaskBatch(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DecideTaskPoolReview operation middleware
+func (siw *ServerInterfaceWrapper) DecideTaskPoolReview(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "taskId" -------------
+	var taskId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "taskId", r.PathValue("taskId"), &taskId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "taskId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DecideTaskPoolReview(w, r, projectId, taskId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SubmitTaskPoolReview operation middleware
+func (siw *ServerInterfaceWrapper) SubmitTaskPoolReview(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "taskId" -------------
+	var taskId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "taskId", r.PathValue("taskId"), &taskId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "taskId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SubmitTaskPoolReview(w, r, projectId, taskId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListUsers operation middleware
 func (siw *ServerInterfaceWrapper) ListUsers(w http.ResponseWriter, r *http.Request) {
 
@@ -834,6 +1133,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/projects/{projectId}/members/{userId}", wrapper.UpdateProjectMemberRole)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}/objectives", wrapper.ListObjectives)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/objectives", wrapper.CreateOkrBatch)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}/tasks", wrapper.ListTasks)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/tasks", wrapper.CreateTaskBatch)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/submit-pool-review", wrapper.SubmitTaskPoolReview)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/pool-review-decision", wrapper.DecideTaskPoolReview)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/users", wrapper.ListUsers)
 
 	return m
@@ -844,61 +1147,78 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,
