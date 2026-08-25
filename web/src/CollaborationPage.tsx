@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Alert, Button, Spin } from "antd";
+import { Alert, Button, Select, Spin, Switch } from "antd";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import ProjectShell from "./ProjectShell";
@@ -9,22 +9,35 @@ type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
 type Objective = components["schemas"]["Objective"];
 type Task = components["schemas"]["Task"];
+type TaskDetail = components["schemas"]["TaskDetail"];
 type DeliverableEdge = components["schemas"]["DeliverableEdge"];
 type Blocker = components["schemas"]["Blocker"];
 type RiskLevel = components["schemas"]["RiskLevel"];
+type TaskStatus = components["schemas"]["TaskStatus"];
 
 const RISK_LABEL: Record<RiskLevel, string> = {
   normal: "正常",
   warning: "预警",
   high_risk: "高风险",
 };
+const STATUS_LABEL: Record<TaskStatus, string> = {
+  draft: "草稿",
+  pending_pool_review: "待入池审批",
+  not_started: "未开始",
+  waiting_input: "等待输入",
+  in_progress: "进行中",
+  pending_intermediate_review: "待中间审核",
+  pending_final_review: "待 KR 终审",
+  completed: "已完成",
+  cancelled: "已取消",
+};
 
-type Mode = { kind: "tree" } | { kind: "o"; objectiveId: number } | { kind: "kr"; krId: number };
+type Mode = { kind: "tree" } | { kind: "o"; objectiveId: number } | { kind: "kr"; krId: number } | { kind: "full" };
 
 type NodePos = { x: number; y: number; w: number; h: number };
 
-// 协作关系（AC-08）：默认 O／KR 层级树（层级连线不可点击、无 KR↔KR 汇总边），
-// 点击 O 聚焦下属 KR，点击 KR 下钻任务关系层（本 KR 任务 + 直接相连的其他 KR 任务 + 真实交付物边）。
+// 协作关系（AC-08/09/27）：O／KR 层级树 → KR 任务关系层 → 全局展开。
+// 全局展开保留 O/KR 分组骨架、真实交付物边（环形/多中心/跨层级不转树）、缩放与筛选淡化。
 export default function CollaborationPage({
   user,
   onLogout,
@@ -46,6 +59,12 @@ export default function CollaborationPage({
   const [mode, setMode] = useState<Mode>({ kind: "tree" });
   const [history, setHistory] = useState<Mode[]>([]);
   const [selectedTask, setSelectedTask] = useState<number | null>(null);
+  const [inspectorDetail, setInspectorDetail] = useState<TaskDetail | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [oFilter, setOFilter] = useState<number | "all">("all");
+  const [krFilter, setKrFilter] = useState<number | "all">("all");
+  const [personFilter, setPersonFilter] = useState<number | "all">("all");
+  const [showCompleted, setShowCompleted] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -77,6 +96,25 @@ export default function CollaborationPage({
     load();
   }, [load]);
 
+  // 选中任务 → 右侧详情（AC-27）。
+  useEffect(() => {
+    if (selectedTask == null) {
+      setInspectorDetail(null);
+      return;
+    }
+    let alive = true;
+    client
+      .GET("/projects/{projectId}/tasks/{taskId}", {
+        params: { path: { projectId, taskId: selectedTask } },
+      })
+      .then((res) => {
+        if (alive && res.data) setInspectorDetail(res.data);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [projectId, selectedTask]);
+
   const krList = useMemo(() => {
     let seq = 0;
     return objectives.flatMap((o) =>
@@ -84,6 +122,7 @@ export default function CollaborationPage({
     );
   }, [objectives]);
   const krById = useMemo(() => new Map(krList.map((k) => [k.id, k])), [krList]);
+  const taskById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
 
   const enter = (next: Mode) => {
     setHistory((h) => [...h, mode]);
@@ -101,7 +140,7 @@ export default function CollaborationPage({
 
   const openBlockers = blockers.filter((b) => b.state === "open");
 
-  // —— O／KR 层级树布局（含 O 聚焦模式）——
+  // —— O／KR 层级树布局 ——
   const tree = useMemo(() => {
     const nodes: { key: string; kind: "o" | "kr"; id: number; pos: NodePos; dimmed: boolean }[] = [];
     const lines: { x1: number; y1: number; x2: number; y2: number; dimmed: boolean }[] = [];
@@ -122,13 +161,7 @@ export default function CollaborationPage({
       krs.forEach((k, i) => {
         const kY = y + i * (krH + 18);
         nodes.push({ key: `kr-${k.id}`, kind: "kr", id: k.id, pos: { x: krX, y: kY, w: krW, h: krH }, dimmed });
-        lines.push({
-          x1: oX + oW,
-          y1: oY + oH / 2,
-          x2: krX,
-          y2: kY + krH / 2,
-          dimmed,
-        });
+        lines.push({ x1: oX + oW, y1: oY + oH / 2, x2: krX, y2: kY + krH / 2, dimmed });
       });
       y += blockHeight + 34;
     }
@@ -142,10 +175,8 @@ export default function CollaborationPage({
     if (!kr) return null;
     const inKr = tasks.filter((t) => t.keyResultId === mode.krId);
     const inKrIds = new Set(inKr.map((t) => t.id));
-    // 直接相连的其他 KR 任务（真实交付物边）。
     const relevantEdges = edges.filter(
-      (e) =>
-        (e.sourceTaskId != null && inKrIds.has(e.sourceTaskId)) || inKrIds.has(e.targetTaskId),
+      (e) => (e.sourceTaskId != null && inKrIds.has(e.sourceTaskId)) || inKrIds.has(e.targetTaskId),
     );
     const neighborIds = new Set<number>();
     for (const e of relevantEdges) {
@@ -157,28 +188,96 @@ export default function CollaborationPage({
     const nodeH = 66;
     const gap = 16;
     const positions = new Map<number, NodePos>();
-    inKr.forEach((t, i) => {
-      positions.set(t.id, { x: 360, y: 24 + i * (nodeH + gap), w: nodeW, h: nodeH });
-    });
-    neighbors.forEach((t, i) => {
-      positions.set(t.id, { x: 40, y: 24 + i * (nodeH + gap), w: nodeW, h: nodeH });
-    });
-    const height = Math.max(inKr.length, neighbors.length) * (nodeH + gap) + 60;
-    // 成员来源节点（#14 输入请求）。
-    const memberNodes: { key: string; label: string; pos: NodePos; edgeId: number }[] = [];
-    relevantEdges.forEach((e, i) => {
+    inKr.forEach((t, i) => positions.set(t.id, { x: 360, y: 24 + i * (nodeH + gap), w: nodeW, h: nodeH }));
+    neighbors.forEach((t, i) => positions.set(t.id, { x: 40, y: 24 + i * (nodeH + gap), w: nodeW, h: nodeH }));
+    let height = Math.max(inKr.length, neighbors.length) * (nodeH + gap) + 60;
+    const memberNodes: { edgeId: number; label: string }[] = [];
+    relevantEdges.forEach((e) => {
       if (e.sourceTaskId == null && e.inputRequest) {
-        memberNodes.push({
-          key: `m-${e.id}`,
-          label: e.inputRequest.providerName,
-          pos: { x: 40, y: height - 40 + i * 0, w: 180, h: 44 },
-          edgeId: e.id,
-        });
-        positions.set(-e.id, { x: 40, y: height - 40, w: 180, h: 44 });
+        positions.set(-e.id, { x: 40, y: height, w: 180, h: 44 });
+        memberNodes.push({ edgeId: e.id, label: e.inputRequest.providerName });
+        height += 56;
       }
     });
-    return { kr, inKr, neighbors, relevantEdges, positions, memberNodes, height: height + 60 };
+    return { kr, inKr, neighbors, relevantEdges, positions, memberNodes, height: height + 40 };
   }, [mode, krById, tasks, edges]);
+
+  // —— 全局展开布局（AC-09）：O/KR 分组骨架 + 全部任务 + 关系相关项目成员 ——
+  const full = useMemo(() => {
+    if (mode.kind !== "full") return null;
+    const visibleTasks = tasks.filter(
+      (t) => t.status !== "cancelled" && (showCompleted || t.status !== "completed"),
+    );
+    const visibleIds = new Set(visibleTasks.map((t) => t.id));
+    const nodeW = 240;
+    const nodeH = 62;
+    const positions = new Map<number, NodePos>();
+    const groups: { key: string; label: string; pos: NodePos; isO: boolean }[] = [];
+    let y = 16;
+    const groupX = 24;
+    const groupW = 2 * (nodeW + 14) + 28;
+    for (const o of objectives) {
+      groups.push({ key: `o-${o.id}`, label: o.title, pos: { x: groupX, y, w: groupW, h: 30 }, isO: true });
+      y += 38;
+      for (const k of krList.filter((k) => k.objectiveId === o.id)) {
+        const krTasks = visibleTasks.filter((t) => t.keyResultId === k.id);
+        const rows = Math.max(1, Math.ceil(krTasks.length / 2));
+        const boxH = rows * (nodeH + 12) + 40;
+        groups.push({ key: `kr-${k.id}`, label: `${k.code} ${k.description}`, pos: { x: groupX, y, w: groupW, h: boxH }, isO: false });
+        krTasks.forEach((t, i) => {
+          const cx = groupX + 14 + (i % 2) * (nodeW + 14);
+          const cy = y + 32 + Math.floor(i / 2) * (nodeH + 12);
+          positions.set(t.id, { x: cx, y: cy, w: nodeW, h: nodeH });
+        });
+        y += boxH + 14;
+      }
+      y += 10;
+    }
+    // 关系相关项目成员节点（词汇表）：承担输入责任的成员。
+    const memberEdges = edges.filter((e) => e.sourceTaskId == null && e.inputRequest && visibleIds.has(e.targetTaskId));
+    const memberByProvider = new Map<number, { name: string; edgeIds: number[] }>();
+    for (const e of memberEdges) {
+      const pid = e.inputRequest!.providerId;
+      const entry = memberByProvider.get(pid) ?? { name: e.inputRequest!.providerName, edgeIds: [] };
+      entry.edgeIds.push(e.id);
+      memberByProvider.set(pid, entry);
+    }
+    const memberNodes: { providerId: number; name: string; pos: NodePos; edgeIds: number[] }[] = [];
+    let mi = 0;
+    for (const [pid, entry] of memberByProvider) {
+      const pos = { x: groupX + 14 + (mi % 2) * (nodeW + 14), y: y + 8 + Math.floor(mi / 2) * 56, w: 200, h: 44 };
+      memberNodes.push({ providerId: pid, name: entry.name, pos, edgeIds: entry.edgeIds });
+      for (const eid of entry.edgeIds) positions.set(-eid, pos);
+      mi++;
+    }
+    if (memberNodes.length > 0) y += Math.ceil(memberNodes.length / 2) * 56 + 24;
+    const visibleEdges = edges.filter((e) => {
+      const targetOK = visibleIds.has(e.targetTaskId);
+      const sourceOK = e.sourceTaskId != null ? visibleIds.has(e.sourceTaskId) : positions.has(-e.id);
+      return targetOK && sourceOK;
+    });
+    return { visibleTasks, positions, groups, memberNodes, visibleEdges, height: y + 30, width: groupX + groupW + 40 };
+  }, [mode, tasks, edges, objectives, krList, showCompleted]);
+
+  // 筛选淡化（AC-09；细化 AC-45 随 #20）：O/KR/人员不匹配 → 淡化保留上下文。
+  const taskMatchesFilter = (t: Task) => {
+    if (krFilter !== "all" && t.keyResultId !== krFilter) return false;
+    if (oFilter !== "all" && krById.get(t.keyResultId)?.objectiveId !== oFilter) return false;
+    if (personFilter !== "all" && t.ownerId !== personFilter) return false;
+    return true;
+  };
+  const hasFilter = oFilter !== "all" || krFilter !== "all" || personFilter !== "all";
+
+  // 选中聚焦：一层邻居强化，其余降噪（AC-27）。
+  const neighborIds = useMemo(() => {
+    if (selectedTask == null) return null;
+    const set = new Set<number>([selectedTask]);
+    for (const e of edges) {
+      if (e.sourceTaskId === selectedTask) set.add(e.targetTaskId);
+      if (e.targetTaskId === selectedTask && e.sourceTaskId != null) set.add(e.sourceTaskId);
+    }
+    return set;
+  }, [selectedTask, edges]);
 
   const edgePath = (from: NodePos, to: NodePos) => {
     const x1 = from.x + from.w;
@@ -189,31 +288,130 @@ export default function CollaborationPage({
     return `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
   };
 
+  const edgeStroke = (e: DeliverableEdge) => {
+    const interlock = !!e.interlockRisk;
+    const feedback = e.edgeType === "feedback";
+    const hard = e.edgeType === "hard_prerequisite";
+    return {
+      stroke: interlock ? "#c44752" : feedback ? "#5a62c9" : hard ? "#436d84" : "#8ea3b0",
+      width: e.onCriticalPath ? 3.2 : hard ? 2.4 : 1.6,
+      dash: interlock ? "5 3" : feedback ? "4 4" : undefined,
+    };
+  };
+
+  const taskNode = (t: Task, pos: NodePos) => {
+    const taskBlockers = openBlockers.filter((b) => b.taskId === t.id);
+    const risk = taskBlockers.some((b) => b.level === "high_risk")
+      ? "high_risk"
+      : taskBlockers.length > 0
+        ? "warning"
+        : "";
+    const dimByFilter = hasFilter && !taskMatchesFilter(t);
+    const dimBySelect = neighborIds != null && !neighborIds.has(t.id);
+    return (
+      <div
+        key={t.id}
+        className={`gnode ${risk ? `risk-${risk}` : ""} ${selectedTask === t.id ? "selected" : ""} ${
+          dimByFilter || dimBySelect ? "dimmed" : ""
+        }`}
+        style={{ left: pos.x, top: pos.y, width: pos.w, height: pos.h }}
+        onClick={() => setSelectedTask((prev) => (prev === t.id ? null : t.id))}
+        onDoubleClick={() => navigate(`/projects/${projectId}/tasks?task=${t.id}&tab=overview`)}
+      >
+        <b>{t.name}</b>
+        <small>
+          {krById.get(t.keyResultId)?.code} · {t.ownerName} · {STATUS_LABEL[t.status]}
+          {taskBlockers.length > 0 && ` · ${taskBlockers.length} 个卡点`}
+        </small>
+      </div>
+    );
+  };
+
+  const inspector = selectedTask != null && inspectorDetail && (
+    <aside
+      style={{
+        position: "absolute",
+        right: 0,
+        top: 0,
+        bottom: 0,
+        width: 300,
+        background: "#fff",
+        borderLeft: "1px solid var(--line)",
+        overflow: "auto",
+        padding: 14,
+        zIndex: 5,
+      }}
+    >
+      <b style={{ fontSize: 14 }}>{inspectorDetail.task.name}</b>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+        所属：{inspectorDetail.objectiveTitle} / {inspectorDetail.krDescription}
+      </div>
+      <div style={{ fontSize: 13, display: "grid", gap: 6 }}>
+        <div>负责人：{inspectorDetail.task.ownerName}</div>
+        <div>
+          状态：<span className="status-pill">{STATUS_LABEL[inspectorDetail.task.status]}</span>
+          {inspectorDetail.task.progress != null && ` · ${inspectorDetail.task.progress}%`}
+        </div>
+        <div>
+          输入 {inspectorDetail.inputs.length} 条 / 输出 {inspectorDetail.outputs.length} 条
+        </div>
+        {inspectorDetail.inputs.map((e) => (
+          <div key={e.id} className="muted" style={{ fontSize: 12 }}>
+            ← {e.sourceTaskName ?? e.inputRequest?.providerName} · {e.name} ·{" "}
+            {e.ready ? "已就绪" : "未就绪"}
+          </div>
+        ))}
+        {inspectorDetail.outputs.map((e) => (
+          <div key={e.id} className="muted" style={{ fontSize: 12 }}>
+            → {e.targetTaskName} · {e.name}
+          </div>
+        ))}
+        {inspectorDetail.blockers.filter((b) => b.state === "open").length > 0 && (
+          <div style={{ color: "var(--red)", fontSize: 12 }}>
+            卡点：
+            {inspectorDetail.blockers
+              .filter((b) => b.state === "open")
+              .map((b) => `缺 ${b.missing}`)
+              .join("；")}
+          </div>
+        )}
+        <div>
+          当前交付物：
+          {inspectorDetail.deliverables.filter((d) => d.current).length === 0
+            ? "无"
+            : inspectorDetail.deliverables
+                .filter((d) => d.current)
+                .map((d) => d.current!.fileName)
+                .join("、")}
+        </div>
+        <Button
+          size="small"
+          onClick={() => navigate(`/projects/${projectId}/tasks?task=${selectedTask}&tab=overview`)}
+        >
+          打开任务详情
+        </Button>
+      </div>
+    </aside>
+  );
+
   const krNodeContent = (krId: number) => {
     const k = krById.get(krId);
     if (!k) return null;
-    const taskCount = k.progressSummary?.totalTasks ?? 0;
-    const blockerCount = k.openBlockerCount ?? 0;
     return (
       <>
         <b>
           {k.code} {k.description}
         </b>
         <small>
-          {taskCount} 项任务 · {blockerCount} 个卡点 · {RISK_LABEL[k.riskLevel]}
+          {k.progressSummary?.totalTasks ?? 0} 项任务 · {k.openBlockerCount ?? 0} 个卡点 ·{" "}
+          {RISK_LABEL[k.riskLevel]}
         </small>
       </>
     );
   };
 
   return (
-    <ProjectShell
-      user={user}
-      project={project}
-      projectId={projectId}
-      pageLabel="协作关系"
-      onLogout={onLogout}
-    >
+    <ProjectShell user={user} project={project} projectId={projectId} pageLabel="协作关系" onLogout={onLogout}>
       {notFound ? (
         <Alert type="error" message="项目不存在" description={<Link to="/">返回项目列表</Link>} />
       ) : loading || !project ? (
@@ -229,57 +427,115 @@ export default function CollaborationPage({
               <Button disabled={history.length === 0} onClick={back}>
                 ← 返回上一级
               </Button>
+              {mode.kind !== "full" ? (
+                <Button type="primary" onClick={() => enter({ kind: "full" })}>
+                  全局展开
+                </Button>
+              ) : (
+                <Button onClick={() => { setMode({ kind: "tree" }); setHistory([]); setSelectedTask(null); }}>
+                  返回层级视图
+                </Button>
+              )}
             </div>
           </div>
-          <div className="graph-layout">
-            <aside className="risk-queue">
-              <div className="risk-queue-head">风险队列</div>
-              {krList.filter((k) => k.riskLevel !== "normal").length === 0 &&
-                openBlockers.length === 0 && (
+          {mode.kind === "full" && (
+            <div className="toolbar">
+              <div className="toolbar-group">
+                <Select
+                  size="small"
+                  style={{ width: 150 }}
+                  value={oFilter}
+                  onChange={setOFilter}
+                  options={[
+                    { value: "all" as const, label: "全部 O" },
+                    ...objectives.map((o) => ({ value: o.id, label: o.title })),
+                  ]}
+                />
+                <Select
+                  size="small"
+                  style={{ width: 140 }}
+                  value={krFilter}
+                  onChange={setKrFilter}
+                  options={[
+                    { value: "all" as const, label: "全部 KR" },
+                    ...krList.map((k) => ({ value: k.id, label: k.code })),
+                  ]}
+                />
+                <Select
+                  size="small"
+                  style={{ width: 150 }}
+                  value={personFilter}
+                  onChange={setPersonFilter}
+                  options={[
+                    { value: "all" as const, label: "全部人员" },
+                    ...[...new Map(tasks.map((t) => [t.ownerId, t.ownerName])).entries()].map(
+                      ([id, name]) => ({ value: id, label: name }),
+                    ),
+                  ]}
+                />
+                <span className="muted" style={{ fontSize: 12 }}>
+                  显示已完成 <Switch size="small" checked={showCompleted} onChange={setShowCompleted} />
+                </span>
+              </div>
+              <div className="toolbar-group">
+                <Button size="small" onClick={() => setZoom((z) => Math.max(0.4, z - 0.15))}>
+                  −
+                </Button>
+                <span className="muted" style={{ fontSize: 12 }}>{Math.round(zoom * 100)}%</span>
+                <Button size="small" onClick={() => setZoom((z) => Math.min(1.6, z + 0.15))}>
+                  ＋
+                </Button>
+                <Button size="small" onClick={() => setZoom(1)}>
+                  适应
+                </Button>
+              </div>
+            </div>
+          )}
+          <div className="graph-layout" style={mode.kind === "full" ? { gridTemplateColumns: "minmax(0,1fr)" } : {}}>
+            {mode.kind !== "full" && (
+              <aside className="risk-queue">
+                <div className="risk-queue-head">风险队列</div>
+                {krList.filter((k) => k.riskLevel !== "normal").length === 0 && openBlockers.length === 0 && (
                   <div className="muted" style={{ padding: 16, fontSize: 12 }}>
                     暂无需要关注的风险
                   </div>
                 )}
-              {krList
-                .filter((k) => k.riskLevel !== "normal")
-                .map((k) => (
-                  <button
-                    key={`rk-${k.id}`}
-                    type="button"
-                    className="risk-queue-item"
-                    onClick={() => enter({ kind: "kr", krId: k.id })}
-                  >
-                    <b>
-                      {k.code} · {RISK_LABEL[k.riskLevel]}
-                    </b>
-                    <small>{k.riskNote ?? k.description}</small>
-                  </button>
-                ))}
-              {openBlockers.map((b) => {
-                const task = tasks.find((t) => t.id === b.taskId);
-                const krId = task?.keyResultId;
-                return (
-                  <button
-                    key={`rb-${b.id}`}
-                    type="button"
-                    className="risk-queue-item"
-                    onClick={() => {
-                      if (krId) {
-                        enter({ kind: "kr", krId });
-                        setSelectedTask(b.taskId);
-                      }
-                    }}
-                  >
-                    <b>{b.level === "high_risk" ? "高风险卡点" : "预警卡点"}</b>
-                    <small>
-                      {task?.name ?? ""}：缺 {b.missing}
-                    </small>
-                  </button>
-                );
-              })}
-            </aside>
-            <div className="graph-shell">
-              {mode.kind !== "kr" ? (
+                {krList
+                  .filter((k) => k.riskLevel !== "normal")
+                  .map((k) => (
+                    <button key={`rk-${k.id}`} type="button" className="risk-queue-item" onClick={() => enter({ kind: "kr", krId: k.id })}>
+                      <b>
+                        {k.code} · {RISK_LABEL[k.riskLevel]}
+                      </b>
+                      <small>{k.riskNote ?? k.description}</small>
+                    </button>
+                  ))}
+                {openBlockers.map((b) => {
+                  const krId = taskById.get(b.taskId)?.keyResultId;
+                  return (
+                    <button
+                      key={`rb-${b.id}`}
+                      type="button"
+                      className="risk-queue-item"
+                      onClick={() => {
+                        if (krId) {
+                          enter({ kind: "kr", krId });
+                          setSelectedTask(b.taskId);
+                        }
+                      }}
+                    >
+                      <b>{b.level === "high_risk" ? "高风险卡点" : "预警卡点"}</b>
+                      <small>
+                        {taskById.get(b.taskId)?.name ?? ""}：缺 {b.missing}
+                      </small>
+                    </button>
+                  );
+                })}
+              </aside>
+            )}
+            <div className="graph-shell" style={{ position: "relative" }}>
+              {mode.kind === "full" && inspector}
+              {mode.kind === "tree" || mode.kind === "o" ? (
                 <div className="graph-canvas-inner" style={{ height: tree.height, minWidth: 700 }}>
                   <div className="graph-note">
                     默认只显示 O、KR 与层级连线（不可点击）；点击 O 聚焦下属 KR，点击 KR 进入任务关系层
@@ -305,17 +561,13 @@ export default function CollaborationPage({
                         onClick={() => enter({ kind: "o", objectiveId: n.id })}
                       >
                         <b>{objectives.find((o) => o.id === n.id)?.title}</b>
-                        <small>
-                          {krList.filter((k) => k.objectiveId === n.id).length} 个 KR
-                        </small>
+                        <small>{krList.filter((k) => k.objectiveId === n.id).length} 个 KR</small>
                       </div>
                     ) : (
                       <div
                         key={n.key}
                         className={`gnode ${n.dimmed ? "dimmed" : ""} ${
-                          krById.get(n.id)?.riskLevel !== "normal"
-                            ? `risk-${krById.get(n.id)?.riskLevel}`
-                            : ""
+                          krById.get(n.id)?.riskLevel !== "normal" ? `risk-${krById.get(n.id)?.riskLevel}` : ""
                         }`}
                         style={{ left: n.pos.x, top: n.pos.y, width: n.pos.w, height: n.pos.h }}
                         onClick={() => enter({ kind: "kr", krId: n.id })}
@@ -325,88 +577,135 @@ export default function CollaborationPage({
                     ),
                   )}
                 </div>
-              ) : krLayer ? (
-                <div
-                  className="graph-canvas-inner"
-                  style={{ height: krLayer.height, minWidth: 700 }}
-                >
+              ) : mode.kind === "kr" && krLayer ? (
+                <div className="graph-canvas-inner" style={{ height: krLayer.height, minWidth: 700 }}>
                   <div className="graph-note">
-                    {krLayer.kr.code} 任务关系层：硬前置加粗、关键路径最粗、互锁风险红色虚线、反馈紫色虚线；环形与双向关系保留真实连线
+                    {krLayer.kr.code} 任务关系层：硬前置加粗、关键路径最粗、互锁红色虚线、反馈紫色虚线
                   </div>
                   <svg className="graph-svg" width="700" height={krLayer.height}>
                     {krLayer.relevantEdges.map((e) => {
                       const from =
-                        e.sourceTaskId != null
-                          ? krLayer.positions.get(e.sourceTaskId)
-                          : krLayer.positions.get(-e.id);
+                        e.sourceTaskId != null ? krLayer.positions.get(e.sourceTaskId) : krLayer.positions.get(-e.id);
                       const to = krLayer.positions.get(e.targetTaskId);
                       if (!from || !to) return null;
-                      const hard = e.edgeType === "hard_prerequisite";
-                      const feedback = e.edgeType === "feedback";
-                      const interlock = !!e.interlockRisk;
-                      const critical = !!e.onCriticalPath;
+                      const st = edgeStroke(e);
                       return (
-                        <path
-                          key={e.id}
-                          d={edgePath(from, to)}
-                          fill="none"
-                          stroke={
-                            interlock ? "#c44752" : feedback ? "#5a62c9" : hard ? "#436d84" : "#8ea3b0"
-                          }
-                          strokeWidth={critical ? 3.2 : hard ? 2.4 : 1.6}
-                          strokeDasharray={interlock ? "5 3" : feedback ? "4 4" : undefined}
-                        />
+                        <path key={e.id} d={edgePath(from, to)} fill="none" stroke={st.stroke} strokeWidth={st.width} strokeDasharray={st.dash} />
                       );
                     })}
                   </svg>
                   {[...krLayer.inKr, ...krLayer.neighbors].map((t) => {
                     const pos = krLayer.positions.get(t.id);
-                    if (!pos) return null;
-                    const taskBlockers = openBlockers.filter((b) => b.taskId === t.id);
-                    const risk =
-                      taskBlockers.some((b) => b.level === "high_risk")
-                        ? "high_risk"
-                        : taskBlockers.length > 0
-                          ? "warning"
-                          : "";
-                    return (
-                      <div
-                        key={t.id}
-                        className={`gnode ${risk ? `risk-${risk}` : ""} ${
-                          selectedTask === t.id ? "selected" : ""
-                        }`}
-                        style={{ left: pos.x, top: pos.y, width: pos.w, height: pos.h }}
-                        onClick={() =>
-                          setSelectedTask((prev) => (prev === t.id ? null : t.id))
-                        }
-                        onDoubleClick={() =>
-                          navigate(`/projects/${projectId}/tasks?task=${t.id}&tab=overview`)
-                        }
-                      >
-                        <b>{t.name}</b>
-                        <small>
-                          {krById.get(t.keyResultId)?.code} · {t.ownerName} ·{" "}
-                          {t.status === "completed" ? "已完成" : t.currentStage}
-                          {taskBlockers.length > 0 && ` · ${taskBlockers.length} 个卡点`}
-                        </small>
-                      </div>
-                    );
+                    return pos ? taskNode(t, pos) : null;
                   })}
-                  {krLayer.memberNodes.map((m) => (
-                    <div
-                      key={m.key}
-                      className="gnode gnode-member"
-                      style={{
-                        left: krLayer.positions.get(-m.edgeId)?.x,
-                        top: krLayer.positions.get(-m.edgeId)?.y,
-                        width: 180,
-                        height: 44,
-                      }}
-                    >
-                      <b>{m.label}</b>
-                      <small>输入提供成员</small>
-                    </div>
-                  ))}
+                  {krLayer.memberNodes.map((m) => {
+                    const pos = krLayer.positions.get(-m.edgeId);
+                    return pos ? (
+                      <div key={`m-${m.edgeId}`} className="gnode gnode-member" style={{ left: pos.x, top: pos.y, width: pos.w, height: pos.h }}>
+                        <b>{m.label}</b>
+                        <small>输入提供成员</small>
+                      </div>
+                    ) : null;
+                  })}
+                </div>
+              ) : mode.kind === "full" && full ? (
+                <div
+                  className="graph-canvas-inner"
+                  style={{
+                    height: full.height * zoom,
+                    width: full.width * zoom,
+                    minWidth: 400,
+                  }}
+                >
+                  <div
+                    style={{
+                      transform: `scale(${zoom})`,
+                      transformOrigin: "top left",
+                      position: "relative",
+                      width: full.width,
+                      height: full.height,
+                    }}
+                  >
+                    <svg className="graph-svg" width={full.width} height={full.height}>
+                      {full.visibleEdges.map((e) => {
+                        const from = e.sourceTaskId != null ? full.positions.get(e.sourceTaskId) : full.positions.get(-e.id);
+                        const to = full.positions.get(e.targetTaskId);
+                        if (!from || !to) return null;
+                        const st = edgeStroke(e);
+                        const dim =
+                          (neighborIds != null &&
+                            !(
+                              (e.sourceTaskId != null && neighborIds.has(e.sourceTaskId) && neighborIds.has(e.targetTaskId)) ||
+                              e.sourceTaskId === selectedTask ||
+                              e.targetTaskId === selectedTask
+                            )) ||
+                          (hasFilter &&
+                            !(
+                              (e.sourceTaskId != null && taskMatchesFilter(taskById.get(e.sourceTaskId)!)) ||
+                              taskMatchesFilter(taskById.get(e.targetTaskId)!)
+                            ));
+                        return (
+                          <path
+                            key={e.id}
+                            d={edgePath(from, to)}
+                            fill="none"
+                            stroke={st.stroke}
+                            strokeWidth={st.width}
+                            strokeDasharray={st.dash}
+                            opacity={dim ? 0.15 : 1}
+                          />
+                        );
+                      })}
+                    </svg>
+                    {full.groups.map((g) =>
+                      g.isO ? (
+                        <div
+                          key={g.key}
+                          style={{
+                            position: "absolute",
+                            left: g.pos.x,
+                            top: g.pos.y,
+                            width: g.pos.w,
+                            fontWeight: 700,
+                            color: "var(--navy)",
+                            fontSize: 14,
+                          }}
+                        >
+                          {g.label}
+                        </div>
+                      ) : (
+                        <div
+                          key={g.key}
+                          style={{
+                            position: "absolute",
+                            left: g.pos.x,
+                            top: g.pos.y,
+                            width: g.pos.w,
+                            height: g.pos.h,
+                            border: "1px dashed #c3cdd8",
+                            borderRadius: 10,
+                            background: "rgba(255,255,255,0.35)",
+                          }}
+                        >
+                          <div className="muted" style={{ fontSize: 12, padding: "6px 10px" }}>{g.label}</div>
+                        </div>
+                      ),
+                    )}
+                    {full.visibleTasks.map((t) => {
+                      const pos = full.positions.get(t.id);
+                      return pos ? taskNode(t, pos) : null;
+                    })}
+                    {full.memberNodes.map((m) => (
+                      <div
+                        key={`fm-${m.providerId}`}
+                        className="gnode gnode-member"
+                        style={{ left: m.pos.x, top: m.pos.y, width: m.pos.w, height: m.pos.h }}
+                      >
+                        <b>{m.name}</b>
+                        <small>关系相关项目成员</small>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ) : null}
             </div>
