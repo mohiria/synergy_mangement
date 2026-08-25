@@ -1515,6 +1515,127 @@ func TestDeliverablesAndFiles(t *testing.T) {
 	resp.Body.Close()
 }
 
+// 任务讨论与定向通知（#9，AC-35/AC-36）：只读成员可提交意见并 @ 成员；
+// 意见不可改删（无端点）；通知只发任务负责人与被 @ 成员并可直达讨论 Tab。
+func TestDiscussionsAndNotifications(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
+	daveUser := seedUser(t, q, "dave", "赵六", "dave-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, bob, carol, dave := newClient(t), newClient(t), newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(bob, "bob", "bob-pass")
+	login(carol, "carol", "carol-pass")
+	login(dave, "dave", "dave-pass")
+
+	sp := func(s string) *string { return &s }
+
+	// alice 建项目；bob 成员并任 KR 负责人与任务负责人；carol 只读成员；dave 非成员
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "讨论试点", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+		api.AddProjectMemberRequest{UserId: bobUser.ID, Role: api.Member})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+		api.AddProjectMemberRequest{UserId: carolUser.ID, Role: api.Viewer})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	okr := decodeBody[[]api.Objective](t, resp)
+	kr1 := okr[0].KeyResults[0].Id
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	tasks := decodeBody[[]api.Task](t, resp)
+	taskID := tasks[0].Id
+	discussURL := fmt.Sprintf("%s/%d/discussions", tasksURL, taskID)
+
+	// AC-35：只读成员 carol 提交意见并 @ alice
+	resp = doJSON(t, carol, http.MethodPost, discussURL,
+		api.CreateDiscussionRequest{Content: "建议补充断链回退场景。", MentionUserIds: &[]int64{aliceUser.ID}})
+	wantStatus(t, resp, http.StatusCreated)
+	d := decodeBody[api.Discussion](t, resp)
+	if d.AuthorName != "王五" || d.MentionNames == nil || (*d.MentionNames)[0] != "张三" {
+		t.Fatalf("讨论意见异常: %+v", d)
+	}
+
+	// 非项目成员 dave 403
+	resp = doJSON(t, dave, http.MethodPost, discussURL, api.CreateDiscussionRequest{Content: "外部插话"})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+
+	// 空内容 422；@ 非成员 422
+	resp = doJSON(t, carol, http.MethodPost, discussURL, api.CreateDiscussionRequest{Content: "  "})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodPost, discussURL,
+		api.CreateDiscussionRequest{Content: "x", MentionUserIds: &[]int64{daveUser.ID}})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+
+	// AC-36：通知只发任务负责人 bob 与被 @ 的 alice，携带 taskId 可直达讨论 Tab
+	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
+	wantStatus(t, resp, http.StatusOK)
+	bobNotes := decodeBody[[]api.Notification](t, resp)
+	if len(bobNotes) != 1 || bobNotes[0].Kind != "discussion_owner" || bobNotes[0].TaskId == nil || *bobNotes[0].TaskId != taskID {
+		t.Fatalf("负责人通知异常: %+v", bobNotes)
+	}
+	resp = doJSON(t, alice, http.MethodGet, base+"/notifications", nil)
+	wantStatus(t, resp, http.StatusOK)
+	aliceNotes := decodeBody[[]api.Notification](t, resp)
+	if len(aliceNotes) != 1 || aliceNotes[0].Kind != "discussion_mention" {
+		t.Fatalf("被 @ 通知异常: %+v", aliceNotes)
+	}
+	resp = doJSON(t, carol, http.MethodGet, base+"/notifications", nil)
+	wantStatus(t, resp, http.StatusOK)
+	if got := decodeBody[[]api.Notification](t, resp); len(got) != 0 {
+		t.Fatalf("作者不应收到通知: %+v", got)
+	}
+
+	// 详情讨论 Tab 数据；已提交意见无编辑/删除路径（契约不存在对应端点）
+	resp = doJSON(t, dave, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail := decodeBody[api.TaskDetail](t, resp)
+	if len(detail.Discussions) != 1 || detail.Discussions[0].Content != "建议补充断链回退场景。" {
+		t.Fatalf("详情讨论异常: %+v", detail.Discussions)
+	}
+
+	// 已读标记
+	resp = doJSON(t, bob, http.MethodPost, base+"/notifications/read-all", nil)
+	wantStatus(t, resp, http.StatusNoContent)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
+	wantStatus(t, resp, http.StatusOK)
+	bobNotes = decodeBody[[]api.Notification](t, resp)
+	if bobNotes[0].ReadAt == nil {
+		t.Fatalf("通知未标记已读: %+v", bobNotes[0])
+	}
+}
+
 func TestLoginRateLimit(t *testing.T) {
 	_, pool := setupDB(t)
 

@@ -412,6 +412,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/tasks/{taskId}/discussions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 提交任务讨论意见（全体项目成员含只读；提交后不可编辑或删除；通知任务负责人与被 @ 成员） */
+        post: operations["createDiscussion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 当前用户的站内通知（最新在前） */
+        get: operations["listNotifications"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/read-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 将当前用户全部通知标记为已读 */
+        post: operations["markAllNotificationsRead"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/task-invites": {
         parameters: {
             query?: never;
@@ -737,6 +791,8 @@ export interface components {
             fieldChanges: components["schemas"]["FieldChange"][];
             /** @description 交付物项列表（含当前内容与候选审核提示，AC-32／AC-33） */
             deliverables: components["schemas"]["Deliverable"][];
+            /** @description 任务讨论意见，按时间正序（AC-35／AC-36） */
+            discussions: components["schemas"]["Discussion"][];
         };
         /** @enum {string} */
         FieldChangeState: "pending" | "approved" | "rejected";
@@ -846,6 +902,42 @@ export interface components {
         DownloadUrlResponse: {
             /** @description MinIO 预签名 GET 地址（预览/下载） */
             url: string;
+        };
+        /** @description 任务讨论意见（词汇表「任务讨论」）；提交后不可编辑或删除 */
+        Discussion: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            taskId: number;
+            /** Format: int64 */
+            authorId: number;
+            authorName: string;
+            content: string;
+            /** @description 被 @ 成员姓名（派生字段） */
+            mentionNames?: string[];
+            /** Format: date-time */
+            createdAt: string;
+        };
+        CreateDiscussionRequest: {
+            content: string;
+            /** @description 被 @ 的项目成员 */
+            mentionUserIds?: number[];
+        };
+        /** @description 站内通知（词汇表「站内通知」） */
+        Notification: {
+            /** Format: int64 */
+            id: number;
+            /** @description 通知类型（discussion_mention／discussion_owner 等） */
+            kind: string;
+            content: string;
+            /** Format: int64 */
+            projectId?: number;
+            /** Format: int64 */
+            taskId?: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            readAt?: string;
         };
         /**
          * @description 任务创建邀请状态（词汇表「任务创建邀请」）
@@ -1732,6 +1824,77 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    createDiscussion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateDiscussionRequest"];
+            };
+        };
+        responses: {
+            /** @description 已提交 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Discussion"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    listNotifications: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 通知列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Notification"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    markAllNotificationsRead: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已标记 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
         };
     };
     listTaskInvites: {

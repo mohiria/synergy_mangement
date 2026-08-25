@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
   Alert,
   Button,
@@ -7,6 +7,7 @@ import {
   Drawer,
   Input,
   InputNumber,
+  Mentions,
   Modal,
   Select,
   Spin,
@@ -108,6 +109,17 @@ export default function ProjectTasksPage({
   useEffect(() => {
     load();
   }, [load]);
+
+  // 站内通知直达：/projects/:id/tasks?task=<id>&tab=discussion
+  const [searchParams, setSearchParams] = useSearchParams();
+  const focusTaskId = searchParams.get("task");
+  const focusTab = searchParams.get("tab") ?? "overview";
+  useEffect(() => {
+    if (focusTaskId && !loading) {
+      setDrawerTaskId(Number(focusTaskId));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusTaskId, loading]);
 
   // KR 展示编号沿全项目顺序派生（与 OKR 页一致），任务编号按 id 顺序派生 T1…。
   const krList = useMemo(() => {
@@ -528,7 +540,12 @@ export default function ProjectTasksPage({
         projectId={projectId}
         task={tasks.find((t) => t.id === drawerTaskId) ?? null}
         code={drawerTaskId != null ? taskCode.get(drawerTaskId) : undefined}
-        onClose={() => setDrawerTaskId(null)}
+        members={members}
+        initialTab={drawerTaskId === Number(focusTaskId) ? focusTab : "overview"}
+        onClose={() => {
+          setDrawerTaskId(null);
+          if (focusTaskId) setSearchParams({}, { replace: true });
+        }}
         actions={{
           start: startTask,
           submitPool,
@@ -1023,12 +1040,16 @@ function TaskDrawer({
   projectId,
   task,
   code,
+  members,
+  initialTab,
   onClose,
   actions,
 }: {
   projectId: number;
   task: Task | null;
   code?: string;
+  members: ProjectMember[];
+  initialTab?: string;
   onClose: () => void;
   actions: {
     start: (t: Task) => void;
@@ -1045,6 +1066,29 @@ function TaskDrawer({
 }) {
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [newDeliverableName, setNewDeliverableName] = useState("");
+  const [discussionDraft, setDiscussionDraft] = useState("");
+  const [postingDiscussion, setPostingDiscussion] = useState(false);
+
+  const postDiscussion = async () => {
+    if (!task) return;
+    // 被 @ 成员按文本中的 @姓名 匹配项目成员（原型「姓名匹配」交互）。
+    const mentionUserIds = members
+      .filter((m) => discussionDraft.includes(`@${m.displayName}`))
+      .map((m) => m.userId);
+    setPostingDiscussion(true);
+    const res = await client.POST("/projects/{projectId}/tasks/{taskId}/discussions", {
+      params: { path: { projectId, taskId: task.id } },
+      body: { content: discussionDraft.trim(), mentionUserIds },
+    });
+    setPostingDiscussion(false);
+    if (res.data) {
+      message.success("意见已提交");
+      setDiscussionDraft("");
+      setRefreshTick((n) => n + 1);
+    } else {
+      message.error(res.error?.message ?? "提交失败");
+    }
+  };
   const [uploadingId, setUploadingId] = useState<number | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
 
@@ -1271,10 +1315,55 @@ function TaskDrawer({
     </>
   );
 
+  const discussions = detail?.discussions ?? [];
   const discussion = (
     <div>
-      <div className="empty compact-empty">尚无讨论意见</div>
-      <div className="notice">任务讨论将随后续版本开放；意见提交后不可编辑或删除。</div>
+      {discussions.length === 0 && <div className="empty compact-empty">尚无讨论意见</div>}
+      {discussions.map((d) => (
+        <article key={d.id} className="deliverable-card" style={{ alignItems: "flex-start" }}>
+          <div style={{ minWidth: 0 }}>
+            <b>
+              {d.authorName}
+              <span className="muted" style={{ fontWeight: 400, fontSize: 12, marginLeft: 8 }}>
+                {fmtTime(d.createdAt)}
+                {d.mentionNames && d.mentionNames.length > 0 && ` · @ ${d.mentionNames.join("、")}`}
+              </span>
+            </b>
+            <div style={{ whiteSpace: "pre-wrap" }}>{d.content}</div>
+          </div>
+        </article>
+      ))}
+      <div style={{ marginTop: 12 }}>
+        <Mentions
+          rows={3}
+          placeholder="输入文字意见，可使用 @姓名 提醒项目成员"
+          value={discussionDraft}
+          onChange={setDiscussionDraft}
+          options={members.map((m) => ({ value: m.displayName, label: m.displayName }))}
+        />
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginTop: 8,
+            gap: 8,
+          }}
+        >
+          <span className="muted" style={{ fontSize: 12 }}>
+            提交后不可编辑、不可删除；任务负责人和被 @ 成员会收到通知。
+          </span>
+          <Button
+            type="primary"
+            size="small"
+            loading={postingDiscussion}
+            disabled={!discussionDraft.trim()}
+            onClick={postDiscussion}
+          >
+            提交讨论
+          </Button>
+        </div>
+      </div>
     </div>
   );
 
@@ -1421,10 +1510,11 @@ function TaskDrawer({
       }
     >
       <Tabs
-        defaultActiveKey="overview"
+        key={task.id}
+        defaultActiveKey={initialTab ?? "overview"}
         items={[
           { key: "overview", label: "任务概况", children: overview },
-          { key: "discussion", label: "讨论 0", children: discussion },
+          { key: "discussion", label: `讨论 ${discussions.length}`, children: discussion },
           { key: "audit", label: `审核 ${pendingReviews}`, children: audit },
         ]}
       />

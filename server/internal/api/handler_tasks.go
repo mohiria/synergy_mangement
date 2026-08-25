@@ -461,6 +461,11 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		writeInternalError(w)
 		return
 	}
+	discussions, err := s.discussionList(r.Context(), taskId)
+	if err != nil {
+		writeInternalError(w)
+		return
+	}
 	list, err := s.taskList(r.Context(), projectId, uid, actor)
 	if err != nil {
 		writeInternalError(w)
@@ -506,6 +511,7 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		PoolReviews:    prs,
 		FieldChanges:   fcs,
 		Deliverables:   deliverables,
+		Discussions:    discussions,
 	})
 }
 

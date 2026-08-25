@@ -29,6 +29,19 @@ type DeliverableFile struct {
 	EffectiveAt   pgtype.Timestamptz
 }
 
+type Discussion struct {
+	ID        int64
+	TaskID    int64
+	AuthorID  int64
+	Content   string
+	CreatedAt pgtype.Timestamptz
+}
+
+type DiscussionMention struct {
+	DiscussionID int64
+	UserID       int64
+}
+
 type FieldChangeRequest struct {
 	ID                    int64
 	TaskID                int64
@@ -64,6 +77,17 @@ type KeyResult struct {
 	RiskLevel   string
 	SortOrder   int32
 	CreatedAt   pgtype.Timestamptz
+}
+
+type Notification struct {
+	ID        int64
+	UserID    int64
+	Kind      string
+	Content   string
+	ProjectID pgtype.Int8
+	TaskID    pgtype.Int8
+	CreatedAt pgtype.Timestamptz
+	ReadAt    pgtype.Timestamptz
 }
 
 type Objective struct {
