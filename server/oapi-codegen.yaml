@@ -1,0 +1,8 @@
+# oapi-codegen 配置：从仓库根 openapi.yaml 生成 server 接口与模型
+# 执行：go tool oapi-codegen -config oapi-codegen.yaml ../openapi.yaml
+package: api
+output: internal/api/api.gen.go
+generate:
+  std-http-server: true
+  models: true
+  embedded-spec: true

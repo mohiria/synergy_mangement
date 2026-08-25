@@ -1,0 +1,19 @@
+# 依赖与构建产物
+node_modules/
+dist/
+*.exe
+*.tsbuildinfo
+
+# 本地环境与日志
+.env
+.env.*
+*.log
+
+# 本地素材（非项目事实源）
+references/
+
+# 工具与编辑器本地文件
+.claude/settings.local.json
+.obsidian/
+.vscode/
+.idea/

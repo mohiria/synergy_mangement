@@ -1,0 +1,54 @@
+# 单机内网部署：五容器（ADR 0001）。凭据为开发默认值，正式部署时改环境变量。
+services:
+  app:
+    build: ./server
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://synergy:synergy@postgres:5432/synergy?sslmode=disable
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: synergy
+      MINIO_SECRET_KEY: synergy-dev-secret
+      GOTENBERG_URL: http://gotenberg:3000
+      APPRISE_URL: http://apprise:8000
+    depends_on:
+      - postgres
+      - minio
+      - gotenberg
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: synergy
+      POSTGRES_PASSWORD: synergy
+      POSTGRES_DB: synergy
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: synergy
+      MINIO_ROOT_PASSWORD: synergy-dev-secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    ports:
+      - "3000:3000"
+
+  apprise:
+    image: caronc/apprise:latest
+    ports:
+      - "8000:8000"
+
+volumes:
+  pgdata:
+  miniodata:

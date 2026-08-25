@@ -1,0 +1,199 @@
+openapi: 3.0.3
+info:
+  title: 协同管理工具 API
+  version: 0.1.0
+  description: |
+    Spec-first 唯一契约源。
+    Go 侧用 oapi-codegen 生成 server 接口与模型，前端用 openapi-typescript + openapi-fetch 生成类型化客户端；生成物不手改。
+    业务规则只在后端 domain 包实现，界面反馈一律消费本契约返回的派生字段。
+servers:
+  - url: /api/v1
+tags:
+  - name: system
+    description: 系统状态
+  - name: auth
+    description: 本地账号登录与会话（bcrypt + HttpOnly Cookie）
+  - name: projects
+    description: 项目列表、创建项目与项目切换（多项目 V1 范围）
+
+paths:
+  /healthz:
+    get:
+      operationId: getHealthz
+      tags: [system]
+      summary: 健康检查
+      security: []
+      responses:
+        "200":
+          description: 服务正常
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: 登录，成功后通过 HttpOnly Cookie 建立会话
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurrentUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: 退出登录，销毁当前会话
+      responses:
+        "204":
+          description: 已退出
+
+  /auth/me:
+    get:
+      operationId: getCurrentUser
+      tags: [auth]
+      summary: 当前登录用户
+      responses:
+        "200":
+          description: 当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurrentUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /projects:
+    get:
+      operationId: listProjects
+      tags: [projects]
+      summary: 当前用户可见的项目列表
+      responses:
+        "200":
+          description: 项目列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Project"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: createProject
+      tags: [projects]
+      summary: 创建项目
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProjectRequest"
+      responses:
+        "201":
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: session
+  responses:
+    Unauthorized:
+      description: 未登录或会话已过期
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ValidationError:
+      description: 请求内容未通过校验
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: 机器可读错误码
+        message:
+          type: string
+          description: 面向用户的错误说明
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          minLength: 1
+          format: password
+    CurrentUser:
+      type: object
+      required: [id, username, displayName]
+      properties:
+        id:
+          type: integer
+          format: int64
+        username:
+          type: string
+        displayName:
+          type: string
+    Project:
+      type: object
+      required: [id, name, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    CreateProjectRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+
+security:
+  - cookieAuth: []
