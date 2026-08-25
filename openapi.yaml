@@ -376,8 +376,8 @@ components:
       enum: [not_started, in_progress, completed, archived]
     MemberRole:
       type: string
-      description: 成员角色（项目管理员／可编辑成员／普通成员／只读成员），见词汇表「成员角色」
-      enum: [admin, editor, member, viewer]
+      description: 成员角色（项目管理员／普通成员／只读成员），见词汇表「成员角色」
+      enum: [admin, member, viewer]
     ProjectMember:
       type: object
       required: [userId, username, displayName, role]

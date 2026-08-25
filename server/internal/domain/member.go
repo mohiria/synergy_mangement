@@ -4,10 +4,9 @@ import "errors"
 
 var ErrMemberRoleInvalid = errors.New("成员角色不合法")
 
-// 成员角色四值枚举（词汇表「成员角色」；PRD §3.2 系统权限）。
+// 成员角色三值枚举（词汇表「成员角色」；PRD §3.2 系统权限，V4.4.3 取消可编辑成员）。
 const (
 	RoleAdmin  = "admin"
-	RoleEditor = "editor"
 	RoleMember = "member"
 	RoleViewer = "viewer"
 )
@@ -20,12 +19,11 @@ type Actor struct {
 
 var memberRoles = map[string]struct{}{
 	RoleAdmin:  {},
-	RoleEditor: {},
 	RoleMember: {},
 	RoleViewer: {},
 }
 
-// ValidateMemberRole 校验成员角色是否属于四值枚举。
+// ValidateMemberRole 校验成员角色是否属于三值枚举。
 func ValidateMemberRole(role string) error {
 	if _, ok := memberRoles[role]; !ok {
 		return ErrMemberRoleInvalid
@@ -39,8 +37,7 @@ func CanManageMembers(a Actor) bool {
 	return a.IsOwner || a.Role == RoleAdmin
 }
 
-// CanEditProject 判定能否编辑项目基础信息与配置：骨架阶段与管理成员同一规则；
-// 可编辑成员的「授权范围」编辑权待 O／KR 结构落地后再细化。
+// CanEditProject 判定能否编辑项目基础信息与配置：与管理成员同一规则（PRD §3.4）。
 func CanEditProject(a Actor) bool {
 	return a.IsOwner || a.Role == RoleAdmin
 }

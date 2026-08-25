@@ -369,13 +369,21 @@ func TestProjectMembersAndPermissions(t *testing.T) {
 		t.Fatalf("负责人派生字段异常: %+v", list[0])
 	}
 	resp = doJSON(t, bob, http.MethodPut, fmt.Sprintf("%s/projects/%d/members/%d", base, created.Id, carolUser.ID),
-		api.UpdateProjectMemberRoleRequest{Role: api.Editor})
+		api.UpdateProjectMemberRoleRequest{Role: api.Member})
 	wantStatus(t, resp, http.StatusOK)
-	if m := decodeBody[api.ProjectMember](t, resp); m.Role != api.Editor {
+	if m := decodeBody[api.ProjectMember](t, resp); m.Role != api.Member {
 		t.Fatalf("角色调整返回异常: %+v", m)
 	}
 
-	// 可编辑成员仍不能管理成员 → 403
+	// 已取消的 editor 角色（V4.4.3）→ 422
+	resp = doJSON(t, alice, http.MethodPut, fmt.Sprintf("%s/projects/%d/members/%d", base, created.Id, carolUser.ID),
+		map[string]any{"role": "editor"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	if e := decodeBody[api.Error](t, resp); e.Code != "invalid_member_role" {
+		t.Fatalf("code = %q, want invalid_member_role", e.Code)
+	}
+
+	// 普通成员仍不能管理成员 → 403
 	resp = doJSON(t, carol, http.MethodPost, membersURL, api.AddProjectMemberRequest{UserId: bobUser.ID, Role: api.Member})
 	wantStatus(t, resp, http.StatusForbidden)
 	resp.Body.Close()

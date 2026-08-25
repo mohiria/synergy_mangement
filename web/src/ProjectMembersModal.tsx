@@ -10,7 +10,6 @@ type UserSummary = components["schemas"]["UserSummary"];
 
 const ROLE_LABEL: Record<MemberRole, string> = {
   admin: "项目管理员",
-  editor: "可编辑成员",
   member: "普通成员",
   viewer: "只读成员",
 };

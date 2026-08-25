@@ -202,10 +202,10 @@ export interface components {
          */
         ProjectStatus: "not_started" | "in_progress" | "completed" | "archived";
         /**
-         * @description 成员角色（项目管理员／可编辑成员／普通成员／只读成员），见词汇表「成员角色」
+         * @description 成员角色（项目管理员／普通成员／只读成员），见词汇表「成员角色」
          * @enum {string}
          */
-        MemberRole: "admin" | "editor" | "member" | "viewer";
+        MemberRole: "admin" | "member" | "viewer";
         ProjectMember: {
             /** Format: int64 */
             userId: number;
