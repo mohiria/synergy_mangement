@@ -55,3 +55,17 @@
 - Playwright 冒烟：尚未搭建，首个业务功能落地后补
 
 生成物（api.gen.go、store/*.sql.go、schema.d.ts）提交进仓库，但不手改。
+
+## Agent skills
+
+### Issue tracker
+
+工作项用 GitHub Issues（gh CLI）跟踪。见 `docs/agents/issue-tracker.md`。
+
+### Triage labels
+
+采用默认五标签（needs-triage / needs-info / ready-for-agent / ready-for-human / wontfix）。见 `docs/agents/triage-labels.md`。
+
+### Domain docs
+
+单一上下文：词汇表在 `docs/CONTEXT.md`，决策在 `docs/adr/`。见 `docs/agents/domain.md`。
