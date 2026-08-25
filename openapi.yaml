@@ -21,6 +21,8 @@ tags:
     description: 用户目录（人员选择用）
   - name: tasks
     description: 任务的创建、入池审批与 KR 负责人免审（AC-04、AC-26）
+  - name: task-invites
+    description: 任务创建邀请（AC-03；词汇表「任务创建邀请」）
 
 paths:
   /healthz:
@@ -469,6 +471,93 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /projects/{projectId}/task-invites:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    get:
+      operationId: listTaskInvites
+      tags: [task-invites]
+      summary: 项目内全部任务创建邀请（含派生动作标志）
+      responses:
+        "200":
+          description: 邀请列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TaskInvite"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: createTaskInvites
+      tags: [task-invites]
+      summary: 邀请成员为某个 KR 创建任务（KR 负责人／项目管理员／项目负责人；可多选受邀成员）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTaskInvitesRequest"
+      responses:
+        "201":
+          description: 已发出，返回项目最新的完整邀请列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TaskInvite"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /projects/{projectId}/task-invites/{inviteId}/revoke:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: inviteId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    post:
+      operationId: revokeTaskInvite
+      tags: [task-invites]
+      summary: 撤回待处理的任务创建邀请（邀请人／项目管理员／项目负责人）
+      responses:
+        "200":
+          description: 已撤回
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskInvite"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
   /users:
     get:
       operationId: listUsers
@@ -837,6 +926,68 @@ components:
         submitForReview:
           type: boolean
           description: true 时保存后立即提交各自所属 KR 的入池审批（原型「提交入池审批」按钮）；KR 负责人本人创建的任务始终免审直接进入未开始
+        taskInviteId:
+          type: integer
+          format: int64
+          description: 通过任务创建邀请响应时携带（AC-03）；须为发给当前用户的待处理邀请，且本批至少一项任务属于邀请指定的 KR 并提交入池，成功后邀请变为已完成
+    TaskInviteState:
+      type: string
+      description: 任务创建邀请状态（词汇表「任务创建邀请」）
+      enum: [pending, completed, revoked]
+    TaskInvite:
+      type: object
+      required: [id, keyResultId, inviterId, inviterName, inviteeId, inviteeName, state, createdAt, canHandle, canRevoke]
+      properties:
+        id:
+          type: integer
+          format: int64
+        keyResultId:
+          type: integer
+          format: int64
+        inviterId:
+          type: integer
+          format: int64
+        inviterName:
+          type: string
+          description: 邀请人姓名（派生字段）
+        inviteeId:
+          type: integer
+          format: int64
+        inviteeName:
+          type: string
+          description: 受邀成员姓名（派生字段）
+        note:
+          type: string
+          description: 邀请说明
+        state:
+          $ref: "#/components/schemas/TaskInviteState"
+        createdAt:
+          type: string
+          format: date-time
+        canHandle:
+          type: boolean
+          description: 当前用户能否响应本邀请（派生字段；受邀人且待处理）
+        canRevoke:
+          type: boolean
+          description: 当前用户能否撤回本邀请（派生字段；邀请人／项目管理员／项目负责人且待处理）
+    CreateTaskInvitesRequest:
+      type: object
+      required: [keyResultId, inviteeIds]
+      properties:
+        keyResultId:
+          type: integer
+          format: int64
+        inviteeIds:
+          type: array
+          minItems: 1
+          items:
+            type: integer
+            format: int64
+          description: 受邀成员（可多选；须为非只读项目成员，不能邀请自己）
+        note:
+          type: string
+          maxLength: 500
+          description: 邀请说明，随站内通知一同展示
     PoolReviewDecisionRequest:
       type: object
       required: [decision]

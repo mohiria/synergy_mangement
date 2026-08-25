@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Alert, Button, DatePicker, Input, Modal, Select, Spin, message } from "antd";
+import { Alert, Button, DatePicker, Input, Modal, Select, Spin, Transfer, message } from "antd";
 import type { Dayjs } from "dayjs";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
@@ -13,6 +13,7 @@ type Task = components["schemas"]["Task"];
 type TaskStatus = components["schemas"]["TaskStatus"];
 type CreateTaskItem = components["schemas"]["CreateTaskItem"];
 type ProjectMember = components["schemas"]["ProjectMember"];
+type TaskInvite = components["schemas"]["TaskInvite"];
 
 // 任务生命周期状态的中文标签与徽章样式（PRD §5.1；配色按原型 statusClass 规则）。
 const STATUS_LABEL: Record<TaskStatus, string> = {
@@ -54,20 +55,24 @@ export default function ProjectTasksPage({
   const [objectives, setObjectives] = useState<Objective[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [members, setMembers] = useState<ProjectMember[]>([]);
+  const [invites, setInvites] = useState<TaskInvite[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [inviteModalOpen, setInviteModalOpen] = useState(false);
+  const [respondingInvite, setRespondingInvite] = useState<TaskInvite | null>(null);
   const [search, setSearch] = useState("");
   const [krFilter, setKrFilter] = useState<number | "all">("all");
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all");
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [projectRes, objectivesRes, tasksRes, membersRes] = await Promise.all([
+    const [projectRes, objectivesRes, tasksRes, membersRes, invitesRes] = await Promise.all([
       client.GET("/projects/{projectId}", { params: { path: { projectId } } }),
       client.GET("/projects/{projectId}/objectives", { params: { path: { projectId } } }),
       client.GET("/projects/{projectId}/tasks", { params: { path: { projectId } } }),
       client.GET("/projects/{projectId}/members", { params: { path: { projectId } } }),
+      client.GET("/projects/{projectId}/task-invites", { params: { path: { projectId } } }),
     ]);
     if (projectRes.response.status === 401) {
       onLogout();
@@ -82,6 +87,7 @@ export default function ProjectTasksPage({
     setObjectives(objectivesRes.data ?? []);
     setTasks(tasksRes.data ?? []);
     setMembers(membersRes.data ?? []);
+    setInvites(invitesRes.data ?? []);
     setLoading(false);
   }, [projectId, onLogout]);
 
@@ -200,6 +206,9 @@ export default function ProjectTasksPage({
   ]);
 
   const canCreate = members.some((m) => m.userId === user.id && m.role !== "viewer") || !!project?.canEdit;
+  // 邀请入口：项目管理员/负责人，或本人负责任一 KR（domain CanInviteForKr 的前端投影，仅控制入口显隐）。
+  const canInvite = !!project?.canEdit || krList.some((k) => k.ownerId === user.id);
+  const myPendingInvites = invites.filter((iv) => iv.canHandle);
 
   return (
     <ProjectShell
@@ -220,12 +229,41 @@ export default function ProjectTasksPage({
               <h1>全部任务</h1>
               <p>按 O / KR 组织三级任务；任务创建后先提交入池审批，通过后进入执行池。</p>
             </div>
-            {canCreate && (
-              <Button type="primary" onClick={() => setModalOpen(true)}>
-                ＋ 创建任务
-              </Button>
-            )}
+            <div style={{ display: "flex", gap: 8 }}>
+              {canInvite && (
+                <Button onClick={() => setInviteModalOpen(true)}>邀请负责人完善</Button>
+              )}
+              {canCreate && (
+                <Button type="primary" onClick={() => setModalOpen(true)}>
+                  ＋ 创建任务
+                </Button>
+              )}
+            </div>
           </div>
+          {myPendingInvites.length > 0 && (
+            <div className="notice" style={{ marginBottom: 12 }}>
+              {myPendingInvites.map((iv) => {
+                const kr = krList.find((k) => k.id === iv.keyResultId);
+                return (
+                  <div
+                    key={iv.id}
+                    style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 28 }}
+                  >
+                    <b>
+                      {kr?.code ?? "KR"} 任务创建邀请
+                    </b>
+                    <span>
+                      {iv.inviterName} 邀请你在「{kr?.description ?? "该 KR"}」下创建任务
+                      {iv.note ? `：${iv.note}` : ""}
+                    </span>
+                    <Button size="small" onClick={() => setRespondingInvite(iv)}>
+                      响应邀请
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <div className="toolbar">
             <div className="toolbar-group">
               <Input
@@ -289,15 +327,33 @@ export default function ProjectTasksPage({
         </>
       )}
       <CreateTaskModal
-        open={modalOpen}
+        open={modalOpen || !!respondingInvite}
         projectId={projectId}
         krList={krList}
         members={members}
         currentUserId={user.id}
-        onClose={() => setModalOpen(false)}
-        onSaved={(latest) => {
-          setTasks(latest);
+        invite={respondingInvite}
+        onClose={() => {
           setModalOpen(false);
+          setRespondingInvite(null);
+        }}
+        onSaved={() => {
+          setModalOpen(false);
+          setRespondingInvite(null);
+          load();
+        }}
+      />
+      <InviteOwnersModal
+        open={inviteModalOpen}
+        projectId={projectId}
+        krList={krList.filter((k) => !!project?.canEdit || k.ownerId === user.id)}
+        members={members}
+        currentUserId={user.id}
+        onClose={() => setInviteModalOpen(false)}
+        onSent={(latest) => {
+          setInvites(latest);
+          setInviteModalOpen(false);
+          message.success("邀请已发出，受邀成员将在其任务页看到该邀请");
         }}
       />
       <Modal
@@ -347,6 +403,7 @@ function CreateTaskModal({
   krList,
   members,
   currentUserId,
+  invite,
   onClose,
   onSaved,
 }: {
@@ -355,6 +412,7 @@ function CreateTaskModal({
   krList: KrOption[];
   members: ProjectMember[];
   currentUserId: number;
+  invite?: TaskInvite | null;
   onClose: () => void;
   onSaved: (latest: Task[]) => void;
 }) {
@@ -364,7 +422,7 @@ function CreateTaskModal({
 
   const newRow = (): TaskRow => ({
     key: ++taskRowSeq,
-    keyResultId: krList[0]?.id,
+    keyResultId: invite ? invite.keyResultId : krList[0]?.id,
     name: "",
     ownerId: members.some((m) => m.userId === currentUserId && m.role !== "viewer")
       ? currentUserId
@@ -422,7 +480,7 @@ function CreateTaskModal({
     setError(null);
     const res = await client.POST("/projects/{projectId}/tasks", {
       params: { path: { projectId } },
-      body: { items, submitForReview: true },
+      body: { items, submitForReview: true, taskInviteId: invite?.id },
     });
     setSaving(false);
     if (res.data) {
@@ -436,8 +494,12 @@ function CreateTaskModal({
     <Modal
       title={
         <div>
-          创建任务
-          <span className="modal-sub">按 KR 连续录入任务骨架并指定负责人</span>
+          {invite ? "响应任务创建邀请" : "创建任务"}
+          <span className="modal-sub">
+            {invite
+              ? `${invite.inviterName} 发起 · 通过本邀请提交关联任务后邀请退出`
+              : "按 KR 连续录入任务骨架并指定负责人"}
+          </span>
         </div>
       }
       open={open}
@@ -450,6 +512,15 @@ function CreateTaskModal({
       destroyOnClose
     >
       {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
+      {invite && (
+        <div className="notice" style={{ marginBottom: 12 }}>
+          <b>任务创建邀请</b>
+          {invite.note ? `：${invite.note}` : ""}
+          <div className="muted" style={{ fontSize: 12 }}>
+            只有通过本邀请提交关联任务，邀请才会退出。
+          </div>
+        </div>
+      )}
       <div className="task-sheet">
         <div className="task-sheet-head">
           <span>所属 KR</span>
@@ -518,6 +589,131 @@ function CreateTaskModal({
       <div className="notice" style={{ marginTop: 12 }}>
         任务提交后处于“待入池审批”；所属 KR 负责人通过后，才进入执行池并变为“未开始”。KR
         负责人在本人负责的 KR 下创建的任务免审，保存后直接进入“未开始”。
+      </div>
+    </Modal>
+  );
+}
+
+function InviteOwnersModal({
+  open,
+  projectId,
+  krList,
+  members,
+  currentUserId,
+  onClose,
+  onSent,
+}: {
+  open: boolean;
+  projectId: number;
+  krList: KrOption[];
+  members: ProjectMember[];
+  currentUserId: number;
+  onClose: () => void;
+  onSent: (latest: TaskInvite[]) => void;
+}) {
+  const [keyResultId, setKeyResultId] = useState<number | undefined>(undefined);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [note, setNote] = useState("请结合你负责的工作，在该 KR 下补充需要推进的任务。");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setKeyResultId(krList[0]?.id);
+      setSelected([]);
+      setError(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // 候选受邀成员：非只读、非本人（原型 inviteMemberCandidates）。
+  const candidates = members.filter((m) => m.role !== "viewer" && m.userId !== currentUserId);
+
+  const send = async () => {
+    if (!keyResultId) {
+      setError("请选择邀请对应的 KR");
+      return;
+    }
+    if (selected.length === 0) {
+      setError("请至少选择一名受邀成员");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    const res = await client.POST("/projects/{projectId}/task-invites", {
+      params: { path: { projectId } },
+      body: {
+        keyResultId,
+        inviteeIds: selected.map(Number),
+        note: note.trim() || undefined,
+      },
+    });
+    setSaving(false);
+    if (res.data) {
+      onSent(res.data);
+    } else {
+      setError(res.error?.message ?? "发送失败");
+    }
+  };
+
+  return (
+    <Modal
+      title={
+        <div>
+          邀请成员创建任务
+          <span className="modal-sub">KR 负责人可以在任务尚未建立时先发出邀请</span>
+        </div>
+      }
+      open={open}
+      width={760}
+      confirmLoading={saving}
+      onOk={send}
+      onCancel={onClose}
+      okText="发送邀请"
+      cancelText="取消"
+      destroyOnClose
+    >
+      {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
+      <div style={{ display: "grid", gap: 12 }}>
+        <div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+            邀请成员为哪个 KR 创建任务
+          </div>
+          <Select
+            style={{ width: "100%" }}
+            value={keyResultId}
+            onChange={setKeyResultId}
+            options={krList.map((k) => ({ value: k.id, label: `${k.code} · ${k.description}` }))}
+            placeholder="选择 KR"
+          />
+        </div>
+        <div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+            选择受邀成员（可多选）
+          </div>
+          <Transfer
+            dataSource={candidates.map((m) => ({
+              key: String(m.userId),
+              title: m.displayName,
+              description: m.username,
+            }))}
+            targetKeys={selected}
+            onChange={(keys) => setSelected(keys.map(String))}
+            render={(item) => `${item.title}（${item.description}）`}
+            titles={["可选成员", "已选成员"]}
+            showSearch
+            listStyle={{ width: 320, height: 280 }}
+          />
+        </div>
+        <div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+            邀请说明
+          </div>
+          <Input.TextArea rows={3} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} />
+        </div>
+        <div className="notice">
+          邀请不依赖现有任务。发送后，右侧已选成员会在其「全部任务」页看到带 KR 上下文的邀请。
+        </div>
       </div>
     </Modal>
   );

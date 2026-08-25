@@ -80,6 +80,16 @@ type Task struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
+type TaskInvite struct {
+	ID          int64
+	KeyResultID int64
+	InviterID   int64
+	InviteeID   int64
+	Note        string
+	State       string
+	CreatedAt   pgtype.Timestamptz
+}
+
 type User struct {
 	ID           int64
 	Username     string

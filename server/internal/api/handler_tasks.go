@@ -55,6 +55,38 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 	for _, m := range members {
 		memberSet[m.UserID] = true
 	}
+	// 通过任务创建邀请响应时（AC-03）：邀请必须待处理、发给本人，且本批含指定 KR 的任务并提交入池。
+	var invite store.GetTaskInviteInProjectRow
+	if req.TaskInviteId != nil {
+		if !req.SubmitForReview {
+			writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_invite_response", Message: "通过邀请创建的任务需要一并提交入池"})
+			return
+		}
+		invite, err = s.q.GetTaskInviteInProject(r.Context(), store.GetTaskInviteInProjectParams{ID: *req.TaskInviteId, ProjectID: projectId})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeJSON(w, http.StatusNotFound, Error{Code: "invite_not_found", Message: "邀请不存在"})
+				return
+			}
+			writeInternalError(w)
+			return
+		}
+		itemKrIDs := make([]int64, 0, len(req.Items))
+		for _, item := range req.Items {
+			itemKrIDs = append(itemKrIDs, item.KeyResultId)
+		}
+		if err := domain.FulfillInvite(invite.State, invite.InviteeID, uid, invite.KeyResultID, itemKrIDs); err != nil {
+			switch {
+			case errors.Is(err, domain.ErrInviteNotPending):
+				writeJSON(w, http.StatusConflict, Error{Code: "invite_state_conflict", Message: err.Error()})
+			case errors.Is(err, domain.ErrInviteNotInvitee):
+				writeJSON(w, http.StatusForbidden, Error{Code: "forbidden", Message: err.Error()})
+			default:
+				writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_invite_response", Message: err.Error()})
+			}
+			return
+		}
+	}
 	// 逐项校验：所属 KR 属于本项目、最小骨架合法；提交入池时 KR 必须有负责人（免审除外）。
 	krOwners := make([]*int64, len(req.Items))
 	for i, item := range req.Items {
@@ -126,6 +158,13 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 			})
 		}
 		if err != nil {
+			writeInternalError(w)
+			return
+		}
+	}
+	if req.TaskInviteId != nil {
+		// 邀请随本批提交一并完成（词汇表：受邀人通过该邀请提交关联任务的入池申请后结束）。
+		if _, err := qtx.UpdateTaskInviteState(r.Context(), store.UpdateTaskInviteStateParams{ID: invite.ID, State: domain.TaskInviteCompleted}); err != nil {
 			writeInternalError(w)
 			return
 		}

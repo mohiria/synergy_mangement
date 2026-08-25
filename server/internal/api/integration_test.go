@@ -758,6 +758,193 @@ func TestTaskCreateAndPoolReview(t *testing.T) {
 	}
 }
 
+// 任务创建邀请（#5，AC-03）：KR 负责人邀请成员→受邀人通过邀请创建并提交任务入池→邀请完成；
+// 撤回后不可再响应；无关任务不使邀请结束；普通成员不可发邀请。
+func TestTaskInviteLifecycle(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
+
+	ts := httptest.NewServer(api.NewHandler(pool, "/api/v1"))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, bob, carol := newClient(t), newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(bob, "bob", "bob-pass")
+	login(carol, "carol", "carol-pass")
+
+	sp := func(s string) *string { return &s }
+
+	// alice 建项目；bob、carol 普通成员；bob 任 KR1 负责人，另建无负责人的 KR2
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "邀请试点", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	for _, uid := range []int64{bobUser.ID, carolUser.ID} {
+		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+		wantStatus(t, resp, http.StatusCreated)
+		resp.Body.Close()
+	}
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{
+				{Description: "上线自动验收", OwnerId: &bobUser.ID},
+				{Description: "回归通过率达标", OwnerId: &bobUser.ID},
+			}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	okr := decodeBody[[]api.Objective](t, resp)
+	kr1, kr2 := okr[0].KeyResults[0].Id, okr[0].KeyResults[1].Id
+	invitesURL := fmt.Sprintf("%s/projects/%d/task-invites", base, created.Id)
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	start, end := openapiDate(t, "2026-09-12"), openapiDate(t, "2026-09-21")
+
+	// 普通成员 carol（非 KR 负责人）发邀请 403
+	resp = doJSON(t, carol, http.MethodPost, invitesURL, api.CreateTaskInvitesRequest{KeyResultId: kr1, InviteeIds: []int64{bobUser.ID}})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+
+	// KR 负责人 bob 邀请 carol（KR 尚无任务也可邀请）
+	note := "请结合你负责的工作，在该 KR 下补充需要推进的任务。"
+	resp = doJSON(t, bob, http.MethodPost, invitesURL, api.CreateTaskInvitesRequest{KeyResultId: kr1, InviteeIds: []int64{carolUser.ID}, Note: &note})
+	wantStatus(t, resp, http.StatusCreated)
+	invites := decodeBody[[]api.TaskInvite](t, resp)
+	if len(invites) != 1 || invites[0].State != api.TaskInviteStatePending || invites[0].InviteeName != "王五" {
+		t.Fatalf("邀请创建异常: %+v", invites)
+	}
+	inviteID := invites[0].Id
+	if invites[0].CanHandle {
+		t.Fatalf("邀请人视角不应可响应: %+v", invites[0])
+	}
+
+	// 受邀人 carol 视角可响应，邀请说明保留
+	resp = doJSON(t, carol, http.MethodGet, invitesURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	got := decodeBody[[]api.TaskInvite](t, resp)
+	if !got[0].CanHandle || got[0].Note == nil || *got[0].Note != note {
+		t.Fatalf("受邀人视角异常: %+v", got[0])
+	}
+
+	// carol 在无关 KR 提交任务，邀请不结束（词汇表）
+	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr2, Name: "与邀请无关的任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodGet, invitesURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	if got = decodeBody[[]api.TaskInvite](t, resp); got[0].State != api.TaskInviteStatePending {
+		t.Fatalf("无关任务不应使邀请结束: %+v", got[0])
+	}
+
+	// 他人（bob）带 carol 的邀请 ID 提交 403
+	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true, TaskInviteId: &inviteID,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "冒名响应", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
+		},
+	})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+
+	// 批内无指定 KR 任务 422
+	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true, TaskInviteId: &inviteID,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr2, Name: "跑偏的响应", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
+		},
+	})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	if e := decodeBody[api.Error](t, resp); e.Code != "invalid_invite_response" {
+		t.Fatalf("code = %q, want invalid_invite_response", e.Code)
+	}
+
+	// AC-03：carol 通过邀请在 KR1 创建并提交 → 任务待入池审批、邀请完成
+	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true, TaskInviteId: &inviteID,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "验证现场联动异常回退", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	tasks := decodeBody[[]api.Task](t, resp)
+	var invited *api.Task
+	for i := range tasks {
+		if tasks[i].Name == "验证现场联动异常回退" {
+			invited = &tasks[i]
+		}
+	}
+	if invited == nil || invited.Status != api.TaskStatusPendingPoolReview {
+		t.Fatalf("邀请响应任务状态异常: %+v", tasks)
+	}
+	resp = doJSON(t, carol, http.MethodGet, invitesURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	if got = decodeBody[[]api.TaskInvite](t, resp); got[0].State != api.TaskInviteStateCompleted {
+		t.Fatalf("提交后邀请应完成: %+v", got[0])
+	}
+
+	// 已完成邀请再响应 409
+	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true, TaskInviteId: &inviteID,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "重复响应", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
+		},
+	})
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+
+	// 撤回流程：bob 再邀请 carol，然后撤回；carol 响应 409；重复撤回 409
+	resp = doJSON(t, bob, http.MethodPost, invitesURL, api.CreateTaskInvitesRequest{KeyResultId: kr1, InviteeIds: []int64{carolUser.ID}})
+	wantStatus(t, resp, http.StatusCreated)
+	invites = decodeBody[[]api.TaskInvite](t, resp)
+	second := invites[0].Id
+	if invites[0].State != api.TaskInviteStatePending || !invites[0].CanRevoke {
+		t.Fatalf("第二次邀请异常: %+v", invites[0])
+	}
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/revoke", invitesURL, second), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if iv := decodeBody[api.TaskInvite](t, resp); iv.State != api.TaskInviteStateRevoked {
+		t.Fatalf("撤回后状态异常: %+v", iv)
+	}
+	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true, TaskInviteId: &second,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "响应已撤回邀请", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
+		},
+	})
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/revoke", invitesURL, second), nil)
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+
+	// 邀请自己 422；邀请只读成员 422
+	daveUser := seedUser(t, q, "dave", "赵六", "dave-pass")
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+		api.AddProjectMemberRequest{UserId: daveUser.ID, Role: api.Viewer})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodPost, invitesURL, api.CreateTaskInvitesRequest{KeyResultId: kr1, InviteeIds: []int64{bobUser.ID}})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodPost, invitesURL, api.CreateTaskInvitesRequest{KeyResultId: kr1, InviteeIds: []int64{daveUser.ID}})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	if e := decodeBody[api.Error](t, resp); e.Code != "invalid_invitees" {
+		t.Fatalf("code = %q, want invalid_invitees", e.Code)
+	}
+}
+
 func TestLoginRateLimit(t *testing.T) {
 	_, pool := setupDB(t)
 

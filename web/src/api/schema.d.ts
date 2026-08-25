@@ -229,6 +229,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/task-invites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        /** 项目内全部任务创建邀请（含派生动作标志） */
+        get: operations["listTaskInvites"];
+        put?: never;
+        /** 邀请成员为某个 KR 创建任务（KR 负责人／项目管理员／项目负责人；可多选受邀成员） */
+        post: operations["createTaskInvites"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/task-invites/{inviteId}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                inviteId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 撤回待处理的任务创建邀请（邀请人／项目管理员／项目负责人） */
+        post: operations["revokeTaskInvite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/users": {
         parameters: {
             query?: never;
@@ -440,6 +480,47 @@ export interface components {
             items: components["schemas"]["CreateTaskItem"][];
             /** @description true 时保存后立即提交各自所属 KR 的入池审批（原型「提交入池审批」按钮）；KR 负责人本人创建的任务始终免审直接进入未开始 */
             submitForReview: boolean;
+            /**
+             * Format: int64
+             * @description 通过任务创建邀请响应时携带（AC-03）；须为发给当前用户的待处理邀请，且本批至少一项任务属于邀请指定的 KR 并提交入池，成功后邀请变为已完成
+             */
+            taskInviteId?: number;
+        };
+        /**
+         * @description 任务创建邀请状态（词汇表「任务创建邀请」）
+         * @enum {string}
+         */
+        TaskInviteState: "pending" | "completed" | "revoked";
+        TaskInvite: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            keyResultId: number;
+            /** Format: int64 */
+            inviterId: number;
+            /** @description 邀请人姓名（派生字段） */
+            inviterName: string;
+            /** Format: int64 */
+            inviteeId: number;
+            /** @description 受邀成员姓名（派生字段） */
+            inviteeName: string;
+            /** @description 邀请说明 */
+            note?: string;
+            state: components["schemas"]["TaskInviteState"];
+            /** Format: date-time */
+            createdAt: string;
+            /** @description 当前用户能否响应本邀请（派生字段；受邀人且待处理） */
+            canHandle: boolean;
+            /** @description 当前用户能否撤回本邀请（派生字段；邀请人／项目管理员／项目负责人且待处理） */
+            canRevoke: boolean;
+        };
+        CreateTaskInvitesRequest: {
+            /** Format: int64 */
+            keyResultId: number;
+            /** @description 受邀成员（可多选；须为非只读项目成员，不能邀请自己） */
+            inviteeIds: number[];
+            /** @description 邀请说明，随站内通知一同展示 */
+            note?: string;
         };
         PoolReviewDecisionRequest: {
             /** @enum {string} */
@@ -1018,6 +1099,87 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["ValidationError"];
+        };
+    };
+    listTaskInvites: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 邀请列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskInvite"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createTaskInvites: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTaskInvitesRequest"];
+            };
+        };
+        responses: {
+            /** @description 已发出，返回项目最新的完整邀请列表 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskInvite"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    revokeTaskInvite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                inviteId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已撤回 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskInvite"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     listUsers: {

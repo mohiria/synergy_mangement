@@ -1,0 +1,72 @@
+package domain
+
+import "errors"
+
+// 任务创建邀请状态（词汇表「任务创建邀请」）。
+const (
+	TaskInvitePending   = "pending"
+	TaskInviteCompleted = "completed"
+	TaskInviteRevoked   = "revoked"
+)
+
+var (
+	ErrInviteesEmpty      = errors.New("请至少选择一名受邀成员")
+	ErrInviteSelf         = errors.New("不能邀请自己")
+	ErrInviteeNotEligible = errors.New("受邀成员必须是非只读的项目成员")
+	ErrInviteNotPending   = errors.New("邀请不在待处理状态")
+	ErrInviteNotInvitee   = errors.New("只有受邀成员本人可以通过该邀请提交任务")
+	ErrInviteKrMismatch   = errors.New("本批任务中至少要有一项属于邀请指定的 KR")
+)
+
+// CanInviteForKr 判定能否为某 KR 发出任务创建邀请：该 KR 负责人、项目管理员或项目负责人（词汇表「任务创建邀请」）。
+func CanInviteForKr(a Actor, userID int64, krOwnerID *int64) bool {
+	if CanEditProject(a) {
+		return true
+	}
+	return krOwnerID != nil && *krOwnerID == userID
+}
+
+// ValidateInvitees 校验受邀成员：非只读项目成员、不能邀请自己（原型 inviteMemberCandidates）。
+func ValidateInvitees(inviterID int64, inviteeIDs []int64, roleOf func(int64) string) error {
+	if len(inviteeIDs) == 0 {
+		return ErrInviteesEmpty
+	}
+	for _, id := range inviteeIDs {
+		if id == inviterID {
+			return ErrInviteSelf
+		}
+		if role := roleOf(id); role != RoleAdmin && role != RoleMember {
+			return ErrInviteeNotEligible
+		}
+	}
+	return nil
+}
+
+// CanRevokeInvite 判定能否撤回邀请：待处理且动作人为邀请人／项目管理员／项目负责人。
+func CanRevokeInvite(a Actor, userID, inviterID int64, state string) bool {
+	if state != TaskInvitePending {
+		return false
+	}
+	return userID == inviterID || CanEditProject(a)
+}
+
+// FulfillInvite 校验通过邀请提交任务：仅受邀人本人、邀请待处理、本批至少一项属于指定 KR（AC-03）。
+func FulfillInvite(state string, inviteeID, actorID, inviteKrID int64, itemKrIDs []int64) error {
+	if state != TaskInvitePending {
+		return ErrInviteNotPending
+	}
+	if actorID != inviteeID {
+		return ErrInviteNotInvitee
+	}
+	for _, krID := range itemKrIDs {
+		if krID == inviteKrID {
+			return nil
+		}
+	}
+	return ErrInviteKrMismatch
+}
+
+// CanHandleInvite 判定当前用户能否响应邀请（派生动作标志）。
+func CanHandleInvite(userID, inviteeID int64, state string) bool {
+	return state == TaskInvitePending && userID == inviteeID
+}
