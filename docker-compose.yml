@@ -7,6 +7,8 @@ services:
     environment:
       DATABASE_URL: postgres://synergy:synergy@postgres:5432/synergy?sslmode=disable
       MINIO_ENDPOINT: minio:9000
+      # 预签名 URL 面向浏览器的地址；内网部署改为主机 IP:9000。
+      MINIO_PUBLIC_ENDPOINT: localhost:9000
       MINIO_ACCESS_KEY: synergy
       MINIO_SECRET_KEY: synergy-dev-secret
       GOTENBERG_URL: http://gotenberg:3000

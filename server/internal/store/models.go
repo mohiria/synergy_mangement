@@ -8,6 +8,27 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Deliverable struct {
+	ID        int64
+	TaskID    int64
+	Name      string
+	CreatedBy int64
+	CreatedAt pgtype.Timestamptz
+}
+
+type DeliverableFile struct {
+	ID            int64
+	DeliverableID int64
+	State         string
+	FileName      string
+	FileType      string
+	FileSize      int64
+	ObjectKey     string
+	UploadedBy    int64
+	UploadedAt    pgtype.Timestamptz
+	EffectiveAt   pgtype.Timestamptz
+}
+
 type FieldChangeRequest struct {
 	ID                    int64
 	TaskID                int64

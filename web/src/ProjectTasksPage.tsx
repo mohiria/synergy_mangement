@@ -309,7 +309,13 @@ export default function ProjectTasksPage({
         </td>
         <td>{fmtDate(t.startDate)}</td>
         <td>{fmtDate(t.endDate)}</td>
-        <td className="muted">—</td>
+        <td>
+          {t.deliverableNames && t.deliverableNames.length > 0 ? (
+            t.deliverableNames.join("、")
+          ) : (
+            <span className="muted">—</span>
+          )}
+        </td>
         <td>
           <div className="row-actions">
             {t.canStart && (
@@ -671,6 +677,7 @@ type TaskRow = {
   name: string;
   ownerId?: number;
   period?: [Dayjs | null, Dayjs | null] | null;
+  outputName: string;
 };
 
 let taskRowSeq = 0;
@@ -702,6 +709,7 @@ function CreateTaskModal({
     key: ++taskRowSeq,
     keyResultId: invite ? invite.keyResultId : krList[0]?.id,
     name: "",
+    outputName: "",
     ownerId: members.some((m) => m.userId === currentUserId && m.role !== "viewer")
       ? currentUserId
       : undefined,
@@ -752,6 +760,7 @@ function CreateTaskModal({
         ownerId: r.ownerId,
         startDate: r.period[0].format("YYYY-MM-DD"),
         endDate: r.period[1].format("YYYY-MM-DD"),
+        expectedDeliverable: r.outputName.trim() || undefined,
       });
     }
     setSaving(true);
@@ -805,6 +814,7 @@ function CreateTaskModal({
           <span>任务名称</span>
           <span>负责人</span>
           <span>开始 / 截止</span>
+          <span>预期交付物</span>
           <span />
         </div>
         {rows.map((r) => (
@@ -843,6 +853,14 @@ function CreateTaskModal({
                 value={r.period ?? undefined}
                 onChange={(v) => patch(r.key, { period: v })}
                 placeholder={["开始", "截止"]}
+              />
+            </div>
+            <div className="task-sheet-cell">
+              <Input
+                maxLength={100}
+                placeholder="预期交付物（选填）"
+                value={r.outputName}
+                onChange={(e) => patch(r.key, { outputName: e.target.value })}
               />
             </div>
             <Button
@@ -1026,6 +1044,10 @@ function TaskDrawer({
   };
 }) {
   const [detail, setDetail] = useState<TaskDetail | null>(null);
+  const [newDeliverableName, setNewDeliverableName] = useState("");
+  const [uploadingId, setUploadingId] = useState<number | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
+
 
   useEffect(() => {
     if (!task) {
@@ -1043,9 +1065,76 @@ function TaskDrawer({
     return () => {
       alive = false;
     };
-  }, [projectId, task]);
+  }, [projectId, task, refreshTick]);
+
+  const openFile = async (fileId: number) => {
+    const res = await client.GET("/projects/{projectId}/files/{fileId}/download-url", {
+      params: { path: { projectId, fileId } },
+    });
+    if (res.data) {
+      window.open(res.data.url, "_blank");
+    } else {
+      message.error(res.error?.message ?? "获取下载地址失败");
+    }
+  };
+
+  const addDeliverable = async () => {
+    if (!task) return;
+    const res = await client.POST("/projects/{projectId}/tasks/{taskId}/deliverables", {
+      params: { path: { projectId, taskId: task.id } },
+      body: { name: newDeliverableName.trim() },
+    });
+    if (res.data) {
+      message.success("交付物项已新增");
+      setNewDeliverableName("");
+      setRefreshTick((n) => n + 1);
+    } else {
+      message.error(res.error?.message ?? "新增失败");
+    }
+  };
+
+  const pickAndUpload = (deliverableId: number) => {
+    if (!task) return;
+    const input = document.createElement("input");
+    input.type = "file";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      setUploadingId(deliverableId);
+      const res = await client.POST(
+        "/projects/{projectId}/tasks/{taskId}/deliverables/{deliverableId}/candidate",
+        {
+          params: { path: { projectId, taskId: task.id, deliverableId } },
+          body: {
+            fileName: file.name,
+            fileType: file.name.split(".").pop() ?? "",
+            fileSize: file.size,
+          },
+        },
+      );
+      if (!res.data) {
+        setUploadingId(null);
+        message.error(res.error?.message ?? "登记候选内容失败");
+        return;
+      }
+      try {
+        const put = await fetch(res.data.uploadUrl, { method: "PUT", body: file });
+        if (!put.ok) throw new Error(`HTTP ${put.status}`);
+        message.success("候选内容已上传；随完成申请提交后进入审核");
+      } catch {
+        message.error("文件上传失败，请确认文件服务可用后重试");
+      }
+      setUploadingId(null);
+      setRefreshTick((n) => n + 1);
+    };
+    input.click();
+  };
 
   if (!task) return null;
+  const currentFiles = (detail?.deliverables ?? [])
+    .filter((d) => d.current)
+    .map((d) => ({ d, f: d.current! }));
+  const candidateCount = (detail?.deliverables ?? []).filter((d) => d.candidate).length;
   const pendingReviews =
     (detail?.poolReviews ?? []).filter((r) => r.status === "pending").length +
     (detail?.fieldChanges ?? []).filter((fc) => fc.state === "pending").length;
@@ -1109,9 +1198,75 @@ function TaskDrawer({
       </section>
       <section className="drawer-section">
         <h3>
-          当前交付物 <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>0 项</span>
+          当前交付物{" "}
+          <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>
+            {currentFiles.length} 项
+          </span>
         </h3>
-        <div className="empty compact-empty">尚无已生效的当前交付物</div>
+        {candidateCount > 0 && (
+          <div className="notice warning" style={{ marginBottom: 10 }}>
+            有 {candidateCount} 项更新审核中，候选内容请在“审核”Tab 查看；当前内容继续有效。
+          </div>
+        )}
+        {currentFiles.map(({ d, f }) => (
+          <article key={f.id} className="deliverable-card">
+            <div>
+              <b>{d.name}</b>
+              <span className="file-link" onClick={() => openFile(f.id)}>
+                {f.fileName}
+              </span>
+              <div className="muted" style={{ fontSize: 12 }}>
+                {f.fileType || "文件"} · {f.fileSize ? `${Math.ceil(f.fileSize / 1024)} KB` : "—"}
+                {f.effectiveAt ? ` · 生效于 ${fmtTime(f.effectiveAt)}` : ""}
+              </div>
+            </div>
+            <Button size="small" onClick={() => openFile(f.id)}>
+              下载
+            </Button>
+          </article>
+        ))}
+        {currentFiles.length === 0 && (
+          <div className="empty compact-empty">尚无已生效的当前交付物</div>
+        )}
+      </section>
+      <section className="drawer-section">
+        <h3>
+          交付物项{" "}
+          <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>
+            {(detail?.deliverables ?? []).length} 项
+          </span>
+        </h3>
+        {(detail?.deliverables ?? []).map((d) => (
+          <article key={d.id} className="deliverable-card">
+            <div>
+              <b>{d.name}</b>
+              <div className="muted" style={{ fontSize: 12 }}>
+                {d.current ? "已有当前内容" : "尚无当前内容"}
+                {d.candidate ? ` · 候选「${d.candidate.fileName}」审核准备中` : ""}
+              </div>
+            </div>
+            {task.canUploadCandidate && (
+              <Button size="small" loading={uploadingId === d.id} onClick={() => pickAndUpload(d.id)}>
+                {d.candidate ? "重传候选内容" : "上传候选内容"}
+              </Button>
+            )}
+          </article>
+        ))}
+        {task.canManageDeliverables && (
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <Input
+              size="small"
+              maxLength={100}
+              placeholder="新增交付物项名称"
+              value={newDeliverableName}
+              onChange={(e) => setNewDeliverableName(e.target.value)}
+              style={{ width: 240 }}
+            />
+            <Button size="small" onClick={addDeliverable} disabled={!newDeliverableName.trim()}>
+              ＋ 新增交付物项
+            </Button>
+          </div>
+        )}
       </section>
     </>
   );

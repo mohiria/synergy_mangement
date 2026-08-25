@@ -351,6 +351,67 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/tasks/{taskId}/deliverables": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 为任务新增交付物项（任务负责人／创建人／可编辑项目者；非终态任务） */
+        post: operations["createDeliverable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/tasks/{taskId}/deliverables/{deliverableId}/candidate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+                deliverableId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 登记候选交付物内容并取得预签名上传地址（任务负责人；重复调用覆盖未提交审核的候选） */
+        post: operations["uploadCandidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/files/{fileId}/download-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                fileId: number;
+            };
+            cookie?: never;
+        };
+        /** 取得交付物内容的预签名下载地址（全体项目成员可查看／下载当前与候选内容，§3.3） */
+        get: operations["getFileDownloadUrl"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/task-invites": {
         parameters: {
             query?: never;
@@ -624,8 +685,14 @@ export interface components {
             canCancel: boolean;
             /** @description 最近一张需要关注的变更单（待审批＝拟议值标示，或退回未处理＝退回待处理事项）；无则不返回 */
             fieldChange?: components["schemas"]["FieldChange"];
+            /** @description 交付物项名称列表（列表「预期交付物」列展示用，派生字段） */
+            deliverableNames?: string[];
             /** @description 当前用户能否编辑任务／提交关键字段修改（派生字段） */
             canProposeFieldChange: boolean;
+            /** @description 当前用户能否配置任务交付物项（派生字段；负责人／创建人／可编辑项目者，非终态） */
+            canManageDeliverables?: boolean;
+            /** @description 当前用户能否登记候选交付物内容（派生字段；负责人，执行类状态） */
+            canUploadCandidate?: boolean;
             /** @description 当前用户能否提交本任务入池（派生字段；草稿且为创建人／负责人／可编辑项目者） */
             canSubmitPoolReview: boolean;
             /** @description 当前用户能否处理本任务的入池审批（派生字段；仅所属 KR 负责人） */
@@ -644,6 +711,8 @@ export interface components {
             startDate: string;
             /** Format: date */
             endDate: string;
+            /** @description 预期交付物名称（选填，原型创建弹窗列）；随任务创建对应交付物项 */
+            expectedDeliverable?: string;
         };
         CreateTaskBatchRequest: {
             items: components["schemas"]["CreateTaskItem"][];
@@ -666,6 +735,8 @@ export interface components {
             poolReviews: components["schemas"]["PoolReview"][];
             /** @description 关键字段变更单记录，最新在前（词汇表「关键字段变更单」） */
             fieldChanges: components["schemas"]["FieldChange"][];
+            /** @description 交付物项列表（含当前内容与候选审核提示，AC-32／AC-33） */
+            deliverables: components["schemas"]["Deliverable"][];
         };
         /** @enum {string} */
         FieldChangeState: "pending" | "approved" | "rejected";
@@ -723,6 +794,58 @@ export interface components {
             /** @enum {string} */
             decision: "approved" | "rejected";
             opinion?: string;
+        };
+        /** @description 交付物内容（词汇表「交付物」；当前已生效或候选审核中） */
+        DeliverableFile: {
+            /** Format: int64 */
+            id: number;
+            /** @enum {string} */
+            state: "current" | "candidate";
+            fileName: string;
+            fileType?: string;
+            /**
+             * Format: int64
+             * @description 字节数
+             */
+            fileSize?: number;
+            /** @description 提交人姓名（派生字段） */
+            uploadedByName?: string;
+            /** Format: date-time */
+            uploadedAt?: string;
+            /**
+             * Format: date-time
+             * @description 当前内容的生效时间（终审通过时刻）
+             */
+            effectiveAt?: string;
+        };
+        /** @description 交付物项：至多一份当前内容与一份候选内容，无版本号与历史（PRD §5.3） */
+        Deliverable: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            taskId: number;
+            name: string;
+            current?: components["schemas"]["DeliverableFile"];
+            /** @description 审核中的候选内容；任务概况只提示不展示内容（AC-33） */
+            candidate?: components["schemas"]["DeliverableFile"];
+        };
+        CreateDeliverableRequest: {
+            name: string;
+        };
+        UploadCandidateRequest: {
+            fileName: string;
+            fileType?: string;
+            /** Format: int64 */
+            fileSize?: number;
+        };
+        UploadCandidateResponse: {
+            file: components["schemas"]["DeliverableFile"];
+            /** @description MinIO 预签名 PUT 地址，客户端直接上传文件内容 */
+            uploadUrl: string;
+        };
+        DownloadUrlResponse: {
+            /** @description MinIO 预签名 GET 地址（预览/下载） */
+            url: string;
         };
         /**
          * @description 任务创建邀请状态（词汇表「任务创建邀请」）
@@ -1519,6 +1642,96 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+        };
+    };
+    createDeliverable: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateDeliverableRequest"];
+            };
+        };
+        responses: {
+            /** @description 已创建 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Deliverable"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    uploadCandidate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+                deliverableId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadCandidateRequest"];
+            };
+        };
+        responses: {
+            /** @description 已登记，客户端用 uploadUrl 直传文件 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadCandidateResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    getFileDownloadUrl: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                fileId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 预签名地址 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DownloadUrlResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
         };
     };
     listTaskInvites: {

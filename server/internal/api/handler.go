@@ -15,6 +15,7 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	"synergy/server/internal/domain"
+	"synergy/server/internal/filestore"
 	"synergy/server/internal/store"
 )
 
@@ -23,6 +24,7 @@ import (
 type Server struct {
 	db       *pgxpool.Pool
 	q        *store.Queries
+	files    filestore.Store
 	throttle *domain.LoginThrottle
 	now      func() time.Time
 }
@@ -30,13 +32,13 @@ type Server struct {
 var _ ServerInterface = (*Server)(nil)
 
 // NewServer 持有连接池以支持多语句事务（如 O／KR 批量创建），常规查询走 sqlc Queries。
-func NewServer(db *pgxpool.Pool) *Server {
-	return &Server{db: db, q: store.New(db), throttle: domain.NewLoginThrottle(), now: time.Now}
+func NewServer(db *pgxpool.Pool, files filestore.Store) *Server {
+	return &Server{db: db, q: store.New(db), files: files, throttle: domain.NewLoginThrottle(), now: time.Now}
 }
 
 // NewHandler 组装路由与会话中间件，main 与集成测试共用同一套装配。
-func NewHandler(db *pgxpool.Pool, baseURL string) http.Handler {
-	s := NewServer(db)
+func NewHandler(db *pgxpool.Pool, baseURL string, files filestore.Store) http.Handler {
+	s := NewServer(db, files)
 	return HandlerWithOptions(s, StdHTTPServerOptions{
 		BaseURL:     baseURL,
 		BaseRouter:  http.NewServeMux(),

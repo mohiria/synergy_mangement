@@ -177,7 +177,7 @@ body {
 .task-sheet { border: 1px solid var(--line); border-radius: 8px; overflow: auto; background: #fff; margin-top: 12px; }
 .task-sheet-head, .task-sheet-row {
   display: grid;
-  grid-template-columns: minmax(230px, 1.1fr) minmax(260px, 1.3fr) 180px 260px 36px;
+  grid-template-columns: minmax(170px, 1fr) minmax(210px, 1.2fr) 150px 240px minmax(150px, 0.9fr) 36px;
   min-width: 996px;
   align-items: center;
 }
@@ -216,6 +216,14 @@ body {
 .handled-fact { margin-top: 8px; padding: 8px 10px; border-radius: 6px; background: #f7f9fb; font-size: var(--type-aux); color: #52606d; }
 .audit-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 .compact-empty { padding: 26px 16px; }
+.deliverable-card {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  border: 1px solid var(--line); border-radius: 8px; background: #fff;
+  padding: 10px 12px; margin-bottom: 8px;
+}
+.deliverable-card b { display: block; }
+.deliverable-card .file-link { color: var(--accent); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; font-size: 13px; }
+.notice.warning { background: var(--amber-soft); color: var(--amber); border-left-color: #d9a94a; }
 
 .login-shell { min-height: 100vh; display: grid; place-items: center; background: var(--bg); }
 .login-brand { display: flex; align-items: center; gap: 10px; justify-content: center; margin-bottom: 18px; }

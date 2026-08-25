@@ -25,8 +25,19 @@ import (
 
 	"synergy/server/internal/api"
 	"synergy/server/internal/domain"
+	"synergy/server/internal/filestore"
 	"synergy/server/internal/store"
 )
+
+func newTestHandler(t *testing.T, pool *pgxpool.Pool) http.Handler {
+	t.Helper()
+	// presign 为纯签名计算，测试无需真实 MinIO 服务。
+	files, err := filestore.NewMinio("localhost:9000", "", "synergy", "synergy-dev-secret", "synergy-test", false)
+	if err != nil {
+		t.Fatalf("filestore: %v", err)
+	}
+	return api.NewHandler(pool, "/api/v1", files)
+}
 
 func setupDB(t *testing.T) (*store.Queries, *pgxpool.Pool) {
 	t.Helper()
@@ -159,7 +170,7 @@ func TestAuthAndProjectsEndToEnd(t *testing.T) {
 	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
 	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
 
-	ts := httptest.NewServer(api.NewHandler(pool, "/api/v1"))
+	ts := httptest.NewServer(newTestHandler(t, pool))
 	defer ts.Close()
 	base := ts.URL + "/api/v1"
 
@@ -304,7 +315,7 @@ func TestProjectMembersAndPermissions(t *testing.T) {
 	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
 	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
 
-	ts := httptest.NewServer(api.NewHandler(pool, "/api/v1"))
+	ts := httptest.NewServer(newTestHandler(t, pool))
 	defer ts.Close()
 	base := ts.URL + "/api/v1"
 
@@ -437,7 +448,7 @@ func TestOkrTableBatchCreate(t *testing.T) {
 	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
 	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
 
-	ts := httptest.NewServer(api.NewHandler(pool, "/api/v1"))
+	ts := httptest.NewServer(newTestHandler(t, pool))
 	defer ts.Close()
 	base := ts.URL + "/api/v1"
 
@@ -565,7 +576,7 @@ func TestTaskCreateAndPoolReview(t *testing.T) {
 	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
 	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
 
-	ts := httptest.NewServer(api.NewHandler(pool, "/api/v1"))
+	ts := httptest.NewServer(newTestHandler(t, pool))
 	defer ts.Close()
 	base := ts.URL + "/api/v1"
 
@@ -766,7 +777,7 @@ func TestTaskInviteLifecycle(t *testing.T) {
 	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
 	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
 
-	ts := httptest.NewServer(api.NewHandler(pool, "/api/v1"))
+	ts := httptest.NewServer(newTestHandler(t, pool))
 	defer ts.Close()
 	base := ts.URL + "/api/v1"
 
@@ -952,7 +963,7 @@ func TestTaskStatusAndProgress(t *testing.T) {
 	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
 	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
 
-	ts := httptest.NewServer(api.NewHandler(pool, "/api/v1"))
+	ts := httptest.NewServer(newTestHandler(t, pool))
 	defer ts.Close()
 	base := ts.URL + "/api/v1"
 
@@ -1098,7 +1109,7 @@ func TestTaskDetail(t *testing.T) {
 	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
 	daveUser := seedUser(t, q, "dave", "赵六", "dave-pass")
 
-	ts := httptest.NewServer(api.NewHandler(pool, "/api/v1"))
+	ts := httptest.NewServer(newTestHandler(t, pool))
 	defer ts.Close()
 	base := ts.URL + "/api/v1"
 
@@ -1205,7 +1216,7 @@ func TestFieldChangeApproval(t *testing.T) {
 	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
 	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
 
-	ts := httptest.NewServer(api.NewHandler(pool, "/api/v1"))
+	ts := httptest.NewServer(newTestHandler(t, pool))
 	defer ts.Close()
 	base := ts.URL + "/api/v1"
 
@@ -1373,10 +1384,141 @@ func TestFieldChangeApproval(t *testing.T) {
 	}
 }
 
+// 交付物模型与文件存取（#8，AC-32/AC-33）：交付物项、候选登记与预签名地址、
+// 多项当前交付物展示、候选仅提示审核中。当前内容的生成流转在 #10 终审实现，
+// 此处经 store 层直接种入已生效内容验证展示端语义。
+func TestDeliverablesAndFiles(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, bob := newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(bob, "bob", "bob-pass")
+
+	sp := func(s string) *string { return &s }
+
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "交付物试点", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+		api.AddProjectMemberRequest{UserId: bobUser.ID, Role: api.Member})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	okr := decodeBody[[]api.Objective](t, resp)
+	kr1 := okr[0].KeyResults[0].Id
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+
+	// 创建任务时带预期交付物 → 自动建交付物项并出现在列表列
+	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: bobUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("验收方案 V1")},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	tasks := decodeBody[[]api.Task](t, resp)
+	taskID := tasks[0].Id
+	if tasks[0].DeliverableNames == nil || (*tasks[0].DeliverableNames)[0] != "验收方案 V1" {
+		t.Fatalf("预期交付物列异常: %+v", tasks[0].DeliverableNames)
+	}
+
+	// 再补一个交付物项（一个任务多项交付物）
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/deliverables", tasksURL, taskID),
+		api.CreateDeliverableRequest{Name: "现场验收记录"})
+	wantStatus(t, resp, http.StatusCreated)
+	second := decodeBody[api.Deliverable](t, resp)
+
+	// 空名称 422
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/deliverables", tasksURL, taskID),
+		api.CreateDeliverableRequest{Name: "  "})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+
+	// 任务开始执行后，负责人登记候选内容并取得预签名上传地址
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, taskID),
+		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskID, second.Id),
+		api.UploadCandidateRequest{FileName: "现场验收记录.xlsx", FileType: sp("xlsx")})
+	wantStatus(t, resp, http.StatusCreated)
+	up := decodeBody[api.UploadCandidateResponse](t, resp)
+	if up.UploadUrl == "" || up.File.State != api.Candidate {
+		t.Fatalf("候选登记异常: %+v", up)
+	}
+
+	// 非负责人 alice 也可（管理员纠错）；无关成员会被拒——此处验证重复登记覆盖旧候选
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskID, second.Id),
+		api.UploadCandidateRequest{FileName: "现场验收记录-rev2.xlsx"})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+
+	// 种入一份已生效当前内容（#10 终审前的展示语义验证）
+	ctx := context.Background()
+	deliverables, err := q.ListDeliverablesByTask(ctx, taskID)
+	if err != nil || len(deliverables) != 2 {
+		t.Fatalf("交付物项异常: %v %+v", err, deliverables)
+	}
+	firstID := deliverables[0].ID
+	cur, err := q.CreateDeliverableFile(ctx, store.CreateDeliverableFileParams{
+		DeliverableID: firstID, State: "current", FileName: "验收方案V1.docx", FileType: "docx",
+		FileSize: 2048, ObjectKey: "deliverables/test/current.docx", UploadedBy: bobUser.ID,
+	})
+	if err != nil {
+		t.Fatalf("seed current: %v", err)
+	}
+
+	// AC-32/33：详情列出全部交付物项；第一项有当前内容，第二项只有候选（概况仅提示由前端负责）
+	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail := decodeBody[api.TaskDetail](t, resp)
+	if len(detail.Deliverables) != 2 {
+		t.Fatalf("交付物项数量异常: %+v", detail.Deliverables)
+	}
+	if detail.Deliverables[0].Current == nil || detail.Deliverables[0].Current.FileName != "验收方案V1.docx" {
+		t.Fatalf("当前内容缺失: %+v", detail.Deliverables[0])
+	}
+	if detail.Deliverables[1].Candidate == nil || detail.Deliverables[1].Candidate.FileName != "现场验收记录-rev2.xlsx" {
+		t.Fatalf("候选覆盖异常: %+v", detail.Deliverables[1])
+	}
+	if detail.Deliverables[1].Current != nil {
+		t.Fatalf("候选不应提前成为当前内容: %+v", detail.Deliverables[1])
+	}
+
+	// 任一项目成员可取预签名下载地址（§3.3）
+	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/files/%d/download-url", base, created.Id, cur.ID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if u := decodeBody[api.DownloadUrlResponse](t, resp); u.Url == "" {
+		t.Fatalf("下载地址为空")
+	}
+
+	// 不存在的文件 404
+	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/files/99999/download-url", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusNotFound)
+	resp.Body.Close()
+}
+
 func TestLoginRateLimit(t *testing.T) {
 	_, pool := setupDB(t)
 
-	ts := httptest.NewServer(api.NewHandler(pool, "/api/v1"))
+	ts := httptest.NewServer(newTestHandler(t, pool))
 	defer ts.Close()
 	base := ts.URL + "/api/v1"
 

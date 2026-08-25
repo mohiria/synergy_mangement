@@ -105,6 +105,12 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 			writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_task", Message: err.Error()})
 			return
 		}
+		if item.ExpectedDeliverable != nil && strings.TrimSpace(*item.ExpectedDeliverable) != "" {
+			if err := domain.ValidateDeliverableName(strings.TrimSpace(*item.ExpectedDeliverable)); err != nil {
+				writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_deliverable", Message: err.Error()})
+				return
+			}
+		}
 		if _, exempt := domain.TaskCreationOutcome(uid, krOwners[i]); !exempt && req.SubmitForReview {
 			if err := domain.SubmitPoolReview(domain.TaskFacts{Status: domain.TaskDraft, KrOwnerID: krOwners[i]}); err != nil {
 				writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "kr_owner_missing", Message: err.Error()})
@@ -160,6 +166,15 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 		if err != nil {
 			writeInternalError(w)
 			return
+		}
+		// 预期交付物（原型创建弹窗列）：随任务建立对应交付物项。
+		if item.ExpectedDeliverable != nil {
+			if dn := strings.TrimSpace(*item.ExpectedDeliverable); dn != "" {
+				if _, err := qtx.CreateDeliverable(r.Context(), store.CreateDeliverableParams{TaskID: task.ID, Name: dn, CreatedBy: uid}); err != nil {
+					writeInternalError(w)
+					return
+				}
+			}
 		}
 	}
 	if req.TaskInviteId != nil {
@@ -441,6 +456,11 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		writeInternalError(w)
 		return
 	}
+	deliverables, err := s.deliverableList(r.Context(), taskId)
+	if err != nil {
+		writeInternalError(w)
+		return
+	}
 	list, err := s.taskList(r.Context(), projectId, uid, actor)
 	if err != nil {
 		writeInternalError(w)
@@ -485,6 +505,7 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		KrDescription:  kr.Description,
 		PoolReviews:    prs,
 		FieldChanges:   fcs,
+		Deliverables:   deliverables,
 	})
 }
 
@@ -530,6 +551,15 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 	changeByTask := make(map[int64]store.LatestFieldChangesByProjectRow, len(changeRows))
 	for _, fc := range changeRows {
 		changeByTask[fc.TaskID] = fc
+	}
+	// 「预期交付物」列：任务的交付物项名称。
+	deliverableRows, err := s.q.ListDeliverableNamesByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	namesByTask := make(map[int64][]string)
+	for _, d := range deliverableRows {
+		namesByTask[d.TaskID] = append(namesByTask[d.TaskID], d.Name)
 	}
 	resp := make([]Task, 0, len(rows))
 	for _, t := range rows {
@@ -592,6 +622,13 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 		}
 		_, routeErr := domain.FieldChangeRoute(actor, userID, facts, hasPending)
 		item.CanProposeFieldChange = routeErr == nil
+		canManageDeliverables := domain.CanManageDeliverables(actor, userID, facts)
+		canUploadCandidate := domain.CanUploadCandidate(actor, userID, facts)
+		item.CanManageDeliverables = &canManageDeliverables
+		item.CanUploadCandidate = &canUploadCandidate
+		if names := namesByTask[t.ID]; len(names) > 0 {
+			item.DeliverableNames = &names
+		}
 		resp = append(resp, item)
 	}
 	return resp, nil
