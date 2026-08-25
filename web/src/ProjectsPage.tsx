@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { Alert, Button, DatePicker, Form, Input, Modal, Select, Table } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import { client } from "./api/client";
@@ -175,7 +176,11 @@ export default function ProjectsPage({
               {
                 title: "项目名称",
                 dataIndex: "name",
-                render: (v: string) => <strong>{v}</strong>,
+                render: (v: string, p) => (
+                  <Link to={`/projects/${p.id}`}>
+                    <strong>{v}</strong>
+                  </Link>
+                ),
               },
               {
                 title: "负责人",

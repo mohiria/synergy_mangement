@@ -28,7 +28,7 @@ import (
 	"synergy/server/internal/store"
 )
 
-func setupDB(t *testing.T) *store.Queries {
+func setupDB(t *testing.T) (*store.Queries, *pgxpool.Pool) {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("需要真实 Postgres，-short 模式跳过")
@@ -79,7 +79,7 @@ func setupDB(t *testing.T) *store.Queries {
 		t.Fatalf("pgxpool: %v", err)
 	}
 	t.Cleanup(pool.Close)
-	return store.New(pool)
+	return store.New(pool), pool
 }
 
 func seedUser(t *testing.T, q *store.Queries, username, display, password string) store.User {
@@ -155,11 +155,11 @@ func wantStatus(t *testing.T, resp *http.Response, want int) {
 }
 
 func TestAuthAndProjectsEndToEnd(t *testing.T) {
-	q := setupDB(t)
+	q, pool := setupDB(t)
 	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
 	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
 
-	ts := httptest.NewServer(api.NewHandler(q, "/api/v1"))
+	ts := httptest.NewServer(api.NewHandler(pool, "/api/v1"))
 	defer ts.Close()
 	base := ts.URL + "/api/v1"
 
@@ -299,12 +299,12 @@ func TestAuthAndProjectsEndToEnd(t *testing.T) {
 // 成员与角色权限骨架（#2，AC-21/AC-22）：管理员加成员赋角色，动作权限按角色在 domain 判定；
 // 项目负责人与管理员独立同权（V4.4.2），负责人不自动成为成员。
 func TestProjectMembersAndPermissions(t *testing.T) {
-	q := setupDB(t)
+	q, pool := setupDB(t)
 	seedUser(t, q, "alice", "张三", "alice-pass")
 	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
 	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
 
-	ts := httptest.NewServer(api.NewHandler(q, "/api/v1"))
+	ts := httptest.NewServer(api.NewHandler(pool, "/api/v1"))
 	defer ts.Close()
 	base := ts.URL + "/api/v1"
 
@@ -429,10 +429,137 @@ func TestProjectMembersAndPermissions(t *testing.T) {
 	resp.Body.Close()
 }
 
-func TestLoginRateLimit(t *testing.T) {
-	q := setupDB(t)
+// O／KR 表格式创建（#3，AC-01）：一批建多个 O 与 KR、指定 KR 负责人；
+// 仅项目管理员／项目负责人可创建；整批一个事务；已有 O 可继续追加 KR。
+func TestOkrTableBatchCreate(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
 
-	ts := httptest.NewServer(api.NewHandler(q, "/api/v1"))
+	ts := httptest.NewServer(api.NewHandler(pool, "/api/v1"))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, bob := newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(bob, "bob", "bob-pass")
+
+	sp := func(s string) *string { return &s }
+
+	// alice 创建项目并任负责人，bob 加为普通成员
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "OKR 试点", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+		api.AddProjectMemberRequest{UserId: bobUser.ID, Role: api.Member})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+
+	// 新增端点：单项目详情，派生字段随身份变化
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/projects/%d", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if p := decodeBody[api.Project](t, resp); p.Id != created.Id || p.CanEdit {
+		t.Fatalf("普通成员的项目详情派生字段异常: %+v", p)
+	}
+
+	okrURL := fmt.Sprintf("%s/projects/%d/objectives", base, created.Id)
+	start := openapiDate(t, "2026-09-01")
+	end := openapiDate(t, "2026-12-31")
+
+	// 表格式批量创建：两个 O，第一个带两条 KR（一条指定负责人、量化指标和周期）
+	resp = doJSON(t, alice, http.MethodPost, okrURL, api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+		{Title: sp("提升产品体验"), KeyResults: &[]api.CreateKeyResultInput{
+			{Description: "上线新版工作台", Metric: sp("转化率 5%"), OwnerId: &bobUser.ID, StartDate: &start, EndDate: &end},
+			{Description: "NPS 提升到 40"},
+		}},
+		{Title: sp("扩大市场份额")},
+	}})
+	wantStatus(t, resp, http.StatusCreated)
+	list := decodeBody[[]api.Objective](t, resp)
+	if len(list) != 2 || list[0].Title != "提升产品体验" || list[1].Title != "扩大市场份额" {
+		t.Fatalf("批量创建返回异常: %+v", list)
+	}
+	if len(list[0].KeyResults) != 2 || len(list[1].KeyResults) != 0 {
+		t.Fatalf("KR 归属异常: %+v", list)
+	}
+	kr := list[0].KeyResults[0]
+	if kr.OwnerName == nil || *kr.OwnerName != "李四" || kr.RiskLevel != api.Normal || kr.SortOrder != 1 {
+		t.Fatalf("KR 派生字段异常: %+v", kr)
+	}
+	if kr.StartDate == nil || kr.EndDate == nil {
+		t.Fatalf("KR 周期未保存: %+v", kr)
+	}
+	if second := list[0].KeyResults[1]; second.OwnerId != nil || second.SortOrder != 2 {
+		t.Fatalf("未指定负责人的 KR 异常: %+v", second)
+	}
+
+	// 向已有 O 追加 KR
+	resp = doJSON(t, alice, http.MethodPost, okrURL, api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+		{ObjectiveId: &list[1].Id, KeyResults: &[]api.CreateKeyResultInput{{Description: "签下 10 家标杆客户"}}},
+	}})
+	wantStatus(t, resp, http.StatusCreated)
+	list = decodeBody[[]api.Objective](t, resp)
+	if len(list) != 2 || len(list[1].KeyResults) != 1 || list[1].KeyResults[0].Description != "签下 10 家标杆客户" {
+		t.Fatalf("追加 KR 异常: %+v", list)
+	}
+
+	// 普通成员读取层级列表 200
+	resp = doJSON(t, bob, http.MethodGet, okrURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	if got := decodeBody[[]api.Objective](t, resp); len(got) != 2 {
+		t.Fatalf("成员读取 O／KR 列表异常: %+v", got)
+	}
+
+	// 普通成员批量创建 403（编辑项目结构需管理员／负责人）
+	resp = doJSON(t, bob, http.MethodPost, okrURL, api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{{Title: sp("越权 O")}}})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+
+	// KR 负责人不是项目成员 422
+	resp = doJSON(t, alice, http.MethodPost, okrURL, api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+		{Title: sp("负责人越界"), KeyResults: &[]api.CreateKeyResultInput{{Description: "x", OwnerId: &carolUser.ID}}},
+	}})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	if e := decodeBody[api.Error](t, resp); e.Code != "invalid_okr" {
+		t.Fatalf("code = %q, want invalid_okr", e.Code)
+	}
+
+	// title 与 objectiveId 同时给 422
+	resp = doJSON(t, alice, http.MethodPost, okrURL, api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+		{ObjectiveId: &list[0].Id, Title: sp("二义项")},
+	}})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+
+	// 指向不存在的 O 422，且整批不落库（事务前置校验）
+	resp = doJSON(t, alice, http.MethodPost, okrURL, api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+		{Title: sp("好 O")},
+		{ObjectiveId: sp2int64(99999), KeyResults: &[]api.CreateKeyResultInput{{Description: "x"}}},
+	}})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	if e := decodeBody[api.Error](t, resp); e.Code != "invalid_objective" {
+		t.Fatalf("code = %q, want invalid_objective", e.Code)
+	}
+	resp = doJSON(t, alice, http.MethodGet, okrURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	if got := decodeBody[[]api.Objective](t, resp); len(got) != 2 {
+		t.Fatalf("失败批次不应写入任何 O: %+v", got)
+	}
+}
+
+func sp2int64(v int64) *int64 { return &v }
+
+func TestLoginRateLimit(t *testing.T) {
+	_, pool := setupDB(t)
+
+	ts := httptest.NewServer(api.NewHandler(pool, "/api/v1"))
 	defer ts.Close()
 	base := ts.URL + "/api/v1"
 

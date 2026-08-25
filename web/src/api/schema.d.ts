@@ -97,7 +97,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** 单个项目详情（项目内页面外壳用） */
+        get: operations["getProject"];
         /** 更新项目（全量字段） */
         put: operations["updateProject"];
         post?: never;
@@ -143,6 +144,26 @@ export interface paths {
         post?: never;
         /** 将成员移出项目（仅项目管理员／项目负责人） */
         delete: operations["removeProjectMember"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/objectives": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        /** 项目的 O／KR 层级列表（O 含下属 KR，按排序返回） */
+        get: operations["listObjectives"];
+        put?: never;
+        /** 表格式批量创建 O／KR（仅项目管理员／项目负责人；整批一个事务，全部成功或全部失败） */
+        post: operations["createOkrBatch"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -220,6 +241,76 @@ export interface components {
         };
         UpdateProjectMemberRoleRequest: {
             role: components["schemas"]["MemberRole"];
+        };
+        /**
+         * @description 风险等级（正常／预警／高风险），见词汇表「风险等级」；不由任务生命周期状态自动推导
+         * @enum {string}
+         */
+        RiskLevel: "normal" | "warning" | "high_risk";
+        KeyResult: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            objectiveId: number;
+            /** @description KR 描述 */
+            description: string;
+            /** @description 量化指标，选填 */
+            metric?: string;
+            /**
+             * Format: int64
+             * @description KR 负责人（项目成员，选填；工作职责而非权限级别）
+             */
+            ownerId?: number;
+            /** @description KR 负责人姓名（派生字段） */
+            ownerName?: string;
+            /**
+             * Format: date
+             * @description 周期开始日期
+             */
+            startDate?: string;
+            /**
+             * Format: date
+             * @description 周期截止日期
+             */
+            endDate?: string;
+            riskLevel: components["schemas"]["RiskLevel"];
+            sortOrder: number;
+        };
+        Objective: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            projectId: number;
+            /** @description O 标题 */
+            title: string;
+            /** @description O 说明，选填 */
+            description?: string;
+            sortOrder: number;
+            keyResults: components["schemas"]["KeyResult"][];
+        };
+        CreateKeyResultInput: {
+            description: string;
+            metric?: string;
+            /**
+             * Format: int64
+             * @description KR 负责人，必须是项目成员
+             */
+            ownerId?: number;
+            /** Format: date */
+            startDate?: string;
+            /** Format: date */
+            endDate?: string;
+        };
+        /** @description 二选一：填 title（可带 description）新建 O，或填 objectiveId 向已有 O 追加 KR（此时 keyResults 至少一条） */
+        CreateOkrBatchItem: {
+            /** Format: int64 */
+            objectiveId?: number;
+            title?: string;
+            description?: string;
+            keyResults?: components["schemas"]["CreateKeyResultInput"][];
+        };
+        CreateOkrBatchRequest: {
+            items: components["schemas"]["CreateOkrBatchItem"][];
         };
         Project: {
             /** Format: int64 */
@@ -463,6 +554,30 @@ export interface operations {
             422: components["responses"]["ValidationError"];
         };
     };
+    getProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 项目详情 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Project"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     updateProject: {
         parameters: {
             query?: never;
@@ -601,6 +716,60 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    listObjectives: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description O 列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Objective"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createOkrBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateOkrBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description 创建成功，返回项目最新的完整 O／KR 列表 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Objective"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
         };
     };
     listUsers: {

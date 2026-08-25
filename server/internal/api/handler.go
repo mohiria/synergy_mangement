@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	"synergy/server/internal/domain"
@@ -20,6 +21,7 @@ import (
 // Server 实现生成的 ServerInterface。handler 保持薄层：
 // 解析请求、调 domain/store、写响应；业务规则一律在 internal/domain。
 type Server struct {
+	db       *pgxpool.Pool
 	q        *store.Queries
 	throttle *domain.LoginThrottle
 	now      func() time.Time
@@ -27,13 +29,14 @@ type Server struct {
 
 var _ ServerInterface = (*Server)(nil)
 
-func NewServer(q *store.Queries) *Server {
-	return &Server{q: q, throttle: domain.NewLoginThrottle(), now: time.Now}
+// NewServer 持有连接池以支持多语句事务（如 O／KR 批量创建），常规查询走 sqlc Queries。
+func NewServer(db *pgxpool.Pool) *Server {
+	return &Server{db: db, q: store.New(db), throttle: domain.NewLoginThrottle(), now: time.Now}
 }
 
 // NewHandler 组装路由与会话中间件，main 与集成测试共用同一套装配。
-func NewHandler(q *store.Queries, baseURL string) http.Handler {
-	s := NewServer(q)
+func NewHandler(db *pgxpool.Pool, baseURL string) http.Handler {
+	s := NewServer(db)
 	return HandlerWithOptions(s, StdHTTPServerOptions{
 		BaseURL:     baseURL,
 		BaseRouter:  http.NewServeMux(),
@@ -402,6 +405,203 @@ func (s *Server) RemoveProjectMember(w http.ResponseWriter, r *http.Request, pro
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) GetProject(w http.ResponseWriter, r *http.Request, projectId int64) {
+	row, ok := s.fetchProject(w, r, projectId)
+	if !ok {
+		return
+	}
+	uid := currentUser(r).ID
+	writeJSON(w, http.StatusOK, toProject(store.Project{
+		ID:               row.ID,
+		Name:             row.Name,
+		CreatedBy:        row.CreatedBy,
+		CreatedAt:        row.CreatedAt,
+		OwnerID:          row.OwnerID,
+		Status:           row.Status,
+		Stage:            row.Stage,
+		PlannedStartDate: row.PlannedStartDate,
+		PlannedEndDate:   row.PlannedEndDate,
+	}, row.OwnerName, projectActor(uid, row.OwnerID, row.MyRole)))
+}
+
+func (s *Server) ListObjectives(w http.ResponseWriter, r *http.Request, projectId int64) {
+	if _, ok := s.fetchProject(w, r, projectId); !ok {
+		return
+	}
+	resp, err := s.okrList(r.Context(), projectId)
+	if err != nil {
+		writeInternalError(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) CreateOkrBatch(w http.ResponseWriter, r *http.Request, projectId int64) {
+	var req CreateOkrBatchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_request", Message: "请求内容无法解析"})
+		return
+	}
+	proj, ok := s.fetchProject(w, r, projectId)
+	if !ok {
+		return
+	}
+	if !domain.CanEditProject(projectActor(currentUser(r).ID, proj.OwnerID, proj.MyRole)) {
+		writeForbidden(w)
+		return
+	}
+	members, err := s.q.ListProjectMembers(r.Context(), projectId)
+	if err != nil {
+		writeInternalError(w)
+		return
+	}
+	memberSet := make(map[int64]bool, len(members))
+	for _, m := range members {
+		memberSet[m.UserID] = true
+	}
+	items := toOkrBatchItems(req.Items)
+	if err := domain.ValidateOkrBatch(items, func(id int64) bool { return memberSet[id] }); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_okr", Message: err.Error()})
+		return
+	}
+	for _, item := range items {
+		if item.ObjectiveID == nil {
+			continue
+		}
+		if _, err := s.q.GetObjective(r.Context(), store.GetObjectiveParams{ID: *item.ObjectiveID, ProjectID: projectId}); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_objective", Message: "所属 O 不存在"})
+				return
+			}
+			writeInternalError(w)
+			return
+		}
+	}
+	// 整批一个事务：全部成功或全部失败（契约 createOkrBatch）。
+	tx, err := s.db.Begin(r.Context())
+	if err != nil {
+		writeInternalError(w)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	qtx := s.q.WithTx(tx)
+	for _, item := range items {
+		objectiveID := int64(0)
+		if item.ObjectiveID != nil {
+			objectiveID = *item.ObjectiveID
+		} else {
+			o, err := qtx.CreateObjective(r.Context(), store.CreateObjectiveParams{
+				ProjectID:   projectId,
+				Title:       item.Title,
+				Description: item.Description,
+			})
+			if err != nil {
+				writeInternalError(w)
+				return
+			}
+			objectiveID = o.ID
+		}
+		for _, k := range item.KeyResults {
+			_, err := qtx.CreateKeyResult(r.Context(), store.CreateKeyResultParams{
+				ObjectiveID: objectiveID,
+				Description: k.Description,
+				Metric:      k.Metric,
+				OwnerID:     toPgInt8(k.OwnerID),
+				StartDate:   toPgDateFromTime(k.Start),
+				EndDate:     toPgDateFromTime(k.End),
+				RiskLevel:   domain.DefaultKrRiskLevel,
+			})
+			if err != nil {
+				writeInternalError(w)
+				return
+			}
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeInternalError(w)
+		return
+	}
+	resp, err := s.okrList(r.Context(), projectId)
+	if err != nil {
+		writeInternalError(w)
+		return
+	}
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+// okrList 组装 O 含下属 KR 的层级列表（按排序返回）。
+func (s *Server) okrList(ctx context.Context, projectID int64) ([]Objective, error) {
+	objectives, err := s.q.ListObjectives(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	krs, err := s.q.ListKeyResultsByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	byObjective := make(map[int64][]KeyResult, len(objectives))
+	for _, k := range krs {
+		byObjective[k.ObjectiveID] = append(byObjective[k.ObjectiveID], KeyResult{
+			Id:          k.ID,
+			ObjectiveId: k.ObjectiveID,
+			Description: k.Description,
+			Metric:      optString(k.Metric),
+			OwnerId:     fromPgInt8(k.OwnerID),
+			OwnerName:   fromPgText(k.OwnerName),
+			StartDate:   fromPgDate(k.StartDate),
+			EndDate:     fromPgDate(k.EndDate),
+			RiskLevel:   RiskLevel(k.RiskLevel),
+			SortOrder:   int(k.SortOrder),
+		})
+	}
+	resp := make([]Objective, 0, len(objectives))
+	for _, o := range objectives {
+		kr := byObjective[o.ID]
+		if kr == nil {
+			kr = []KeyResult{}
+		}
+		resp = append(resp, Objective{
+			Id:          o.ID,
+			ProjectId:   o.ProjectID,
+			Title:       o.Title,
+			Description: optString(o.Description),
+			SortOrder:   int(o.SortOrder),
+			KeyResults:  kr,
+		})
+	}
+	return resp, nil
+}
+
+// toOkrBatchItems 把契约请求映射为 domain 输入（去除首尾空白，规则校验在 domain）。
+func toOkrBatchItems(reqItems []CreateOkrBatchItem) []domain.OkrBatchItem {
+	items := make([]domain.OkrBatchItem, 0, len(reqItems))
+	for _, it := range reqItems {
+		item := domain.OkrBatchItem{ObjectiveID: it.ObjectiveId}
+		if it.Title != nil {
+			item.Title = strings.TrimSpace(*it.Title)
+		}
+		if it.Description != nil {
+			item.Description = strings.TrimSpace(*it.Description)
+		}
+		if it.KeyResults != nil {
+			for _, k := range *it.KeyResults {
+				kr := domain.NewKeyResult{
+					Description: strings.TrimSpace(k.Description),
+					OwnerID:     k.OwnerId,
+					Start:       toTimePtr(k.StartDate),
+					End:         toTimePtr(k.EndDate),
+				}
+				if k.Metric != nil {
+					kr.Metric = strings.TrimSpace(*k.Metric)
+				}
+				item.KeyResults = append(item.KeyResults, kr)
+			}
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
 // fetchProject 读取项目与当前用户在其中的成员角色；项目不存在时已写出 404 并返回 false。
 func (s *Server) fetchProject(w http.ResponseWriter, r *http.Request, projectID int64) (store.GetProjectRow, bool) {
 	row, err := s.q.GetProject(r.Context(), store.GetProjectParams{ID: projectID, UserID: currentUser(r).ID})
@@ -491,6 +691,34 @@ func fromPgText(t pgtype.Text) *string {
 		return nil
 	}
 	return &t.String
+}
+
+func optString(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+func toPgInt8(v *int64) pgtype.Int8 {
+	if v == nil {
+		return pgtype.Int8{}
+	}
+	return pgtype.Int8{Int64: *v, Valid: true}
+}
+
+func fromPgInt8(v pgtype.Int8) *int64 {
+	if !v.Valid {
+		return nil
+	}
+	return &v.Int64
+}
+
+func toPgDateFromTime(t *time.Time) pgtype.Date {
+	if t == nil {
+		return pgtype.Date{}
+	}
+	return pgtype.Date{Time: *t, Valid: true}
 }
 
 func toPgDate(d *openapi_types.Date) pgtype.Date {

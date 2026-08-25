@@ -81,11 +81,56 @@ func (e ProjectStatus) Valid() bool {
 	}
 }
 
+// Defines values for RiskLevel.
+const (
+	HighRisk RiskLevel = "high_risk"
+	Normal   RiskLevel = "normal"
+	Warning  RiskLevel = "warning"
+)
+
+// Valid indicates whether the value is a known member of the RiskLevel enum.
+func (e RiskLevel) Valid() bool {
+	switch e {
+	case HighRisk:
+		return true
+	case Normal:
+		return true
+	case Warning:
+		return true
+	default:
+		return false
+	}
+}
+
 // AddProjectMemberRequest defines model for AddProjectMemberRequest.
 type AddProjectMemberRequest struct {
 	// Role 成员角色（项目管理员／普通成员／只读成员），见词汇表「成员角色」
 	Role   MemberRole `json:"role"`
 	UserId int64      `json:"userId"`
+}
+
+// CreateKeyResultInput defines model for CreateKeyResultInput.
+type CreateKeyResultInput struct {
+	Description string              `json:"description"`
+	EndDate     *openapi_types.Date `json:"endDate,omitempty"`
+	Metric      *string             `json:"metric,omitempty"`
+
+	// OwnerId KR 负责人，必须是项目成员
+	OwnerId   *int64              `json:"ownerId,omitempty"`
+	StartDate *openapi_types.Date `json:"startDate,omitempty"`
+}
+
+// CreateOkrBatchItem 二选一：填 title（可带 description）新建 O，或填 objectiveId 向已有 O 追加 KR（此时 keyResults 至少一条）
+type CreateOkrBatchItem struct {
+	Description *string                 `json:"description,omitempty"`
+	KeyResults  *[]CreateKeyResultInput `json:"keyResults,omitempty"`
+	ObjectiveId *int64                  `json:"objectiveId,omitempty"`
+	Title       *string                 `json:"title,omitempty"`
+}
+
+// CreateOkrBatchRequest defines model for CreateOkrBatchRequest.
+type CreateOkrBatchRequest struct {
+	Items []CreateOkrBatchItem `json:"items"`
 }
 
 // CreateProjectRequest defines model for CreateProjectRequest.
@@ -121,6 +166,33 @@ type Health struct {
 // HealthStatus defines model for Health.Status.
 type HealthStatus string
 
+// KeyResult defines model for KeyResult.
+type KeyResult struct {
+	// Description KR 描述
+	Description string `json:"description"`
+
+	// EndDate 周期截止日期
+	EndDate *openapi_types.Date `json:"endDate,omitempty"`
+	Id      int64               `json:"id"`
+
+	// Metric 量化指标，选填
+	Metric      *string `json:"metric,omitempty"`
+	ObjectiveId int64   `json:"objectiveId"`
+
+	// OwnerId KR 负责人（项目成员，选填；工作职责而非权限级别）
+	OwnerId *int64 `json:"ownerId,omitempty"`
+
+	// OwnerName KR 负责人姓名（派生字段）
+	OwnerName *string `json:"ownerName,omitempty"`
+
+	// RiskLevel 风险等级（正常／预警／高风险），见词汇表「风险等级」；不由任务生命周期状态自动推导
+	RiskLevel RiskLevel `json:"riskLevel"`
+	SortOrder int       `json:"sortOrder"`
+
+	// StartDate 周期开始日期
+	StartDate *openapi_types.Date `json:"startDate,omitempty"`
+}
+
 // LoginRequest defines model for LoginRequest.
 type LoginRequest struct {
 	Password string `json:"password"`
@@ -129,6 +201,19 @@ type LoginRequest struct {
 
 // MemberRole 成员角色（项目管理员／普通成员／只读成员），见词汇表「成员角色」
 type MemberRole string
+
+// Objective defines model for Objective.
+type Objective struct {
+	// Description O 说明，选填
+	Description *string     `json:"description,omitempty"`
+	Id          int64       `json:"id"`
+	KeyResults  []KeyResult `json:"keyResults"`
+	ProjectId   int64       `json:"projectId"`
+	SortOrder   int         `json:"sortOrder"`
+
+	// Title O 标题
+	Title string `json:"title"`
+}
 
 // Project defines model for Project.
 type Project struct {
@@ -168,6 +253,9 @@ type ProjectMember struct {
 
 // ProjectStatus 项目状态（未开始／进行中／已完成／已归档），与自由文本“阶段”正交
 type ProjectStatus string
+
+// RiskLevel 风险等级（正常／预警／高风险），见词汇表「风险等级」；不由任务生命周期状态自动推导
+type RiskLevel string
 
 // UpdateProjectMemberRoleRequest defines model for UpdateProjectMemberRoleRequest.
 type UpdateProjectMemberRoleRequest struct {
@@ -227,6 +315,9 @@ type AddProjectMemberJSONRequestBody = AddProjectMemberRequest
 // UpdateProjectMemberRoleJSONRequestBody defines body for UpdateProjectMemberRole for application/json ContentType.
 type UpdateProjectMemberRoleJSONRequestBody = UpdateProjectMemberRoleRequest
 
+// CreateOkrBatchJSONRequestBody defines body for CreateOkrBatch for application/json ContentType.
+type CreateOkrBatchJSONRequestBody = CreateOkrBatchRequest
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// Login 登录，成功后通过 HttpOnly Cookie 建立会话
@@ -247,6 +338,9 @@ type ServerInterface interface {
 	// CreateProject 创建项目
 	// (POST /projects)
 	CreateProject(w http.ResponseWriter, r *http.Request)
+	// GetProject 单个项目详情（项目内页面外壳用）
+	// (GET /projects/{projectId})
+	GetProject(w http.ResponseWriter, r *http.Request, projectId int64)
 	// UpdateProject 更新项目（全量字段）
 	// (PUT /projects/{projectId})
 	UpdateProject(w http.ResponseWriter, r *http.Request, projectId int64)
@@ -262,6 +356,12 @@ type ServerInterface interface {
 	// UpdateProjectMemberRole 调整成员角色（仅项目管理员／项目负责人）
 	// (PUT /projects/{projectId}/members/{userId})
 	UpdateProjectMemberRole(w http.ResponseWriter, r *http.Request, projectId int64, userId int64)
+	// ListObjectives 项目的 O／KR 层级列表（O 含下属 KR，按排序返回）
+	// (GET /projects/{projectId}/objectives)
+	ListObjectives(w http.ResponseWriter, r *http.Request, projectId int64)
+	// CreateOkrBatch 表格式批量创建 O／KR（仅项目管理员／项目负责人；整批一个事务，全部成功或全部失败）
+	// (POST /projects/{projectId}/objectives)
+	CreateOkrBatch(w http.ResponseWriter, r *http.Request, projectId int64)
 	// ListUsers 全部用户（用于人员选择）
 	// (GET /users)
 	ListUsers(w http.ResponseWriter, r *http.Request)
@@ -351,6 +451,32 @@ func (siw *ServerInterfaceWrapper) CreateProject(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateProject(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetProject operation middleware
+func (siw *ServerInterfaceWrapper) GetProject(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetProject(w, r, projectId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -508,6 +634,58 @@ func (siw *ServerInterfaceWrapper) UpdateProjectMemberRole(w http.ResponseWriter
 	handler.ServeHTTP(w, r)
 }
 
+// ListObjectives operation middleware
+func (siw *ServerInterfaceWrapper) ListObjectives(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListObjectives(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateOkrBatch operation middleware
+func (siw *ServerInterfaceWrapper) CreateOkrBatch(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateOkrBatch(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListUsers operation middleware
 func (siw *ServerInterfaceWrapper) ListUsers(w http.ResponseWriter, r *http.Request) {
 
@@ -648,11 +826,14 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/me", wrapper.GetCurrentUser)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects", wrapper.ListProjects)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects", wrapper.CreateProject)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}", wrapper.GetProject)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/projects/{projectId}", wrapper.UpdateProject)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}/members", wrapper.ListProjectMembers)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/members", wrapper.AddProjectMember)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/projects/{projectId}/members/{userId}", wrapper.RemoveProjectMember)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/projects/{projectId}/members/{userId}", wrapper.UpdateProjectMemberRole)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}/objectives", wrapper.ListObjectives)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/objectives", wrapper.CreateOkrBatch)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/users", wrapper.ListUsers)
 
 	return m
@@ -663,48 +844,61 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"3kf/k8xKkVCBEbPn1UzBIoX6PjQe+k8AAAD//w==",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

@@ -9,7 +9,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"synergy/server/internal/api"
-	"synergy/server/internal/store"
 )
 
 func main() {
@@ -28,7 +27,7 @@ func main() {
 	}
 	defer pool.Close()
 
-	handler := api.NewHandler(store.New(pool), "/api/v1")
+	handler := api.NewHandler(pool, "/api/v1")
 
 	log.Printf("listening on %s", addr)
 	if err := http.ListenAndServe(addr, handler); err != nil {

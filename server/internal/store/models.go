@@ -8,6 +8,28 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type KeyResult struct {
+	ID          int64
+	ObjectiveID int64
+	Description string
+	Metric      string
+	OwnerID     pgtype.Int8
+	StartDate   pgtype.Date
+	EndDate     pgtype.Date
+	RiskLevel   string
+	SortOrder   int32
+	CreatedAt   pgtype.Timestamptz
+}
+
+type Objective struct {
+	ID          int64
+	ProjectID   int64
+	Title       string
+	Description string
+	SortOrder   int32
+	CreatedAt   pgtype.Timestamptz
+}
+
 type Project struct {
 	ID               int64
 	Name             string

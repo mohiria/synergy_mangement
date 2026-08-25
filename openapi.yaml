@@ -15,6 +15,8 @@ tags:
     description: 本地账号登录与会话（bcrypt + HttpOnly Cookie）
   - name: projects
     description: 项目列表、创建项目与项目切换（多项目 V1 范围）
+  - name: okr
+    description: O／KR 层级的建立与查询（表格式创建，AC-01）
   - name: users
     description: 用户目录（人员选择用）
 
@@ -120,6 +122,28 @@ paths:
           $ref: "#/components/responses/ValidationError"
 
   /projects/{projectId}:
+    get:
+      operationId: getProject
+      tags: [projects]
+      summary: 单个项目详情（项目内页面外壳用）
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: 项目详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
     put:
       operationId: updateProject
       tags: [projects]
@@ -258,6 +282,59 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /projects/{projectId}/objectives:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    get:
+      operationId: listObjectives
+      tags: [okr]
+      summary: 项目的 O／KR 层级列表（O 含下属 KR，按排序返回）
+      responses:
+        "200":
+          description: O 列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Objective"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: createOkrBatch
+      tags: [okr]
+      summary: 表格式批量创建 O／KR（仅项目管理员／项目负责人；整批一个事务，全部成功或全部失败）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOkrBatchRequest"
+      responses:
+        "201":
+          description: 创建成功，返回项目最新的完整 O／KR 列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Objective"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
 
   /users:
     get:
@@ -406,6 +483,114 @@ components:
       properties:
         role:
           $ref: "#/components/schemas/MemberRole"
+    RiskLevel:
+      type: string
+      description: 风险等级（正常／预警／高风险），见词汇表「风险等级」；不由任务生命周期状态自动推导
+      enum: [normal, warning, high_risk]
+    KeyResult:
+      type: object
+      required: [id, objectiveId, description, riskLevel, sortOrder]
+      properties:
+        id:
+          type: integer
+          format: int64
+        objectiveId:
+          type: integer
+          format: int64
+        description:
+          type: string
+          description: KR 描述
+        metric:
+          type: string
+          description: 量化指标，选填
+        ownerId:
+          type: integer
+          format: int64
+          description: KR 负责人（项目成员，选填；工作职责而非权限级别）
+        ownerName:
+          type: string
+          description: KR 负责人姓名（派生字段）
+        startDate:
+          type: string
+          format: date
+          description: 周期开始日期
+        endDate:
+          type: string
+          format: date
+          description: 周期截止日期
+        riskLevel:
+          $ref: "#/components/schemas/RiskLevel"
+        sortOrder:
+          type: integer
+    Objective:
+      type: object
+      required: [id, projectId, title, sortOrder, keyResults]
+      properties:
+        id:
+          type: integer
+          format: int64
+        projectId:
+          type: integer
+          format: int64
+        title:
+          type: string
+          description: O 标题
+        description:
+          type: string
+          description: O 说明，选填
+        sortOrder:
+          type: integer
+        keyResults:
+          type: array
+          items:
+            $ref: "#/components/schemas/KeyResult"
+    CreateKeyResultInput:
+      type: object
+      required: [description]
+      properties:
+        description:
+          type: string
+          minLength: 1
+          maxLength: 200
+        metric:
+          type: string
+          maxLength: 100
+        ownerId:
+          type: integer
+          format: int64
+          description: KR 负责人，必须是项目成员
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+    CreateOkrBatchItem:
+      type: object
+      description: 二选一：填 title（可带 description）新建 O，或填 objectiveId 向已有 O 追加 KR（此时 keyResults 至少一条）
+      properties:
+        objectiveId:
+          type: integer
+          format: int64
+        title:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 500
+        keyResults:
+          type: array
+          items:
+            $ref: "#/components/schemas/CreateKeyResultInput"
+    CreateOkrBatchRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/CreateOkrBatchItem"
     Project:
       type: object
       required: [id, name, ownerId, ownerName, status, createdAt, canEdit, canManageMembers]

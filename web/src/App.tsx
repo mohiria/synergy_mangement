@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
+import { Navigate, Route, Routes } from "react-router-dom";
 import { Spin } from "antd";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import LoginPage from "./LoginPage";
 import ProjectsPage from "./ProjectsPage";
+import ProjectOkrPage from "./ProjectOkrPage";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 
@@ -25,5 +27,12 @@ export default function App() {
   if (!user) {
     return <LoginPage onLogin={setUser} />;
   }
-  return <ProjectsPage user={user} onLogout={() => setUser(null)} />;
+  const logout = () => setUser(null);
+  return (
+    <Routes>
+      <Route path="/" element={<ProjectsPage user={user} onLogout={logout} />} />
+      <Route path="/projects/:projectId" element={<ProjectOkrPage user={user} onLogout={logout} />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
 }
