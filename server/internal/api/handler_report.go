@@ -16,15 +16,24 @@ func (s *Server) GetReport(w http.ResponseWriter, r *http.Request, projectId int
 	if _, ok := s.fetchProject(w, r, projectId); !ok {
 		return
 	}
-	now := s.now()
 	rangeName := "all"
 	if params.Range != nil {
 		rangeName = string(*params.Range)
 	}
+	report, ok := s.buildReport(w, r, projectId, rangeName)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
+}
+
+// buildReport 聚合报告事实（GetReport 与导出共用）；失败时已写出响应并返回 false。
+func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId int64, rangeName string) (Report, bool) {
+	now := s.now()
 	from, err := domain.ReportRangeFrom(rangeName, now)
 	if err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_range", Message: err.Error()})
-		return
+		return Report{}, false
 	}
 	inRange := func(t time.Time) bool { return from == nil || !t.Before(*from) }
 	ctx := r.Context()
@@ -33,17 +42,17 @@ func (s *Server) GetReport(w http.ResponseWriter, r *http.Request, projectId int
 	objectives, err := s.okrList(ctx, projectId)
 	if err != nil {
 		writeInternalError(w)
-		return
+		return Report{}, false
 	}
 	completionRows, err := s.q.LatestCompletionReviewsByProject(ctx, projectId)
 	if err != nil {
 		writeInternalError(w)
-		return
+		return Report{}, false
 	}
 	taskRows, err := s.q.ListProjectTasks(ctx, projectId)
 	if err != nil {
 		writeInternalError(w)
-		return
+		return Report{}, false
 	}
 	krByTask := map[int64]int64{}
 	taskNameByID := map[int64]string{}
@@ -79,12 +88,12 @@ func (s *Server) GetReport(w http.ResponseWriter, r *http.Request, projectId int
 	files, err := s.q.ListDeliverableFilesByProject(ctx, projectId)
 	if err != nil {
 		writeInternalError(w)
-		return
+		return Report{}, false
 	}
 	deliverables, err := s.q.ListDeliverablesByProject(ctx, projectId)
 	if err != nil {
 		writeInternalError(w)
-		return
+		return Report{}, false
 	}
 	deliverableName := map[int64]string{}
 	deliverableTask := map[int64]int64{}
@@ -110,7 +119,7 @@ func (s *Server) GetReport(w http.ResponseWriter, r *http.Request, projectId int
 	blockerRows, err := s.q.ListBlockersByProject(ctx, projectId)
 	if err != nil {
 		writeInternalError(w)
-		return
+		return Report{}, false
 	}
 	blockers := []ReportBlocker{}
 	for _, b := range blockerRows {
@@ -136,12 +145,12 @@ func (s *Server) GetReport(w http.ResponseWriter, r *http.Request, projectId int
 	poolRows, err := s.q.LatestPoolReviewsByProject(ctx, projectId)
 	if err != nil {
 		writeInternalError(w)
-		return
+		return Report{}, false
 	}
 	changeRows, err := s.q.LatestFieldChangesByProject(ctx, projectId)
 	if err != nil {
 		writeInternalError(w)
-		return
+		return Report{}, false
 	}
 	pending := struct {
 		Completions  int `json:"completions"`
@@ -193,7 +202,7 @@ func (s *Server) GetReport(w http.ResponseWriter, r *http.Request, projectId int
 		nextSteps = nextSteps[:10]
 	}
 
-	writeJSON(w, http.StatusOK, Report{
+	return Report{
 		Range:                 ReportRange(rangeName),
 		GeneratedAt:           now,
 		KrProgress:            krProgress,
@@ -201,5 +210,5 @@ func (s *Server) GetReport(w http.ResponseWriter, r *http.Request, projectId int
 		Blockers:              blockers,
 		PendingApprovals:      pending,
 		NextSteps:             nextSteps,
-	})
+	}, true
 }

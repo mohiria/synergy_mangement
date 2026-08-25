@@ -2983,6 +2983,59 @@ func TestProjectReport(t *testing.T) {
 	resp.Body.Close()
 }
 
+// 报告导出（#26，AC-20）：Gotenberg 渲染 PDF 与移动端长图；服务不可达时跳过。
+func TestReportExport(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+
+	// Gotenberg 可达性探测
+	gt := os.Getenv("GOTENBERG_URL")
+	if gt == "" {
+		gt = "http://localhost:3000"
+	}
+	if resp, err := http.Get(gt + "/health"); err != nil {
+		t.Skipf("Gotenberg 不可达（docker compose up -d gotenberg）: %v", err)
+	} else {
+		resp.Body.Close()
+	}
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	alice := newClient(t)
+	resp := doJSON(t, alice, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: "alice", Password: "alice-pass"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "导出试点", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+
+	// PDF
+	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/report/export?range=all&format=pdf", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if ct := resp.Header.Get("Content-Type"); ct != "application/pdf" {
+		t.Fatalf("PDF 内容类型异常: %q", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !bytes.HasPrefix(body, []byte("%PDF")) {
+		t.Fatalf("非 PDF 内容: %q", body[:min(8, len(body))])
+	}
+
+	// 长图 PNG
+	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/report/export?range=week&format=image", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if ct := resp.Header.Get("Content-Type"); ct != "image/png" {
+		t.Fatalf("PNG 内容类型异常: %q", ct)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if len(body) < 8 || body[1] != 'P' || body[2] != 'N' || body[3] != 'G' {
+		t.Fatalf("非 PNG 内容")
+	}
+}
+
 func TestLoginRateLimit(t *testing.T) {
 	_, pool := setupDB(t)
 

@@ -99,7 +99,7 @@ export default function ReportsPage({
               <h1>项目报告</h1>
               <p>由项目事实自动生成，不要求成员重复填报 · 生成于 {fmtTime(report.generatedAt)}</p>
             </div>
-            <div style={{ display: "flex", gap: 6 }}>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               {(Object.keys(RANGE_LABEL) as ReportRange[]).map((r) => (
                 <Button
                   key={r}
@@ -110,6 +110,28 @@ export default function ReportsPage({
                   {RANGE_LABEL[r]}
                 </Button>
               ))}
+              <Button
+                size="small"
+                onClick={() =>
+                  window.open(
+                    `/api/v1/projects/${projectId}/report/export?range=${range}&format=image`,
+                    "_blank",
+                  )
+                }
+              >
+                导出长图
+              </Button>
+              <Button
+                size="small"
+                onClick={() =>
+                  window.open(
+                    `/api/v1/projects/${projectId}/report/export?range=${range}&format=pdf`,
+                    "_blank",
+                  )
+                }
+              >
+                导出 PDF
+              </Button>
             </div>
           </div>
 

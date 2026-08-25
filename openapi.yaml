@@ -1562,6 +1562,55 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /projects/{projectId}/report/export:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: range
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/ReportRange"
+      - name: format
+        in: query
+        required: true
+        schema:
+          type: string
+          enum: [pdf, image]
+          description: pdf＝正式留档 PDF；image＝移动端长图 PNG
+    get:
+      operationId: exportReport
+      tags: [tasks]
+      summary: 导出报告（AC-20）：经 Gotenberg 渲染为正式 PDF 或移动端长图
+      responses:
+        "200":
+          description: 导出文件
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "502":
+          description: 渲染服务不可用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /projects/{projectId}/my-work:
     parameters:
       - name: projectId

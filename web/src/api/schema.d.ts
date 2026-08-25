@@ -825,6 +825,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/report/export": {
+        parameters: {
+            query: {
+                range?: components["schemas"]["ReportRange"];
+                format: "pdf" | "image";
+            };
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        /** 导出报告（AC-20）：经 Gotenberg 渲染为正式 PDF 或移动端长图 */
+        get: operations["exportReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/my-work": {
         parameters: {
             query?: never;
@@ -3246,6 +3268,44 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["ValidationError"];
+        };
+    };
+    exportReport: {
+        parameters: {
+            query: {
+                range?: components["schemas"]["ReportRange"];
+                format: "pdf" | "image";
+            };
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 导出文件 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                    "image/png": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+            /** @description 渲染服务不可用 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     getMyWork: {
