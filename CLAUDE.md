@@ -58,6 +58,11 @@
 
 生成物（api.gen.go、store/*.sql.go、schema.d.ts）提交进仓库，但不手改。
 
+## 上下文与交接
+
+- 每完成一个 ticket（commit 之后）或每落地一项重要决定，主动执行 `/handoff` 更新交接文档，不等用户提醒。
+- 上下文压缩交给 auto-compact，模型不主动执行也不模拟 `/compact`。
+
 ## Agent skills
 
 ### Issue tracker
