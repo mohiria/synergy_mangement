@@ -5,6 +5,7 @@ import type { Dayjs } from "dayjs";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import ProjectShell from "./ProjectShell";
+import ImportModal from "./ImportModal";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
@@ -39,6 +40,7 @@ export default function ProjectOkrPage({
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -133,9 +135,12 @@ export default function ProjectOkrPage({
                   <p>O、KR 在线下确定后在此连续录入；系统不承载 OKR 讨论审批。</p>
                 </div>
                 {project.canEdit && (
-                  <Button type="primary" onClick={() => setModalOpen(true)}>
-                    ＋ 新增 O / KR
-                  </Button>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <Button onClick={() => setImportOpen(true)}>导入已有表格</Button>
+                    <Button type="primary" onClick={() => setModalOpen(true)}>
+                      ＋ 新增 O / KR
+                    </Button>
+                  </div>
                 )}
               </div>
               <div className="data-table-wrap">
@@ -165,6 +170,16 @@ export default function ProjectOkrPage({
               </div>
         </>
       )}
+      <ImportModal
+        open={importOpen}
+        projectId={projectId}
+        members={members}
+        onClose={() => setImportOpen(false)}
+        onImported={() => {
+          setImportOpen(false);
+          load();
+        }}
+      />
       {project && (
         <OkrBatchModal
           open={modalOpen}

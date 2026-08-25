@@ -217,6 +217,47 @@ export default function ProjectTasksPage({
   const [inputTask, setInputTask] = useState<Task | null>(null);
   const [reviewerTask, setReviewerTask] = useState<Task | null>(null);
   const [blockerTask, setBlockerTask] = useState<Task | null>(null);
+  const [batchSelected, setBatchSelected] = useState<Set<number>>(new Set());
+
+  const toggleBatch = (id: number) =>
+    setBatchSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const batchSubmit = async () => {
+    const ids = [...batchSelected].filter((id) => tasks.find((t) => t.id === id)?.canSubmitPoolReview);
+    if (ids.length === 0) return;
+    const res = await client.POST("/projects/{projectId}/tasks/batch-pool-submit", {
+      params: { path: { projectId } },
+      body: { taskIds: ids },
+    });
+    if (res.data) {
+      message.success(`已批量提交 ${ids.length} 项入池审批`);
+      setBatchSelected(new Set());
+      load();
+    } else {
+      message.error(res.error?.message ?? "批量提交失败");
+    }
+  };
+
+  const batchDecide = async (decision: "approved" | "rejected", opinion?: string) => {
+    const ids = [...batchSelected].filter((id) => tasks.find((t) => t.id === id)?.canDecidePoolReview);
+    if (ids.length === 0) return;
+    const res = await client.POST("/projects/{projectId}/tasks/batch-pool-decision", {
+      params: { path: { projectId } },
+      body: { taskIds: ids, decision, opinion },
+    });
+    if (res.data) {
+      message.success(decision === "approved" ? "已批量通过" : "已批量退回");
+      setBatchSelected(new Set());
+      load();
+    } else {
+      message.error(res.error?.message ?? "批量处理失败");
+    }
+  };
 
   const remindBlocker = async (blockerId: number) => {
     const res = await client.POST("/projects/{projectId}/blockers/{blockerId}/remind", {
@@ -411,7 +452,17 @@ export default function ProjectTasksPage({
     </tr>,
     ...list.map((t) => (
       <tr key={t.id}>
-        <td className="mono">{taskCode.get(t.id)}</td>
+        <td className="mono">
+          {(t.canSubmitPoolReview || t.canDecidePoolReview) && (
+            <input
+              type="checkbox"
+              checked={batchSelected.has(t.id)}
+              onChange={() => toggleBatch(t.id)}
+              style={{ marginRight: 4 }}
+            />
+          )}
+          {taskCode.get(t.id)}
+        </td>
         <td>
           <Button type="link" size="small" style={{ padding: 0 }} onClick={() => setDrawerTaskId(t.id)}>
             {t.name}
@@ -621,6 +672,30 @@ export default function ProjectTasksPage({
                   })),
                 ]}
               />
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <Button
+                size="small"
+                disabled={![...batchSelected].some((id) => tasks.find((t) => t.id === id)?.canSubmitPoolReview)}
+                onClick={batchSubmit}
+              >
+                批量提交入池
+              </Button>
+              <Button
+                size="small"
+                disabled={![...batchSelected].some((id) => tasks.find((t) => t.id === id)?.canDecidePoolReview)}
+                onClick={() => batchDecide("approved")}
+              >
+                批量通过
+              </Button>
+              <Button
+                size="small"
+                danger
+                disabled={![...batchSelected].some((id) => tasks.find((t) => t.id === id)?.canDecidePoolReview)}
+                onClick={() => batchDecide("rejected", "批量退回，请完善后重提")}
+              >
+                批量退回
+              </Button>
             </div>
           </div>
           <div className="data-table-wrap">

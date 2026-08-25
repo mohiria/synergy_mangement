@@ -3036,6 +3036,153 @@ func TestReportExport(t *testing.T) {
 	}
 }
 
+// 表格导入与批量入池（#27，AC-02/25）：结构化导入生成 O/KR 与任务草稿（整批事务）；
+// 按 KR 批量提交；KR 负责人批量通过或退回。
+func TestImportAndBatchPool(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, bob, carol := newClient(t), newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(bob, "bob", "bob-pass")
+	login(carol, "carol", "carol-pass")
+
+	sp := func(s string) *string { return &s }
+
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "导入试点", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	for _, uid := range []int64{bobUser.ID, carolUser.ID} {
+		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+		wantStatus(t, resp, http.StatusCreated)
+		resp.Body.Close()
+	}
+
+	importURL := fmt.Sprintf("%s/projects/%d/import", base, created.Id)
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+
+	// 普通成员导入 403
+	badReq := api.ImportRequest{Items: []api.ImportItem{{Title: sp("越权 O")}}}
+	resp = doJSON(t, carol, http.MethodPost, importURL, badReq)
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+
+	// AC-02：管理员导入 1 O × 2 KR × 3 任务草稿
+	imp := api.ImportRequest{Items: []api.ImportItem{{
+		Title: sp("提升交付质量"),
+		KeyResults: &[]api.ImportKrItem{
+			{Description: "上线自动验收", OwnerId: &bobUser.ID, Tasks: &[]api.ImportTaskItem{
+				{Name: "导入任务一", OwnerId: carolUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("方案一")},
+				{Name: "导入任务二", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
+			}},
+			{Description: "现场回归通过", OwnerId: &bobUser.ID, Tasks: &[]api.ImportTaskItem{
+				{Name: "导入任务三", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
+			}},
+		},
+	}}}
+	resp = doJSON(t, alice, http.MethodPost, importURL, imp)
+	wantStatus(t, resp, http.StatusCreated)
+	result := decodeBody[api.ImportResult](t, resp)
+	if len(result.Objectives) != 1 || len(result.Objectives[0].KeyResults) != 2 || len(result.Tasks) != 3 {
+		t.Fatalf("导入结构异常: O=%d tasks=%d", len(result.Objectives), len(result.Tasks))
+	}
+	for _, task := range result.Tasks {
+		if task.Status != api.TaskStatusDraft {
+			t.Fatalf("导入任务应为草稿: %+v", task)
+		}
+	}
+
+	// 校验失败整批回滚：含非法任务的导入不落任何数据
+	bad := api.ImportRequest{Items: []api.ImportItem{{
+		Title: sp("坏 O"),
+		KeyResults: &[]api.ImportKrItem{{Description: "坏 KR", Tasks: &[]api.ImportTaskItem{
+			{Name: "  ", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
+		}}},
+	}}}
+	resp = doJSON(t, alice, http.MethodPost, importURL, bad)
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	resp = doJSON(t, alice, http.MethodGet, tasksURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	if got := decodeBody[[]api.Task](t, resp); len(got) != 3 {
+		t.Fatalf("失败导入不应落库: %d", len(got))
+	}
+
+	// AC-25：按 KR1 批量提交（任务一、二）
+	kr1Tasks := []int64{}
+	for _, task := range result.Tasks {
+		if task.Name == "导入任务一" || task.Name == "导入任务二" {
+			kr1Tasks = append(kr1Tasks, task.Id)
+		}
+	}
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/projects/%d/tasks/batch-pool-submit", base, created.Id),
+		api.BatchPoolSubmitRequest{TaskIds: kr1Tasks})
+	wantStatus(t, resp, http.StatusOK)
+	list := decodeBody[[]api.Task](t, resp)
+	pendingCount := 0
+	for _, task := range list {
+		if task.Status == api.TaskStatusPendingPoolReview {
+			pendingCount++
+		}
+	}
+	if pendingCount != 2 {
+		t.Fatalf("批量提交后待审批数量异常: %d", pendingCount)
+	}
+
+	// 非 KR 负责人批量处理 403；KR 负责人 bob 批量通过
+	decideURL := fmt.Sprintf("%s/projects/%d/tasks/batch-pool-decision", base, created.Id)
+	resp = doJSON(t, alice, http.MethodPost, decideURL, api.BatchPoolDecisionRequest{TaskIds: kr1Tasks, Decision: api.BatchPoolDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodPost, decideURL, api.BatchPoolDecisionRequest{TaskIds: kr1Tasks, Decision: api.BatchPoolDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusOK)
+	list = decodeBody[[]api.Task](t, resp)
+	notStarted := 0
+	for _, task := range list {
+		if task.Status == api.TaskStatusNotStarted {
+			notStarted++
+		}
+	}
+	if notStarted != 2 {
+		t.Fatalf("批量通过后未开始数量异常: %d", notStarted)
+	}
+
+	// 批量退回路径：任务三提交后被退回
+	var task3 int64
+	for _, task := range result.Tasks {
+		if task.Name == "导入任务三" {
+			task3 = task.Id
+		}
+	}
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/projects/%d/tasks/batch-pool-submit", base, created.Id),
+		api.BatchPoolSubmitRequest{TaskIds: []int64{task3}})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	op := "范围与 KR 不匹配"
+	resp = doJSON(t, bob, http.MethodPost, decideURL, api.BatchPoolDecisionRequest{TaskIds: []int64{task3}, Decision: api.BatchPoolDecisionRequestDecisionRejected, Opinion: &op})
+	wantStatus(t, resp, http.StatusOK)
+	list = decodeBody[[]api.Task](t, resp)
+	for _, task := range list {
+		if task.Id == task3 && task.Status != api.TaskStatusDraft {
+			t.Fatalf("批量退回后应回草稿: %+v", task)
+		}
+	}
+}
+
 func TestLoginRateLimit(t *testing.T) {
 	_, pool := setupDB(t)
 
