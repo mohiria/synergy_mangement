@@ -20,7 +20,7 @@
 
 1. 从 PRD 验收场景（AC-01～AC-49，主 PRD §12）出发，先改 `openapi.yaml`；
 2. 重新生成代码：后端 oapi-codegen，前端 openapi-typescript + openapi-fetch；生成物不手改；
-3. 业务规则（状态派生、卡点、互锁、审批链、权限、进度、五组归类）只写 `server/internal/domain/`；严格 red-green-refactor：先写覆盖对应 AC 的表驱动单测并真实跑一次、确认失败（编译失败也算红），再实现转绿，最后按需重构；从未见红的测试不算数，「先写后跑直接全绿」不满足本条；
+3. 业务规则（状态派生、卡点、互锁、审批链、权限、进度、五组归类）只写 `server/internal/domain/`；严格 red-green-refactor：先写覆盖对应 AC 的表驱动单测；若编译不过，先补最小桩（空实现／零值返回）让测试可编译运行，再真实跑一次、确认**断言级失败**（红 = 断言失败，编译失败只是中间过程、不算红），然后实现转绿，最后按需重构；从未见断言红的测试不算数，「先写后跑直接全绿」不满足本条；
 4. API handler 保持薄层；集成测试用 httptest + Docker 真 Postgres；
 5. 前端不复刻任何规则，界面反馈只消费 API 派生字段；字段不够时回到契约补字段，不在前端计算；
 6. 数据访问用 sqlc 生成，库结构变更一律走 goose 迁移（`server/migrations/`），不手改数据库。
@@ -32,6 +32,8 @@
 - `server/`：`go build ./... && go vet ./... && go test ./...`
 - `web/`：`npm run build`（含 tsc 类型检查）
 - 契约变更时：两端代码重新生成，确认编译通过
+
+验证／冒烟启动的临时进程（`go run` 起的 server、`npm run dev`、临时端口上的服务等）测试完成后必须关闭，不留后台；`docker compose` 的常驻 postgres 容器除外。
 
 ## 常用命令
 
