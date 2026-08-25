@@ -2015,6 +2015,183 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 	}
 }
 
+// 中间审核或签与退回（#11，AC-14/24/37）：配置或签组→提交进入中间审核→任一人通过进待终审
+// 且其余待办关闭→终审闭环；退回路径删除候选、意见保留、任务回进行中可重新提交完整流程。
+func TestIntermediateReviewOrSign(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
+	daveUser := seedUser(t, q, "dave", "赵六", "dave-pass")
+	erinUser := seedUser(t, q, "erin", "钱七", "erin-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, bob, carol, dave, erin := newClient(t), newClient(t), newClient(t), newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(bob, "bob", "bob-pass")
+	login(carol, "carol", "carol-pass")
+	login(dave, "dave", "dave-pass")
+	login(erin, "erin", "erin-pass")
+
+	sp := func(s string) *string { return &s }
+
+	// 项目：bob KR 负责人；carol 任务负责人；dave、erin 或签组
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "或签试点", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	for _, uid := range []int64{bobUser.ID, carolUser.ID, daveUser.ID, erinUser.ID} {
+		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+		wantStatus(t, resp, http.StatusCreated)
+		resp.Body.Close()
+	}
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	okr := decodeBody[[]api.Objective](t, resp)
+	kr1 := okr[0].KeyResults[0].Id
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+
+	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: carolUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("验收方案")},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	tasks := decodeBody[[]api.Task](t, resp)
+	taskID := tasks[0].Id
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, taskID),
+		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	// carol 配置或签组（dave、erin）；只读成员会被拒
+	reviewersURL := fmt.Sprintf("%s/%d/reviewers", tasksURL, taskID)
+	resp = doJSON(t, carol, http.MethodPut, reviewersURL, api.SetReviewersRequest{UserIds: []int64{daveUser.ID, erinUser.ID}})
+	wantStatus(t, resp, http.StatusOK)
+	if got := decodeBody[[]api.ReviewerInfo](t, resp); len(got) != 2 {
+		t.Fatalf("或签组配置异常: %+v", got)
+	}
+
+	// 开始执行、上传候选、提交 → 进入中间审核
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, taskID),
+		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail := decodeBody[api.TaskDetail](t, resp)
+	dA := detail.Deliverables[0].Id
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskID, dA),
+		api.UploadCandidateRequest{FileName: "验收方案V1.docx"})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskID),
+		api.SubmitCompletionRequest{Note: "请或签审核"})
+	wantStatus(t, resp, http.StatusOK)
+	submitted := decodeBody[api.Task](t, resp)
+	if submitted.Status != api.TaskStatusPendingIntermediateReview || submitted.CurrentStage != "中间或签审核" {
+		t.Fatalf("提交后应进入中间审核: %+v", submitted)
+	}
+
+	// 审核中不可再调整或签组 409
+	resp = doJSON(t, carol, http.MethodPut, reviewersURL, api.SetReviewersRequest{UserIds: []int64{daveUser.ID}})
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail = decodeBody[api.TaskDetail](t, resp)
+	reviewID := detail.CompletionReviews[0].Id
+	if detail.CompletionReviews[0].State != api.CompletionReviewStateIntermediateReview {
+		t.Fatalf("申请状态异常: %+v", detail.CompletionReviews[0])
+	}
+	// AC-37：任务负责人 carol 与 KR 负责人 bob（非组员）均无处理标志
+	if detail.CompletionReviews[0].CanDecide == nil || *detail.CompletionReviews[0].CanDecide {
+		t.Fatalf("非审核人不应可处理: %+v", detail.CompletionReviews[0])
+	}
+	decisionURL := fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, taskID, reviewID)
+	resp = doJSON(t, bob, http.MethodPost, decisionURL, api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+
+	// AC-24：erin 退回（意见必填）→ 候选删除、任务回进行中、意见保留
+	resp = doJSON(t, erin, http.MethodPost, decisionURL, api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionRejected})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	op := "验收样例与现场口径不一致"
+	resp = doJSON(t, erin, http.MethodPost, decisionURL, api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionRejected, Opinion: &op})
+	wantStatus(t, resp, http.StatusOK)
+	if got := decodeBody[api.Task](t, resp); got.Status != api.TaskStatusInProgress {
+		t.Fatalf("退回后应回进行中: %+v", got)
+	}
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail = decodeBody[api.TaskDetail](t, resp)
+	if detail.CompletionReviews[0].State != api.CompletionReviewStateRejected || *detail.CompletionReviews[0].Opinion != op {
+		t.Fatalf("退回意见未保留: %+v", detail.CompletionReviews[0])
+	}
+	if detail.Deliverables[0].Candidate != nil {
+		t.Fatalf("退回后候选应删除: %+v", detail.Deliverables[0])
+	}
+
+	// 重新提交完整流程：重传候选→提交→dave 通过（或签任一人）→ 待 KR 终审、erin 待办关闭
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskID, dA),
+		api.UploadCandidateRequest{FileName: "验收方案V2.docx"})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskID),
+		api.SubmitCompletionRequest{Note: "修正口径后重提"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, dave, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail = decodeBody[api.TaskDetail](t, resp)
+	newReviewID := detail.CompletionReviews[0].Id
+	if detail.CompletionReviews[0].CanDecide == nil || !*detail.CompletionReviews[0].CanDecide {
+		t.Fatalf("或签组成员应可处理: %+v", detail.CompletionReviews[0])
+	}
+	newDecisionURL := fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, taskID, newReviewID)
+	okOp := "口径一致，通过"
+	resp = doJSON(t, dave, http.MethodPost, newDecisionURL, api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved, Opinion: &okOp})
+	wantStatus(t, resp, http.StatusOK)
+	afterOr := decodeBody[api.Task](t, resp)
+	if afterOr.Status != api.TaskStatusPendingFinalReview {
+		t.Fatalf("或签通过后应待 KR 终审: %+v", afterOr)
+	}
+	// AC-14：其余待办自动关闭——erin 再处理返回状态冲突
+	resp = doJSON(t, erin, http.MethodPost, newDecisionURL, api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+
+	// 或签通过留痕；KR 负责人终审闭环
+	resp = doJSON(t, erin, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail = decodeBody[api.TaskDetail](t, resp)
+	cr := detail.CompletionReviews[0]
+	if cr.IntermediateByName == nil || *cr.IntermediateByName != "赵六" || cr.IntermediateOpinion == nil || *cr.IntermediateOpinion != okOp {
+		t.Fatalf("或签处理事实未留痕: %+v", cr)
+	}
+	resp = doJSON(t, bob, http.MethodPost, newDecisionURL, api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusOK)
+	if got := decodeBody[api.Task](t, resp); got.Status != api.TaskStatusCompleted {
+		t.Fatalf("终审后应完成: %+v", got)
+	}
+}
+
 func TestLoginRateLimit(t *testing.T) {
 	_, pool := setupDB(t)
 

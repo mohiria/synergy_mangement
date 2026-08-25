@@ -48,10 +48,22 @@ func (q *Queries) CandidateCountsByProject(ctx context.Context, projectID int64)
 	return items, nil
 }
 
+const clearTaskReviewers = `-- name: ClearTaskReviewers :execrows
+DELETE FROM task_reviewers WHERE task_id = $1
+`
+
+func (q *Queries) ClearTaskReviewers(ctx context.Context, taskID int64) (int64, error) {
+	result, err := q.db.Exec(ctx, clearTaskReviewers, taskID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const createCompletionReview = `-- name: CreateCompletionReview :one
 INSERT INTO completion_reviews (task_id, submitted_by, note, state)
 VALUES ($1, $2, $3, $4)
-RETURNING id, task_id, submitted_by, note, state, opinion, submitted_at, decided_by, decided_at
+RETURNING id, task_id, submitted_by, note, state, opinion, submitted_at, decided_by, decided_at, intermediate_by, intermediate_at, intermediate_opinion
 `
 
 type CreateCompletionReviewParams struct {
@@ -79,6 +91,9 @@ func (q *Queries) CreateCompletionReview(ctx context.Context, arg CreateCompleti
 		&i.SubmittedAt,
 		&i.DecidedBy,
 		&i.DecidedAt,
+		&i.IntermediateBy,
+		&i.IntermediateAt,
+		&i.IntermediateOpinion,
 	)
 	return i, err
 }
@@ -107,11 +122,27 @@ func (q *Queries) CreateCompletionReviewItem(ctx context.Context, arg CreateComp
 	return err
 }
 
+const createReviewReviewer = `-- name: CreateReviewReviewer :exec
+INSERT INTO completion_review_reviewers (review_id, user_id)
+VALUES ($1, $2)
+ON CONFLICT DO NOTHING
+`
+
+type CreateReviewReviewerParams struct {
+	ReviewID int64
+	UserID   int64
+}
+
+func (q *Queries) CreateReviewReviewer(ctx context.Context, arg CreateReviewReviewerParams) error {
+	_, err := q.db.Exec(ctx, createReviewReviewer, arg.ReviewID, arg.UserID)
+	return err
+}
+
 const decideCompletionReview = `-- name: DecideCompletionReview :one
 UPDATE completion_reviews
 SET state = $2, opinion = $3, decided_by = $4, decided_at = now()
 WHERE id = $1
-RETURNING id, task_id, submitted_by, note, state, opinion, submitted_at, decided_by, decided_at
+RETURNING id, task_id, submitted_by, note, state, opinion, submitted_at, decided_by, decided_at, intermediate_by, intermediate_at, intermediate_opinion
 `
 
 type DecideCompletionReviewParams struct {
@@ -139,12 +170,15 @@ func (q *Queries) DecideCompletionReview(ctx context.Context, arg DecideCompleti
 		&i.SubmittedAt,
 		&i.DecidedBy,
 		&i.DecidedAt,
+		&i.IntermediateBy,
+		&i.IntermediateAt,
+		&i.IntermediateOpinion,
 	)
 	return i, err
 }
 
 const getCompletionReview = `-- name: GetCompletionReview :one
-SELECT id, task_id, submitted_by, note, state, opinion, submitted_at, decided_by, decided_at FROM completion_reviews
+SELECT id, task_id, submitted_by, note, state, opinion, submitted_at, decided_by, decided_at, intermediate_by, intermediate_at, intermediate_opinion FROM completion_reviews
 WHERE id = $1 AND task_id = $2
 `
 
@@ -166,6 +200,9 @@ func (q *Queries) GetCompletionReview(ctx context.Context, arg GetCompletionRevi
 		&i.SubmittedAt,
 		&i.DecidedBy,
 		&i.DecidedAt,
+		&i.IntermediateBy,
+		&i.IntermediateAt,
+		&i.IntermediateOpinion,
 	)
 	return i, err
 }
@@ -282,7 +319,7 @@ func (q *Queries) ListCompletionReviewItems(ctx context.Context, reviewID int64)
 }
 
 const listCompletionReviewsByTask = `-- name: ListCompletionReviewsByTask :many
-SELECT cr.id, cr.task_id, cr.submitted_by, cr.note, cr.state, cr.opinion, cr.submitted_at, cr.decided_by, cr.decided_at, su.display_name AS submitted_by_name, du.display_name AS decided_by_name
+SELECT cr.id, cr.task_id, cr.submitted_by, cr.note, cr.state, cr.opinion, cr.submitted_at, cr.decided_by, cr.decided_at, cr.intermediate_by, cr.intermediate_at, cr.intermediate_opinion, su.display_name AS submitted_by_name, du.display_name AS decided_by_name
 FROM completion_reviews cr
 JOIN users su ON su.id = cr.submitted_by
 LEFT JOIN users du ON du.id = cr.decided_by
@@ -291,17 +328,20 @@ ORDER BY cr.id DESC
 `
 
 type ListCompletionReviewsByTaskRow struct {
-	ID              int64
-	TaskID          int64
-	SubmittedBy     int64
-	Note            string
-	State           string
-	Opinion         string
-	SubmittedAt     pgtype.Timestamptz
-	DecidedBy       pgtype.Int8
-	DecidedAt       pgtype.Timestamptz
-	SubmittedByName string
-	DecidedByName   pgtype.Text
+	ID                  int64
+	TaskID              int64
+	SubmittedBy         int64
+	Note                string
+	State               string
+	Opinion             string
+	SubmittedAt         pgtype.Timestamptz
+	DecidedBy           pgtype.Int8
+	DecidedAt           pgtype.Timestamptz
+	IntermediateBy      pgtype.Int8
+	IntermediateAt      pgtype.Timestamptz
+	IntermediateOpinion string
+	SubmittedByName     string
+	DecidedByName       pgtype.Text
 }
 
 func (q *Queries) ListCompletionReviewsByTask(ctx context.Context, taskID int64) ([]ListCompletionReviewsByTaskRow, error) {
@@ -323,9 +363,78 @@ func (q *Queries) ListCompletionReviewsByTask(ctx context.Context, taskID int64)
 			&i.SubmittedAt,
 			&i.DecidedBy,
 			&i.DecidedAt,
+			&i.IntermediateBy,
+			&i.IntermediateAt,
+			&i.IntermediateOpinion,
 			&i.SubmittedByName,
 			&i.DecidedByName,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReviewReviewers = `-- name: ListReviewReviewers :many
+SELECT crr.user_id, u.display_name
+FROM completion_review_reviewers crr
+JOIN users u ON u.id = crr.user_id
+WHERE crr.review_id = $1
+ORDER BY crr.user_id
+`
+
+type ListReviewReviewersRow struct {
+	UserID      int64
+	DisplayName string
+}
+
+func (q *Queries) ListReviewReviewers(ctx context.Context, reviewID int64) ([]ListReviewReviewersRow, error) {
+	rows, err := q.db.Query(ctx, listReviewReviewers, reviewID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListReviewReviewersRow
+	for rows.Next() {
+		var i ListReviewReviewersRow
+		if err := rows.Scan(&i.UserID, &i.DisplayName); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTaskReviewers = `-- name: ListTaskReviewers :many
+SELECT tr.user_id, u.display_name
+FROM task_reviewers tr
+JOIN users u ON u.id = tr.user_id
+WHERE tr.task_id = $1
+ORDER BY tr.user_id
+`
+
+type ListTaskReviewersRow struct {
+	UserID      int64
+	DisplayName string
+}
+
+func (q *Queries) ListTaskReviewers(ctx context.Context, taskID int64) ([]ListTaskReviewersRow, error) {
+	rows, err := q.db.Query(ctx, listTaskReviewers, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTaskReviewersRow
+	for rows.Next() {
+		var i ListTaskReviewersRow
+		if err := rows.Scan(&i.UserID, &i.DisplayName); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -360,4 +469,60 @@ func (q *Queries) PromoteCandidateToCurrent(ctx context.Context, id int64) (Deli
 		&i.EffectiveAt,
 	)
 	return i, err
+}
+
+const recordIntermediateApproval = `-- name: RecordIntermediateApproval :one
+UPDATE completion_reviews
+SET state = $2, intermediate_by = $3, intermediate_at = now(), intermediate_opinion = $4
+WHERE id = $1
+RETURNING id, task_id, submitted_by, note, state, opinion, submitted_at, decided_by, decided_at, intermediate_by, intermediate_at, intermediate_opinion
+`
+
+type RecordIntermediateApprovalParams struct {
+	ID                  int64
+	State               string
+	IntermediateBy      pgtype.Int8
+	IntermediateOpinion string
+}
+
+// 或签任一人通过：记录处理事实并进入待 KR 终审（其余待办随状态关闭）。
+func (q *Queries) RecordIntermediateApproval(ctx context.Context, arg RecordIntermediateApprovalParams) (CompletionReview, error) {
+	row := q.db.QueryRow(ctx, recordIntermediateApproval,
+		arg.ID,
+		arg.State,
+		arg.IntermediateBy,
+		arg.IntermediateOpinion,
+	)
+	var i CompletionReview
+	err := row.Scan(
+		&i.ID,
+		&i.TaskID,
+		&i.SubmittedBy,
+		&i.Note,
+		&i.State,
+		&i.Opinion,
+		&i.SubmittedAt,
+		&i.DecidedBy,
+		&i.DecidedAt,
+		&i.IntermediateBy,
+		&i.IntermediateAt,
+		&i.IntermediateOpinion,
+	)
+	return i, err
+}
+
+const setTaskReviewer = `-- name: SetTaskReviewer :exec
+INSERT INTO task_reviewers (task_id, user_id)
+VALUES ($1, $2)
+ON CONFLICT DO NOTHING
+`
+
+type SetTaskReviewerParams struct {
+	TaskID int64
+	UserID int64
+}
+
+func (q *Queries) SetTaskReviewer(ctx context.Context, arg SetTaskReviewerParams) error {
+	_, err := q.db.Exec(ctx, setTaskReviewer, arg.TaskID, arg.UserID)
+	return err
 }

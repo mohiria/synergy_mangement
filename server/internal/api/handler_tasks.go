@@ -477,6 +477,15 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		writeInternalError(w)
 		return
 	}
+	reviewerRows, err := s.q.ListTaskReviewers(r.Context(), taskId)
+	if err != nil {
+		writeInternalError(w)
+		return
+	}
+	reviewerViews := make([]ReviewerInfo, 0, len(reviewerRows))
+	for _, rv := range reviewerRows {
+		reviewerViews = append(reviewerViews, ReviewerInfo{UserId: rv.UserID, DisplayName: rv.DisplayName})
+	}
 	inputs, outputs := []DeliverableEdge{}, []DeliverableEdge{}
 	for _, e := range allEdges {
 		if e.TargetTaskId == taskId {
@@ -533,6 +542,7 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		Deliverables:      deliverables,
 		Discussions:       discussions,
 		CompletionReviews: completions,
+		Reviewers:         reviewerViews,
 		Inputs:            inputs,
 		Outputs:           outputs,
 	})
@@ -681,6 +691,8 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 		item.CanUploadCandidate = &canUploadCandidate
 		canSubmitCompletion := domain.CanSubmitCompletion(actor, userID, facts, candidatesByTask[t.ID])
 		item.CanSubmitCompletion = &canSubmitCompletion
+		canManageReviewers := domain.CanManageReviewers(actor, userID, facts)
+		item.CanManageReviewers = &canManageReviewers
 		if names := namesByTask[t.ID]; len(names) > 0 {
 			item.DeliverableNames = &names
 		}

@@ -9,15 +9,18 @@ import (
 )
 
 type CompletionReview struct {
-	ID          int64
-	TaskID      int64
-	SubmittedBy int64
-	Note        string
-	State       string
-	Opinion     string
-	SubmittedAt pgtype.Timestamptz
-	DecidedBy   pgtype.Int8
-	DecidedAt   pgtype.Timestamptz
+	ID                  int64
+	TaskID              int64
+	SubmittedBy         int64
+	Note                string
+	State               string
+	Opinion             string
+	SubmittedAt         pgtype.Timestamptz
+	DecidedBy           pgtype.Int8
+	DecidedAt           pgtype.Timestamptz
+	IntermediateBy      pgtype.Int8
+	IntermediateAt      pgtype.Timestamptz
+	IntermediateOpinion string
 }
 
 type CompletionReviewItem struct {
@@ -26,6 +29,11 @@ type CompletionReviewItem struct {
 	DeliverableName string
 	FileName        string
 	FileID          pgtype.Int8
+}
+
+type CompletionReviewReviewer struct {
+	ReviewID int64
+	UserID   int64
 }
 
 type Deliverable struct {
@@ -195,6 +203,11 @@ type TaskInvite struct {
 	Note        string
 	State       string
 	CreatedAt   pgtype.Timestamptz
+}
+
+type TaskReviewer struct {
+	TaskID int64
+	UserID int64
 }
 
 type User struct {

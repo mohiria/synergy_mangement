@@ -1,3 +1,30 @@
+-- name: SetTaskReviewer :exec
+INSERT INTO task_reviewers (task_id, user_id)
+VALUES ($1, $2)
+ON CONFLICT DO NOTHING;
+
+-- name: ClearTaskReviewers :execrows
+DELETE FROM task_reviewers WHERE task_id = $1;
+
+-- name: ListTaskReviewers :many
+SELECT tr.user_id, u.display_name
+FROM task_reviewers tr
+JOIN users u ON u.id = tr.user_id
+WHERE tr.task_id = $1
+ORDER BY tr.user_id;
+
+-- name: CreateReviewReviewer :exec
+INSERT INTO completion_review_reviewers (review_id, user_id)
+VALUES ($1, $2)
+ON CONFLICT DO NOTHING;
+
+-- name: ListReviewReviewers :many
+SELECT crr.user_id, u.display_name
+FROM completion_review_reviewers crr
+JOIN users u ON u.id = crr.user_id
+WHERE crr.review_id = $1
+ORDER BY crr.user_id;
+
 -- name: CreateCompletionReview :one
 INSERT INTO completion_reviews (task_id, submitted_by, note, state)
 VALUES ($1, $2, $3, $4)
@@ -23,6 +50,13 @@ ORDER BY cr.id DESC;
 SELECT * FROM completion_review_items
 WHERE review_id = $1
 ORDER BY deliverable_id;
+
+-- name: RecordIntermediateApproval :one
+-- 或签任一人通过：记录处理事实并进入待 KR 终审（其余待办随状态关闭）。
+UPDATE completion_reviews
+SET state = $2, intermediate_by = $3, intermediate_at = now(), intermediate_opinion = $4
+WHERE id = $1
+RETURNING *;
 
 -- name: DecideCompletionReview :one
 UPDATE completion_reviews

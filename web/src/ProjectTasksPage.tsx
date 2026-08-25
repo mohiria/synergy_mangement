@@ -215,6 +215,7 @@ export default function ProjectTasksPage({
     }
   };
   const [inputTask, setInputTask] = useState<Task | null>(null);
+  const [reviewerTask, setReviewerTask] = useState<Task | null>(null);
 
   const removeEdge = async (edgeId: number) => {
     const res = await client.DELETE("/projects/{projectId}/edges/{edgeId}", {
@@ -642,6 +643,7 @@ export default function ProjectTasksPage({
             setCrRejectOpinion("");
           },
           openConfigureInput: (t) => setInputTask(t),
+          openReviewers: (t) => setReviewerTask(t),
           removeEdge,
           openTask: (id) => setDrawerTaskId(id),
         }}
@@ -654,6 +656,16 @@ export default function ProjectTasksPage({
         onClose={() => setInputTask(null)}
         onSaved={() => {
           setInputTask(null);
+          load();
+        }}
+      />
+      <ReviewersModal
+        projectId={projectId}
+        task={reviewerTask}
+        members={members}
+        onClose={() => setReviewerTask(null)}
+        onSaved={() => {
+          setReviewerTask(null);
           load();
         }}
       />
@@ -672,7 +684,7 @@ export default function ProjectTasksPage({
         }}
       >
         <p className="muted" style={{ marginTop: 0 }}>
-          本次全部候选交付物整体提交；未配置中间审核人，提交后直接进入待 KR 终审。
+          本次全部候选交付物整体提交；已配置中间审核人时进入多人或签，否则直接进入待 KR 终审。
         </p>
         <Input.TextArea
           rows={3}
@@ -1202,6 +1214,7 @@ function TaskDrawer({
     approveCompletion: (t: Task, reviewId: number) => void;
     openCrReject: (t: Task, reviewId: number) => void;
     openConfigureInput: (t: Task) => void;
+    openReviewers: (t: Task) => void;
     removeEdge: (edgeId: number) => void;
     openTask: (taskId: number) => void;
   };
@@ -1317,6 +1330,7 @@ function TaskDrawer({
   };
 
   if (!task) return null;
+  const reviewers = detail?.reviewers ?? [];
   const inputs = detail?.inputs ?? [];
   const outputs = detail?.outputs ?? [];
   const requiredInputs = inputs.filter((e) => e.necessity === "required");
@@ -1374,6 +1388,19 @@ function TaskDrawer({
               {task.currentStage}
               {task.pendingActorName ? ` · ${task.pendingActorName}` : ""}
             </strong>
+          </div>
+          <div className="task-info-row">
+            <span>中间审核（或签）</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <strong className={reviewers.length ? "" : "muted"}>
+                {reviewers.length ? reviewers.map((r) => r.displayName).join("、") : "未配置"}
+              </strong>
+              {task.canManageReviewers && (
+                <Button size="small" onClick={() => actions.openReviewers(task)}>
+                  调整
+                </Button>
+              )}
+            </div>
           </div>
           <div className="task-info-row">
             <span>任务说明</span>
@@ -1667,7 +1694,18 @@ function TaskDrawer({
           <div style={{ marginTop: 8, fontSize: 13 }}>
             <div className="muted" style={{ fontSize: 12 }}>
               提交说明:{cr.note}；本次 {cr.items.length} 项候选整体通过或退回。
+              {cr.reviewers && cr.reviewers.length > 0 &&
+                `或签组：${cr.reviewers.map((r) => r.displayName).join("、")}（任一人通过即进入待 KR 终审）。`}
             </div>
+            {cr.intermediateByName && (
+              <div className="handled-fact" style={{ marginTop: 6 }}>
+                <b>
+                  中间或签通过 · {cr.intermediateByName}
+                  {cr.intermediateAt ? ` · ${fmtTime(cr.intermediateAt)}` : ""}
+                </b>
+                <div>{cr.intermediateOpinion || "未填写意见"}</div>
+              </div>
+            )}
             {cr.items.map((it) => (
               <div key={cr.id + "-" + it.deliverableId} style={{ marginTop: 4 }}>
                 <b>{it.deliverableName}</b>：
@@ -2182,6 +2220,93 @@ function ConfigureInputModal({
         <div className="notice">
           某项信息不到位会阻止下游开始或完成时，请选择「硬前置交付」；必要输入未就绪的任务显示“等待输入”。
         </div>
+      </div>
+    </Modal>
+  );
+}
+
+// 中间审核人配置（§5.4）：非关键字段，可直接调整；0～多名，或签。
+function ReviewersModal({
+  projectId,
+  task,
+  members,
+  onClose,
+  onSaved,
+}: {
+  projectId: number;
+  task: Task | null;
+  members: ProjectMember[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [userIds, setUserIds] = useState<number[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (task) {
+      setError(null);
+      client
+        .GET("/projects/{projectId}/tasks/{taskId}", {
+          params: { path: { projectId, taskId: task.id } },
+        })
+        .then((res) => {
+          if (res.data) setUserIds(res.data.reviewers.map((r) => r.userId));
+        });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task?.id]);
+
+  if (!task) return null;
+  const options = members
+    .filter((m) => m.role !== "viewer")
+    .map((m) => ({ value: m.userId, label: `${m.displayName}（${m.username}）` }));
+
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    const res = await client.PUT("/projects/{projectId}/tasks/{taskId}/reviewers", {
+      params: { path: { projectId, taskId: task.id } },
+      body: { userIds },
+    });
+    setSaving(false);
+    if (res.data) {
+      message.success("中间审核人配置已调整");
+      onSaved();
+    } else {
+      setError(res.error?.message ?? "保存失败");
+    }
+  };
+
+  return (
+    <Modal
+      title={
+        <div>
+          中间审核（或签）
+          <span className="modal-sub">0～多名；任一人通过即进入待 KR 终审，任一人退回则整体退回</span>
+        </div>
+      }
+      open={!!task}
+      width={520}
+      confirmLoading={saving}
+      onOk={save}
+      onCancel={onClose}
+      okText="保存配置"
+      cancelText="取消"
+      destroyOnClose
+    >
+      {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
+      <Select
+        mode="multiple"
+        style={{ width: "100%" }}
+        placeholder="选择中间审核人（可为空表示不设置）"
+        value={userIds}
+        onChange={setUserIds}
+        options={options}
+        optionFilterProp="label"
+      />
+      <div className="notice" style={{ marginTop: 12 }}>
+        中间审核人配置不属于关键字段，可直接调整；提交完成申请后随申请快照锁定。
       </div>
     </Modal>
   );

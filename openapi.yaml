@@ -837,6 +837,50 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /projects/{projectId}/tasks/{taskId}/reviewers:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: taskId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    put:
+      operationId: setTaskReviewers
+      tags: [tasks]
+      summary: 调整中间审核人配置（非关键字段可直接调整，§5.2.B；审核中与终态不可）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetReviewersRequest"
+      responses:
+        "200":
+          description: 已调整，返回最新配置
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ReviewerInfo"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
   /projects/{projectId}/tasks/{taskId}/completion-reviews:
     parameters:
       - name: projectId
@@ -1604,6 +1648,9 @@ components:
         canSubmitCompletion:
           type: boolean
           description: 当前用户能否提交完成申请（派生字段；负责人，进行中且有候选内容）
+        canManageReviewers:
+          type: boolean
+          description: 当前用户能否调整中间审核人配置（派生字段；负责人／创建人／可编辑项目者，审核中与终态不可）
         canUploadCandidate:
           type: boolean
           description: 当前用户能否登记候选交付物内容（派生字段；负责人，执行类状态）
@@ -1667,6 +1714,7 @@ components:
           deliverables,
           discussions,
           completionReviews,
+          reviewers,
           inputs,
           outputs,
         ]
@@ -1704,6 +1752,11 @@ components:
           description: 完成申请记录，最新在前（AC-13／AC-15／AC-38～40）
           items:
             $ref: "#/components/schemas/CompletionReview"
+        reviewers:
+          type: array
+          description: 任务级中间审核人配置（或签组；提交完成申请时快照进申请）
+          items:
+            $ref: "#/components/schemas/ReviewerInfo"
         inputs:
           type: array
           description: 指向本任务的交付物边（必要输入与参考输入，AC-07／28）
@@ -2073,6 +2126,25 @@ components:
           type: integer
           format: int64
           description: 仍可预览／下载的在库文件；已删除时缺省
+    ReviewerInfo:
+      type: object
+      required: [userId, displayName]
+      properties:
+        userId:
+          type: integer
+          format: int64
+        displayName:
+          type: string
+    SetReviewersRequest:
+      type: object
+      required: [userIds]
+      properties:
+        userIds:
+          type: array
+          description: 中间审核人（或签组；可为空表示不配置）；须为非只读项目成员
+          items:
+            type: integer
+            format: int64
     CompletionReview:
       type: object
       description: 完成申请（词汇表）；整体通过或整体退回
@@ -2103,9 +2175,22 @@ components:
         decidedAt:
           type: string
           format: date-time
+        reviewers:
+          type: array
+          description: 中间审核组快照（或签；AC-14）
+          items:
+            $ref: "#/components/schemas/ReviewerInfo"
+        intermediateByName:
+          type: string
+          description: 或签通过的处理人姓名（派生字段）
+        intermediateAt:
+          type: string
+          format: date-time
+        intermediateOpinion:
+          type: string
         canDecide:
           type: boolean
-          description: 当前用户能否处理本申请（派生字段；待 KR 终审时仅所属 KR 负责人）
+          description: 当前用户能否处理本申请（派生字段；中间审核中为或签组成员，待 KR 终审时仅所属 KR 负责人，AC-37）
     SubmitCompletionRequest:
       type: object
       required: [note]

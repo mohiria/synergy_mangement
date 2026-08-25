@@ -412,6 +412,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/tasks/{taskId}/reviewers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 调整中间审核人配置（非关键字段可直接调整，§5.2.B；审核中与终态不可） */
+        put: operations["setTaskReviewers"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/tasks/{taskId}/completion-reviews": {
         parameters: {
             query?: never;
@@ -847,6 +867,8 @@ export interface components {
             canManageDeliverables?: boolean;
             /** @description 当前用户能否提交完成申请（派生字段；负责人，进行中且有候选内容） */
             canSubmitCompletion?: boolean;
+            /** @description 当前用户能否调整中间审核人配置（派生字段；负责人／创建人／可编辑项目者，审核中与终态不可） */
+            canManageReviewers?: boolean;
             /** @description 当前用户能否登记候选交付物内容（派生字段；负责人，执行类状态） */
             canUploadCandidate?: boolean;
             /** @description 当前用户能否提交本任务入池（派生字段；草稿且为创建人／负责人／可编辑项目者） */
@@ -897,6 +919,8 @@ export interface components {
             discussions: components["schemas"]["Discussion"][];
             /** @description 完成申请记录，最新在前（AC-13／AC-15／AC-38～40） */
             completionReviews: components["schemas"]["CompletionReview"][];
+            /** @description 任务级中间审核人配置（或签组；提交完成申请时快照进申请） */
+            reviewers: components["schemas"]["ReviewerInfo"][];
             /** @description 指向本任务的交付物边（必要输入与参考输入，AC-07／28） */
             inputs: components["schemas"]["DeliverableEdge"][];
             /** @description 从本任务出发的交付物边（直接下游） */
@@ -1134,6 +1158,15 @@ export interface components {
              */
             fileId?: number;
         };
+        ReviewerInfo: {
+            /** Format: int64 */
+            userId: number;
+            displayName: string;
+        };
+        SetReviewersRequest: {
+            /** @description 中间审核人（或签组；可为空表示不配置）；须为非只读项目成员 */
+            userIds: number[];
+        };
         /** @description 完成申请（词汇表）；整体通过或整体退回 */
         CompletionReview: {
             /** Format: int64 */
@@ -1150,7 +1183,14 @@ export interface components {
             submittedAt?: string;
             /** Format: date-time */
             decidedAt?: string;
-            /** @description 当前用户能否处理本申请（派生字段；待 KR 终审时仅所属 KR 负责人） */
+            /** @description 中间审核组快照（或签；AC-14） */
+            reviewers?: components["schemas"]["ReviewerInfo"][];
+            /** @description 或签通过的处理人姓名（派生字段） */
+            intermediateByName?: string;
+            /** Format: date-time */
+            intermediateAt?: string;
+            intermediateOpinion?: string;
+            /** @description 当前用户能否处理本申请（派生字段；中间审核中为或签组成员，待 KR 终审时仅所属 KR 负责人，AC-37） */
             canDecide?: boolean;
         };
         SubmitCompletionRequest: {
@@ -2048,6 +2088,38 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    setTaskReviewers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetReviewersRequest"];
+            };
+        };
+        responses: {
+            /** @description 已调整，返回最新配置 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewerInfo"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
         };
     };
     submitCompletion: {
