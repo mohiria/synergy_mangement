@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/oapi-codegen/runtime"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 // Defines values for HealthStatus.
@@ -34,9 +36,37 @@ func (e HealthStatus) Valid() bool {
 	}
 }
 
+// Defines values for ProjectStatus.
+const (
+	Archived   ProjectStatus = "archived"
+	Completed  ProjectStatus = "completed"
+	InProgress ProjectStatus = "in_progress"
+	NotStarted ProjectStatus = "not_started"
+)
+
+// Valid indicates whether the value is a known member of the ProjectStatus enum.
+func (e ProjectStatus) Valid() bool {
+	switch e {
+	case Archived:
+		return true
+	case Completed:
+		return true
+	case InProgress:
+		return true
+	case NotStarted:
+		return true
+	default:
+		return false
+	}
+}
+
 // CreateProjectRequest defines model for CreateProjectRequest.
 type CreateProjectRequest struct {
-	Name string `json:"name"`
+	Name             string              `json:"name"`
+	OwnerId          int64               `json:"ownerId"`
+	PlannedEndDate   *openapi_types.Date `json:"plannedEndDate,omitempty"`
+	PlannedStartDate *openapi_types.Date `json:"plannedStartDate,omitempty"`
+	Stage            *string             `json:"stage,omitempty"`
 }
 
 // CurrentUser defines model for CurrentUser.
@@ -74,7 +104,49 @@ type Project struct {
 	CreatedAt time.Time `json:"createdAt"`
 	Id        int64     `json:"id"`
 	Name      string    `json:"name"`
+
+	// OwnerId 项目负责人（单人；与项目管理员为独立角色）
+	OwnerId int64 `json:"ownerId"`
+
+	// OwnerName 项目负责人姓名（派生字段，前端直接展示）
+	OwnerName        string              `json:"ownerName"`
+	PlannedEndDate   *openapi_types.Date `json:"plannedEndDate,omitempty"`
+	PlannedStartDate *openapi_types.Date `json:"plannedStartDate,omitempty"`
+
+	// Stage 业务里程碑标签，自由文本，选填
+	Stage *string `json:"stage,omitempty"`
+
+	// Status 项目状态（未开始／进行中／已完成／已归档），与自由文本“阶段”正交
+	Status ProjectStatus `json:"status"`
 }
+
+// ProjectStatus 项目状态（未开始／进行中／已完成／已归档），与自由文本“阶段”正交
+type ProjectStatus string
+
+// UpdateProjectRequest defines model for UpdateProjectRequest.
+type UpdateProjectRequest struct {
+	Name             string              `json:"name"`
+	OwnerId          int64               `json:"ownerId"`
+	PlannedEndDate   *openapi_types.Date `json:"plannedEndDate,omitempty"`
+	PlannedStartDate *openapi_types.Date `json:"plannedStartDate,omitempty"`
+	Stage            *string             `json:"stage,omitempty"`
+
+	// Status 项目状态（未开始／进行中／已完成／已归档），与自由文本“阶段”正交
+	Status ProjectStatus `json:"status"`
+}
+
+// UserSummary defines model for UserSummary.
+type UserSummary struct {
+	DisplayName string `json:"displayName"`
+	Id          int64  `json:"id"`
+	Username    string `json:"username"`
+}
+
+// NotFound defines model for NotFound.
+type NotFound = Error
+
+// TooManyRequests defines model for TooManyRequests.
+type TooManyRequests = Error
 
 // Unauthorized defines model for Unauthorized.
 type Unauthorized = Error
@@ -87,6 +159,9 @@ type LoginJSONRequestBody = LoginRequest
 
 // CreateProjectJSONRequestBody defines body for CreateProject for application/json ContentType.
 type CreateProjectJSONRequestBody = CreateProjectRequest
+
+// UpdateProjectJSONRequestBody defines body for UpdateProject for application/json ContentType.
+type UpdateProjectJSONRequestBody = UpdateProjectRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -108,6 +183,12 @@ type ServerInterface interface {
 	// CreateProject 创建项目
 	// (POST /projects)
 	CreateProject(w http.ResponseWriter, r *http.Request)
+	// UpdateProject 更新项目（全量字段）
+	// (PUT /projects/{projectId})
+	UpdateProject(w http.ResponseWriter, r *http.Request, projectId int64)
+	// ListUsers 全部用户（用于人员选择）
+	// (GET /users)
+	ListUsers(w http.ResponseWriter, r *http.Request)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -194,6 +275,46 @@ func (siw *ServerInterfaceWrapper) CreateProject(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateProject(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateProject operation middleware
+func (siw *ServerInterfaceWrapper) UpdateProject(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateProject(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListUsers operation middleware
+func (siw *ServerInterfaceWrapper) ListUsers(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListUsers(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -329,6 +450,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/me", wrapper.GetCurrentUser)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects", wrapper.ListProjects)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects", wrapper.CreateProject)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/projects/{projectId}", wrapper.UpdateProject)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/users", wrapper.ListUsers)
 
 	return m
 }
@@ -338,29 +461,39 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"7FhtcxrHHf8qzLbvio3kuJ0p71w3jT11U09V542ryVxgjS6Bu8ve4pR4mEGOFcA8KkG2JLBlLMkiegDL",
+	"xQajs/1dEnbveMVX6Ozt6XTAgTS15E5n+oplb/f/+Ps/7R0QkCOKLEEJq8B/ByCoKrKkQvPPpzL+kxyV",
+	"gmwdkCUMJcyWgqKExYCARVnyfanKEttTA3MwIrDVrxG8BfzgV74jwj7+VfV9jJCMQDwe94IgVANIVBgR",
+	"4AfGy3u0U+y2c2RvmVRqIO4Ff5flvwhS7G/w6yhUuXBnK4O+ckDeLJGNfaO5SXerdOm58S5JNlb7Wpau",
+	"3qUPX/VWir3EGpPthiRE8ZyMxG/hBzAOrWxz2WjqQVdbNRqPSOuF8S5JK6YwnwlhMWgy5BTO3lmNFt2/",
+	"S75fIPXXtLLdS6wyYZ5Ue9tZwE5bBBj9ywgKGF5H8pcwgC1Xsn0FyQpEWOQ4k4QIZL8R4Z/XoBTCc8A/",
+	"PTXlBRFRsv97AY4pEPiBipEohZji8jcSRFdNB9ySUUTAwA9ECf/uIrAPixKGIYjYaSUsSBIMfiwF/yhg",
+	"OHApyDZcGFhXZrCA8IkvqVgIDWvz26mRg3EvQPDrqIgYgm5yExypNGufl79gpmOEL0cRghK+oUI0asKg",
+	"qCphIfapZckRqcSTmimqQiS5UxkSWQwCx3HvgAhu8tvoHJQ8IAdNZsOY75CVGik0jMZBr7RiNBr6k3k3",
+	"c0egqloGH6TQe/SUFBf1Uo2mWvrqPU7EaDTpch4c5w1TpiPabtpcgUKYuXZYHRULOGquoBSNMGLyVw4C",
+	"Yxhat9wYXZNDojQ2dBRBVb+R0aB37c1jQ8jp7YlHh+R1uN1m5ia8FfkuXjcTQ/ASHompc1iMuAbWiSEs",
+	"jQsCR8IYwkr1tV6uG801o7ne7XT6WorklsxFudvO8696vaoXvyeLy912R8/s6jsZY+sHI/2ir6WB9yRi",
+	"mdwPA3Qif7L1Iynm+lqKNt/qpTWy95DWX/a1LEnn9J2GXm7S/CbZX9I3Opz5uMT14XLdoDrd9iq5X+0l",
+	"s3otoz9dpE+S+t7bvpY1ktt6aZ8+SNLKbl/L9hJpUt0ZQ9cKokkFygLXDD/smp6G0qrTCTYXrwOMEzA8",
+	"Y8vk5jv9/iuamGcuq2wTLUG2Mn2tYLwrG9Vst73X1wqk9YLUszRVtNZvfqDV9b6W7mvZbjvvtMzPiUpv",
+	"+RWtv/w58YjurXc7G8BrJxNJxp+rzEeQaSNKnytIDiGommrIESUM+RcBBebE2zDoknq84IYS/H9Vdq3K",
+	"pwO9EdRNSO+snM9EIxEBxf4HqzozGAxEkYhjM8w0hyVd/kqEl6K8PoosSvjWYUT6gQpVlcWPTVFQxD/D",
+	"GG83RemWPBpoMwoMnLslIhV7SKnRbSfI5qLeeUY7xV8Sd/8hfSJ7um+39FLNIwuKeI6V8BCUPHppjaaK",
+	"HhWi2xB5WOIsrHfbeVqrkseZo5zKrilQYjeZQJyv5zf25i2IA3MWMX3/gDzOkOwDUn/KmoudRl8rW5/S",
+	"P3XbOZrO0NJrUyqeCo2teyS1QgrbpFIjxby+0/AE5YggSh6SXSD1x3r+eV/L6ktZ1rQUcr1nKabe2wx9",
+	"lTKar2lll6tqvCuR8mN99Z6zLphsmB1FHGaGJLkCKWatatXaJAstz6XrV4EX3IZI5ZacOj99fsqMVa4d",
+	"8IOPzk+d/8is5njO9KGPTTi+MGs+TFzKPEUwdJrDBItw3psADiCo4j/IwdipjR8DfU98EKYYRaG54RhW",
+	"L0xNnRpvZ6s9dlKkqSK5b05gF6emx1G0RfQNzIzs0oXfH39peAh2Bhzw35z1AvUwd1hSsWnVFIwU83wy",
+	"81zBWPmrFI55LptB6CEHHX0nwydJBhwhpLLIZ+KBWcbB9r0cxROdz76PuOHiaOiS1oteIkGSHa6ALTLf",
+	"tAXvlRK0MU/e/EjSuWPF48ksBF0k+wRipwf/e0DhqvAZ5D8EyoC9LHqmvSyqrgaaM4eTbycZ6Ip15AyN",
+	"Y41Iri8aOXK/SvfWSbs9EdNkfpN0WnQ9Qdc2HaqqMRXDiKWswmuxOlbba6KKrx8eek99RQwjJ+0OmMcP",
+	"qxtCQszNErx7JKmHRrV2iggxscGm5615Nvs6mRxZ0TbcLOuqXGN84P3mjBK96xvRiRL+9KnJYHvMJYZT",
+	"ZXLQee9kf+H4S8MPeUOeNeXgrnR3ojMYfHes1dVg3EzhURfvDswBZvFHQgRiiBhlq3FjDcFR22YTBcPe",
+	"8TosfWxDGp89Gyi5DjYfuHeYACVabtIHz98XSrzATr5kv9yfDva44Bx7fS1FFmq9ZOHwWSI9Ho1sjpic",
+	"l2+YJz5EUnYOWidIzFYKPb3EvFDrfVfjVPtaSi/Vup18t9Mhi8u9RJpmfho0JLfcbHyoOA7OVjdnWSDx",
+	"0YaHbBSFgR/4BEX03Z4G7KtFcLgj0/91oB+s8VcLx1TG62rcO/ocu0sqz43mM1Jo8faj287zFq2vpb4I",
+	"oJg5LQ11mlwli7bZnoxSdtamXxLzzixnP72RVJLmnjLgbazyHc9n0x4j+x0pNwd42PAb5WM9BJfrZquZ",
+	"clpeL9UGqHDbx2fj/w4AAP//",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

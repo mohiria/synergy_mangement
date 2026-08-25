@@ -1,0 +1,104 @@
+package domain
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"sync"
+	"time"
+
+	"golang.org/x/crypto/bcrypt"
+)
+
+const (
+	// SessionTTL 会话有效期，7 天滑动过期（ADR-0001）。
+	SessionTTL = 7 * 24 * time.Hour
+	// RenewSlack 滑动续期间隔：距上次续期超过该时长才写库，避免每个请求都更新。
+	RenewSlack = time.Hour
+	// MaxLoginFailures 连续失败次数上限，达到后在锁定窗口内拒绝尝试。
+	MaxLoginFailures = 5
+	// LoginLockWindow 登录失败锁定窗口。
+	LoginLockWindow = 15 * time.Minute
+)
+
+// SessionRenewal 判定会话是否需要滑动续期。返回新的过期时间与是否需要写库。
+func SessionRenewal(now, expiresAt time.Time) (time.Time, bool) {
+	newExpiry := now.Add(SessionTTL)
+	if newExpiry.Sub(expiresAt) >= RenewSlack {
+		return newExpiry, true
+	}
+	return expiresAt, false
+}
+
+// LoginThrottle 进程内登录失败限速（ADR-0001：进程内缓存替代 Redis）。
+// 同一用户名连续失败达上限后，在锁定窗口内拒绝继续尝试；
+// 距上次失败超过锁定窗口的旧记录不再累计。
+type LoginThrottle struct {
+	mu    sync.Mutex
+	state map[string]*failState
+}
+
+type failState struct {
+	failures    int
+	lastFailure time.Time
+}
+
+func NewLoginThrottle() *LoginThrottle {
+	return &LoginThrottle{state: map[string]*failState{}}
+}
+
+// Allow 判定该用户名当前是否允许尝试登录。
+func (t *LoginThrottle) Allow(username string, now time.Time) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	s, ok := t.state[username]
+	if !ok {
+		return true
+	}
+	if now.Sub(s.lastFailure) > LoginLockWindow {
+		return true
+	}
+	return s.failures < MaxLoginFailures
+}
+
+// RecordFailure 记录一次登录失败。
+func (t *LoginThrottle) RecordFailure(username string, now time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	s, ok := t.state[username]
+	if !ok || now.Sub(s.lastFailure) > LoginLockWindow {
+		t.state[username] = &failState{failures: 1, lastFailure: now}
+		return
+	}
+	s.failures++
+	s.lastFailure = now
+}
+
+// RecordSuccess 登录成功后清零该用户名的失败计数。
+func (t *LoginThrottle) RecordSuccess(username string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.state, username)
+}
+
+// HashPassword 生成 bcrypt 哈希（ADR-0001）。
+func HashPassword(password string) (string, error) {
+	b, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// VerifyPassword 校验明文口令与 bcrypt 哈希是否匹配。
+func VerifyPassword(hash, password string) bool {
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
+}
+
+// NewSessionToken 生成 256 位随机会话 token（hex 编码）。
+func NewSessionToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}

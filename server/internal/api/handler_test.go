@@ -8,8 +8,7 @@ import (
 )
 
 func TestGetHealthz(t *testing.T) {
-	mux := http.NewServeMux()
-	h := HandlerFromMuxWithBaseURL(NewServer(), mux, "/api/v1")
+	h := NewHandler(nil, "/api/v1")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/healthz", nil)
 	rec := httptest.NewRecorder()

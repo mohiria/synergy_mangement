@@ -7,49 +7,129 @@ package store
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createProject = `-- name: CreateProject :one
-INSERT INTO projects (name, created_by)
-VALUES ($1, $2)
-RETURNING id, name, created_by, created_at
+INSERT INTO projects (name, created_by, owner_id, status, stage, planned_start_date, planned_end_date)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, name, created_by, created_at, owner_id, status, stage, planned_start_date, planned_end_date
 `
 
 type CreateProjectParams struct {
-	Name      string
-	CreatedBy int64
+	Name             string
+	CreatedBy        int64
+	OwnerID          int64
+	Status           string
+	Stage            pgtype.Text
+	PlannedStartDate pgtype.Date
+	PlannedEndDate   pgtype.Date
 }
 
 func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error) {
-	row := q.db.QueryRow(ctx, createProject, arg.Name, arg.CreatedBy)
+	row := q.db.QueryRow(ctx, createProject,
+		arg.Name,
+		arg.CreatedBy,
+		arg.OwnerID,
+		arg.Status,
+		arg.Stage,
+		arg.PlannedStartDate,
+		arg.PlannedEndDate,
+	)
 	var i Project
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.OwnerID,
+		&i.Status,
+		&i.Stage,
+		&i.PlannedStartDate,
+		&i.PlannedEndDate,
+	)
+	return i, err
+}
+
+const getProject = `-- name: GetProject :one
+SELECT p.id, p.name, p.created_by, p.created_at, p.owner_id, p.status, p.stage, p.planned_start_date, p.planned_end_date, u.display_name AS owner_name
+FROM projects p
+JOIN users u ON u.id = p.owner_id
+WHERE p.id = $1
+`
+
+type GetProjectRow struct {
+	ID               int64
+	Name             string
+	CreatedBy        int64
+	CreatedAt        pgtype.Timestamptz
+	OwnerID          int64
+	Status           string
+	Stage            pgtype.Text
+	PlannedStartDate pgtype.Date
+	PlannedEndDate   pgtype.Date
+	OwnerName        string
+}
+
+func (q *Queries) GetProject(ctx context.Context, id int64) (GetProjectRow, error) {
+	row := q.db.QueryRow(ctx, getProject, id)
+	var i GetProjectRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.OwnerID,
+		&i.Status,
+		&i.Stage,
+		&i.PlannedStartDate,
+		&i.PlannedEndDate,
+		&i.OwnerName,
 	)
 	return i, err
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, name, created_by, created_at FROM projects ORDER BY created_at DESC
+SELECT p.id, p.name, p.created_by, p.created_at, p.owner_id, p.status, p.stage, p.planned_start_date, p.planned_end_date, u.display_name AS owner_name
+FROM projects p
+JOIN users u ON u.id = p.owner_id
+ORDER BY p.created_at DESC
 `
 
-func (q *Queries) ListProjects(ctx context.Context) ([]Project, error) {
+type ListProjectsRow struct {
+	ID               int64
+	Name             string
+	CreatedBy        int64
+	CreatedAt        pgtype.Timestamptz
+	OwnerID          int64
+	Status           string
+	Stage            pgtype.Text
+	PlannedStartDate pgtype.Date
+	PlannedEndDate   pgtype.Date
+	OwnerName        string
+}
+
+func (q *Queries) ListProjects(ctx context.Context) ([]ListProjectsRow, error) {
 	rows, err := q.db.Query(ctx, listProjects)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Project
+	var items []ListProjectsRow
 	for rows.Next() {
-		var i Project
+		var i ListProjectsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
 			&i.CreatedBy,
 			&i.CreatedAt,
+			&i.OwnerID,
+			&i.Status,
+			&i.Stage,
+			&i.PlannedStartDate,
+			&i.PlannedEndDate,
+			&i.OwnerName,
 		); err != nil {
 			return nil, err
 		}
@@ -59,4 +139,51 @@ func (q *Queries) ListProjects(ctx context.Context) ([]Project, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateProject = `-- name: UpdateProject :one
+UPDATE projects
+SET name = $2,
+    owner_id = $3,
+    status = $4,
+    stage = $5,
+    planned_start_date = $6,
+    planned_end_date = $7
+WHERE id = $1
+RETURNING id, name, created_by, created_at, owner_id, status, stage, planned_start_date, planned_end_date
+`
+
+type UpdateProjectParams struct {
+	ID               int64
+	Name             string
+	OwnerID          int64
+	Status           string
+	Stage            pgtype.Text
+	PlannedStartDate pgtype.Date
+	PlannedEndDate   pgtype.Date
+}
+
+func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error) {
+	row := q.db.QueryRow(ctx, updateProject,
+		arg.ID,
+		arg.Name,
+		arg.OwnerID,
+		arg.Status,
+		arg.Stage,
+		arg.PlannedStartDate,
+		arg.PlannedEndDate,
+	)
+	var i Project
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.OwnerID,
+		&i.Status,
+		&i.Stage,
+		&i.PlannedStartDate,
+		&i.PlannedEndDate,
+	)
+	return i, err
 }

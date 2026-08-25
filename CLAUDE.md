@@ -20,7 +20,7 @@
 
 1. 从 PRD 验收场景（AC-01～AC-49，主 PRD §12）出发，先改 `openapi.yaml`；
 2. 重新生成代码：后端 oapi-codegen，前端 openapi-typescript + openapi-fetch；生成物不手改；
-3. 业务规则（状态派生、卡点、互锁、审批链、权限、进度、五组归类）只写 `server/internal/domain/`；先写覆盖对应 AC 的表驱动单测，再实现；
+3. 业务规则（状态派生、卡点、互锁、审批链、权限、进度、五组归类）只写 `server/internal/domain/`；严格 red-green-refactor：先写覆盖对应 AC 的表驱动单测并真实跑一次、确认失败（编译失败也算红），再实现转绿，最后按需重构；从未见红的测试不算数，「先写后跑直接全绿」不满足本条；
 4. API handler 保持薄层；集成测试用 httptest + Docker 真 Postgres；
 5. 前端不复刻任何规则，界面反馈只消费 API 派生字段；字段不够时回到契约补字段，不在前端计算；
 6. 数据访问用 sqlc 生成，库结构变更一律走 goose 迁移（`server/migrations/`），不手改数据库。

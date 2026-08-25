@@ -90,6 +90,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 更新项目（全量字段） */
+        put: operations["updateProject"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 全部用户（用于人员选择） */
+        get: operations["listUsers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -115,15 +149,58 @@ export interface components {
             username: string;
             displayName: string;
         };
+        UserSummary: {
+            /** Format: int64 */
+            id: number;
+            username: string;
+            displayName: string;
+        };
+        /**
+         * @description 项目状态（未开始／进行中／已完成／已归档），与自由文本“阶段”正交
+         * @enum {string}
+         */
+        ProjectStatus: "not_started" | "in_progress" | "completed" | "archived";
         Project: {
             /** Format: int64 */
             id: number;
             name: string;
+            /**
+             * Format: int64
+             * @description 项目负责人（单人；与项目管理员为独立角色）
+             */
+            ownerId: number;
+            /** @description 项目负责人姓名（派生字段，前端直接展示） */
+            ownerName: string;
+            status: components["schemas"]["ProjectStatus"];
+            /** @description 业务里程碑标签，自由文本，选填 */
+            stage?: string;
+            /** Format: date */
+            plannedStartDate?: string;
+            /** Format: date */
+            plannedEndDate?: string;
             /** Format: date-time */
             createdAt: string;
         };
         CreateProjectRequest: {
             name: string;
+            /** Format: int64 */
+            ownerId: number;
+            stage?: string;
+            /** Format: date */
+            plannedStartDate?: string;
+            /** Format: date */
+            plannedEndDate?: string;
+        };
+        UpdateProjectRequest: {
+            name: string;
+            /** Format: int64 */
+            ownerId: number;
+            status: components["schemas"]["ProjectStatus"];
+            stage?: string;
+            /** Format: date */
+            plannedStartDate?: string;
+            /** Format: date */
+            plannedEndDate?: string;
         };
     };
     responses: {
@@ -136,8 +213,26 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
+        /** @description 登录失败次数过多，暂时限速 */
+        TooManyRequests: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
         /** @description 请求内容未通过校验 */
         ValidationError: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description 资源不存在 */
+        NotFound: {
             headers: {
                 [name: string]: unknown;
             };
@@ -196,6 +291,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            429: components["responses"]["TooManyRequests"];
         };
     };
     logout: {
@@ -282,6 +378,56 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             422: components["responses"]["ValidationError"];
+        };
+    };
+    updateProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateProjectRequest"];
+            };
+        };
+        responses: {
+            /** @description 更新成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Project"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    listUsers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 用户列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserSummary"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
         };
     };
 }

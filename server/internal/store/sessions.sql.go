@@ -36,6 +36,22 @@ func (q *Queries) DeleteSession(ctx context.Context, token string) error {
 	return err
 }
 
+const getSession = `-- name: GetSession :one
+SELECT token, user_id, expires_at, created_at FROM sessions WHERE token = $1 AND expires_at > now()
+`
+
+func (q *Queries) GetSession(ctx context.Context, token string) (Session, error) {
+	row := q.db.QueryRow(ctx, getSession, token)
+	var i Session
+	err := row.Scan(
+		&i.Token,
+		&i.UserID,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getSessionUser = `-- name: GetSessionUser :one
 SELECT u.id, u.username, u.display_name, u.password_hash, u.created_at FROM sessions s
 JOIN users u ON u.id = s.user_id
@@ -53,4 +69,18 @@ func (q *Queries) GetSessionUser(ctx context.Context, token string) (User, error
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const updateSessionExpiry = `-- name: UpdateSessionExpiry :exec
+UPDATE sessions SET expires_at = $2 WHERE token = $1
+`
+
+type UpdateSessionExpiryParams struct {
+	Token     string
+	ExpiresAt pgtype.Timestamptz
+}
+
+func (q *Queries) UpdateSessionExpiry(ctx context.Context, arg UpdateSessionExpiryParams) error {
+	_, err := q.db.Exec(ctx, updateSessionExpiry, arg.Token, arg.ExpiresAt)
+	return err
 }

@@ -15,6 +15,8 @@ tags:
     description: 本地账号登录与会话（bcrypt + HttpOnly Cookie）
   - name: projects
     description: 项目列表、创建项目与项目切换（多项目 V1 范围）
+  - name: users
+    description: 用户目录（人员选择用）
 
 paths:
   /healthz:
@@ -52,6 +54,8 @@ paths:
                 $ref: "#/components/schemas/CurrentUser"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   /auth/logout:
     post:
@@ -115,6 +119,55 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /projects/{projectId}:
+    put:
+      operationId: updateProject
+      tags: [projects]
+      summary: 更新项目（全量字段）
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProjectRequest"
+      responses:
+        "200":
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /users:
+    get:
+      operationId: listUsers
+      tags: [users]
+      summary: 全部用户（用于人员选择）
+      responses:
+        "200":
+          description: 用户列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UserSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
 components:
   securitySchemes:
     cookieAuth:
@@ -128,8 +181,20 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
+    TooManyRequests:
+      description: 登录失败次数过多，暂时限速
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
     ValidationError:
       description: 请求内容未通过校验
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: 资源不存在
       content:
         application/json:
           schema:
@@ -174,26 +239,93 @@ components:
           type: string
         displayName:
           type: string
+    UserSummary:
+      type: object
+      required: [id, username, displayName]
+      properties:
+        id:
+          type: integer
+          format: int64
+        username:
+          type: string
+        displayName:
+          type: string
+    ProjectStatus:
+      type: string
+      description: 项目状态（未开始／进行中／已完成／已归档），与自由文本“阶段”正交
+      enum: [not_started, in_progress, completed, archived]
     Project:
       type: object
-      required: [id, name, createdAt]
+      required: [id, name, ownerId, ownerName, status, createdAt]
       properties:
         id:
           type: integer
           format: int64
         name:
           type: string
+        ownerId:
+          type: integer
+          format: int64
+          description: 项目负责人（单人；与项目管理员为独立角色）
+        ownerName:
+          type: string
+          description: 项目负责人姓名（派生字段，前端直接展示）
+        status:
+          $ref: "#/components/schemas/ProjectStatus"
+        stage:
+          type: string
+          description: 业务里程碑标签，自由文本，选填
+        plannedStartDate:
+          type: string
+          format: date
+        plannedEndDate:
+          type: string
+          format: date
         createdAt:
           type: string
           format: date-time
     CreateProjectRequest:
       type: object
-      required: [name]
+      required: [name, ownerId]
       properties:
         name:
           type: string
           minLength: 1
           maxLength: 100
+        ownerId:
+          type: integer
+          format: int64
+        stage:
+          type: string
+          maxLength: 50
+        plannedStartDate:
+          type: string
+          format: date
+        plannedEndDate:
+          type: string
+          format: date
+    UpdateProjectRequest:
+      type: object
+      required: [name, ownerId, status]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        ownerId:
+          type: integer
+          format: int64
+        status:
+          $ref: "#/components/schemas/ProjectStatus"
+        stage:
+          type: string
+          maxLength: 50
+        plannedStartDate:
+          type: string
+          format: date
+        plannedEndDate:
+          type: string
+          format: date
 
 security:
   - cookieAuth: []

@@ -9,10 +9,15 @@ import (
 )
 
 type Project struct {
-	ID        int64
-	Name      string
-	CreatedBy int64
-	CreatedAt pgtype.Timestamptz
+	ID               int64
+	Name             string
+	CreatedBy        int64
+	CreatedAt        pgtype.Timestamptz
+	OwnerID          int64
+	Status           string
+	Stage            pgtype.Text
+	PlannedStartDate pgtype.Date
+	PlannedEndDate   pgtype.Date
 }
 
 type Session struct {
