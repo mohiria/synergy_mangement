@@ -3,7 +3,6 @@ import { Link } from "react-router-dom";
 import { Alert, Button, DatePicker, Form, Input, Modal, Select, Table } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import { client } from "./api/client";
-import ProjectMembersModal from "./ProjectMembersModal";
 import type { components } from "./api/schema";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
@@ -48,7 +47,6 @@ export default function ProjectsPage({
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Project | null>(null);
-  const [memberProject, setMemberProject] = useState<Project | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [form] = Form.useForm<ProjectFormValues>();
@@ -235,9 +233,7 @@ export default function ProjectsPage({
                         编辑
                       </Button>
                     )}
-                    <Button type="link" size="small" onClick={() => setMemberProject(p)}>
-                      成员
-                    </Button>
+
                   </>
                 ),
               },
@@ -245,11 +241,6 @@ export default function ProjectsPage({
           />
         </main>
       </section>
-      <ProjectMembersModal
-        project={memberProject}
-        users={users}
-        onClose={() => setMemberProject(null)}
-      />
       <Modal
         title={editing ? "编辑项目" : "新建项目"}
         open={modalOpen}

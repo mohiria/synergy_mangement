@@ -16,6 +16,7 @@ const NAV_ITEMS = [
   { key: "okr", label: "OKR 管理", path: "/okr" },
   { key: "tasks", label: "全部任务", path: "/tasks" },
   { key: "mywork", label: "我的工作", path: "/my-work" },
+  { key: "settings", label: "项目设置", path: "/settings" },
 ];
 
 export default function ProjectShell({
