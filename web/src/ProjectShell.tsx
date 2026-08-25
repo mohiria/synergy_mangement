@@ -12,7 +12,8 @@ type Notification = components["schemas"]["Notification"];
 // 项目内页面共用壳层：浅色侧边栏 + 顶栏（原型 index.html 结构）。
 // 导航项随功能落地逐步补齐（项目总览、协作关系等见后续 ticket）。
 const NAV_ITEMS = [
-  { key: "okr", label: "OKR 管理", path: "" },
+  { key: "overview", label: "项目总览", path: "" },
+  { key: "okr", label: "OKR 管理", path: "/okr" },
   { key: "tasks", label: "全部任务", path: "/tasks" },
   { key: "mywork", label: "我的工作", path: "/my-work" },
 ];

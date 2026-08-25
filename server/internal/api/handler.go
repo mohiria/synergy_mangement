@@ -553,6 +553,26 @@ func (s *Server) okrList(ctx context.Context, projectID int64) ([]Objective, err
 			Progress: fromPgInt4(row.Progress),
 		})
 	}
+	// KR 行的一行风险原因（AC-05）：来自 KR 下任务的开放卡点事实。
+	taskRowsForNotes, err := s.q.ListProjectTasks(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	krByTask := make(map[int64]int64, len(taskRowsForNotes))
+	for _, t := range taskRowsForNotes {
+		krByTask[t.ID] = t.KeyResultID
+	}
+	blockerRows, err := s.q.ListBlockersByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	notesByKr := make(map[int64][]string)
+	for _, b := range blockerRows {
+		if b.State == domain.BlockerOpen {
+			krID := krByTask[b.TaskID]
+			notesByKr[krID] = append(notesByKr[krID], "缺 "+b.Missing+"："+b.Reason)
+		}
+	}
 	byObjective := make(map[int64][]KeyResult, len(objectives))
 	for _, k := range krs {
 		summary := domain.ProgressCoverage(factsByKr[k.ID])
@@ -572,6 +592,7 @@ func (s *Server) okrList(ctx context.Context, projectID int64) ([]Objective, err
 				FilledTasks:     summary.FilledTasks,
 				AverageProgress: summary.AverageProgress,
 			},
+			RiskNote: optString(domain.KrRiskNote(k.RiskLevel, notesByKr[k.ID])),
 		})
 	}
 	resp := make([]Objective, 0, len(objectives))

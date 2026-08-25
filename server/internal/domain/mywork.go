@@ -333,3 +333,15 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 
 	return g
 }
+
+// KrRiskNote 派生 KR 行的一行风险原因（AC-05）：优先取 KR 下任务的首个开放卡点事实；
+// 无卡点但风险等级非正常时给通用说明。
+func KrRiskNote(riskLevel string, blockerNotes []string) string {
+	if len(blockerNotes) > 0 {
+		return blockerNotes[0]
+	}
+	if riskLevel != "normal" {
+		return "存在待处理的风险因素"
+	}
+	return ""
+}

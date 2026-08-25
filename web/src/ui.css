@@ -197,6 +197,40 @@ body {
 .progress { height: 5px; min-width: 66px; background: #e9edf0; border-radius: 10px; overflow: hidden; }
 .progress i { display: block; height: 100%; background: #6a9aae; }
 
+/* 项目总览（原型 renderOverview 生效样式）。 */
+.objective { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: 12px; overflow: hidden; }
+.objective-head {
+  padding: 14px 16px; background: #f8fafc; border-bottom: 1px solid var(--line);
+  display: grid; grid-template-columns: 52px 1fr auto; gap: 12px; align-items: start;
+}
+.objective-code {
+  width: 38px; height: 30px; display: grid; place-items: center;
+  border: 0; border-radius: 6px; background: #263b59; color: #fff; font-weight: 700;
+}
+.objective-head h2 { margin: 0 0 3px; font-size: var(--type-body); }
+.objective-head p { margin: 0; color: var(--muted); font-size: var(--type-aux); }
+.objective-count { align-self: center; color: var(--muted); font-size: var(--type-aux); white-space: nowrap; }
+.kr-row { border-bottom: 1px solid #edf0f2; }
+.kr-row:last-child { border-bottom: 0; }
+.kr-main {
+  width: 100%; min-height: 50px; padding: 7px 16px; border: 0; background: #fff;
+  display: grid; grid-template-columns: 26px 54px minmax(0, 1fr) max-content 20px;
+  align-items: center; gap: 9px; text-align: left; cursor: pointer; font: inherit;
+}
+.kr-main:hover { background: #f8fafb; }
+.kr-code { font-weight: 600; color: var(--navy); }
+.risk-stripe { width: 3px; height: 28px; border-radius: 2px; background: var(--green); justify-self: center; }
+.risk-stripe.warning { background: var(--amber); }
+.risk-stripe.high_risk { background: var(--red); }
+.kr-title-cell small { display: block; color: var(--muted); font-size: var(--type-aux); }
+.kr-tasks { padding: 8px 14px 12px 56px; background: #fbfcfd; }
+.kr-meta { color: var(--muted); font-size: var(--type-aux); margin-bottom: 6px; }
+.mini-task {
+  min-height: 38px; display: grid; grid-template-columns: 56px minmax(180px, 1fr) 120px 110px 90px 30px;
+  gap: 10px; align-items: center; border-top: 1px solid #e8ecef; font-size: 13px;
+}
+.mini-task > * { min-width: 0; }
+
 /* 任务详情抽屉（原型 task-drawer）。 */
 .drawer-sub { font-size: var(--type-aux); color: var(--muted); font-weight: 400; margin-top: 3px; }
 .drawer-section { margin-top: 18px; }
