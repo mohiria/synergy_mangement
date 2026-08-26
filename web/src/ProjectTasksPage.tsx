@@ -2349,9 +2349,9 @@ function ConfigureInputModal({
   onSaved: () => void;
 }) {
   const [mode, setMode] = useState<"task" | "member">("task");
-  const [providerId, setProviderId] = useState<number | undefined>(undefined);
+  const [providerIds, setProviderIds] = useState<number[]>([]);
   const [contentNote, setContentNote] = useState("");
-  const [sourceTaskId, setSourceTaskId] = useState<number | undefined>(undefined);
+  const [sourceTaskIds, setSourceTaskIds] = useState<number[]>([]);
   const [sourceDeliverables, setSourceDeliverables] = useState<{ id: number; name: string }[]>([]);
   const [deliverableId, setDeliverableId] = useState<number | undefined>(undefined);
   const [name, setName] = useState("");
@@ -2364,9 +2364,9 @@ function ConfigureInputModal({
   useEffect(() => {
     if (task) {
       setMode("task");
-      setProviderId(undefined);
+      setProviderIds([]);
       setContentNote("");
-      setSourceTaskId(undefined);
+      setSourceTaskIds([]);
       setSourceDeliverables([]);
       setDeliverableId(undefined);
       setName("");
@@ -2377,22 +2377,23 @@ function ConfigureInputModal({
     }
   }, [task]);
 
+  // 交付物项挂在具体来源任务上，只在单选一个来源任务时可指定（AC-53）。
   useEffect(() => {
-    if (!sourceTaskId) {
+    if (sourceTaskIds.length !== 1) {
       setSourceDeliverables([]);
       setDeliverableId(undefined);
       return;
     }
     client
       .GET("/projects/{projectId}/tasks/{taskId}", {
-        params: { path: { projectId, taskId: sourceTaskId } },
+        params: { path: { projectId, taskId: sourceTaskIds[0] } },
       })
       .then((res) => {
         if (res.data) {
           setSourceDeliverables(res.data.deliverables.map((d) => ({ id: d.id, name: d.name })));
         }
       });
-  }, [projectId, sourceTaskId]);
+  }, [projectId, sourceTaskIds]);
 
   if (!task) return null;
   const candidates = tasks.filter((t) => t.id !== task.id && t.status !== "cancelled");
@@ -2403,8 +2404,8 @@ function ConfigureInputModal({
       return;
     }
     if (mode === "member") {
-      if (!providerId) {
-        setError("请选择对接人");
+      if (providerIds.length === 0) {
+        setError("请至少选择一名对接人");
         return;
       }
       if (!contentNote.trim()) {
@@ -2422,22 +2423,22 @@ function ConfigureInputModal({
         body: {
           name: name.trim(),
           necessity,
-          providerId,
+          providerIds,
           contentNote: contentNote.trim(),
           expectedDate: expectedDate.format("YYYY-MM-DD"),
         },
       });
       setSaving(false);
       if (res.data) {
-        message.success("已建立「成员 → 本任务」的输入请求；入池后对接人会收到通知");
+        message.success(`已为 ${providerIds.length} 名对接人建立输入请求；入池后对接人会收到通知`);
         onSaved();
       } else {
         setError(res.error?.message ?? "保存失败");
       }
       return;
     }
-    if (!sourceTaskId) {
-      setError("请选择来源任务");
+    if (sourceTaskIds.length === 0) {
+      setError("请至少选择一个来源任务");
       return;
     }
     setSaving(true);
@@ -2448,14 +2449,14 @@ function ConfigureInputModal({
         name: name.trim(),
         necessity,
         edgeType,
-        sourceTaskId,
+        sourceTaskIds,
         deliverableId,
         expectedDate: expectedDate ? expectedDate.format("YYYY-MM-DD") : undefined,
       },
     });
     setSaving(false);
     if (res.data) {
-      message.success("已建立「来源任务 → 本任务」的交付物边");
+      message.success(`已建立 ${sourceTaskIds.length} 条「来源任务 → 本任务」的交付物边`);
       onSaved();
     } else {
       setError(res.error?.message ?? "保存失败");
@@ -2496,14 +2497,15 @@ function ConfigureInputModal({
         {mode === "member" && (
           <>
             <div>
-              <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>对接人</div>
+              <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>对接人（可多选）</div>
               <Select
                 style={{ width: "100%" }}
+                mode="multiple"
                 showSearch
                 optionFilterProp="label"
-                placeholder="选择项目成员"
-                value={providerId}
-                onChange={setProviderId}
+                placeholder="选择一名或多名项目成员"
+                value={providerIds}
+                onChange={setProviderIds}
                 options={members
                   .filter((m) => m.role !== "viewer")
                   .map((m) => ({ value: m.userId, label: `${m.displayName}（${m.username}）` }))}
@@ -2522,14 +2524,15 @@ function ConfigureInputModal({
         )}
         {mode === "task" && (
         <div>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>来源任务</div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>来源任务（可多选）</div>
           <Select
             style={{ width: "100%" }}
+            mode="multiple"
             showSearch
             optionFilterProp="label"
-            placeholder="按任务名称、编号或负责人搜索"
-            value={sourceTaskId}
-            onChange={setSourceTaskId}
+            placeholder="按任务名称、编号或负责人搜索，可多选"
+            value={sourceTaskIds}
+            onChange={setSourceTaskIds}
             options={candidates.map((t) => ({
               value: t.id,
               label: `${taskCode.get(t.id) ?? ""} ${t.name}（${t.ownerName} · ${t.statusLabel}）`,
@@ -2540,11 +2543,12 @@ function ConfigureInputModal({
         {mode === "task" && (
         <div>
           <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
-            对应交付物（选填；无文件的条件可不选）
+            对应交付物（选填；无文件的条件可不选；仅单选一个来源任务时可指定）
           </div>
           <Select
             style={{ width: "100%" }}
             allowClear
+            disabled={sourceTaskIds.length !== 1}
             placeholder="选择来源任务的交付物项"
             value={deliverableId}
             onChange={(v) => {

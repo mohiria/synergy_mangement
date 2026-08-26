@@ -18,25 +18,29 @@ import (
 
 // unreadyRequiredInputs 汇总每个下游任务的必要输入未就绪注记（§5.1「等待输入」的唯一口径）：
 // 值为「上游未就绪：缺 XX」，取首条未就绪的必要输入；成员来源按输入请求状态判定就绪。
+// 同一任务的多条输入（AC-53 多来源）各自独立判定，任一必要输入未就绪即等待输入。
 func unreadyRequiredInputs(edges []store.ListEdgesByProjectRow, requests []store.ListInputRequestsByProjectRow) map[int64]string {
 	stateByEdge := make(map[int64]string, len(requests))
 	for _, ir := range requests {
 		stateByEdge[ir.EdgeID] = ir.State
 	}
-	notes := map[int64]string{}
+	targets := []int64{}
+	byTarget := map[int64][]domain.InputEdgeState{}
 	for _, e := range edges {
-		if e.Necessity != domain.NecessityRequired {
-			continue
-		}
 		ready := domain.EdgeReady(e.CurrentFileID.Valid, e.HasCandidate)
 		if state, ok := stateByEdge[e.ID]; ok {
 			ready = domain.MemberEdgeReady(state)
 		}
-		if ready {
-			continue
+		if _, seen := byTarget[e.TargetTaskID]; !seen {
+			targets = append(targets, e.TargetTaskID)
 		}
-		if _, seen := notes[e.TargetTaskID]; !seen {
-			notes[e.TargetTaskID] = "上游未就绪：缺 " + e.Name
+		byTarget[e.TargetTaskID] = append(byTarget[e.TargetTaskID],
+			domain.InputEdgeState{Name: e.Name, Necessity: e.Necessity, Ready: ready})
+	}
+	notes := map[int64]string{}
+	for _, taskID := range targets {
+		if missing := domain.FirstUnmetRequiredInput(byTarget[taskID]); missing != "" {
+			notes[taskID] = "上游未就绪：缺 " + missing
 		}
 	}
 	return notes
@@ -55,7 +59,8 @@ func (s *Server) unreadyRequiredInputsByProject(ctx context.Context, projectID i
 	return unreadyRequiredInputs(edges, requests), nil
 }
 
-// CreateTaskInput 新增输入要求：自动建立「来源任务 → 目标任务」的交付物边（AC-28）。
+// CreateTaskInput 新增输入要求：为每个选中的来源任务分别建立「来源任务 → 目标任务」交付物边
+// （AC-28；AC-53 一次可多选来源任务，多条边一并建立或一并失败）。
 func (s *Server) CreateTaskInput(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64) {
 	var req CreateTaskInputRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -76,64 +81,95 @@ func (s *Server) CreateTaskInput(w http.ResponseWriter, r *http.Request, project
 		writeForbidden(w)
 		return
 	}
-	edge := domain.NewEdge{
-		Name:         strings.TrimSpace(req.Name),
-		EdgeType:     string(req.EdgeType),
-		Necessity:    string(req.Necessity),
-		SourceTaskID: &req.SourceTaskId,
-		TargetTaskID: taskId,
+	inputs := domain.NewTaskInputs{
+		Name:           strings.TrimSpace(req.Name),
+		EdgeType:       string(req.EdgeType),
+		Necessity:      string(req.Necessity),
+		SourceTaskIDs:  req.SourceTaskIds,
+		TargetTaskID:   taskId,
+		HasDeliverable: req.DeliverableId != nil,
 	}
-	if err := domain.ValidateNewEdge(edge); err != nil {
+	if err := domain.ValidateNewTaskInputs(inputs); err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_edge", Message: err.Error()})
 		return
 	}
-	// 来源任务必须属于本项目；指定交付物项时必须挂在来源任务上。
-	if _, err := s.q.GetTaskInProject(r.Context(), store.GetTaskInProjectParams{ID: req.SourceTaskId, ProjectID: projectId}); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_source_task", Message: "来源任务不存在"})
+	// 每个来源任务都必须属于本项目；指定交付物项时必须挂在（唯一的）来源任务上。
+	for _, sourceID := range inputs.SourceTaskIDs {
+		if _, err := s.q.GetTaskInProject(r.Context(), store.GetTaskInProjectParams{ID: sourceID, ProjectID: projectId}); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_source_task", Message: "来源任务不存在"})
+				return
+			}
+			writeInternalError(w)
 			return
 		}
-		writeInternalError(w)
-		return
 	}
 	if req.DeliverableId != nil {
-		d, err := s.q.GetDeliverableInProject(r.Context(), store.GetDeliverableInProjectParams{ID: *req.DeliverableId, ID_2: req.SourceTaskId, ProjectID: projectId})
-		if err != nil || d.TaskID != req.SourceTaskId {
+		sourceID := inputs.SourceTaskIDs[0]
+		d, err := s.q.GetDeliverableInProject(r.Context(), store.GetDeliverableInProjectParams{ID: *req.DeliverableId, ID_2: sourceID, ProjectID: projectId})
+		if err != nil || d.TaskID != sourceID {
 			writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_deliverable", Message: "交付物项不属于来源任务"})
 			return
 		}
 	}
-	created, err := s.q.CreateEdge(r.Context(), store.CreateEdgeParams{
-		TargetTaskID: taskId,
-		SourceTaskID: pgtype.Int8{Int64: req.SourceTaskId, Valid: true},
-		DeliverableID: func() pgtype.Int8 {
-			if req.DeliverableId == nil {
-				return pgtype.Int8{}
-			}
-			return pgtype.Int8{Int64: *req.DeliverableId, Valid: true}
-		}(),
-		Name:         edge.Name,
-		EdgeType:     edge.EdgeType,
-		Necessity:    edge.Necessity,
-		ExpectedDate: toPgDate(req.ExpectedDate),
-		CreatedBy:    uid,
-	})
+	tx, err := s.db.Begin(r.Context())
 	if err != nil {
 		writeInternalError(w)
 		return
 	}
-	views, err := s.edgeViews(r.Context(), projectId, uid, actor)
-	if err != nil {
-		writeInternalError(w)
-		return
-	}
-	for _, v := range views {
-		if v.Id == created.ID {
-			writeJSON(w, http.StatusCreated, v)
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	qtx := s.q.WithTx(tx)
+	createdIDs := make([]int64, 0, len(inputs.SourceTaskIDs))
+	for _, sourceID := range inputs.SourceTaskIDs {
+		created, err := qtx.CreateEdge(r.Context(), store.CreateEdgeParams{
+			TargetTaskID: taskId,
+			SourceTaskID: pgtype.Int8{Int64: sourceID, Valid: true},
+			DeliverableID: func() pgtype.Int8 {
+				if req.DeliverableId == nil {
+					return pgtype.Int8{}
+				}
+				return pgtype.Int8{Int64: *req.DeliverableId, Valid: true}
+			}(),
+			Name:         inputs.Name,
+			EdgeType:     inputs.EdgeType,
+			Necessity:    inputs.Necessity,
+			ExpectedDate: toPgDate(req.ExpectedDate),
+			CreatedBy:    uid,
+		})
+		if err != nil {
+			writeInternalError(w)
 			return
 		}
+		createdIDs = append(createdIDs, created.ID)
 	}
-	writeInternalError(w)
+	if err := tx.Commit(r.Context()); err != nil {
+		writeInternalError(w)
+		return
+	}
+	s.writeCreatedEdges(w, r, projectId, uid, actor, createdIDs)
+}
+
+// writeCreatedEdges 按新建顺序回写各条交付物边视图（AC-53 多来源一次返回多条）。
+func (s *Server) writeCreatedEdges(w http.ResponseWriter, r *http.Request, projectID, userID int64, actor domain.Actor, createdIDs []int64) {
+	views, err := s.edgeViews(r.Context(), projectID, userID, actor)
+	if err != nil {
+		writeInternalError(w)
+		return
+	}
+	byID := make(map[int64]DeliverableEdge, len(views))
+	for _, v := range views {
+		byID[v.Id] = v
+	}
+	out := make([]DeliverableEdge, 0, len(createdIDs))
+	for _, id := range createdIDs {
+		v, ok := byID[id]
+		if !ok {
+			writeInternalError(w)
+			return
+		}
+		out = append(out, v)
+	}
+	writeJSON(w, http.StatusCreated, out)
 }
 
 func (s *Server) RemoveEdge(w http.ResponseWriter, r *http.Request, projectId int64, edgeId int64) {

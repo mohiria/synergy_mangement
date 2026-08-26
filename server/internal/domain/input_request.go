@@ -97,3 +97,39 @@ func ProvideInputRule(state string, providerID, actorID int64, hasContent bool) 
 func MemberEdgeReady(state string) bool {
 	return state == InputRequestProvided
 }
+
+var (
+	ErrProvidersEmpty     = errors.New("请至少选择一名对接人")
+	ErrProviderDuplicated = errors.New("对接人不能重复选择")
+)
+
+// MemberInputs 一次配置产生的多条「项目成员 → 目标任务」输入（AC-53：对接人可多选）。
+type MemberInputs struct {
+	Name            string
+	Necessity       string
+	ProviderIDs     []int64
+	ContentNote     string
+	HasExpectedDate bool
+}
+
+// ValidateMemberInputs 校验一次多选对接人的输入配置（AC-53）：至少选一名、同一次不可重复，
+// 每名对接人仍按单人规则校验（非只读项目成员、所需内容与期望时间必填）。
+func ValidateMemberInputs(m MemberInputs, roleOf func(int64) string) error {
+	if len(m.ProviderIDs) == 0 {
+		return ErrProvidersEmpty
+	}
+	seen := make(map[int64]struct{}, len(m.ProviderIDs))
+	for _, id := range m.ProviderIDs {
+		if _, dup := seen[id]; dup {
+			return ErrProviderDuplicated
+		}
+		seen[id] = struct{}{}
+		if err := ValidateMemberInput(MemberInput{
+			Name: m.Name, Necessity: m.Necessity, ProviderID: id,
+			ContentNote: m.ContentNote, HasExpectedDate: m.HasExpectedDate,
+		}, roleOf); err != nil {
+			return err
+		}
+	}
+	return nil
+}

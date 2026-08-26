@@ -85,3 +85,67 @@ func TestDeriveDisplayStatus(t *testing.T) {
 		})
 	}
 }
+
+// AC-53：一次配置可多选来源任务——至少一个、不可重复、逐条沿用单边校验；指定交付物项时只能单选。
+func TestValidateNewTaskInputs(t *testing.T) {
+	base := NewTaskInputs{Name: "现场数据包", EdgeType: EdgeHardPrerequisite, Necessity: NecessityRequired, SourceTaskIDs: []int64{2, 3, 4}, TargetTaskID: 1}
+	cases := []struct {
+		name string
+		mut  func(*NewTaskInputs)
+		want error
+	}{
+		{"多来源合法", func(*NewTaskInputs) {}, nil},
+		{"单来源合法", func(in *NewTaskInputs) { in.SourceTaskIDs = []int64{2} }, nil},
+		{"未选来源", func(in *NewTaskInputs) { in.SourceTaskIDs = nil }, ErrEdgeSourceMissing},
+		{"来源重复", func(in *NewTaskInputs) { in.SourceTaskIDs = []int64{2, 3, 2} }, ErrEdgeSourceDuplicated},
+		{"含自身", func(in *NewTaskInputs) { in.SourceTaskIDs = []int64{2, 1} }, ErrEdgeSelfLoop},
+		{"名称为空", func(in *NewTaskInputs) { in.Name = "  " }, ErrEdgeNameEmpty},
+		{"类型非法", func(in *NewTaskInputs) { in.EdgeType = "loop" }, ErrEdgeTypeInvalid},
+		{"必要性非法", func(in *NewTaskInputs) { in.Necessity = "optional" }, ErrNecessityInvalid},
+		{"单来源可指定交付物项", func(in *NewTaskInputs) { in.SourceTaskIDs = []int64{2}; in.HasDeliverable = true }, nil},
+		{"多来源不可指定交付物项", func(in *NewTaskInputs) { in.HasDeliverable = true }, ErrDeliverableMultiSource},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := base
+			tc.mut(&in)
+			if got := ValidateNewTaskInputs(in); !errors.Is(got, tc.want) {
+				t.Fatalf("ValidateNewTaskInputs() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// AC-53：多来源各边独立参与就绪判定——任一必要输入未就绪即整体等待输入；参考输入不参与。
+func TestFirstUnmetRequiredInput(t *testing.T) {
+	cases := []struct {
+		name   string
+		inputs []InputEdgeState
+		want   string
+	}{
+		{"无输入", nil, ""},
+		{"多来源全部就绪", []InputEdgeState{
+			{Name: "A", Necessity: NecessityRequired, Ready: true},
+			{Name: "B", Necessity: NecessityRequired, Ready: true},
+		}, ""},
+		{"一条未就绪即等待", []InputEdgeState{
+			{Name: "A", Necessity: NecessityRequired, Ready: true},
+			{Name: "B", Necessity: NecessityRequired, Ready: false},
+		}, "B"},
+		{"取首条未就绪", []InputEdgeState{
+			{Name: "A", Necessity: NecessityRequired, Ready: false},
+			{Name: "B", Necessity: NecessityRequired, Ready: false},
+		}, "A"},
+		{"参考输入不参与", []InputEdgeState{
+			{Name: "A", Necessity: NecessityReference, Ready: false},
+			{Name: "B", Necessity: NecessityRequired, Ready: true},
+		}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := FirstUnmetRequiredInput(tc.inputs); got != tc.want {
+				t.Fatalf("FirstUnmetRequiredInput() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

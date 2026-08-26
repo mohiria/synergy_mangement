@@ -485,7 +485,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 新增输入要求并自动建立「来源任务 → 目标任务」交付物边（AC-28；任务负责人／可编辑项目者） */
+        /** 新增输入要求并自动建立「来源任务 → 目标任务」交付物边（AC-28；可一次多选来源任务，AC-53；任务负责人／可编辑项目者） */
         post: operations["createTaskInput"];
         delete?: never;
         options?: never;
@@ -505,7 +505,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 指定项目成员提供输入（AC-29）：建立「成员 → 目标任务」交付物边并生成输入请求；任务已入池时立即发站内通知，否则待入池审批通过后发送 */
+        /** 指定项目成员提供输入（AC-29；可一次多选对接人，AC-53）：为每名对接人建立「成员 → 目标任务」交付物边并生成输入请求；任务已入池时立即发站内通知，否则待入池审批通过后发送 */
         post: operations["createMemberInput"];
         delete?: never;
         options?: never;
@@ -1443,17 +1443,17 @@ export interface components {
             /** @description 位于硬前置关键路径上（派生字段，AC-10）；日期不足时不派生（此时仅硬依赖链） */
             onCriticalPath?: boolean;
         };
-        /** @description 新增输入要求（来源＝系统内已有任务，AC-28；指定项目成员来源见 */
+        /** @description 新增输入要求（来源＝系统内已有任务，AC-28；可一次多选来源任务，AC-53） */
         CreateTaskInputRequest: {
             /** @description 输入名称 */
             name: string;
             necessity: components["schemas"]["Necessity"];
             edgeType: components["schemas"]["EdgeType"];
-            /** Format: int64 */
-            sourceTaskId: number;
+            /** @description 来源任务（AC-53 多选）；确认后按选择顺序分别建立「来源任务 → 目标任务」交付物边，不可重复 */
+            sourceTaskIds: number[];
             /**
              * Format: int64
-             * @description 来源任务的交付物项（选填；未选时以边本身表达结构化条件）
+             * @description 来源任务的交付物项（选填；未选时以边本身表达结构化条件；仅在只选一个来源任务时可指定）
              */
             deliverableId?: number;
             /** Format: date */
@@ -1733,15 +1733,12 @@ export interface components {
             /** @description 当前用户能否提交内容（派生字段；对接人本人且已接收） */
             canProvide?: boolean;
         };
-        /** @description 新增输入要求（来源＝指定项目成员，AC-29） */
+        /** @description 新增输入要求（来源＝指定项目成员，AC-29；可一次多选对接人，AC-53） */
         CreateMemberInputRequest: {
             name: string;
             necessity: components["schemas"]["Necessity"];
-            /**
-             * Format: int64
-             * @description 对接人（非只读项目成员）
-             */
-            providerId: number;
+            /** @description 对接人（非只读项目成员，AC-53 多选）；每人分别建边并生成输入请求与通知，不可重复 */
+            providerIds: number[];
             /** @description 所需内容（§9.1 必填） */
             contentNote: string;
             /**
@@ -2825,13 +2822,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 已建立 */
+            /** @description 已建立（按 sourceTaskIds 顺序返回新建的各条交付物边） */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DeliverableEdge"];
+                    "application/json": components["schemas"]["DeliverableEdge"][];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -2856,13 +2853,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 已建立 */
+            /** @description 已建立（按 providerIds 顺序返回新建的各条交付物边） */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DeliverableEdge"];
+                    "application/json": components["schemas"]["DeliverableEdge"][];
                 };
             };
             401: components["responses"]["Unauthorized"];

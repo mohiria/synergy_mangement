@@ -86,3 +86,61 @@ func DeriveDisplayStatus(stored string, hasUnmetRequiredInput bool) string {
 	}
 	return stored
 }
+
+var (
+	ErrEdgeSourceDuplicated   = errors.New("来源任务不能重复选择")
+	ErrDeliverableMultiSource = errors.New("指定交付物项时只能选择一个来源任务")
+)
+
+// NewTaskInputs 一次配置产生的多条「来源任务 → 目标任务」输入（AC-53：来源任务可多选）。
+type NewTaskInputs struct {
+	Name           string
+	EdgeType       string
+	Necessity      string
+	SourceTaskIDs  []int64
+	TargetTaskID   int64
+	HasDeliverable bool
+}
+
+// ValidateNewTaskInputs 校验一次多选来源任务的输入配置（AC-53）：至少选一个、同一次不可重复，
+// 每条来源仍按单边规则校验；交付物项挂在具体来源任务上，故只在单选时可指定。
+func ValidateNewTaskInputs(in NewTaskInputs) error {
+	if len(in.SourceTaskIDs) == 0 {
+		return ErrEdgeSourceMissing
+	}
+	if in.HasDeliverable && len(in.SourceTaskIDs) > 1 {
+		return ErrDeliverableMultiSource
+	}
+	seen := make(map[int64]struct{}, len(in.SourceTaskIDs))
+	for _, id := range in.SourceTaskIDs {
+		if _, dup := seen[id]; dup {
+			return ErrEdgeSourceDuplicated
+		}
+		seen[id] = struct{}{}
+		if err := ValidateNewEdge(NewEdge{
+			Name: in.Name, EdgeType: in.EdgeType, Necessity: in.Necessity,
+			SourceTaskID: &id, TargetTaskID: in.TargetTaskID,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// InputEdgeState 指向同一目标任务的一条输入的就绪事实（AC-53：多来源时每条边一项）。
+type InputEdgeState struct {
+	Name      string
+	Necessity string
+	Ready     bool
+}
+
+// FirstUnmetRequiredInput 取首条未就绪的必要输入名（AC-48、AC-53）：各边独立判定，
+// 任一必要输入未就绪即整体等待输入；参考输入不参与。全部就绪时返回空串。
+func FirstUnmetRequiredInput(inputs []InputEdgeState) string {
+	for _, in := range inputs {
+		if in.Necessity == NecessityRequired && !in.Ready {
+			return in.Name
+		}
+	}
+	return ""
+}

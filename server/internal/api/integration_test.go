@@ -1929,17 +1929,17 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 	inputsURL := func(id int64) string { return fmt.Sprintf("%s/%d/inputs", tasksURL, id) }
 	resp = doJSON(t, carol, http.MethodPost, inputsURL(taskB.Id), api.CreateTaskInputRequest{
 		Name: "现场数据包", Necessity: api.Required, EdgeType: api.HardPrerequisite,
-		SourceTaskId: taskA.Id, DeliverableId: &dA,
+		SourceTaskIds: []int64{taskA.Id}, DeliverableId: &dA,
 	})
 	wantStatus(t, resp, http.StatusCreated)
-	edge := decodeBody[api.DeliverableEdge](t, resp)
+	edge := decodeBody[[]api.DeliverableEdge](t, resp)[0]
 	if edge.Ready || edge.SourceTaskName == nil || *edge.SourceTaskName != "采集现场数据" {
 		t.Fatalf("新建边应未就绪且含来源信息: %+v", edge)
 	}
 
 	// AC-07：反向再建一条反馈边（双向/循环关系保留真实连线）
 	resp = doJSON(t, bob, http.MethodPost, inputsURL(taskA.Id), api.CreateTaskInputRequest{
-		Name: "回归问题清单", Necessity: api.Reference, EdgeType: api.Feedback, SourceTaskId: taskB.Id,
+		Name: "回归问题清单", Necessity: api.Reference, EdgeType: api.Feedback, SourceTaskIds: []int64{taskB.Id},
 	})
 	wantStatus(t, resp, http.StatusCreated)
 	resp.Body.Close()
@@ -1964,7 +1964,7 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 
 	// 自环 422；无关成员建边 403
 	resp = doJSON(t, carol, http.MethodPost, inputsURL(taskB.Id), api.CreateTaskInputRequest{
-		Name: "自环", Necessity: api.Required, EdgeType: api.Information, SourceTaskId: taskB.Id,
+		Name: "自环", Necessity: api.Required, EdgeType: api.Information, SourceTaskIds: []int64{taskB.Id},
 	})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
@@ -2270,11 +2270,11 @@ func TestMemberInputRequests(t *testing.T) {
 	expected := openapiDate(t, "2026-09-10")
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/member-inputs", tasksURL, taskID),
 		api.CreateMemberInputRequest{
-			Name: "接口字段口径", Necessity: api.Required, ProviderId: daveUser.ID,
+			Name: "接口字段口径", Necessity: api.Required, ProviderIds: []int64{daveUser.ID},
 			ContentNote: "请提供最新接口字段口径说明", ExpectedDate: expected,
 		})
 	wantStatus(t, resp, http.StatusCreated)
-	edge := decodeBody[api.DeliverableEdge](t, resp)
+	edge := decodeBody[[]api.DeliverableEdge](t, resp)[0]
 	if edge.InputRequest == nil || edge.InputRequest.State != api.InputRequestStatePending || edge.Ready {
 		t.Fatalf("成员输入边异常: %+v", edge)
 	}
@@ -2286,9 +2286,9 @@ func TestMemberInputRequests(t *testing.T) {
 	}
 
 	// 期望时间必填 422
-	bad := api.CreateMemberInputRequest{Name: "缺期望时间", Necessity: api.Required, ProviderId: daveUser.ID, ContentNote: "x"}
+	bad := api.CreateMemberInputRequest{Name: "缺期望时间", Necessity: api.Required, ProviderIds: []int64{daveUser.ID}, ContentNote: "x"}
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/member-inputs", tasksURL, taskID), map[string]any{
-		"name": bad.Name, "necessity": bad.Necessity, "providerId": bad.ProviderId, "contentNote": bad.ContentNote,
+		"name": bad.Name, "necessity": bad.Necessity, "providerIds": bad.ProviderIds, "contentNote": bad.ContentNote,
 	})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
@@ -2370,6 +2370,200 @@ func TestMemberInputRequests(t *testing.T) {
 	resp.Body.Close()
 }
 
+// AC-53 后端：一次配置可多选来源任务或多名对接人，分别建边；各边独立参与就绪判定，
+// 任一必要输入未就绪仍使目标任务显示「等待输入」。
+func TestMultiSourceInputs(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
+	daveUser := seedUser(t, q, "dave", "赵六", "dave-pass")
+	erinUser := seedUser(t, q, "erin", "钱七", "erin-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, bob, carol, dave, erin := newClient(t), newClient(t), newClient(t), newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(bob, "bob", "bob-pass")
+	login(carol, "carol", "carol-pass")
+	login(dave, "dave", "dave-pass")
+	login(erin, "erin", "erin-pass")
+
+	sp := func(s string) *string { return &s }
+
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "多来源试点", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	for _, uid := range []int64{bobUser.ID, carolUser.ID, daveUser.ID, erinUser.ID} {
+		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+		wantStatus(t, resp, http.StatusCreated)
+		resp.Body.Close()
+	}
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	kr1 := decodeBody[[]api.Objective](t, resp)[0].KeyResults[0].Id
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	edgesURL := fmt.Sprintf("%s/projects/%d/edges", base, created.Id)
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+
+	// KR 负责人 bob 免审建两条上游任务与两条下游任务（C 用于多来源任务，D 用于多对接人）
+	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "采集现场数据", OwnerId: bobUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("现场数据包")},
+			{KeyResultId: kr1, Name: "整理历史台账", OwnerId: bobUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("历史台账")},
+			{KeyResultId: kr1, Name: "回归验证分析", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
+			{KeyResultId: kr1, Name: "外部口径汇总", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	byName := map[string]int64{}
+	for _, task := range decodeBody[[]api.Task](t, resp) {
+		byName[task.Name] = task.Id
+	}
+	taskA, taskB2, taskC, taskD := byName["采集现场数据"], byName["整理历史台账"], byName["回归验证分析"], byName["外部口径汇总"]
+
+	// AC-53：一次选择两个来源任务 → 分别建立两条边，各自独立未就绪
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, taskC),
+		api.CreateTaskInputRequest{
+			Name: "上游材料", Necessity: api.Required, EdgeType: api.HardPrerequisite,
+			SourceTaskIds: []int64{taskA, taskB2},
+		})
+	wantStatus(t, resp, http.StatusCreated)
+	multi := decodeBody[[]api.DeliverableEdge](t, resp)
+	if len(multi) != 2 || multi[0].Id == multi[1].Id {
+		t.Fatalf("多来源应分别建边: %+v", multi)
+	}
+	if multi[0].SourceTaskId == nil || *multi[0].SourceTaskId != taskA || multi[1].SourceTaskId == nil || *multi[1].SourceTaskId != taskB2 {
+		t.Fatalf("应按选择顺序对应来源任务: %+v", multi)
+	}
+	for _, e := range multi {
+		if e.Ready || e.TargetTaskId != taskC {
+			t.Fatalf("新建多来源边应指向目标任务且未就绪: %+v", e)
+		}
+	}
+
+	// 同一次选择不可重复、多选时不能指定交付物项、不能选自身、不能空选
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskA), nil)
+	wantStatus(t, resp, http.StatusOK)
+	dA := decodeBody[api.TaskDetail](t, resp).Deliverables[0].Id
+	for _, bad := range []api.CreateTaskInputRequest{
+		{Name: "重复来源", Necessity: api.Required, EdgeType: api.Information, SourceTaskIds: []int64{taskA, taskA}},
+		{Name: "多选带交付物项", Necessity: api.Required, EdgeType: api.Information, SourceTaskIds: []int64{taskA, taskB2}, DeliverableId: &dA},
+		{Name: "含自身", Necessity: api.Required, EdgeType: api.Information, SourceTaskIds: []int64{taskA, taskC}},
+		{Name: "空选", Necessity: api.Required, EdgeType: api.Information, SourceTaskIds: []int64{}},
+	} {
+		resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, taskC), bad)
+		wantStatus(t, resp, http.StatusUnprocessableEntity)
+		resp.Body.Close()
+	}
+
+	// 任一必要输入未就绪 ⇒ C 等待输入
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskC), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if detail := decodeBody[api.TaskDetail](t, resp); detail.Task.Status != api.TaskStatusWaitingInput || len(detail.Inputs) != 2 {
+		t.Fatalf("多来源未就绪应等待输入: %+v", detail.Task.Status)
+	}
+
+	// AC-53：一次选择两名对接人 → 各自建边、各自生成输入请求与通知
+	expected := openapiDate(t, "2026-09-10")
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/member-inputs", tasksURL, taskD),
+		api.CreateMemberInputRequest{
+			Name: "外部厂商口径", Necessity: api.Required, ProviderIds: []int64{daveUser.ID, erinUser.ID},
+			ContentNote: "请各自提供本方口径说明", ExpectedDate: expected,
+		})
+	wantStatus(t, resp, http.StatusCreated)
+	memberEdges := decodeBody[[]api.DeliverableEdge](t, resp)
+	if len(memberEdges) != 2 {
+		t.Fatalf("多对接人应分别建边: %+v", memberEdges)
+	}
+	requestIDs := map[int64]int64{}
+	for _, e := range memberEdges {
+		if e.InputRequest == nil || e.InputRequest.State != api.InputRequestStatePending || e.Ready {
+			t.Fatalf("每名对接人应各自生成待接收输入请求: %+v", e)
+		}
+		requestIDs[e.InputRequest.ProviderId] = e.InputRequest.Id
+	}
+	if len(requestIDs) != 2 {
+		t.Fatalf("输入请求应按对接人各一条: %+v", requestIDs)
+	}
+	for _, c := range []*http.Client{dave, erin} {
+		resp = doJSON(t, c, http.MethodGet, base+"/notifications", nil)
+		wantStatus(t, resp, http.StatusOK)
+		notes := decodeBody[[]api.Notification](t, resp)
+		if len(notes) != 1 || notes[0].Kind != "input_request" || notes[0].TaskId == nil || *notes[0].TaskId != taskD {
+			t.Fatalf("每名对接人应各收到一条带上下文通知: %+v", notes)
+		}
+	}
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/member-inputs", tasksURL, taskD),
+		api.CreateMemberInputRequest{
+			Name: "重复对接人", Necessity: api.Required, ProviderIds: []int64{daveUser.ID, daveUser.ID},
+			ContentNote: "x", ExpectedDate: expected,
+		})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/member-inputs", tasksURL, taskD),
+		api.CreateMemberInputRequest{
+			Name: "空选对接人", Necessity: api.Required, ProviderIds: []int64{},
+			ContentNote: "x", ExpectedDate: expected,
+		})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+
+	// 各对接人独立走「同意接收 → 提交内容」；只完成一人时 D 仍等待输入
+	act := func(c *http.Client, providerID int64) {
+		t.Helper()
+		id := requestIDs[providerID]
+		r := doJSON(t, c, http.MethodPost, fmt.Sprintf("%s/projects/%d/input-requests/%d/accept", base, created.Id, id), nil)
+		wantStatus(t, r, http.StatusOK)
+		r.Body.Close()
+		r = doJSON(t, c, http.MethodPost, fmt.Sprintf("%s/projects/%d/input-requests/%d/provide", base, created.Id, id),
+			api.ProvideInputRequest{Text: sp("本方口径说明")})
+		wantStatus(t, r, http.StatusOK)
+		r.Body.Close()
+	}
+	act(dave, daveUser.ID)
+	resp = doJSON(t, dave, http.MethodPost, fmt.Sprintf("%s/projects/%d/input-requests/%d/accept", base, created.Id, requestIDs[erinUser.ID]), nil)
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodGet, edgesURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	readyByProvider := map[int64]bool{}
+	for _, e := range decodeBody[[]api.DeliverableEdge](t, resp) {
+		if e.TargetTaskId == taskD && e.InputRequest != nil {
+			readyByProvider[e.InputRequest.ProviderId] = e.Ready
+		}
+	}
+	if !readyByProvider[daveUser.ID] || readyByProvider[erinUser.ID] {
+		t.Fatalf("对接人各边应独立就绪: %+v", readyByProvider)
+	}
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskD), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if detail := decodeBody[api.TaskDetail](t, resp); detail.Task.Status != api.TaskStatusWaitingInput {
+		t.Fatalf("仍有对接人未提交时应继续等待输入: %+v", detail.Task.Status)
+	}
+
+	// 两名对接人都提交后不再等待输入
+	act(erin, erinUser.ID)
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskD), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if detail := decodeBody[api.TaskDetail](t, resp); detail.Task.Status != api.TaskStatusNotStarted {
+		t.Fatalf("全部对接人提交后应解除等待输入: %+v", detail.Task.Status)
+	}
+}
+
 // 结构化卡点与一键提醒（#15，AC-11）：执行者填写类型/缺失/原因/希望行动人上报，
 // 一键提醒发定向通知；解除后保留处理事实且不可再动作。
 // AC-11：卡点由四类结构化事实派生，触发条件消失即自动解除；一键提醒当前待行动人。
@@ -2445,10 +2639,10 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, downstream.Id),
 		api.CreateTaskInputRequest{
 			Name: "现场数据包", Necessity: api.Required, EdgeType: api.HardPrerequisite,
-			SourceTaskId: upstream.Id, DeliverableId: &upstreamDeliverable,
+			SourceTaskIds: []int64{upstream.Id}, DeliverableId: &upstreamDeliverable,
 		})
 	wantStatus(t, resp, http.StatusCreated)
-	edge := decodeBody[api.DeliverableEdge](t, resp)
+	edge := decodeBody[[]api.DeliverableEdge](t, resp)[0]
 
 	byKind := func(c *http.Client) map[string]api.Blocker {
 		t.Helper()
@@ -2755,10 +2949,10 @@ func TestInterlockAndCriticalPath(t *testing.T) {
 	mkEdge := func(name string, src, dst int64, et api.EdgeType) api.DeliverableEdge {
 		t.Helper()
 		resp := doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, dst), api.CreateTaskInputRequest{
-			Name: name, Necessity: api.Required, EdgeType: et, SourceTaskId: src,
+			Name: name, Necessity: api.Required, EdgeType: et, SourceTaskIds: []int64{src},
 		})
 		wantStatus(t, resp, http.StatusCreated)
-		return decodeBody[api.DeliverableEdge](t, resp)
+		return decodeBody[[]api.DeliverableEdge](t, resp)[0]
 	}
 	eAB := mkEdge("A产物", byName["任务A"], byName["任务B"], api.HardPrerequisite)
 	eBC := mkEdge("B产物", byName["任务B"], byName["任务C"], api.HardPrerequisite)
@@ -3009,7 +3203,7 @@ func TestProjectReport(t *testing.T) {
 
 	// B 挂一条来自 C 的必要输入边：C 未交付 ⇒ B 的必要输入未就绪（§5.1 等待输入）。
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, taskB.Id),
-		api.CreateTaskInputRequest{Name: "上游数据包", Necessity: api.Required, EdgeType: api.HardPrerequisite, SourceTaskId: taskC.Id})
+		api.CreateTaskInputRequest{Name: "上游数据包", Necessity: api.Required, EdgeType: api.HardPrerequisite, SourceTaskIds: []int64{taskC.Id}})
 	wantStatus(t, resp, http.StatusCreated)
 	resp.Body.Close()
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, taskA.Id),
@@ -3434,12 +3628,12 @@ func TestUnifiedPermissionsAcrossIdentities(t *testing.T) {
 	resp.Body.Close()
 	expected := openapiDate(t, "2026-09-10")
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/member-inputs", tasksURL, taskID),
-		api.CreateMemberInputRequest{Name: "外部厂商接口说明", Necessity: api.Required, ProviderId: daveUser.ID,
+		api.CreateMemberInputRequest{Name: "外部厂商接口说明", Necessity: api.Required, ProviderIds: []int64{daveUser.ID},
 			ContentNote: "外部材料需由内部协调人代录", ExpectedDate: expected})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/member-inputs", tasksURL, taskID),
-		api.CreateMemberInputRequest{Name: "外部厂商接口说明", Necessity: api.Required, ProviderId: bobUser.ID,
+		api.CreateMemberInputRequest{Name: "外部厂商接口说明", Necessity: api.Required, ProviderIds: []int64{bobUser.ID},
 			ContentNote: "外部材料由协调人李四收集后代录", ExpectedDate: expected})
 	wantStatus(t, resp, http.StatusCreated)
 	resp.Body.Close()

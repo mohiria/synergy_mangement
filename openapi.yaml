@@ -988,7 +988,7 @@ paths:
     post:
       operationId: createTaskInput
       tags: [tasks]
-      summary: 新增输入要求并自动建立「来源任务 → 目标任务」交付物边（AC-28；任务负责人／可编辑项目者）
+      summary: 新增输入要求并自动建立「来源任务 → 目标任务」交付物边（AC-28；可一次多选来源任务，AC-53；任务负责人／可编辑项目者）
       requestBody:
         required: true
         content:
@@ -997,11 +997,13 @@ paths:
               $ref: "#/components/schemas/CreateTaskInputRequest"
       responses:
         "201":
-          description: 已建立
+          description: 已建立（按 sourceTaskIds 顺序返回新建的各条交付物边）
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DeliverableEdge"
+                type: array
+                items:
+                  $ref: "#/components/schemas/DeliverableEdge"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1028,7 +1030,7 @@ paths:
     post:
       operationId: createMemberInput
       tags: [tasks]
-      summary: 指定项目成员提供输入（AC-29）：建立「成员 → 目标任务」交付物边并生成输入请求；任务已入池时立即发站内通知，否则待入池审批通过后发送
+      summary: 指定项目成员提供输入（AC-29；可一次多选对接人，AC-53）：为每名对接人建立「成员 → 目标任务」交付物边并生成输入请求；任务已入池时立即发站内通知，否则待入池审批通过后发送
       requestBody:
         required: true
         content:
@@ -1037,11 +1039,13 @@ paths:
               $ref: "#/components/schemas/CreateMemberInputRequest"
       responses:
         "201":
-          description: 已建立
+          description: 已建立（按 providerIds 顺序返回新建的各条交付物边）
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DeliverableEdge"
+                type: array
+                items:
+                  $ref: "#/components/schemas/DeliverableEdge"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -2651,8 +2655,8 @@ components:
           description: 位于硬前置关键路径上（派生字段，AC-10）；日期不足时不派生（此时仅硬依赖链）
     CreateTaskInputRequest:
       type: object
-      description: 新增输入要求（来源＝系统内已有任务，AC-28；指定项目成员来源见 #14）
-      required: [name, necessity, edgeType, sourceTaskId]
+      description: 新增输入要求（来源＝系统内已有任务，AC-28；可一次多选来源任务，AC-53）
+      required: [name, necessity, edgeType, sourceTaskIds]
       properties:
         name:
           type: string
@@ -2663,13 +2667,17 @@ components:
           $ref: "#/components/schemas/Necessity"
         edgeType:
           $ref: "#/components/schemas/EdgeType"
-        sourceTaskId:
-          type: integer
-          format: int64
+        sourceTaskIds:
+          type: array
+          minItems: 1
+          items:
+            type: integer
+            format: int64
+          description: 来源任务（AC-53 多选）；确认后按选择顺序分别建立「来源任务 → 目标任务」交付物边，不可重复
         deliverableId:
           type: integer
           format: int64
-          description: 来源任务的交付物项（选填；未选时以边本身表达结构化条件）
+          description: 来源任务的交付物项（选填；未选时以边本身表达结构化条件；仅在只选一个来源任务时可指定）
         expectedDate:
           type: string
           format: date
@@ -3174,8 +3182,8 @@ components:
           description: 当前用户能否提交内容（派生字段；对接人本人且已接收）
     CreateMemberInputRequest:
       type: object
-      description: 新增输入要求（来源＝指定项目成员，AC-29）
-      required: [name, necessity, providerId, contentNote, expectedDate]
+      description: 新增输入要求（来源＝指定项目成员，AC-29；可一次多选对接人，AC-53）
+      required: [name, necessity, providerIds, contentNote, expectedDate]
       properties:
         name:
           type: string
@@ -3183,10 +3191,13 @@ components:
           maxLength: 100
         necessity:
           $ref: "#/components/schemas/Necessity"
-        providerId:
-          type: integer
-          format: int64
-          description: 对接人（非只读项目成员）
+        providerIds:
+          type: array
+          minItems: 1
+          items:
+            type: integer
+            format: int64
+          description: 对接人（非只读项目成员，AC-53 多选）；每人分别建边并生成输入请求与通知，不可重复
         contentNote:
           type: string
           minLength: 1

@@ -16,7 +16,8 @@ import (
 
 // 指定项目成员输入请求（AC-29、AC-30）。业务规则在 domain，handler 仅编排。
 
-// CreateMemberInput 指定项目成员提供输入：建边 + 输入请求；任务已入池立即通知，否则入池通过后补发。
+// CreateMemberInput 指定项目成员提供输入：为每名对接人分别建边 + 建输入请求（AC-29；AC-53 可多选对接人）；
+// 任务已入池立即逐人通知，否则入池通过后补发。
 func (s *Server) CreateMemberInput(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64) {
 	var req CreateMemberInputRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -46,14 +47,14 @@ func (s *Server) CreateMemberInput(w http.ResponseWriter, r *http.Request, proje
 	for _, m := range members {
 		roleByID[m.UserID] = m.Role
 	}
-	input := domain.MemberInput{
+	input := domain.MemberInputs{
 		Name:            strings.TrimSpace(req.Name),
 		Necessity:       string(req.Necessity),
-		ProviderID:      req.ProviderId,
+		ProviderIDs:     req.ProviderIds,
 		ContentNote:     strings.TrimSpace(req.ContentNote),
 		HasExpectedDate: !req.ExpectedDate.Time.IsZero(),
 	}
-	if err := domain.ValidateMemberInput(input, func(id int64) string { return roleByID[id] }); err != nil {
+	if err := domain.ValidateMemberInputs(input, func(id int64) string { return roleByID[id] }); err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_member_input", Message: err.Error()})
 		return
 	}
@@ -66,60 +67,51 @@ func (s *Server) CreateMemberInput(w http.ResponseWriter, r *http.Request, proje
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
 	qtx := s.q.WithTx(tx)
-	edge, err := qtx.CreateEdge(r.Context(), store.CreateEdgeParams{
-		TargetTaskID: taskId,
-		SourceUserID: pgtype.Int8{Int64: req.ProviderId, Valid: true},
-		Name:         input.Name,
-		EdgeType:     domain.EdgeInformation,
-		Necessity:    input.Necessity,
-		ExpectedDate: pgtype.Date{Time: req.ExpectedDate.Time, Valid: true},
-		CreatedBy:    uid,
-	})
-	if err != nil {
-		writeInternalError(w)
-		return
-	}
-	notified := pgtype.Timestamptz{}
-	if pooled {
-		notified = pgtype.Timestamptz{Time: s.now(), Valid: true}
-	}
-	ir, err := qtx.CreateInputRequest(r.Context(), store.CreateInputRequestParams{
-		EdgeID: edge.ID, ProviderID: req.ProviderId, ContentNote: input.ContentNote, NotifiedAt: notified,
-	})
-	if err != nil {
-		writeInternalError(w)
-		return
-	}
-	if pooled {
-		// AC-29：带上下文的站内通知。
-		if _, err := qtx.CreateNotification(r.Context(), store.CreateNotificationParams{
-			UserID:    req.ProviderId,
-			Kind:      domain.NotifyInputRequest,
-			Content:   fmt.Sprintf("请你为任务「%s」提供输入「%s」：%s", task.Name, input.Name, input.ContentNote),
-			ProjectID: pgtype.Int8{Int64: projectId, Valid: true},
-			TaskID:    pgtype.Int8{Int64: taskId, Valid: true},
+	createdIDs := make([]int64, 0, len(input.ProviderIDs))
+	for _, providerID := range input.ProviderIDs {
+		edge, err := qtx.CreateEdge(r.Context(), store.CreateEdgeParams{
+			TargetTaskID: taskId,
+			SourceUserID: pgtype.Int8{Int64: providerID, Valid: true},
+			Name:         input.Name,
+			EdgeType:     domain.EdgeInformation,
+			Necessity:    input.Necessity,
+			ExpectedDate: pgtype.Date{Time: req.ExpectedDate.Time, Valid: true},
+			CreatedBy:    uid,
+		})
+		if err != nil {
+			writeInternalError(w)
+			return
+		}
+		notified := pgtype.Timestamptz{}
+		if pooled {
+			notified = pgtype.Timestamptz{Time: s.now(), Valid: true}
+		}
+		if _, err := qtx.CreateInputRequest(r.Context(), store.CreateInputRequestParams{
+			EdgeID: edge.ID, ProviderID: providerID, ContentNote: input.ContentNote, NotifiedAt: notified,
 		}); err != nil {
 			writeInternalError(w)
 			return
 		}
+		if pooled {
+			// AC-29：带上下文的站内通知，每名对接人各发一条。
+			if _, err := qtx.CreateNotification(r.Context(), store.CreateNotificationParams{
+				UserID:    providerID,
+				Kind:      domain.NotifyInputRequest,
+				Content:   fmt.Sprintf("请你为任务「%s」提供输入「%s」：%s", task.Name, input.Name, input.ContentNote),
+				ProjectID: pgtype.Int8{Int64: projectId, Valid: true},
+				TaskID:    pgtype.Int8{Int64: taskId, Valid: true},
+			}); err != nil {
+				writeInternalError(w)
+				return
+			}
+		}
+		createdIDs = append(createdIDs, edge.ID)
 	}
-	_ = ir
 	if err := tx.Commit(r.Context()); err != nil {
 		writeInternalError(w)
 		return
 	}
-	views, err := s.edgeViews(r.Context(), projectId, uid, actor)
-	if err != nil {
-		writeInternalError(w)
-		return
-	}
-	for _, v := range views {
-		if v.Id == edge.ID {
-			writeJSON(w, http.StatusCreated, v)
-			return
-		}
-	}
-	writeInternalError(w)
+	s.writeCreatedEdges(w, r, projectId, uid, actor, createdIDs)
 }
 
 func (s *Server) AcceptInputRequest(w http.ResponseWriter, r *http.Request, projectId int64, requestId int64) {
