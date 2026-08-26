@@ -119,6 +119,33 @@ func (q *Queries) GetProject(ctx context.Context, arg GetProjectParams) (GetProj
 	return i, err
 }
 
+const listActiveProjectIDs = `-- name: ListActiveProjectIDs :many
+SELECT id FROM projects
+WHERE status IN ('not_started', 'in_progress')
+ORDER BY id
+`
+
+// 活跃项目（每小时 ticker 的扫描范围）：已完成与已归档项目不再补记卡点动态。
+func (q *Queries) ListActiveProjectIDs(ctx context.Context) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listActiveProjectIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listProjects = `-- name: ListProjects :many
 SELECT p.id, p.name, p.created_by, p.created_at, p.owner_id, p.status, p.stage, p.planned_start_date, p.planned_end_date, u.display_name AS owner_name, m.role AS my_role
 FROM projects p

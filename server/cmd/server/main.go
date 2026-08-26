@@ -44,7 +44,11 @@ func main() {
 		log.Printf("warning: minio 不可达，文件上传下载暂不可用: %v", err)
 	}
 
-	handler := api.NewHandler(pool, "/api/v1", files)
+	srv := api.NewServer(pool, files)
+	// 时间型卡点的动态留痕（ADR 0001）：进程内单 ticker 每小时扫描活跃项目补记，无外部定时设施。
+	stopSweep := srv.StartBlockerActivityTicker(context.Background(), api.BlockerSweepInterval)
+	defer stopSweep()
+	handler := api.NewHandlerFromServer(srv, "/api/v1")
 
 	log.Printf("listening on %s", addr)
 	if err := http.ListenAndServe(addr, handler); err != nil {

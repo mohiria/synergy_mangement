@@ -11,10 +11,39 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createBlockerActivity = `-- name: CreateBlockerActivity :execrows
+INSERT INTO task_activities (task_id, kind, actor_id, summary, occurred_at, blocker_key)
+VALUES ($1, $2, NULL, $3, $4, $5)
+ON CONFLICT DO NOTHING
+`
+
+type CreateBlockerActivityParams struct {
+	TaskID     int64
+	Kind       string
+	Summary    string
+	OccurredAt pgtype.Timestamptz
+	BlockerKey pgtype.Text
+}
+
+// 卡点动态：系统派生、无行动人；按 (任务, 类型, 合成键, 发生时刻) 去重，重复插入直接忽略。
+func (q *Queries) CreateBlockerActivity(ctx context.Context, arg CreateBlockerActivityParams) (int64, error) {
+	result, err := q.db.Exec(ctx, createBlockerActivity,
+		arg.TaskID,
+		arg.Kind,
+		arg.Summary,
+		arg.OccurredAt,
+		arg.BlockerKey,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const createTaskActivity = `-- name: CreateTaskActivity :one
 INSERT INTO task_activities (task_id, kind, actor_id, summary, occurred_at)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, task_id, kind, actor_id, summary, occurred_at
+RETURNING id, task_id, kind, actor_id, summary, occurred_at, blocker_key
 `
 
 type CreateTaskActivityParams struct {
@@ -42,12 +71,13 @@ func (q *Queries) CreateTaskActivity(ctx context.Context, arg CreateTaskActivity
 		&i.ActorID,
 		&i.Summary,
 		&i.OccurredAt,
+		&i.BlockerKey,
 	)
 	return i, err
 }
 
 const listTaskActivitiesByTask = `-- name: ListTaskActivitiesByTask :many
-SELECT a.id, a.task_id, a.kind, a.actor_id, a.summary, a.occurred_at, u.display_name AS actor_name
+SELECT a.id, a.task_id, a.kind, a.actor_id, a.summary, a.occurred_at, a.blocker_key, u.display_name AS actor_name
 FROM task_activities a
 LEFT JOIN users u ON u.id = a.actor_id
 WHERE a.task_id = $1
@@ -61,6 +91,7 @@ type ListTaskActivitiesByTaskRow struct {
 	ActorID    pgtype.Int8
 	Summary    string
 	OccurredAt pgtype.Timestamptz
+	BlockerKey pgtype.Text
 	ActorName  pgtype.Text
 }
 
@@ -81,6 +112,7 @@ func (q *Queries) ListTaskActivitiesByTask(ctx context.Context, taskID int64) ([
 			&i.ActorID,
 			&i.Summary,
 			&i.OccurredAt,
+			&i.BlockerKey,
 			&i.ActorName,
 		); err != nil {
 			return nil, err

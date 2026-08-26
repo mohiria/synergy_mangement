@@ -13,8 +13,15 @@ import (
 // 任务动态写入（词汇表「任务动态」；ADR 0002）。
 // 动态是留痕不是业务前置条件：写失败只记日志，不回滚已经发生的业务动作。
 
-// recordActivity 追加一条任务动态。actorID 为空表示系统派生事件。
+// recordActivity 追加一条任务动态。actorID 为空表示系统派生事件；
+// 卡点类动态带合成键，走去重写入（写触发 diff 与每小时 ticker 可能记同一条，ADR 0001）。
 func (s *Server) recordActivity(ctx context.Context, a domain.TaskActivity) {
+	if a.BlockerKey != "" {
+		if err := s.recordBlockerActivity(ctx, a); err != nil {
+			log.Printf("record blocker activity failed: task=%d key=%s err=%v", a.TaskID, a.BlockerKey, err)
+		}
+		return
+	}
 	if _, err := s.q.CreateTaskActivity(ctx, store.CreateTaskActivityParams{
 		TaskID:     a.TaskID,
 		Kind:       a.Kind,

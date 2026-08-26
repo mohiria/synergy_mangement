@@ -35,3 +35,9 @@ SET name = $2,
     planned_end_date = $7
 WHERE id = $1
 RETURNING *;
+
+-- name: ListActiveProjectIDs :many
+-- 活跃项目（每小时 ticker 的扫描范围）：已完成与已归档项目不再补记卡点动态。
+SELECT id FROM projects
+WHERE status IN ('not_started', 'in_progress')
+ORDER BY id;

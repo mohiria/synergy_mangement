@@ -42,6 +42,7 @@ type TaskActivity struct {
 	ActorID    *int64 // 系统派生事件为空
 	Summary    string
 	OccurredAt time.Time
+	BlockerKey string // 卡点类动态的合成键（落库唯一键用，业务动作为空）
 }
 
 // ActivityKindLabel 动态类型的中文名（派生字段）；未知类型退化为通用词，不返回枚举原文。
@@ -79,11 +80,39 @@ func BlockerActivityDiff(before, after []Blocker, now time.Time) []TaskActivity 
 	return out
 }
 
+// blockerActivity 一条卡点动态。出现取卡点的真实发生时刻——写触发的 diff 与每小时 ticker
+// 因此对同一条卡点产出完全相同的一行，落库唯一键即可挡住重复记账（ADR 0001）；
+// 解除没有可计算的发生时刻，取本次比对时刻。
 func blockerActivity(b Blocker, kind string, now time.Time) TaskActivity {
+	at := now
+	if kind == ActivityBlockerOpened && !b.OccurredAt.IsZero() {
+		at = b.OccurredAt
+	}
 	return TaskActivity{
 		TaskID:     b.TaskID,
 		Kind:       kind,
 		Summary:    ActivityKindLabel(kind) + "：" + BlockerKindLabel(b.Kind) + " · 缺 " + b.Missing,
-		OccurredAt: now,
+		OccurredAt: at,
+		BlockerKey: b.Key,
 	}
+}
+
+// IsTimeTriggeredBlocker 判定是否时间型卡点（ADR 0001）：审批超时与任务超期只随时间流逝出现，
+// 没有对应的业务写操作，因此写触发的 diff 抓不到它们的「出现」。
+func IsTimeTriggeredBlocker(kind string) bool {
+	return kind == BlockerApprovalTimeout || kind == BlockerTaskOverdue
+}
+
+// TimeTriggeredBlockerActivities 每小时 ticker 扫描活跃项目后要补记的「卡点出现」动态。
+// 只补时间型卡点：其余三类都有写操作可依附，由 BlockerActivityDiff 记账。
+// 解除同理不在这里补——时间型卡点的解除（完成、改期、审批处理）一定伴随写操作。
+func TimeTriggeredBlockerActivities(bs []Blocker) []TaskActivity {
+	out := []TaskActivity{}
+	for _, b := range bs {
+		if !IsTimeTriggeredBlocker(b.Kind) {
+			continue
+		}
+		out = append(out, blockerActivity(b, ActivityBlockerOpened, b.OccurredAt))
+	}
+	return out
 }

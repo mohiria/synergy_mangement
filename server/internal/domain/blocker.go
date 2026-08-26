@@ -88,6 +88,7 @@ type Blocker struct {
 	ActionOwnerNames []string
 	Level            string
 	Since            time.Time
+	OccurredAt       time.Time // 真实发生时刻（ADR 0001；ticker 补记与写触发 diff 共用同一时间戳）
 	ImpactNote       string
 	// 以下为分组与权限判定用的任务事实，不出现在 API 契约里。
 	TaskOwnerID int64
@@ -142,11 +143,12 @@ func DeriveBlockers(f BlockerFacts) []Blocker {
 			continue // 未到开始时间的输入缺失只是风险信号（模块 PRD §8.7）
 		}
 		b := Blocker{
-			Key:     fmt.Sprintf("%s:edge:%d", BlockerUpstreamUnready, in.EdgeID),
-			Kind:    BlockerUpstreamUnready,
-			Missing: in.InputName,
-			Level:   blockerLevel(t.EndDate != nil && f.Now.After(*t.EndDate)),
-			Since:   *t.StartDate,
+			Key:        fmt.Sprintf("%s:edge:%d", BlockerUpstreamUnready, in.EdgeID),
+			Kind:       BlockerUpstreamUnready,
+			Missing:    in.InputName,
+			Level:      blockerLevel(t.EndDate != nil && f.Now.After(*t.EndDate)),
+			Since:      *t.StartDate,
+			OccurredAt: *t.StartDate,
 		}
 		switch {
 		case in.SourceTaskID != nil:
@@ -178,6 +180,7 @@ func DeriveBlockers(f BlockerFacts) []Blocker {
 			ActionOwnerNames: []string{t.OwnerName},
 			Level:            "high_risk",
 			Since:            *t.EndDate,
+			OccurredAt:       *t.EndDate,
 		})
 	}
 
@@ -205,6 +208,8 @@ func DeriveBlockers(f BlockerFacts) []Blocker {
 			ActionOwnerNames: append([]string(nil), a.ApproverNames...),
 			Level:            blockerLevel(waited >= 2*threshold),
 			Since:            a.StageSince,
+			// 审批超时在「进入环节 + N×24h」那一刻发生，与本次派生时刻无关（ADR 0001）。
+			OccurredAt: a.StageSince.Add(threshold),
 		})
 	}
 
@@ -233,6 +238,7 @@ func DeriveBlockers(f BlockerFacts) []Blocker {
 				ActionOwnerNames: ownerNames,
 				Level:            "high_risk",
 				Since:            f.Now, // 互锁没有独立发生时点，取本次派生时间
+				OccurredAt:       f.Now,
 			})
 		}
 	}

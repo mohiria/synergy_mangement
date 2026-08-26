@@ -13,7 +13,7 @@ func TestBlockerActivityDiff(t *testing.T) {
 		return Blocker{
 			Key: key, Kind: kind, TaskID: 7, TaskName: "联调验证",
 			Missing: missing, Reason: "上游未交付", Level: level,
-			ActionOwnerNames: []string{"周宁"}, Since: now.AddDate(0, 0, -2),
+			ActionOwnerNames: []string{"周宁"}, Since: now.AddDate(0, 0, -2), OccurredAt: now,
 		}
 	}
 	a := mk("upstream_unready:edge:1", BlockerUpstreamUnready, "接口清单", "warning")

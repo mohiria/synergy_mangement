@@ -38,7 +38,11 @@ func NewServer(db *pgxpool.Pool, files filestore.Store) *Server {
 
 // NewHandler 组装路由与会话中间件，main 与集成测试共用同一套装配。
 func NewHandler(db *pgxpool.Pool, baseURL string, files filestore.Store) http.Handler {
-	s := NewServer(db, files)
+	return NewHandlerFromServer(NewServer(db, files), baseURL)
+}
+
+// NewHandlerFromServer 由既有 Server 组装路由；main 需要同一个 Server 同时跑卡点 ticker。
+func NewHandlerFromServer(s *Server, baseURL string) http.Handler {
 	return HandlerWithOptions(s, StdHTTPServerOptions{
 		BaseURL:     baseURL,
 		BaseRouter:  http.NewServeMux(),

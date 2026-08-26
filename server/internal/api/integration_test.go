@@ -4141,3 +4141,119 @@ func TestRemindWaitingTargets(t *testing.T) {
 	wantStatus(t, resp, http.StatusNotFound)
 	resp.Body.Close()
 }
+
+// 时间型卡点的动态留痕（ADR 0001）：审批超时与任务超期不由写操作触发，
+// 由进程内每小时 ticker 扫描活跃项目补记；时间戳取真实发生时刻，重复扫描不重记。
+func TestTimeBlockerActivitySweep(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	alice, bob := newClient(t), newClient(t)
+	for _, c := range []struct {
+		client   *http.Client
+		username string
+		password string
+	}{{alice, "alice", "alice-pass"}, {bob, "bob", "bob-pass"}} {
+		resp := doJSON(t, c.client, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: c.username, Password: c.password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	sp := func(s string) *string { return &s }
+
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "留痕试点", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+		api.AddProjectMemberRequest{UserId: bobUser.ID, Role: api.Member})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("按期交付"), KeyResults: &[]api.CreateKeyResultInput{{Description: "无超期任务", OwnerId: &aliceUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	kr1 := decodeBody[[]api.Objective](t, resp)[0].KeyResults[0].Id
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+
+	// 建一个不会超期的任务并开始执行：此时没有任何卡点动态
+	future := time.Now().AddDate(0, 0, 30).Format("2006-01-02")
+	start, end := openapiDate(t, time.Now().Format("2006-01-02")), openapiDate(t, future)
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "按期交付的任务", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	task := decodeBody[[]api.Task](t, resp)[0]
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, task.Id),
+		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	detailURL := fmt.Sprintf("%s/%d", tasksURL, task.Id)
+	blockerActivities := func(client *http.Client) []api.TaskActivity {
+		t.Helper()
+		r := doJSON(t, client, http.MethodGet, detailURL, nil)
+		wantStatus(t, r, http.StatusOK)
+		out := []api.TaskActivity{}
+		for _, a := range decodeBody[api.TaskDetail](t, r).Activities {
+			if a.Kind == api.BlockerOpened {
+				out = append(out, a)
+			}
+		}
+		return out
+	}
+	if got := blockerActivities(alice); len(got) != 0 {
+		t.Fatalf("尚未超期不应有卡点动态: %+v", got)
+	}
+
+	// 时间流逝：把周期改到过去（不经过任何业务写操作，因此写触发的 diff 抓不到）
+	overdueOn := time.Now().AddDate(0, 0, -5).Format("2006-01-02")
+	if _, err := pool.Exec(context.Background(),
+		"UPDATE tasks SET start_date = $2, end_date = $2 WHERE id = $1", task.Id, overdueOn); err != nil {
+		t.Fatalf("模拟超期失败: %v", err)
+	}
+	if got := blockerActivities(alice); len(got) != 0 {
+		t.Fatalf("只读派生不应产生动态: %+v", got)
+	}
+
+	// ticker 扫描一次：补记「卡点出现」，时间戳取真实发生时刻（截止日），不是扫描时刻
+	sweeper := api.NewServer(pool, nil)
+	sweeper.SweepBlockerActivities(context.Background())
+	got := blockerActivities(alice)
+	if len(got) != 1 {
+		t.Fatalf("ticker 应补记一条任务超期动态: %+v", got)
+	}
+	if got[0].Summary != "卡点出现：任务超期 · 缺 按期完成任务" {
+		t.Fatalf("补记文案异常: %q", got[0].Summary)
+	}
+	if got[0].OccurredAt.Format("2006-01-02") != overdueOn {
+		t.Fatalf("时间戳应取真实发生时刻 %s: %v", overdueOn, got[0].OccurredAt)
+	}
+	if got[0].ActorName != nil {
+		t.Fatalf("系统派生事件不应有行动人: %+v", got[0])
+	}
+
+	// 再扫一次（等价于下一小时或进程重启后重扫）：不重记
+	sweeper.SweepBlockerActivities(context.Background())
+	sweeper.SweepBlockerActivities(context.Background())
+	if again := blockerActivities(alice); len(again) != 1 {
+		t.Fatalf("重复扫描不应重复记账: %+v", again)
+	}
+
+	// 之后的业务写操作也不会再记一条（写触发 diff 与 ticker 指向同一条事实）
+	progress := 40
+	resp = doJSON(t, bob, http.MethodPut, fmt.Sprintf("%s/%d/progress", tasksURL, task.Id),
+		api.UpdateTaskProgressRequest{Progress: &progress})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	if again := blockerActivities(alice); len(again) != 1 {
+		t.Fatalf("写触发 diff 不应与 ticker 重复记账: %+v", again)
+	}
+}

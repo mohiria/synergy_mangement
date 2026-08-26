@@ -241,6 +241,7 @@ type TaskActivity struct {
 	ActorID    pgtype.Int8
 	Summary    string
 	OccurredAt pgtype.Timestamptz
+	BlockerKey pgtype.Text
 }
 
 type TaskInvite struct {
