@@ -137,10 +137,10 @@ export default function ArtifactsPage({
               </div>
               {o.krs.map((kr) => (
                 <div key={kr.keyResultId} style={{ padding: "10px 16px", borderTop: "1px solid #edf0f2" }}>
-                  <b style={{ fontSize: 13 }}>{kr.description}</b>
+                  <b style={{ fontSize: 14 }}>{kr.description}</b>
                   {kr.tasks.map((t) => (
                     <div key={t.taskId} style={{ margin: "8px 0 4px 12px" }}>
-                      <div style={{ fontSize: 13, marginBottom: 4 }}>
+                      <div style={{ fontSize: 14, marginBottom: 4 }}>
                         {t.name}
                         <Button
                           type="link"
@@ -207,7 +207,7 @@ export default function ArtifactsPage({
                     {p.createdByName} · {fmtTime(p.createdAt)}
                   </span>
                 </div>
-                <div style={{ marginTop: 6, fontSize: 13 }}>
+                <div style={{ marginTop: 6, fontSize: 14 }}>
                   {p.items.map((it) => (
                     <div key={it.deliverableId}>
                       <span className="muted">{it.taskName} / </span>

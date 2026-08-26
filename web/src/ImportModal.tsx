@@ -367,7 +367,7 @@ export default function ImportModal({
                     )}
                   </span>
                   {k.tasks.map((tk, ti) => (
-                    <div key={ti} className="muted" style={{ marginLeft: 16, fontSize: 13 }}>
+                    <div key={ti} className="muted" style={{ marginLeft: 16, fontSize: 14 }}>
                       任务：{tk.name} · {members.find((m) => m.userId === tk.ownerId)?.displayName ?? "？"} ·{" "}
                       {tk.startDate || "?"}—{tk.endDate || "?"}
                       {tk.expectedDeliverable ? ` · ${tk.expectedDeliverable}` : ""}

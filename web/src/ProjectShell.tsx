@@ -76,7 +76,7 @@ export default function ProjectShell({
           marginBottom: 6,
         }}
       >
-        <b style={{ fontSize: 13 }}>站内通知</b>
+        <b style={{ fontSize: 14 }}>站内通知</b>
         <Button type="link" size="small" disabled={unread === 0} onClick={markAllRead}>
           全部已读
         </Button>
@@ -95,7 +95,7 @@ export default function ProjectShell({
             borderBottom: "1px solid var(--line)",
             cursor: n.taskId ? "pointer" : "default",
             opacity: n.readAt ? 0.6 : 1,
-            fontSize: 13,
+            fontSize: 14,
           }}
         >
           {n.content}
@@ -151,13 +151,29 @@ export default function ProjectShell({
                 </Button>
               </Badge>
             </Popover>
-          <div className="identity">
-            <span className="avatar">{user.displayName.slice(0, 1)}</span>
-            <span>{user.displayName}</span>
-            <Button size="small" onClick={logout}>
-              登出
-            </Button>
-          </div>
+            <Popover
+              trigger="click"
+              placement="bottomRight"
+              content={
+                <div className="identity-popover">
+                  <div className="identity-popover-head">
+                    <span className="avatar">{user.displayName.slice(0, 1)}</span>
+                    <span>
+                      <b>{user.displayName}</b>
+                      <small>{user.username}</small>
+                    </span>
+                  </div>
+                  <Button block onClick={logout}>
+                    登出
+                  </Button>
+                </div>
+              }
+            >
+              <button className="identity" type="button" aria-label="当前身份">
+                <span className="avatar">{user.displayName.slice(0, 1)}</span>
+                <span>{user.displayName}</span>
+              </button>
+            </Popover>
           </div>
         </header>
         <main className="page">{children}</main>

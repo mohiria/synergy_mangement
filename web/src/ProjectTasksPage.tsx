@@ -2017,7 +2017,7 @@ function TaskDrawer({
               申请人 {cr.submittedByName} · {fmtTime(cr.submittedAt)}
             </span>
           </div>
-          <div style={{ marginTop: 8, fontSize: 13 }}>
+          <div style={{ marginTop: 8, fontSize: 14 }}>
             <div className="muted" style={{ fontSize: 12 }}>
               提交说明:{cr.note}；本次 {cr.items.length} 项候选整体通过或退回。
               {cr.reviewers && cr.reviewers.length > 0 &&
@@ -2085,7 +2085,7 @@ function TaskDrawer({
               申请人 {fc.submittedByName} · {fmtTime(fc.submittedAt)}
             </span>
           </div>
-          <div style={{ marginTop: 8, fontSize: 13 }}>
+          <div style={{ marginTop: 8, fontSize: 14 }}>
             {fc.changes.map((c) => (
               <div key={c.field}>
                 <span className="muted">{c.label}：</span>

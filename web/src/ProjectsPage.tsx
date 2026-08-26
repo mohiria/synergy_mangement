@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Alert, Button, DatePicker, Form, Input, Modal, Select, Table } from "antd";
+import { Alert, Button, DatePicker, Form, Input, Modal, Popover, Select, Table } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
@@ -146,13 +146,29 @@ export default function ProjectsPage({
           <div className="breadcrumbs">
             <b>项目列表</b>
           </div>
-          <div className="identity">
-            <span className="avatar">{user.displayName.slice(0, 1)}</span>
-            <span>{user.displayName}</span>
-            <Button size="small" onClick={logout}>
-              登出
-            </Button>
-          </div>
+          <Popover
+            trigger="click"
+            placement="bottomRight"
+            content={
+              <div className="identity-popover">
+                <div className="identity-popover-head">
+                  <span className="avatar">{user.displayName.slice(0, 1)}</span>
+                  <span>
+                    <b>{user.displayName}</b>
+                    <small>{user.username}</small>
+                  </span>
+                </div>
+                <Button block onClick={logout}>
+                  登出
+                </Button>
+              </div>
+            }
+          >
+            <button className="identity" type="button" aria-label="当前身份">
+              <span className="avatar">{user.displayName.slice(0, 1)}</span>
+              <span>{user.displayName}</span>
+            </button>
+          </Popover>
         </header>
         <main className="page">
           <div className="page-head">

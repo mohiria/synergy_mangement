@@ -523,7 +523,7 @@ export default function CollaborationPage({
       }}
     >
       <b style={{ fontSize: 14 }}>交付物边 · {selectedEdgeObj.name}</b>
-      <div style={{ fontSize: 13, display: "grid", gap: 6, marginTop: 8 }}>
+      <div style={{ fontSize: 14, display: "grid", gap: 6, marginTop: 8 }}>
         <div>关系类型：{EDGE_TYPE_LABEL[selectedEdgeObj.edgeType]}</div>
         <div>必要性：{selectedEdgeObj.necessity === "required" ? "必要" : "参考"}</div>
         <div>
@@ -594,7 +594,7 @@ export default function CollaborationPage({
       <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
         所属：{inspectorDetail.objectiveTitle} / {inspectorDetail.krDescription}
       </div>
-      <div style={{ fontSize: 13, display: "grid", gap: 6 }}>
+      <div style={{ fontSize: 14, display: "grid", gap: 6 }}>
         <div>负责人：{inspectorDetail.task.ownerName}</div>
         <div>
           状态：<span className="status-pill">{STATUS_LABEL[inspectorDetail.task.status]}</span>
