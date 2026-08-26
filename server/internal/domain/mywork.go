@@ -99,6 +99,7 @@ type MyWorkFacts struct {
 	Invites       []WorkInviteFact
 	Blockers      []Blocker
 	Upstreams     []WorkUpstreamFact
+	Receipts      []ReceiptFact
 }
 
 // WorkItem 单张卡片事实。
@@ -139,7 +140,7 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 	g := MyWorkGroups{
 		Pending:   []WorkItem{},
 		Approvals: []WorkItem{},
-		Receipts:  []WorkItem{}, // 待接收项随接收方建模落地（当前恒空）
+		Receipts:  []WorkItem{},
 		Waiting:   []WorkItem{},
 		Blockers:  []WorkItem{},
 	}
@@ -264,6 +265,20 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 				Due: tk.EndDate, RejectedReason: *tk.PoolRejected, DrawerTab: "audit",
 			})
 		}
+	}
+
+	// —— 待我接收（Q2：本人是接收方且文件已交付、未确认；模块 PRD §3.2.C、§8.6）——
+	// 待接收项在终审通过时按当时接收方名单落库，本处只按「本人且未确认」筛选，不再重算名单。
+	for _, rc := range f.Receipts {
+		if rc.UserID != me || rc.ConfirmedAt != nil {
+			continue
+		}
+		days, _ := waitingDays(rc.GeneratedAt)
+		g.Receipts = append(g.Receipts, WorkItem{
+			Kind: "receipt", Title: "[待接收] " + rc.TaskName,
+			TaskID: tid(rc.TaskID), TaskName: rc.TaskName, RefID: tid(rc.ID),
+			WaitingDays: days, Stage: "确认接收", DrawerTab: "overview",
+		})
 	}
 
 	// —— 等待他人（Q5：停在他人队列；及我任务的上游）——

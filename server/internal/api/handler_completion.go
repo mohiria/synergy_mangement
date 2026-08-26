@@ -119,7 +119,7 @@ func (s *Server) DecideCompletion(w http.ResponseWriter, r *http.Request, projec
 	}
 	uid := currentUser(r).ID
 	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
-	_, facts, ok := s.fetchTask(w, r, projectId, taskId)
+	task, facts, ok := s.fetchTask(w, r, projectId, taskId)
 	if !ok {
 		return
 	}
@@ -214,6 +214,13 @@ func (s *Server) DecideCompletion(w http.ResponseWriter, r *http.Request, projec
 	if _, err := qtx.UpdateTaskStatus(r.Context(), store.UpdateTaskStatusParams{ID: taskId, Status: newStatus}); err != nil {
 		writeInternalError(w)
 		return
+	}
+	// MW-09：终审通过后为每位接收方生成待接收项（「所有项目成员」按当时成员逐人生成）。
+	if approve {
+		if err := generateReceipts(r.Context(), qtx, projectId, taskId, task.ReceiverScope); err != nil {
+			writeInternalError(w)
+			return
+		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
 		writeInternalError(w)

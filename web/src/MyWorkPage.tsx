@@ -36,6 +36,7 @@ const KIND_BADGE: Record<string, string> = {
   field_change: "审",
   intermediate_review: "审",
   final_review: "审",
+  receipt: "收",
   upstream: "等",
   waiting_input_request: "等",
   waiting_pool: "等",

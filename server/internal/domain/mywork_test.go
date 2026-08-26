@@ -9,7 +9,7 @@ import (
 // 同时覆盖 MW-01（负责人视角）、MW-02（提交完成申请后移出待我处理）、MW-04（成员创建任务）、
 // MW-05（入池退回回到创建人待我处理）、MW-06（变更单同时进两组）、MW-07／MW-08（或签与终审归属）、
 // MW-10／MW-11（输入请求按通知与状态进组）、MW-12（卡点归组与同源去重）、MW-19（邀请退出条件）、
-// MW-20（审批等待达阈值标超期）；MW-09 的待接收组在此断言为恒空——接收方尚未建模。
+// MW-20（审批等待达阈值标超期）；本例没有待接收项事实，故待接收组断言为空（MW-09 另见 receiver_test.go）。
 func TestMyWorkGrouping(t *testing.T) {
 	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
 	me := int64(5)
@@ -143,7 +143,7 @@ func TestMyWorkGrouping(t *testing.T) {
 
 	// 待接收：接收方建模未落地，恒为空数组
 	if g.Receipts == nil || len(g.Receipts) != 0 {
-		t.Fatalf("待我接收应为空数组: %+v", g.Receipts)
+		t.Fatalf("无待接收项事实时待我接收应为空数组: %+v", g.Receipts)
 	}
 
 	// 等待天数：入池审批 11 提交于 5 天前 → waitingDays=5、超期（阈值 3×24h）

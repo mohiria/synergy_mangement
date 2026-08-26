@@ -627,6 +627,11 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		}
 		return out
 	}
+	receipts, err := s.receiptList(r.Context(), taskId)
+	if err != nil {
+		writeInternalError(w)
+		return
+	}
 	writeJSON(w, http.StatusOK, TaskDetail{
 		Task:              *item,
 		ObjectiveTitle:    obj.Title,
@@ -643,6 +648,7 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		Upstream:          relationViews(upRefs),
 		Downstream:        relationViews(downRefs),
 		Activities:        activities,
+		Receipts:          receipts,
 	})
 }
 
@@ -720,6 +726,25 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 	namesByTask := make(map[int64][]string)
 	for _, d := range deliverableRows {
 		namesByTask[d.TaskID] = append(namesByTask[d.TaskID], d.Name)
+	}
+	// 接收方名单与本人待接收项（MW-09、模块 PRD §8.6）。
+	receiverRows, err := s.q.ListReceiversByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	receiversByTask := make(map[int64][]ReviewerInfo)
+	for _, rv := range receiverRows {
+		receiversByTask[rv.TaskID] = append(receiversByTask[rv.TaskID], ReviewerInfo{UserId: rv.UserID, DisplayName: rv.DisplayName})
+	}
+	receiptRows, err := s.q.ListReceiptsByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	pendingReceiptByTask := map[int64]bool{}
+	for _, rc := range receiptRows {
+		if rc.UserID == userID && !rc.ConfirmedAt.Valid {
+			pendingReceiptByTask[rc.TaskID] = true
+		}
 	}
 	// 或签中任务的当前审核组姓名（AC-04 显示文案）。
 	reviewerRows, err := s.q.IntermediateReviewerNamesByProject(ctx, projectID)
@@ -807,6 +832,17 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 		item.CanSubmitCompletion = &canSubmitCompletion
 		canManageReviewers := domain.CanManageReviewers(actor, userID, facts)
 		item.CanManageReviewers = &canManageReviewers
+		// 接收方与确认接收（MW-09）：名单只在「指定成员」时有意义，其余取值返回空数组。
+		item.ReceiverScope = ReceiverScope(t.ReceiverScope)
+		receivers := receiversByTask[t.ID]
+		if receivers == nil || t.ReceiverScope != domain.ReceiverScopeMembers {
+			receivers = []ReviewerInfo{}
+		}
+		item.Receivers = &receivers
+		canManageReceivers := domain.CanConfigureReceivers(actor, userID, facts)
+		item.CanManageReceivers = &canManageReceivers
+		canConfirmReceipt := pendingReceiptByTask[t.ID]
+		item.CanConfirmReceipt = &canConfirmReceipt
 		if n := openBlockersByTask[t.ID]; n > 0 {
 			item.OpenBlockerCount = &n
 		}

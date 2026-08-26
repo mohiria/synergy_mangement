@@ -412,6 +412,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/tasks/{taskId}/receivers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 配置接收方（按需字段，与输入／输出配置同口径直接生效；模块 PRD §8.6、MW-09） */
+        put: operations["setTaskReceivers"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/tasks/{taskId}/confirm-receipt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 接收方确认接收，待接收项退出「待我接收」并形成接收记录（MW-09；接收方无审核权，不提供退回） */
+        post: operations["confirmTaskReceipt"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/tasks/{taskId}/reviewers": {
         parameters: {
             query?: never;
@@ -1186,6 +1226,13 @@ export interface components {
             canSubmitPoolReview: boolean;
             /** @description 当前用户能否处理本任务的入池审批（派生字段；仅所属 KR 负责人） */
             canDecidePoolReview: boolean;
+            receiverScope: components["schemas"]["ReceiverScope"];
+            /** @description 指定成员为接收方时的名单（receiverScope=members；其余取值为空数组） */
+            receivers?: components["schemas"]["ReviewerInfo"][];
+            /** @description 当前用户能否配置接收方（派生字段；与输入／输出配置同口径：负责人／创建人／可编辑项目者，终态不可） */
+            canManageReceivers?: boolean;
+            /** @description 当前用户是否有本任务的待接收项待确认（派生字段；MW-09） */
+            canConfirmReceipt?: boolean;
         };
         CreateTaskItem: {
             /** Format: int64 */
@@ -1244,12 +1291,14 @@ export interface components {
             downstream: components["schemas"]["TaskRelation"][];
             /** @description 任务动态，最新在前（词汇表「任务动态」；ADR 0002） */
             activities: components["schemas"]["TaskActivity"][];
+            /** @description 待接收项与接收记录（词汇表「接收记录」；终审通过后按当时接收方名单逐人生成，MW-09） */
+            receipts: components["schemas"]["TaskReceipt"][];
         };
         /**
          * @description 任务动态类型（ADR 0002）；blocker_* 为系统派生，无行动人
          * @enum {string}
          */
-        TaskActivityKind: "pool_submitted" | "pool_approved" | "pool_rejected" | "field_change_submitted" | "field_change_approved" | "field_change_rejected" | "field_change_abandoned" | "completion_submitted" | "completion_approved" | "completion_rejected" | "blocker_opened" | "blocker_resolved";
+        TaskActivityKind: "pool_submitted" | "pool_approved" | "pool_rejected" | "field_change_submitted" | "field_change_approved" | "field_change_rejected" | "field_change_abandoned" | "completion_submitted" | "completion_approved" | "completion_rejected" | "receipt_confirmed" | "blocker_opened" | "blocker_resolved";
         /** @description 任务动态的一条事实（词汇表「任务动态」）：已经发生、不可撤销，只记录不派生，不可编辑或删除 */
         TaskActivity: {
             /** Format: int64 */
@@ -1837,6 +1886,31 @@ export interface components {
             /** Format: int64 */
             userId: number;
             displayName: string;
+        };
+        /**
+         * @description 接收方范围（词汇表「接收方」；模块 PRD §8.6）：不配置、指定成员或所有项目成员
+         * @enum {string}
+         */
+        ReceiverScope: "none" | "members" | "all";
+        /** @description 一条待接收项／接收记录：未确认为待接收项，已确认为接收记录（接收方、任务、生成时间、确认时间） */
+        TaskReceipt: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            userId: number;
+            displayName: string;
+            /** Format: date-time */
+            generatedAt: string;
+            /**
+             * Format: date-time
+             * @description 确认接收时间；未确认时不返回
+             */
+            confirmedAt?: string;
+        };
+        SetReceiversRequest: {
+            scope: components["schemas"]["ReceiverScope"];
+            /** @description scope=members 时的接收方名单（至少一人，须为项目成员）；其余取值忽略 */
+            userIds?: number[];
         };
         SetReviewersRequest: {
             /** @description 中间审核人（或签组；可为空表示不配置）；须为非只读项目成员 */
@@ -2765,6 +2839,64 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    setTaskReceivers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetReceiversRequest"];
+            };
+        };
+        responses: {
+            /** @description 已配置，返回任务最新事实 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Task"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    confirmTaskReceipt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已确认，返回任务最新事实 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Task"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     setTaskReviewers: {

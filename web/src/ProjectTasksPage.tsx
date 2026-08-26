@@ -261,6 +261,7 @@ export default function ProjectTasksPage({
   };
   const [inputTask, setInputTask] = useState<Task | null>(null);
   const [reviewerTask, setReviewerTask] = useState<Task | null>(null);
+  const [receiverTask, setReceiverTask] = useState<Task | null>(null);
   const [batchSelected, setBatchSelected] = useState<Set<number>>(new Set());
 
   const toggleBatch = (id: number) =>
@@ -399,6 +400,19 @@ export default function ProjectTasksPage({
       load();
     } else {
       message.error(res.error?.message ?? "提交失败");
+    }
+  };
+
+  // MW-09：接收方确认接收，待接收项退出「待我接收」并形成接收记录。
+  const confirmReceipt = async (task: Task) => {
+    const res = await client.POST("/projects/{projectId}/tasks/{taskId}/confirm-receipt", {
+      params: { path: { projectId, taskId: task.id } },
+    });
+    if (res.data) {
+      message.success("已确认接收");
+      load();
+    } else {
+      message.error(res.error?.message ?? "确认失败");
     }
   };
 
@@ -854,6 +868,8 @@ export default function ProjectTasksPage({
           },
           openConfigureInput: (t) => setInputTask(t),
           openReviewers: (t) => setReviewerTask(t),
+          openReceivers: (t) => setReceiverTask(t),
+          confirmReceipt,
           acceptInput,
           openProvide: (id) => {
             setProvideReq(id);
@@ -888,6 +904,16 @@ export default function ProjectTasksPage({
         onClose={() => setReviewerTask(null)}
         onSaved={() => {
           setReviewerTask(null);
+          load();
+        }}
+      />
+      <ReceiversModal
+        projectId={projectId}
+        task={receiverTask}
+        members={members}
+        onClose={() => setReceiverTask(null)}
+        onSaved={() => {
+          setReceiverTask(null);
           load();
         }}
       />
@@ -1466,6 +1492,8 @@ function TaskDrawer({
     openCrReject: (t: Task, reviewId: number) => void;
     openConfigureInput: (t: Task) => void;
     openReviewers: (t: Task) => void;
+    openReceivers: (t: Task) => void;
+    confirmReceipt: (t: Task) => void;
     acceptInput: (requestId: number) => void;
     openProvide: (requestId: number) => void;
     openInputFile: (requestId: number) => void;
@@ -1491,7 +1519,7 @@ function TaskDrawer({
     const targets: Record<string, string[]> = {
       pending: ['[data-focus="inputs"]', ".audit-card.pending", '[data-focus="basic"]'],
       approvals: [".audit-card.pending", '[data-focus="basic"]'],
-      receipts: ['[data-focus="deliverables"]', '[data-focus="basic"]'],
+      receipts: ['[data-focus="receipts"]', '[data-focus="deliverables"]', '[data-focus="basic"]'],
       waiting: ['[data-focus="inputs"]', '[data-focus="basic"]'],
       blockers: ['[data-focus="blockers"]', '[data-focus="basic"]'],
     };
@@ -1618,6 +1646,14 @@ function TaskDrawer({
 
   if (!task) return null;
   const reviewers = detail?.reviewers ?? [];
+  const receipts = detail?.receipts ?? [];
+  // 接收方展示口径（模块 PRD §8.6）：不配置、指定成员名单，或「所有项目成员」。
+  const receiverLabel =
+    task.receiverScope === "all"
+      ? "所有项目成员"
+      : task.receiverScope === "members"
+        ? (task.receivers ?? []).map((r) => r.displayName).join("、") || "未配置"
+        : "未配置";
   const blockers = detail?.blockers ?? [];
   const inputs = detail?.inputs ?? [];
   const activities = detail?.activities ?? [];
@@ -1938,6 +1974,51 @@ function TaskDrawer({
               </Button>
             </article>
           ))}
+        </section>
+      )}
+      {/* 成果接收（词汇表「接收方」「接收记录」；模块 PRD §8.6、MW-09）：
+          未配置接收方且本人无配置权限时整块不显示；确认接收只对接收方本人显示，接收方无审核权、不提供退回。 */}
+      {(task.receiverScope !== "none" || task.canManageReceivers) && (
+        <section className="drawer-section" data-focus="receipts">
+          <h3>成果接收</h3>
+          <div className="task-info-list">
+            <div className="task-info-row">
+              <span>接收方</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <strong className={task.receiverScope === "none" ? "muted" : ""}>{receiverLabel}</strong>
+                {task.canManageReceivers && (
+                  <Button size="small" onClick={() => actions.openReceivers(task)}>
+                    调整
+                  </Button>
+                )}
+              </div>
+            </div>
+            {receipts.map((rc) => (
+              <div key={rc.id} className="task-info-row">
+                <span>{rc.displayName}</span>
+                <strong className={rc.confirmedAt ? "" : "muted"}>
+                  {rc.confirmedAt ? `已确认接收 · ${fmtTime(rc.confirmedAt)}` : "待确认"}
+                </strong>
+              </div>
+            ))}
+          </div>
+          {task.canConfirmReceipt && (
+            <div
+              className="notice"
+              style={{
+                marginTop: 10,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <span>成果已交付，确认接收后本任务从「待我接收」移出并形成接收记录。</span>
+              <Button type="primary" size="small" onClick={() => actions.confirmReceipt(task)}>
+                确认接收
+              </Button>
+            </div>
+          )}
         </section>
       )}
       {/* AC-50 空区块不显示：无交付物项且无配置权限时整块隐藏；
@@ -2905,6 +2986,105 @@ function ReviewersModal({
       />
       <div className="notice" style={{ marginTop: 12 }}>
         中间审核人配置不属于关键字段，可直接调整；提交完成申请后随申请快照锁定。
+      </div>
+    </Modal>
+  );
+}
+
+// 接收方配置（模块 PRD §8.6、MW-09）：按需字段，与输入／输出配置同口径直接生效；
+// 一至多名具体成员，或「所有项目成员」——后者在终审通过时按当时项目成员逐人生成待接收项。
+function ReceiversModal({
+  projectId,
+  task,
+  members,
+  onClose,
+  onSaved,
+}: {
+  projectId: number;
+  task: Task | null;
+  members: ProjectMember[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [scope, setScope] = useState<"none" | "members" | "all">("none");
+  const [userIds, setUserIds] = useState<number[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (task) {
+      setError(null);
+      setScope(task.receiverScope);
+      setUserIds((task.receivers ?? []).map((r) => r.userId));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task?.id]);
+
+  if (!task) return null;
+  // 接收方只查看、下载与确认接收，不拥有审核权，因此只读成员也可以是接收方。
+  const options = members.map((m) => ({
+    value: m.userId,
+    label: `${m.displayName}（${m.username}）`,
+  }));
+
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    const res = await client.PUT("/projects/{projectId}/tasks/{taskId}/receivers", {
+      params: { path: { projectId, taskId: task.id } },
+      body: { scope, userIds: scope === "members" ? userIds : [] },
+    });
+    setSaving(false);
+    if (res.data) {
+      message.success("接收方配置已保存");
+      onSaved();
+    } else {
+      setError(res.error?.message ?? "保存失败");
+    }
+  };
+
+  return (
+    <Modal
+      title={
+        <div>
+          接收方
+          <span className="modal-sub">终审通过后，每位接收方在「待我接收」收到待确认的成果</span>
+        </div>
+      }
+      open={!!task}
+      width={520}
+      confirmLoading={saving}
+      onOk={save}
+      onCancel={onClose}
+      okText="保存配置"
+      cancelText="取消"
+      destroyOnClose
+    >
+      {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
+      <Select
+        style={{ width: "100%" }}
+        value={scope}
+        onChange={(v) => setScope(v)}
+        options={[
+          { value: "none", label: "不指定接收方" },
+          { value: "members", label: "指定成员" },
+          { value: "all", label: "所有项目成员" },
+        ]}
+      />
+      {scope === "members" && (
+        <Select
+          mode="multiple"
+          style={{ width: "100%", marginTop: 8 }}
+          placeholder="选择接收方（至少一人）"
+          value={userIds}
+          onChange={setUserIds}
+          options={options}
+          optionFilterProp="label"
+        />
+      )}
+      <div className="notice" style={{ marginTop: 12 }}>
+        接收方只查看、下载和确认接收，不拥有审核权，不能退回。
+        「所有项目成员」按终审通过当时的项目成员逐人生成待接收项。
       </div>
     </Modal>
   );

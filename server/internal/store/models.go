@@ -222,6 +222,7 @@ type Task struct {
 	Description        string
 	CompletionCriteria string
 	UpdatedAt          pgtype.Timestamptz
+	ReceiverScope      string
 }
 
 type TaskActivity struct {
@@ -241,6 +242,19 @@ type TaskInvite struct {
 	Note        string
 	State       string
 	CreatedAt   pgtype.Timestamptz
+}
+
+type TaskReceipt struct {
+	ID          int64
+	TaskID      int64
+	UserID      int64
+	GeneratedAt pgtype.Timestamptz
+	ConfirmedAt pgtype.Timestamptz
+}
+
+type TaskReceiver struct {
+	TaskID int64
+	UserID int64
 }
 
 type TaskReviewer struct {

@@ -3256,7 +3256,7 @@ func TestProjectReport(t *testing.T) {
 	resp = doJSON(t, alice, http.MethodGet, reportURL+"?range=today", nil)
 	wantStatus(t, resp, http.StatusOK)
 	rep := decodeBody[api.Report](t, resp)
-	if rep.Range != api.Today || len(rep.KrProgress) != 1 {
+	if rep.Range != api.ReportRangeToday || len(rep.KrProgress) != 1 {
 		t.Fatalf("报告基本结构异常: %+v", rep.Range)
 	}
 	if rep.KrProgress[0].CompletedInRange != 1 {
@@ -3292,7 +3292,7 @@ func TestProjectReport(t *testing.T) {
 	// 项目整体（默认 all）与非法范围
 	resp = doJSON(t, alice, http.MethodGet, reportURL, nil)
 	wantStatus(t, resp, http.StatusOK)
-	if rep := decodeBody[api.Report](t, resp); rep.Range != api.All {
+	if rep := decodeBody[api.Report](t, resp); rep.Range != api.ReportRangeAll {
 		t.Fatalf("默认范围应为 all: %+v", rep.Range)
 	}
 	resp = doJSON(t, alice, http.MethodGet, reportURL+"?range=year", nil)
@@ -3832,5 +3832,198 @@ func TestTaskActivity(t *testing.T) {
 	}
 	if has(acts, api.BlockerResolved) == nil {
 		t.Fatalf("卡点条件消失后应补记卡点解除: %+v", kinds(acts))
+	}
+}
+
+// MW-09：接收方与接收记录。终审通过后每位接收方的「待我接收」出现待接收项；
+// 进任务概况确认接收后卡片消失、形成接收记录并留痕（模块 PRD §3.2.C、§8.6）。
+func TestReceiversAndReceipts(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
+	daveUser := seedUser(t, q, "dave", "赵六", "dave-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, bob, carol, dave := newClient(t), newClient(t), newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(bob, "bob", "bob-pass")
+	login(carol, "carol", "carol-pass")
+	login(dave, "dave", "dave-pass")
+	sp := func(s string) *string { return &s }
+
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "成果接收试点", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	for _, uid := range []int64{bobUser.ID, carolUser.ID, daveUser.ID} {
+		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+		wantStatus(t, resp, http.StatusCreated)
+		resp.Body.Close()
+	}
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("交付到位"), KeyResults: &[]api.CreateKeyResultInput{{Description: "成果按时移交", OwnerId: &bobUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	okr := decodeBody[[]api.Objective](t, resp)
+	kr1 := okr[0].KeyResults[0].Id
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+
+	// carol 建两个任务并入池通过、开始执行
+	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "指定接收方的任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("移交清单")},
+			{KeyResultId: kr1, Name: "全员接收的任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("通报材料")},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	tasks := decodeBody[[]api.Task](t, resp)
+	taskA, taskB := tasks[0].Id, tasks[1].Id
+	for _, id := range []int64{taskA, taskB} {
+		resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, id),
+			api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+		resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, id),
+			api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+
+	// 接收方配置口径同输入配置：无关成员不可配置；指定成员时名单不能为空
+	receiversA := fmt.Sprintf("%s/%d/receivers", tasksURL, taskA)
+	resp = doJSON(t, dave, http.MethodPut, receiversA, api.SetReceiversRequest{Scope: api.ReceiverScopeMembers, UserIds: &[]int64{daveUser.ID}})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodPut, receiversA, api.SetReceiversRequest{Scope: api.ReceiverScopeMembers})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+
+	// 任务 A 指定 dave 为接收方；任务 B 取「所有项目成员」
+	resp = doJSON(t, carol, http.MethodPut, receiversA, api.SetReceiversRequest{Scope: api.ReceiverScopeMembers, UserIds: &[]int64{daveUser.ID}})
+	wantStatus(t, resp, http.StatusOK)
+	configured := decodeBody[api.Task](t, resp)
+	if configured.ReceiverScope != api.ReceiverScopeMembers || configured.Receivers == nil || len(*configured.Receivers) != 1 {
+		t.Fatalf("接收方配置未生效: %+v", configured)
+	}
+	resp = doJSON(t, carol, http.MethodPut, fmt.Sprintf("%s/%d/receivers", tasksURL, taskB),
+		api.SetReceiversRequest{Scope: api.ReceiverScopeAll})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	// 终审通过前没有待接收项
+	myWorkURL := fmt.Sprintf("%s/projects/%d/my-work", base, created.Id)
+	resp = doJSON(t, dave, http.MethodGet, myWorkURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	if work := decodeBody[api.MyWork](t, resp); len(work.Receipts) != 0 {
+		t.Fatalf("终审通过前不应有待接收项: %+v", work.Receipts)
+	}
+
+	// 走完完成审核：上传候选 → 提交 → bob 终审通过
+	approve := func(taskID int64, fileName string) {
+		t.Helper()
+		detailURL := fmt.Sprintf("%s/%d", tasksURL, taskID)
+		r := doJSON(t, carol, http.MethodGet, detailURL, nil)
+		wantStatus(t, r, http.StatusOK)
+		d := decodeBody[api.TaskDetail](t, r)
+		r = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskID, d.Deliverables[0].Id),
+			api.UploadCandidateRequest{FileName: fileName})
+		wantStatus(t, r, http.StatusCreated)
+		r.Body.Close()
+		r = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskID),
+			api.SubmitCompletionRequest{Note: "请终审"})
+		wantStatus(t, r, http.StatusOK)
+		r.Body.Close()
+		r = doJSON(t, carol, http.MethodGet, detailURL, nil)
+		wantStatus(t, r, http.StatusOK)
+		d = decodeBody[api.TaskDetail](t, r)
+		r = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, taskID, d.CompletionReviews[0].Id),
+			api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
+		wantStatus(t, r, http.StatusOK)
+		r.Body.Close()
+	}
+	approve(taskA, "移交清单.docx")
+	approve(taskB, "通报材料.docx")
+
+	// MW-09：dave 的待我接收出现两条（A 指定接收方 + B 全员）；carol 只因 B 全员出现一条
+	resp = doJSON(t, dave, http.MethodGet, myWorkURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	daveWork := decodeBody[api.MyWork](t, resp)
+	if len(daveWork.Receipts) != 2 {
+		t.Fatalf("接收方待我接收应有两条: %+v", daveWork.Receipts)
+	}
+	for _, it := range daveWork.Receipts {
+		if it.Kind != "receipt" || it.ActionLabel != "去处理" || it.DrawerTab == nil || *it.DrawerTab != "overview" {
+			t.Fatalf("待接收项卡片事实不对: %+v", it)
+		}
+	}
+	resp = doJSON(t, carol, http.MethodGet, myWorkURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	carolWork := decodeBody[api.MyWork](t, resp)
+	if len(carolWork.Receipts) != 1 || carolWork.Receipts[0].TaskId == nil || *carolWork.Receipts[0].TaskId != taskB {
+		t.Fatalf("「所有项目成员」应逐人生成待接收项: %+v", carolWork.Receipts)
+	}
+
+	// 任务详情：接收方看到自己的待确认项；他人不能替其确认
+	detailA := fmt.Sprintf("%s/%d", tasksURL, taskA)
+	resp = doJSON(t, dave, http.MethodGet, detailA, nil)
+	wantStatus(t, resp, http.StatusOK)
+	dA := decodeBody[api.TaskDetail](t, resp)
+	if len(dA.Receipts) != 1 || dA.Receipts[0].ConfirmedAt != nil {
+		t.Fatalf("任务详情应有一条未确认的待接收项: %+v", dA.Receipts)
+	}
+	if dA.Task.CanConfirmReceipt == nil || !*dA.Task.CanConfirmReceipt {
+		t.Fatalf("接收方本人应可确认接收: %+v", dA.Task)
+	}
+	confirmA := fmt.Sprintf("%s/%d/confirm-receipt", tasksURL, taskA)
+	resp = doJSON(t, alice, http.MethodPost, confirmA, nil)
+	wantStatus(t, resp, http.StatusNotFound)
+	resp.Body.Close()
+
+	// 确认接收：待接收项退出本组、形成接收记录、动作进任务动态
+	resp = doJSON(t, dave, http.MethodPost, confirmA, nil)
+	wantStatus(t, resp, http.StatusOK)
+	confirmed := decodeBody[api.Task](t, resp)
+	if confirmed.CanConfirmReceipt == nil || *confirmed.CanConfirmReceipt {
+		t.Fatalf("确认后不应再有待接收项: %+v", confirmed)
+	}
+	resp = doJSON(t, dave, http.MethodPost, confirmA, nil)
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+
+	resp = doJSON(t, dave, http.MethodGet, myWorkURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	if work := decodeBody[api.MyWork](t, resp); len(work.Receipts) != 1 {
+		t.Fatalf("确认后待我接收应只剩一条: %+v", work.Receipts)
+	}
+	resp = doJSON(t, dave, http.MethodGet, detailA, nil)
+	wantStatus(t, resp, http.StatusOK)
+	dA = decodeBody[api.TaskDetail](t, resp)
+	if len(dA.Receipts) != 1 || dA.Receipts[0].ConfirmedAt == nil {
+		t.Fatalf("确认后应形成接收记录: %+v", dA.Receipts)
+	}
+	hasReceiptActivity := false
+	for _, a := range dA.Activities {
+		if a.Kind == api.ReceiptConfirmed {
+			hasReceiptActivity = true
+			if a.ActorName == nil || *a.ActorName != "赵六" {
+				t.Fatalf("确认接收动态应记录行动人: %+v", a)
+			}
+		}
+	}
+	if !hasReceiptActivity {
+		t.Fatalf("确认接收应进任务动态: %+v", dA.Activities)
 	}
 }

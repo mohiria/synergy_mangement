@@ -837,6 +837,80 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /projects/{projectId}/tasks/{taskId}/receivers:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: taskId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    put:
+      operationId: setTaskReceivers
+      tags: [tasks]
+      summary: 配置接收方（按需字段，与输入／输出配置同口径直接生效；模块 PRD §8.6、MW-09）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetReceiversRequest"
+      responses:
+        "200":
+          description: 已配置，返回任务最新事实
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /projects/{projectId}/tasks/{taskId}/confirm-receipt:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: taskId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    post:
+      operationId: confirmTaskReceipt
+      tags: [tasks]
+      summary: 接收方确认接收，待接收项退出「待我接收」并形成接收记录（MW-09；接收方无审核权，不提供退回）
+      responses:
+        "200":
+          description: 已确认，返回任务最新事实
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
   /projects/{projectId}/tasks/{taskId}/reviewers:
     parameters:
       - name: projectId
@@ -2117,6 +2191,7 @@ components:
           canCancel,
           canSubmitPoolReview,
           canDecidePoolReview,
+          receiverScope,
         ]
       properties:
         id:
@@ -2215,6 +2290,19 @@ components:
         canDecidePoolReview:
           type: boolean
           description: 当前用户能否处理本任务的入池审批（派生字段；仅所属 KR 负责人）
+        receiverScope:
+          $ref: "#/components/schemas/ReceiverScope"
+        receivers:
+          type: array
+          description: 指定成员为接收方时的名单（receiverScope=members；其余取值为空数组）
+          items:
+            $ref: "#/components/schemas/ReviewerInfo"
+        canManageReceivers:
+          type: boolean
+          description: 当前用户能否配置接收方（派生字段；与输入／输出配置同口径：负责人／创建人／可编辑项目者，终态不可）
+        canConfirmReceipt:
+          type: boolean
+          description: 当前用户是否有本任务的待接收项待确认（派生字段；MW-09）
     CreateTaskItem:
       type: object
       required: [keyResultId, name, ownerId, startDate, endDate]
@@ -2276,6 +2364,7 @@ components:
           upstream,
           downstream,
           activities,
+          receipts,
         ]
       properties:
         task:
@@ -2346,6 +2435,11 @@ components:
           description: 任务动态，最新在前（词汇表「任务动态」；ADR 0002）
           items:
             $ref: "#/components/schemas/TaskActivity"
+        receipts:
+          type: array
+          description: 待接收项与接收记录（词汇表「接收记录」；终审通过后按当时接收方名单逐人生成，MW-09）
+          items:
+            $ref: "#/components/schemas/TaskReceipt"
     TaskActivityKind:
       type: string
       description: 任务动态类型（ADR 0002）；blocker_* 为系统派生，无行动人
@@ -2361,6 +2455,7 @@ components:
           completion_submitted,
           completion_approved,
           completion_rejected,
+          receipt_confirmed,
           blocker_opened,
           blocker_resolved,
         ]
@@ -3359,6 +3454,42 @@ components:
           format: int64
         displayName:
           type: string
+    ReceiverScope:
+      type: string
+      description: 接收方范围（词汇表「接收方」；模块 PRD §8.6）：不配置、指定成员或所有项目成员
+      enum: [none, members, all]
+    TaskReceipt:
+      type: object
+      description: 一条待接收项／接收记录：未确认为待接收项，已确认为接收记录（接收方、任务、生成时间、确认时间）
+      required: [id, userId, displayName, generatedAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        userId:
+          type: integer
+          format: int64
+        displayName:
+          type: string
+        generatedAt:
+          type: string
+          format: date-time
+        confirmedAt:
+          type: string
+          format: date-time
+          description: 确认接收时间；未确认时不返回
+    SetReceiversRequest:
+      type: object
+      required: [scope]
+      properties:
+        scope:
+          $ref: "#/components/schemas/ReceiverScope"
+        userIds:
+          type: array
+          description: scope=members 时的接收方名单（至少一人，须为项目成员）；其余取值忽略
+          items:
+            type: integer
+            format: int64
     SetReviewersRequest:
       type: object
       required: [userIds]

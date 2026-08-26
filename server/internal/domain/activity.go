@@ -14,6 +14,7 @@ const (
 	ActivityCompletionSubmitted  = "completion_submitted"
 	ActivityCompletionApproved   = "completion_approved"
 	ActivityCompletionRejected   = "completion_rejected"
+	ActivityReceiptConfirmed     = "receipt_confirmed"
 	ActivityBlockerOpened        = "blocker_opened"
 	ActivityBlockerResolved      = "blocker_resolved"
 )
@@ -29,6 +30,7 @@ var activityKindLabels = map[string]string{
 	ActivityCompletionSubmitted:  "提交完成申请",
 	ActivityCompletionApproved:   "完成审核通过",
 	ActivityCompletionRejected:   "完成审核退回",
+	ActivityReceiptConfirmed:     "确认接收",
 	ActivityBlockerOpened:        "卡点出现",
 	ActivityBlockerResolved:      "卡点解除",
 }

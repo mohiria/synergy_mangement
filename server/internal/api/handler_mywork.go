@@ -229,6 +229,26 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 			State: iv.State, Note: iv.Note, CreatedAt: iv.CreatedAt.Time,
 		})
 	}
+	// 待接收项与接收记录（MW-09）：分组只按「本人且未确认」筛选，名单在终审通过时已落库。
+	receiptRows, err := s.q.ListReceiptsByProject(ctx, projectId)
+	if err != nil {
+		writeInternalError(w)
+		return
+	}
+	for _, rc := range receiptRows {
+		fact := domain.ReceiptFact{
+			ID: rc.ID, TaskID: rc.TaskID, TaskName: rc.TaskName,
+			UserID: rc.UserID, UserName: rc.DisplayName,
+		}
+		if rc.GeneratedAt.Valid {
+			fact.GeneratedAt = rc.GeneratedAt.Time
+		}
+		if rc.ConfirmedAt.Valid {
+			at := rc.ConfirmedAt.Time
+			fact.ConfirmedAt = &at
+		}
+		facts.Receipts = append(facts.Receipts, fact)
+	}
 	blockers, err := s.projectBlockers(ctx, projectId)
 	if err != nil {
 		writeInternalError(w)
