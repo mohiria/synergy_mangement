@@ -224,6 +224,15 @@ type Task struct {
 	UpdatedAt          pgtype.Timestamptz
 }
 
+type TaskActivity struct {
+	ID         int64
+	TaskID     int64
+	Kind       string
+	ActorID    pgtype.Int8
+	Summary    string
+	OccurredAt pgtype.Timestamptz
+}
+
 type TaskInvite struct {
 	ID          int64
 	KeyResultID int64

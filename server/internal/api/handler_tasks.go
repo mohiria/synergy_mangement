@@ -126,6 +126,7 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
 	qtx := s.q.WithTx(tx)
+	created := make([]createdTask, 0, len(req.Items))
 	for i, item := range req.Items {
 		status, exempt := domain.TaskCreationOutcome(uid, krOwners[i])
 		if !exempt && req.SubmitForReview {
@@ -144,6 +145,7 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 			writeInternalError(w)
 			return
 		}
+		created = append(created, createdTask{id: task.ID, exempt: exempt, submitted: req.SubmitForReview})
 		switch {
 		case exempt:
 			// AC-26：免审生成一条已通过并标记免审的审批单，记录免审原因。
@@ -188,12 +190,29 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 		writeInternalError(w)
 		return
 	}
+	// 新建任务的入池留痕：免审记「入池审批通过」并带免审原因，提交待审记「提交入池审批」。
+	// 存草稿不产生审批事实，也就没有可留痕的动态。
+	for _, c := range created {
+		switch {
+		case c.exempt:
+			s.actionActivity(r.Context(), c.id, domain.ActivityPoolApproved, uid, domain.PoolExemptOpinion)
+		case c.submitted:
+			s.actionActivity(r.Context(), c.id, domain.ActivityPoolSubmitted, uid, "")
+		}
+	}
 	resp, err := s.taskList(r.Context(), projectId, uid, actor)
 	if err != nil {
 		writeInternalError(w)
 		return
 	}
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+// createdTask 本批新建任务的入池留痕所需事实。
+type createdTask struct {
+	id        int64
+	exempt    bool
+	submitted bool
 }
 
 func (s *Server) SubmitTaskPoolReview(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64) {
@@ -211,6 +230,7 @@ func (s *Server) SubmitTaskPoolReview(w http.ResponseWriter, r *http.Request, pr
 		writeForbidden(w)
 		return
 	}
+	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
 	if err := domain.SubmitPoolReview(facts); err != nil {
 		if errors.Is(err, domain.ErrTaskNotDraft) {
 			writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: err.Error()})
@@ -242,6 +262,8 @@ func (s *Server) SubmitTaskPoolReview(w http.ResponseWriter, r *http.Request, pr
 		writeInternalError(w)
 		return
 	}
+	s.actionActivity(r.Context(), taskId, domain.ActivityPoolSubmitted, uid, "")
+	s.recordBlockerChanges(r.Context(), projectId, blockersBefore)
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 
@@ -262,6 +284,7 @@ func (s *Server) DecideTaskPoolReview(w http.ResponseWriter, r *http.Request, pr
 		return
 	}
 	approve := req.Decision == PoolReviewDecisionRequestDecisionApproved
+	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
 	newStatus, err := domain.DecidePoolReview(facts, uid, approve)
 	if err != nil {
 		if errors.Is(err, domain.ErrPoolReviewNotPending) {
@@ -308,10 +331,15 @@ func (s *Server) DecideTaskPoolReview(w http.ResponseWriter, r *http.Request, pr
 		writeInternalError(w)
 		return
 	}
+	// 退回类动态带上一句话理由（MW-18）。
 	if approve {
+		s.actionActivity(r.Context(), taskId, domain.ActivityPoolApproved, uid, opinion)
 		// AC-29：首次入池通过后补发指定成员的输入请求通知。
 		s.notifyPendingInputRequests(r, projectId, task)
+	} else {
+		s.actionActivity(r.Context(), taskId, domain.ActivityPoolRejected, uid, opinion)
 	}
+	s.recordBlockerChanges(r.Context(), projectId, blockersBefore)
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 
@@ -470,6 +498,11 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		writeInternalError(w)
 		return
 	}
+	activities, err := s.activityList(r.Context(), taskId)
+	if err != nil {
+		writeInternalError(w)
+		return
+	}
 	factsForReviews := domain.TaskFacts{Status: task.Status, CreatorID: task.CreatedBy, OwnerID: task.OwnerID, KrOwnerID: fromPgInt8(task.KrOwnerID)}
 	completions, err := s.completionReviewList(r.Context(), taskId, factsForReviews, uid)
 	if err != nil {
@@ -609,6 +642,7 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		Outputs:           outputs,
 		Upstream:          relationViews(upRefs),
 		Downstream:        relationViews(downRefs),
+		Activities:        activities,
 	})
 }
 

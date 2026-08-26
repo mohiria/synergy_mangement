@@ -71,6 +71,7 @@ func (s *Server) SubmitFieldChange(w http.ResponseWriter, r *http.Request, proje
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_field_change", Message: err.Error()})
 		return
 	}
+	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
 		writeInternalError(w)
@@ -112,6 +113,14 @@ func (s *Server) SubmitFieldChange(w http.ResponseWriter, r *http.Request, proje
 		writeInternalError(w)
 		return
 	}
+	// 草稿完善不生成变更单，也就没有可留痕的审批事实；免审直接记「生效」。
+	switch outcome {
+	case domain.FieldChangeExempt:
+		s.actionActivity(r.Context(), taskId, domain.ActivityFieldChangeApproved, uid, domain.FieldChangeExemptOpinion)
+	case domain.FieldChangePending:
+		s.actionActivity(r.Context(), taskId, domain.ActivityFieldChangeSubmitted, uid, reason)
+	}
+	s.recordBlockerChanges(r.Context(), projectId, blockersBefore)
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 
@@ -153,6 +162,7 @@ func (s *Server) DecideFieldChange(w http.ResponseWriter, r *http.Request, proje
 		opinion = strings.TrimSpace(*req.Opinion)
 	}
 	approve := req.Decision == FieldChangeDecisionRequestDecisionApproved
+	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
 	newState := domain.FieldChangeRejectedState
 	if approve {
 		newState = domain.FieldChangeApprovedState
@@ -188,6 +198,12 @@ func (s *Server) DecideFieldChange(w http.ResponseWriter, r *http.Request, proje
 		writeInternalError(w)
 		return
 	}
+	if approve {
+		s.actionActivity(r.Context(), taskId, domain.ActivityFieldChangeApproved, uid, opinion)
+	} else {
+		s.actionActivity(r.Context(), taskId, domain.ActivityFieldChangeRejected, uid, opinion)
+	}
+	s.recordBlockerChanges(r.Context(), projectId, blockersBefore)
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 
@@ -222,6 +238,7 @@ func (s *Server) AbandonFieldChange(w http.ResponseWriter, r *http.Request, proj
 		writeInternalError(w)
 		return
 	}
+	s.actionActivity(r.Context(), taskId, domain.ActivityFieldChangeAbandoned, uid, "")
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 

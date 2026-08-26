@@ -1242,6 +1242,27 @@ export interface components {
             upstream: components["schemas"]["TaskRelation"][];
             /** @description 协作关系摘要——直接下游分组（词汇表；派生字段，无关系时为空数组，前端按空组隐藏） */
             downstream: components["schemas"]["TaskRelation"][];
+            /** @description 任务动态，最新在前（词汇表「任务动态」；ADR 0002） */
+            activities: components["schemas"]["TaskActivity"][];
+        };
+        /**
+         * @description 任务动态类型（ADR 0002）；blocker_* 为系统派生，无行动人
+         * @enum {string}
+         */
+        TaskActivityKind: "pool_submitted" | "pool_approved" | "pool_rejected" | "field_change_submitted" | "field_change_approved" | "field_change_rejected" | "field_change_abandoned" | "completion_submitted" | "completion_approved" | "completion_rejected" | "blocker_opened" | "blocker_resolved";
+        /** @description 任务动态的一条事实（词汇表「任务动态」）：已经发生、不可撤销，只记录不派生，不可编辑或删除 */
+        TaskActivity: {
+            /** Format: int64 */
+            id: number;
+            kind: components["schemas"]["TaskActivityKind"];
+            /** @description 动态类型的中文名（派生字段）；行级显示消费本字段，前端不按枚举拼文案 */
+            kindLabel: string;
+            /** @description 行动人姓名（派生字段）；系统派生事件不返回 */
+            actorName?: string;
+            /** @description 面向用户的一句话，写入时定型；退回类动态带上一句话理由 */
+            summary: string;
+            /** Format: date-time */
+            occurredAt: string;
         };
         /** @description 协作关系摘要中的一条直接协作关系（词汇表「协作关系摘要」；PRD §7.5）；不插入交付物中间节点，同一对方任务同一关系类型合并为一条 */
         TaskRelation: {

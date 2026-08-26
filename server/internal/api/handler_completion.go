@@ -59,6 +59,7 @@ func (s *Server) SubmitCompletion(w http.ResponseWriter, r *http.Request, projec
 	}
 	// AC-13/14：无中间审核人直接待 KR 终审；配置了则进入中间或签（配置快照进申请）。
 	reviewState, taskStatus := domain.SubmitCompletionOutcome(len(reviewers))
+	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
 		writeInternalError(w)
@@ -99,6 +100,8 @@ func (s *Server) SubmitCompletion(w http.ResponseWriter, r *http.Request, projec
 		writeInternalError(w)
 		return
 	}
+	s.actionActivity(r.Context(), taskId, domain.ActivityCompletionSubmitted, uid, note)
+	s.recordBlockerChanges(r.Context(), projectId, blockersBefore)
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 
@@ -134,6 +137,7 @@ func (s *Server) DecideCompletion(w http.ResponseWriter, r *http.Request, projec
 		opinion = strings.TrimSpace(*req.Opinion)
 	}
 	approve := req.Decision == CompletionDecisionRequestDecisionApproved
+	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
 	// 中间或签阶段（AC-14/24/37）：仅或签组成员可处理。
 	if review.State == domain.CompletionIntermediate {
 		s.decideIntermediate(w, r, projectId, taskId, review, facts, uid, actor, approve, opinion)
@@ -218,6 +222,12 @@ func (s *Server) DecideCompletion(w http.ResponseWriter, r *http.Request, projec
 	for _, key := range removeKeys {
 		_ = s.files.Remove(r.Context(), key)
 	}
+	if approve {
+		s.actionActivity(r.Context(), taskId, domain.ActivityCompletionApproved, uid, opinion)
+	} else {
+		s.actionActivity(r.Context(), taskId, domain.ActivityCompletionRejected, uid, opinion)
+	}
+	s.recordBlockerChanges(r.Context(), projectId, blockersBefore)
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 
@@ -246,6 +256,7 @@ func (s *Server) decideIntermediate(w http.ResponseWriter, r *http.Request, proj
 		}
 		return
 	}
+	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
 		writeInternalError(w)
@@ -298,6 +309,12 @@ func (s *Server) decideIntermediate(w http.ResponseWriter, r *http.Request, proj
 	for _, key := range removeKeys {
 		_ = s.files.Remove(r.Context(), key)
 	}
+	if approve {
+		s.actionActivity(r.Context(), taskId, domain.ActivityCompletionApproved, uid, opinion)
+	} else {
+		s.actionActivity(r.Context(), taskId, domain.ActivityCompletionRejected, uid, opinion)
+	}
+	s.recordBlockerChanges(r.Context(), projectId, blockersBefore)
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 

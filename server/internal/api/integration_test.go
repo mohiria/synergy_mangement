@@ -3687,3 +3687,146 @@ func derefStr(v *string) string {
 	}
 	return *v
 }
+
+// 任务动态（#43，ADR 0002）：三道审批的提交与处理留痕，退回理由进动态；
+// 卡点出现由写操作前后的派生卡点集合 diff 补记，系统派生事件没有行动人。
+func TestTaskActivity(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, bob := newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(bob, "bob", "bob-pass")
+	sp := func(s string) *string { return &s }
+
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "动态试点", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+		api.AddProjectMemberRequest{UserId: bobUser.ID, Role: api.Member})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("联调收敛"), KeyResults: &[]api.CreateKeyResultInput{{Description: "打通端到端", OwnerId: &aliceUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	kr1 := decodeBody[[]api.Objective](t, resp)[0].KeyResults[0].Id
+
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	// 周期取已经过去的窗口：任务在草稿态不派生卡点，入池通过进入未开始后才成为超期卡点，
+	// 这样「卡点出现」正好由入池通过这次写操作 diff 出来。
+	start, end := openapiDate(t, "2026-01-01"), openapiDate(t, "2026-01-05")
+	activitiesOf := func(taskID int64) []api.TaskActivity {
+		t.Helper()
+		r := doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
+		wantStatus(t, r, http.StatusOK)
+		return decodeBody[api.TaskDetail](t, r).Activities
+	}
+	kinds := func(as []api.TaskActivity) []api.TaskActivityKind {
+		out := make([]api.TaskActivityKind, 0, len(as))
+		for _, a := range as {
+			out = append(out, a.Kind)
+		}
+		return out
+	}
+	has := func(as []api.TaskActivity, kind api.TaskActivityKind) *api.TaskActivity {
+		for i := range as {
+			if as[i].Kind == kind {
+				return &as[i]
+			}
+		}
+		return nil
+	}
+
+	// bob 建任务并提交入池 → 提交留痕；alice（KR 负责人）退回 → 理由进动态（MW-18）
+	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "端到端联调", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	taskID := decodeBody[[]api.Task](t, resp)[0].Id
+
+	acts := activitiesOf(taskID)
+	if len(acts) != 1 || acts[0].Kind != api.PoolSubmitted || acts[0].ActorName == nil || *acts[0].ActorName != "李四" {
+		t.Fatalf("提交入池应留痕并带行动人: %+v", acts)
+	}
+	if acts[0].KindLabel != "提交入池审批" {
+		t.Fatalf("动态类型中文名异常: %+v", acts[0])
+	}
+
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, taskID),
+		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionRejected, Opinion: sp("范围写得太粗")})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	acts = activitiesOf(taskID)
+	rejected := has(acts, api.PoolRejected)
+	if rejected == nil || rejected.Summary != "入池审批退回：范围写得太粗" {
+		t.Fatalf("退回理由应进动态: %+v", kinds(acts))
+	}
+	// 最新在前
+	if acts[0].Kind != api.PoolRejected {
+		t.Fatalf("动态应最新在前: %+v", kinds(acts))
+	}
+
+	// 重新提交并通过 → 任务进入未开始
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/submit-pool-review", tasksURL, taskID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, taskID),
+		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	acts = activitiesOf(taskID)
+	if has(acts, api.PoolApproved) == nil {
+		t.Fatalf("入池通过应留痕: %+v", kinds(acts))
+	}
+	// 入池通过让任务从草稿进入未开始，截止时间已过 ⇒ 派生出任务超期卡点，diff 补记「卡点出现」
+	opened := has(acts, api.BlockerOpened)
+	if opened == nil {
+		t.Fatalf("入池通过后应补记卡点出现: %+v", kinds(acts))
+	}
+	if opened.ActorName != nil {
+		t.Fatalf("系统派生事件不应带行动人: %+v", opened)
+	}
+	if opened.Summary != "卡点出现：任务超期 · 缺 按期完成任务" {
+		t.Fatalf("卡点动态文案异常: %+v", opened.Summary)
+	}
+
+	// 关键字段修改把截止时间挪到未来 → 通过后超期条件消失，diff 补记「卡点解除」
+	future := openapiDate(t, "2026-12-31")
+	back := api.SubmitFieldChangeRequest{Reason: sp("窗口顺延")}
+	back.Changes.EndDate = &future
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/field-changes", tasksURL, taskID), back)
+	wantStatus(t, resp, http.StatusOK)
+	backID := decodeBody[api.Task](t, resp).FieldChange.Id
+	if has(activitiesOf(taskID), api.FieldChangeSubmitted) == nil {
+		t.Fatalf("提交关键字段修改应留痕: %+v", kinds(activitiesOf(taskID)))
+	}
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/field-changes/%d/decision", tasksURL, taskID, backID),
+		api.FieldChangeDecisionRequest{Decision: api.FieldChangeDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	acts = activitiesOf(taskID)
+	if has(acts, api.FieldChangeApproved) == nil {
+		t.Fatalf("关键字段修改生效应留痕: %+v", kinds(acts))
+	}
+	if has(acts, api.BlockerResolved) == nil {
+		t.Fatalf("卡点条件消失后应补记卡点解除: %+v", kinds(acts))
+	}
+}

@@ -1620,6 +1620,7 @@ function TaskDrawer({
   const reviewers = detail?.reviewers ?? [];
   const blockers = detail?.blockers ?? [];
   const inputs = detail?.inputs ?? [];
+  const activities = detail?.activities ?? [];
   const upstream = detail?.upstream ?? [];
   const downstream = detail?.downstream ?? [];
   const requiredInputs = inputs.filter((e) => e.necessity === "required");
@@ -1984,6 +1985,31 @@ function TaskDrawer({
               </Button>
             </div>
           )}
+        </section>
+      )}
+      {/* 任务动态（词汇表、ADR 0002）：已发生事实的倒序留痕，只读；
+          文案由服务端写入时定型，前端不拼装、不按 kind 拼中文名。无动态时整块不显示。 */}
+      {activities.length > 0 && (
+        <section className="drawer-section">
+          <h3>
+            任务动态{" "}
+            <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>
+              {activities.length} 条
+            </span>
+          </h3>
+          <ol className="activity-feed">
+            {activities.map((a) => (
+              <li key={a.id}>
+                <span className="activity-dot" aria-hidden />
+                <div>
+                  <b>{a.summary}</b>
+                  <small>
+                    {a.actorName ?? "系统"} · {fmtTime(a.occurredAt)}
+                  </small>
+                </div>
+              </li>
+            ))}
+          </ol>
         </section>
       )}
       {/* 协作关系摘要（AC-41/AC-50、词汇表）：直接消费 API 的 upstream／downstream 派生分组，

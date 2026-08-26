@@ -605,3 +605,17 @@ body {
 .package-item-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .package-item-head .muted { font-size: var(--type-aux); }
 .package-item-body { margin-top: 6px; font-size: var(--type-body); }
+
+/* 任务动态时间线（词汇表「任务动态」）：只读留痕，倒序，系统派生事件行动人显示为「系统」。 */
+.activity-feed { margin: 0; padding: 0; list-style: none; }
+.activity-feed li {
+  position: relative; display: grid; grid-template-columns: 16px minmax(0, 1fr);
+  gap: 8px; padding: 8px 0 8px 2px; border-bottom: 1px solid #edf0f4;
+}
+.activity-feed li:last-child { border-bottom: 0; }
+.activity-dot {
+  width: 7px; height: 7px; margin-top: 7px; border-radius: 50%;
+  background: var(--line-strong); justify-self: center;
+}
+.activity-feed b { display: block; font-size: var(--type-body); font-weight: 500; }
+.activity-feed small { display: block; margin-top: 2px; color: var(--muted); font-size: var(--type-aux); }
