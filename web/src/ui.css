@@ -275,6 +275,9 @@ body {
 
 /* 任务详情抽屉（原型 task-drawer）。 */
 .drawer-sub { font-size: var(--type-aux); color: var(--muted); font-weight: 400; margin-top: 3px; }
+.drawer-sub-sep { margin: 0 6px; }
+/* AC-56：切换 Tab 只更新内容区，页头与抽屉尺寸稳定不闪烁。 */
+.task-drawer-tabs > .ant-tabs-content-holder { min-height: 420px; }
 .drawer-section { margin-top: 18px; }
 .drawer-section h3 { margin: 0 0 10px; font-size: var(--type-body); font-weight: 600; }
 .task-info-list { border: 1px solid var(--line); border-radius: var(--radius); background: #fff; }

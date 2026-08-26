@@ -555,6 +555,45 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 			SubmittedAt: fc.SubmittedAt, DecidedBy: fc.DecidedBy, DecidedAt: fc.DecidedAt,
 		}, fc.SubmittedByName, fc.DecidedByName, facts, actor, uid))
 	}
+	// 协作关系摘要（AC-50、词汇表「协作关系摘要」）：分组与合并规则在 domain，
+	// 这里只把对方任务的展示事实（名称、所属 KR、负责人、状态文案）贴上去。
+	relFacts := make([]domain.RelationEdgeFact, 0, len(allEdges))
+	for _, e := range allEdges {
+		relFacts = append(relFacts, domain.RelationEdgeFact{
+			EdgeType: string(e.EdgeType), SourceTaskID: e.SourceTaskId,
+			TargetTaskID: e.TargetTaskId, Ready: e.Ready,
+		})
+	}
+	upRefs, downRefs := domain.RelationSummary(taskId, relFacts)
+	krDescByID := map[int64]string{}
+	if krRows, err := s.q.ListKeyResultsByProject(r.Context(), projectId); err == nil {
+		for _, k := range krRows {
+			krDescByID[k.ID] = k.Description
+		}
+	}
+	taskByID := make(map[int64]*Task, len(list))
+	for i := range list {
+		taskByID[list[i].Id] = &list[i]
+	}
+	relationViews := func(refs []domain.TaskRelationRef) []TaskRelation {
+		out := make([]TaskRelation, 0, len(refs))
+		for _, ref := range refs {
+			other, ok := taskByID[ref.TaskID]
+			if !ok {
+				continue
+			}
+			out = append(out, TaskRelation{
+				TaskId:          other.Id,
+				TaskName:        other.Name,
+				KrDescription:   krDescByID[other.KeyResultId],
+				EdgeType:        EdgeType(ref.EdgeType),
+				OwnerName:       other.OwnerName,
+				TaskStatusLabel: other.StatusLabel,
+				Ready:           ref.Ready,
+			})
+		}
+		return out
+	}
 	writeJSON(w, http.StatusOK, TaskDetail{
 		Task:              *item,
 		ObjectiveTitle:    obj.Title,
@@ -568,6 +607,8 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		Blockers:          taskBlockers,
 		Inputs:            inputs,
 		Outputs:           outputs,
+		Upstream:          relationViews(upRefs),
+		Downstream:        relationViews(downRefs),
 	})
 }
 
@@ -666,6 +707,7 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 			OwnerName:           t.OwnerName,
 			StartDate:           *fromPgDate(t.StartDate),
 			EndDate:             *fromPgDate(t.EndDate),
+			UpdatedAt:           t.UpdatedAt.Time,
 			Status:              TaskStatus(t.Status),
 			Description:         optString(t.Description),
 			CompletionCriteria:  optString(t.CompletionCriteria),

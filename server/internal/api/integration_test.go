@@ -2018,6 +2018,23 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 	if len(detailB.Outputs) != 1 || detailB.Outputs[0].EdgeType != api.Feedback {
 		t.Fatalf("B 的下游反馈边异常: %+v", detailB.Outputs)
 	}
+	// AC-50：协作关系摘要按直接上游／下游分组派生，条目自带对方任务的展示事实
+	if len(detailB.Upstream) != 1 {
+		t.Fatalf("B 的直接上游分组异常: %+v", detailB.Upstream)
+	}
+	up := detailB.Upstream[0]
+	if up.TaskId != taskA.Id || up.TaskName != "采集现场数据" || up.EdgeType != api.HardPrerequisite ||
+		!up.Ready || up.OwnerName != bobUser.DisplayName || up.KrDescription == "" || up.TaskStatusLabel == "" {
+		t.Fatalf("直接上游摘要事实异常: %+v", up)
+	}
+	if len(detailB.Downstream) != 1 || detailB.Downstream[0].TaskId != taskA.Id ||
+		detailB.Downstream[0].EdgeType != api.Feedback {
+		t.Fatalf("B 的直接下游分组异常: %+v", detailB.Downstream)
+	}
+	// AC-50：任务详情页头的更新时间随任务写入推进
+	if !detailA.Task.UpdatedAt.After(taskA.UpdatedAt) {
+		t.Fatalf("任务更新时间应随状态推进: %v → %v", taskA.UpdatedAt, detailA.Task.UpdatedAt)
+	}
 
 	// 解除边：A 已完成（终态）目标边不可再配置 → 409/403；改由 B 的负责人解除指向 B 的输入边
 	resp = doJSON(t, bob, http.MethodDelete, fmt.Sprintf("%s/projects/%d/edges/%d", base, created.Id, detailB.Outputs[0].Id), nil)

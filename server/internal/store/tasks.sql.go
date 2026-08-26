@@ -55,7 +55,7 @@ func (q *Queries) CreatePoolReview(ctx context.Context, arg CreatePoolReviewPara
 const createTask = `-- name: CreateTask :one
 INSERT INTO tasks (key_result_id, name, owner_id, start_date, end_date, status, created_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, key_result_id, name, owner_id, start_date, end_date, status, created_by, created_at, progress, cancel_reason, description, completion_criteria
+RETURNING id, key_result_id, name, owner_id, start_date, end_date, status, created_by, created_at, progress, cancel_reason, description, completion_criteria, updated_at
 `
 
 type CreateTaskParams struct {
@@ -93,6 +93,7 @@ func (q *Queries) CreateTask(ctx context.Context, arg CreateTaskParams) (Task, e
 		&i.CancelReason,
 		&i.Description,
 		&i.CompletionCriteria,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -204,7 +205,7 @@ func (q *Queries) GetLatestPoolReview(ctx context.Context, taskID int64) (PoolRe
 }
 
 const getTaskInProject = `-- name: GetTaskInProject :one
-SELECT t.id, t.key_result_id, t.name, t.owner_id, t.start_date, t.end_date, t.status, t.created_by, t.created_at, t.progress, t.cancel_reason, t.description, t.completion_criteria, k.owner_id AS kr_owner_id, o.project_id
+SELECT t.id, t.key_result_id, t.name, t.owner_id, t.start_date, t.end_date, t.status, t.created_by, t.created_at, t.progress, t.cancel_reason, t.description, t.completion_criteria, t.updated_at, k.owner_id AS kr_owner_id, o.project_id
 FROM tasks t
 JOIN key_results k ON k.id = t.key_result_id
 JOIN objectives o ON o.id = k.objective_id
@@ -230,6 +231,7 @@ type GetTaskInProjectRow struct {
 	CancelReason       string
 	Description        string
 	CompletionCriteria string
+	UpdatedAt          pgtype.Timestamptz
 	KrOwnerID          pgtype.Int8
 	ProjectID          int64
 }
@@ -252,6 +254,7 @@ func (q *Queries) GetTaskInProject(ctx context.Context, arg GetTaskInProjectPara
 		&i.CancelReason,
 		&i.Description,
 		&i.CompletionCriteria,
+		&i.UpdatedAt,
 		&i.KrOwnerID,
 		&i.ProjectID,
 	)
@@ -376,7 +379,7 @@ func (q *Queries) ListPoolReviewsByTask(ctx context.Context, taskID int64) ([]Li
 }
 
 const listProjectTasks = `-- name: ListProjectTasks :many
-SELECT t.id, t.key_result_id, t.name, t.owner_id, t.start_date, t.end_date, t.status, t.created_by, t.created_at, t.progress, t.cancel_reason, t.description, t.completion_criteria, u.display_name AS owner_name, cu.display_name AS creator_name,
+SELECT t.id, t.key_result_id, t.name, t.owner_id, t.start_date, t.end_date, t.status, t.created_by, t.created_at, t.progress, t.cancel_reason, t.description, t.completion_criteria, t.updated_at, u.display_name AS owner_name, cu.display_name AS creator_name,
     k.owner_id AS kr_owner_id, ku.display_name AS kr_owner_name
 FROM tasks t
 JOIN key_results k ON k.id = t.key_result_id
@@ -402,6 +405,7 @@ type ListProjectTasksRow struct {
 	CancelReason       string
 	Description        string
 	CompletionCriteria string
+	UpdatedAt          pgtype.Timestamptz
 	OwnerName          string
 	CreatorName        string
 	KrOwnerID          pgtype.Int8
@@ -432,6 +436,7 @@ func (q *Queries) ListProjectTasks(ctx context.Context, projectID int64) ([]List
 			&i.CancelReason,
 			&i.Description,
 			&i.CompletionCriteria,
+			&i.UpdatedAt,
 			&i.OwnerName,
 			&i.CreatorName,
 			&i.KrOwnerID,
@@ -484,9 +489,9 @@ func (q *Queries) ListTaskProgressByProject(ctx context.Context, projectID int64
 
 const updateTaskProgress = `-- name: UpdateTaskProgress :one
 UPDATE tasks
-SET progress = $2
+SET progress = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, key_result_id, name, owner_id, start_date, end_date, status, created_by, created_at, progress, cancel_reason, description, completion_criteria
+RETURNING id, key_result_id, name, owner_id, start_date, end_date, status, created_by, created_at, progress, cancel_reason, description, completion_criteria, updated_at
 `
 
 type UpdateTaskProgressParams struct {
@@ -511,15 +516,16 @@ func (q *Queries) UpdateTaskProgress(ctx context.Context, arg UpdateTaskProgress
 		&i.CancelReason,
 		&i.Description,
 		&i.CompletionCriteria,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const updateTaskStatus = `-- name: UpdateTaskStatus :one
 UPDATE tasks
-SET status = $2
+SET status = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, key_result_id, name, owner_id, start_date, end_date, status, created_by, created_at, progress, cancel_reason, description, completion_criteria
+RETURNING id, key_result_id, name, owner_id, start_date, end_date, status, created_by, created_at, progress, cancel_reason, description, completion_criteria, updated_at
 `
 
 type UpdateTaskStatusParams struct {
@@ -544,15 +550,16 @@ func (q *Queries) UpdateTaskStatus(ctx context.Context, arg UpdateTaskStatusPara
 		&i.CancelReason,
 		&i.Description,
 		&i.CompletionCriteria,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const updateTaskStatusWithReason = `-- name: UpdateTaskStatusWithReason :one
 UPDATE tasks
-SET status = $2, cancel_reason = $3
+SET status = $2, cancel_reason = $3, updated_at = now()
 WHERE id = $1
-RETURNING id, key_result_id, name, owner_id, start_date, end_date, status, created_by, created_at, progress, cancel_reason, description, completion_criteria
+RETURNING id, key_result_id, name, owner_id, start_date, end_date, status, created_by, created_at, progress, cancel_reason, description, completion_criteria, updated_at
 `
 
 type UpdateTaskStatusWithReasonParams struct {
@@ -578,6 +585,7 @@ func (q *Queries) UpdateTaskStatusWithReason(ctx context.Context, arg UpdateTask
 		&i.CancelReason,
 		&i.Description,
 		&i.CompletionCriteria,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

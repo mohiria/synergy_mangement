@@ -65,6 +65,7 @@ SET name = COALESCE(sqlc.narg('name'), name),
     description = COALESCE(sqlc.narg('description'), description),
     completion_criteria = COALESCE(sqlc.narg('completion_criteria'), completion_criteria),
     owner_id = COALESCE(sqlc.narg('owner_id'), owner_id),
-    end_date = COALESCE(sqlc.narg('end_date'), end_date)
+    end_date = COALESCE(sqlc.narg('end_date'), end_date),
+    updated_at = now()
 WHERE id = sqlc.arg('id')
 RETURNING *;

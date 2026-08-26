@@ -35,19 +35,19 @@ ORDER BY pr.id DESC;
 
 -- name: UpdateTaskStatus :one
 UPDATE tasks
-SET status = $2
+SET status = $2, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
 -- name: UpdateTaskStatusWithReason :one
 UPDATE tasks
-SET status = $2, cancel_reason = $3
+SET status = $2, cancel_reason = $3, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
 -- name: UpdateTaskProgress :one
 UPDATE tasks
-SET progress = $2
+SET progress = $2, updated_at = now()
 WHERE id = $1
 RETURNING *;
 

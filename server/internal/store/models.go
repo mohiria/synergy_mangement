@@ -221,6 +221,7 @@ type Task struct {
 	CancelReason       string
 	Description        string
 	CompletionCriteria string
+	UpdatedAt          pgtype.Timestamptz
 }
 
 type TaskInvite struct {

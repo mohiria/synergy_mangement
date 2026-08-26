@@ -1135,6 +1135,11 @@ export interface components {
             startDate: string;
             /** Format: date */
             endDate: string;
+            /**
+             * Format: date-time
+             * @description 任务最后更新时间（任务详情页头展示，AC-50）
+             */
+            updatedAt: string;
             status: components["schemas"]["TaskStatus"];
             /** @description 面向用户的状态显示文案（AC-04、决策 34；派生字段）；审批等待状态为“待{当前审批人姓名}审批”，或签多人为“待{首位姓名}等N人审批”，无审批人时退化为“待审批” */
             statusLabel: string;
@@ -1233,6 +1238,28 @@ export interface components {
             inputs: components["schemas"]["DeliverableEdge"][];
             /** @description 从本任务出发的交付物边（直接下游） */
             outputs: components["schemas"]["DeliverableEdge"][];
+            /** @description 协作关系摘要——直接上游分组（词汇表；派生字段，无关系时为空数组，前端按空组隐藏） */
+            upstream: components["schemas"]["TaskRelation"][];
+            /** @description 协作关系摘要——直接下游分组（词汇表；派生字段，无关系时为空数组，前端按空组隐藏） */
+            downstream: components["schemas"]["TaskRelation"][];
+        };
+        /** @description 协作关系摘要中的一条直接协作关系（词汇表「协作关系摘要」；PRD §7.5）；不插入交付物中间节点，同一对方任务同一关系类型合并为一条 */
+        TaskRelation: {
+            /**
+             * Format: int64
+             * @description 对方任务
+             */
+            taskId: number;
+            taskName: string;
+            /** @description 对方任务所属 KR 描述（派生字段） */
+            krDescription: string;
+            edgeType: components["schemas"]["EdgeType"];
+            /** @description 对方任务负责人姓名（派生字段） */
+            ownerName: string;
+            /** @description 对方任务状态显示文案（AC-04；派生字段） */
+            taskStatusLabel: string;
+            /** @description 该关系是否就绪（AC-48；合并后全部边就绪才为真） */
+            ready: boolean;
         };
         /** @enum {string} */
         FieldChangeState: "pending" | "approved" | "rejected";

@@ -2107,6 +2107,7 @@ components:
           ownerName,
           startDate,
           endDate,
+          updatedAt,
           status,
           statusLabel,
           currentStage,
@@ -2139,6 +2140,10 @@ components:
         endDate:
           type: string
           format: date
+        updatedAt:
+          type: string
+          format: date-time
+          description: 任务最后更新时间（任务详情页头展示，AC-50）
         status:
           $ref: "#/components/schemas/TaskStatus"
         statusLabel:
@@ -2268,6 +2273,8 @@ components:
           blockers,
           inputs,
           outputs,
+          upstream,
+          downstream,
         ]
       properties:
         task:
@@ -2323,6 +2330,41 @@ components:
           description: 从本任务出发的交付物边（直接下游）
           items:
             $ref: "#/components/schemas/DeliverableEdge"
+        upstream:
+          type: array
+          description: 协作关系摘要——直接上游分组（词汇表；派生字段，无关系时为空数组，前端按空组隐藏）
+          items:
+            $ref: "#/components/schemas/TaskRelation"
+        downstream:
+          type: array
+          description: 协作关系摘要——直接下游分组（词汇表；派生字段，无关系时为空数组，前端按空组隐藏）
+          items:
+            $ref: "#/components/schemas/TaskRelation"
+    TaskRelation:
+      type: object
+      description: 协作关系摘要中的一条直接协作关系（词汇表「协作关系摘要」；PRD §7.5）；不插入交付物中间节点，同一对方任务同一关系类型合并为一条
+      required: [taskId, taskName, krDescription, edgeType, ownerName, taskStatusLabel, ready]
+      properties:
+        taskId:
+          type: integer
+          format: int64
+          description: 对方任务
+        taskName:
+          type: string
+        krDescription:
+          type: string
+          description: 对方任务所属 KR 描述（派生字段）
+        edgeType:
+          $ref: "#/components/schemas/EdgeType"
+        ownerName:
+          type: string
+          description: 对方任务负责人姓名（派生字段）
+        taskStatusLabel:
+          type: string
+          description: 对方任务状态显示文案（AC-04；派生字段）
+        ready:
+          type: boolean
+          description: 该关系是否就绪（AC-48；合并后全部边就绪才为真）
     FieldChangeState:
       type: string
       enum: [pending, approved, rejected]

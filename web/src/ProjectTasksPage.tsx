@@ -20,7 +20,7 @@ import type { components } from "./api/schema";
 import ProjectShell from "./ProjectShell";
 import TreeTransfer from "./TreeTransfer";
 import type { TreeTransferItem } from "./TreeTransfer";
-import FileUploadField from "./FileUploadField";
+import FileUploadField, { fileTypeLabel, formatFileSize } from "./FileUploadField";
 import DateRangeField from "./DateRangeField";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
@@ -33,6 +33,7 @@ type ProjectMember = components["schemas"]["ProjectMember"];
 type TaskInvite = components["schemas"]["TaskInvite"];
 type TaskDetail = components["schemas"]["TaskDetail"];
 type EdgeType = components["schemas"]["EdgeType"];
+type TaskRelation = components["schemas"]["TaskRelation"];
 type MemberRole = components["schemas"]["MemberRole"];
 type RiskLevel = components["schemas"]["RiskLevel"];
 
@@ -796,6 +797,7 @@ export default function ProjectTasksPage({
         projectId={projectId}
         task={tasks.find((t) => t.id === drawerTaskId) ?? null}
         code={drawerTaskId != null ? taskCode.get(drawerTaskId) : undefined}
+        taskCode={taskCode}
         members={members}
         initialTab={drawerTaskId === Number(focusTaskId) ? focusTab : "overview"}
         onClose={() => {
@@ -1404,12 +1406,13 @@ function InviteOwnersModal({
 
 const fmtTime = (s?: string) => (s ? s.slice(0, 16).replace("T", " ") : "");
 
-// 任务详情抽屉（AC-31/AC-34）：任务概况、讨论、审核三 Tab；
-// PRD §7.5 规定 Tab 顺序为概况、讨论、审核（原型 nav 顺序与 PRD 不一致，以 PRD 为准）。
+// 任务详情抽屉（AC-31/AC-34/AC-50/AC-51）：任务概况、审核、讨论三 Tab，默认进入任务概况。
+// 页头承载任务编号、名称、所属 O／KR 与更新时间，正文不重复；空字段与空区块一律不显示（PRD §7.5）。
 function TaskDrawer({
   projectId,
   task,
   code,
+  taskCode,
   members,
   initialTab,
   onClose,
@@ -1418,6 +1421,7 @@ function TaskDrawer({
   projectId: number;
   task: Task | null;
   code?: string;
+  taskCode: Map<number, string>;
   members: ProjectMember[];
   initialTab?: string;
   onClose: () => void;
@@ -1564,7 +1568,8 @@ function TaskDrawer({
   const reviewers = detail?.reviewers ?? [];
   const blockers = detail?.blockers ?? [];
   const inputs = detail?.inputs ?? [];
-  const outputs = detail?.outputs ?? [];
+  const upstream = detail?.upstream ?? [];
+  const downstream = detail?.downstream ?? [];
   const requiredInputs = inputs.filter((e) => e.necessity === "required");
   const referenceInputs = inputs.filter((e) => e.necessity === "reference");
   const currentFiles = (detail?.deliverables ?? [])
@@ -1578,13 +1583,58 @@ function TaskDrawer({
       (cr) => cr.state === "pending_final" || cr.state === "intermediate_review",
     ).length;
 
+  // 摘要一组关系（AC-41）：对方任务编号与名称、所属 KR、关系类型、负责人、状态与就绪；
+  // 组为空时不渲染该分组（词汇表「协作关系摘要」）。
+  const relationGroup = (title: string, rels: TaskRelation[]) =>
+    rels.length === 0 ? null : (
+      <div style={{ marginBottom: 8 }}>
+        <b style={{ fontSize: 12, color: "var(--muted)" }}>
+          {title} · {rels.length}
+        </b>
+        {rels.map((rel) => (
+          <button
+            key={`${title}-${rel.taskId}-${rel.edgeType}`}
+            type="button"
+            className="relation-card"
+            onClick={() => actions.openTask(rel.taskId)}
+          >
+            <span>
+              <b>
+                {taskCode.get(rel.taskId) ?? ""} · {rel.taskName}
+              </b>
+              <small>
+                {rel.krDescription} · {EDGE_TYPE_LABEL[rel.edgeType]} · 负责人 {rel.ownerName} ·{" "}
+                {rel.taskStatusLabel}
+              </small>
+            </span>
+            <span className={`status-pill ${rel.ready ? "completed" : "warning"}`}>
+              {rel.ready ? "已就绪" : "未就绪"}
+            </span>
+          </button>
+        ))}
+      </div>
+    );
+
   const overview = (
     <>
+      {/* AC-50 基础信息：按 PRD §7.5 顺序紧凑排列，不重复页头已有的编号与 O／KR；
+          空字段不显示。「参与人」属 PRD §9.2 按需字段，尚无数据模型，故当前不出行。
+          当前环节／待行动人不再单列——statusLabel 已按 AC-04 表达审批等待，属重复提示。 */}
       <section className="drawer-section" style={{ marginTop: 4 }}>
         <h3>基础信息</h3>
         <div className="task-info-list">
           <div className="task-info-row">
-            <span>状态</span>
+            <span>负责人</span>
+            <strong>{task.ownerName}</strong>
+          </div>
+          <div className="task-info-row">
+            <span>周期</span>
+            <strong>
+              {task.startDate} — {task.endDate}
+            </strong>
+          </div>
+          <div className="task-info-row">
+            <span>执行状态</span>
             <div>
               <span className={`status-pill ${STATUS_CLASS[task.status]}`}>
                 {task.statusLabel}
@@ -1596,56 +1646,24 @@ function TaskDrawer({
               )}
             </div>
           </div>
-          <div className="task-info-row">
-            <span>负责人</span>
-            <strong>{task.ownerName}</strong>
-          </div>
-          <div className="task-info-row">
-            <span>参与人</span>
-            <strong className="muted">未设置</strong>
-          </div>
-          <div className="task-info-row">
-            <span>开始／截止</span>
-            <strong>
-              {task.startDate} — {task.endDate}
-            </strong>
-          </div>
-          <div className="task-info-row">
-            <span>进度</span>
-            <strong>{task.progress != null ? `${task.progress}%` : "未填写"}</strong>
-          </div>
-          <div className="task-info-row">
-            <span>当前环节／待行动人</span>
-            <strong>
-              {task.currentStage}
-              {task.pendingActorName ? ` · ${task.pendingActorName}` : ""}
-            </strong>
-          </div>
-          <div className="task-info-row">
-            <span>中间审核（或签）</span>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <strong className={reviewers.length ? "" : "muted"}>
-                {reviewers.length ? reviewers.map((r) => r.displayName).join("、") : "未配置"}
-              </strong>
-              {task.canManageReviewers && (
-                <Button size="small" onClick={() => actions.openReviewers(task)}>
-                  调整
-                </Button>
-              )}
+          {task.progress != null && (
+            <div className="task-info-row">
+              <span>进度</span>
+              <strong>{task.progress}%</strong>
             </div>
-          </div>
-          <div className="task-info-row">
-            <span>任务说明</span>
-            <strong className={task.description ? "" : "muted"}>
-              {task.description || "未填写"}
-            </strong>
-          </div>
-          <div className="task-info-row">
-            <span>完成标准</span>
-            <strong className={task.completionCriteria ? "" : "muted"}>
-              {task.completionCriteria || "未填写"}
-            </strong>
-          </div>
+          )}
+          {task.description && (
+            <div className="task-info-row">
+              <span>任务说明</span>
+              <strong>{task.description}</strong>
+            </div>
+          )}
+          {task.completionCriteria && (
+            <div className="task-info-row">
+              <span>量化标准</span>
+              <strong>{task.completionCriteria}</strong>
+            </div>
+          )}
         </div>
       </section>
       {blockers.length > 0 && (
@@ -1784,83 +1802,90 @@ function TaskDrawer({
           ))}
         </section>
       )}
-      <section className="drawer-section">
-        <h3>
-          当前交付物{" "}
-          <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>
-            {currentFiles.length} 项
-          </span>
-        </h3>
-        {candidateCount > 0 && (
-          <div className="notice warning" style={{ marginBottom: 10 }}>
-            有 {candidateCount} 项更新审核中，候选内容请在“审核”Tab 查看；当前内容继续有效。
-          </div>
-        )}
-        {currentFiles.map(({ d, f }) => (
-          <article key={f.id} className="deliverable-card">
-            <div>
-              <b>{d.name}</b>
-              <span className="file-link" onClick={() => openFile(f.id)}>
-                {f.fileName}
-              </span>
-              <div className="muted" style={{ fontSize: 12 }}>
-                {f.fileType || "文件"} · {f.fileSize ? `${Math.ceil(f.fileSize / 1024)} KB` : "—"}
-                {f.effectiveAt ? ` · 生效于 ${fmtTime(f.effectiveAt)}` : ""}
-              </div>
+      {/* AC-51：尚无正式提交的交付物时整块不显示；每项只留名称、可预览文件名、格式、大小和更新时间。 */}
+      {currentFiles.length > 0 && (
+        <section className="drawer-section">
+          <h3>
+            当前交付物{" "}
+            <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>
+              {currentFiles.length} 项
+            </span>
+          </h3>
+          {candidateCount > 0 && (
+            <div className="notice warning" style={{ marginBottom: 10 }}>
+              有 {candidateCount} 项更新审核中，候选内容请在“审核”Tab 查看；当前内容继续有效。
             </div>
-            <Button size="small" onClick={() => openFile(f.id)}>
-              下载
-            </Button>
-          </article>
-        ))}
-        {currentFiles.length === 0 && (
-          <div className="empty compact-empty">尚无已生效的当前交付物</div>
-        )}
-      </section>
-      <section className="drawer-section">
-        <h3>
-          交付物项{" "}
-          <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>
-            {(detail?.deliverables ?? []).length} 项
-          </span>
-        </h3>
-        {(detail?.deliverables ?? []).map((d) => (
-          <article key={d.id} className="deliverable-card">
-            <div>
-              <b>{d.name}</b>
-              <div className="muted" style={{ fontSize: 12 }}>
-                {d.current ? "已有当前内容" : "尚无当前内容"}
-                {d.candidate ? ` · 候选「${d.candidate.fileName}」审核准备中` : ""}
+          )}
+          {currentFiles.map(({ d, f }) => (
+            <article key={f.id} className="deliverable-card">
+              <div>
+                <b>{d.name}</b>
+                <span className="file-link" onClick={() => openFile(f.id)}>
+                  {f.fileName}
+                </span>
+                <div className="muted" style={{ fontSize: 12 }}>
+                  {fileTypeLabel(f.fileName)}
+                  {f.fileSize ? ` · ${formatFileSize(f.fileSize)}` : ""}
+                  {f.effectiveAt ? ` · 更新于 ${fmtTime(f.effectiveAt)}` : ""}
+                </div>
               </div>
-            </div>
-            {task.canUploadCandidate && (
-              <Button
-                size="small"
-                loading={uploadingId === d.id}
-                onClick={() => setCandidateFor({ id: d.id, name: d.name })}
-              >
-                {d.candidate ? "重传候选内容" : "上传候选内容"}
+              <Button size="small" onClick={() => openFile(f.id)}>
+                下载
               </Button>
-            )}
-          </article>
-        ))}
-        {task.canManageDeliverables && (
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <Input
-              size="small"
-              maxLength={100}
-              placeholder="新增交付物项名称"
-              value={newDeliverableName}
-              onChange={(e) => setNewDeliverableName(e.target.value)}
-              style={{ width: 240 }}
-            />
-            <Button size="small" onClick={addDeliverable} disabled={!newDeliverableName.trim()}>
-              ＋ 新增交付物项
-            </Button>
-          </div>
-        )}
-      </section>
-      {(inputs.length > 0 || outputs.length > 0) && (
+            </article>
+          ))}
+        </section>
+      )}
+      {/* AC-50 空区块不显示：无交付物项且无配置权限时整块隐藏；
+          有配置权限时保留，否则负责人失去唯一的新增／上传候选内容入口。 */}
+      {((detail?.deliverables ?? []).length > 0 || task.canManageDeliverables) && (
+        <section className="drawer-section">
+          <h3>
+            交付物项{" "}
+            <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>
+              {(detail?.deliverables ?? []).length} 项
+            </span>
+          </h3>
+          {(detail?.deliverables ?? []).map((d) => (
+            <article key={d.id} className="deliverable-card">
+              <div>
+                <b>{d.name}</b>
+                <div className="muted" style={{ fontSize: 12 }}>
+                  {d.current ? "已有当前内容" : "尚无当前内容"}
+                  {d.candidate ? ` · 候选「${d.candidate.fileName}」审核准备中` : ""}
+                </div>
+              </div>
+              {task.canUploadCandidate && (
+                <Button
+                  size="small"
+                  loading={uploadingId === d.id}
+                  onClick={() => setCandidateFor({ id: d.id, name: d.name })}
+                >
+                  {d.candidate ? "重传候选内容" : "上传候选内容"}
+                </Button>
+              )}
+            </article>
+          ))}
+          {task.canManageDeliverables && (
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <Input
+                size="small"
+                maxLength={100}
+                placeholder="新增交付物项名称"
+                value={newDeliverableName}
+                onChange={(e) => setNewDeliverableName(e.target.value)}
+                style={{ width: 240 }}
+              />
+              <Button size="small" onClick={addDeliverable} disabled={!newDeliverableName.trim()}>
+                ＋ 新增交付物项
+              </Button>
+            </div>
+          )}
+        </section>
+      )}
+      {/* 协作关系摘要（AC-41/AC-50、词汇表）：直接消费 API 的 upstream／downstream 派生分组，
+          前端不再过滤或合并；空组不显示，两组皆空时整块不显示，且不插入交付物节点。 */}
+      {(upstream.length > 0 || downstream.length > 0) && (
         <section className="drawer-section">
           <h3 style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             协作关系
@@ -1872,57 +1897,8 @@ function TaskDrawer({
               在关系图谱中查看 →
             </Button>
           </h3>
-          {inputs.length > 0 && (
-            <div style={{ marginBottom: 8 }}>
-              <b style={{ fontSize: 12, color: "var(--muted)" }}>直接上游 · {inputs.length}</b>
-              {inputs.map((e) =>
-                e.sourceTaskId ? (
-                  <button
-                    key={e.id}
-                    type="button"
-                    className="relation-card"
-                    onClick={() => actions.openTask(e.sourceTaskId!)}
-                  >
-                    <span>
-                      <b>{e.sourceTaskName}</b>
-                      <small>
-                        {EDGE_TYPE_LABEL[e.edgeType]} · {e.name}
-                        {e.sourceOwnerName ? ` · 责任人 ${e.sourceOwnerName}` : ""}
-                        {e.sourceTaskStatusLabel ? ` · ${e.sourceTaskStatusLabel}` : ""}
-                        {e.currentFileName ? ` · ${e.currentFileName}` : ""}
-                      </small>
-                    </span>
-                    <span className={`status-pill ${e.ready ? "completed" : "warning"}`}>
-                      {e.ready ? "已就绪" : "未就绪"}
-                    </span>
-                  </button>
-                ) : null,
-              )}
-            </div>
-          )}
-          {outputs.length > 0 && (
-            <div>
-              <b style={{ fontSize: 12, color: "var(--muted)" }}>直接下游 · {outputs.length}</b>
-              {outputs.map((e) => (
-                <button
-                  key={e.id}
-                  type="button"
-                  className="relation-card"
-                  onClick={() => actions.openTask(e.targetTaskId)}
-                >
-                  <span>
-                    <b>{e.targetTaskName}</b>
-                    <small>
-                      {EDGE_TYPE_LABEL[e.edgeType]} · {e.name}
-                    </small>
-                  </span>
-                  <span className={`status-pill ${e.ready ? "completed" : "warning"}`}>
-                    {e.ready ? "已就绪" : "未就绪"}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
+          {relationGroup("直接上游", upstream)}
+          {relationGroup("直接下游", downstream)}
         </section>
       )}
     </>
@@ -1982,6 +1958,22 @@ function TaskDrawer({
 
   const audit = (
     <div style={{ paddingTop: 4 }}>
+      {/* 中间审核人配置（§5.4）：审核类动作归「审核」Tab，任务概况只读。 */}
+      <div className="task-info-list" style={{ marginBottom: 12 }}>
+        <div className="task-info-row">
+          <span>中间审核（或签）</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <strong className={reviewers.length ? "" : "muted"}>
+              {reviewers.length ? reviewers.map((r) => r.displayName).join("、") : "未配置"}
+            </strong>
+            {task.canManageReviewers && (
+              <Button size="small" onClick={() => actions.openReviewers(task)}>
+                调整
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
       {(detail?.poolReviews ?? []).length === 0 &&
         (detail?.fieldChanges ?? []).length === 0 &&
         (detail?.completionReviews ?? []).length === 0 && (
@@ -2177,7 +2169,9 @@ function TaskDrawer({
         <div>
           {code} · {task.name}
           <div className="drawer-sub">
-            所属 O / KR：{detail ? `${detail.objectiveTitle} / ${detail.krDescription}` : "…"}
+            所属 O／KR：{detail ? `${detail.objectiveTitle} / ${detail.krDescription}` : "—"}
+            <span className="drawer-sub-sep">·</span>
+            更新于 {fmtTime(task.updatedAt)}
           </div>
         </div>
       }
@@ -2209,11 +2203,12 @@ function TaskDrawer({
     >
       <Tabs
         key={task.id}
+        className="task-drawer-tabs"
         defaultActiveKey={initialTab ?? "overview"}
         items={[
           { key: "overview", label: "任务概况", children: overview },
-          { key: "discussion", label: `讨论 ${discussions.length}`, children: discussion },
           { key: "audit", label: `审核 ${pendingReviews}`, children: audit },
+          { key: "discussion", label: `讨论 ${discussions.length}`, children: discussion },
         ]}
       />
       <Modal
