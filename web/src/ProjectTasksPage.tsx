@@ -477,18 +477,24 @@ export default function ProjectTasksPage({
   const rows = groups.flatMap(({ kr, list }) => [
     <tr key={`kr-${kr.id}`} className="table-group">
       <td colSpan={9}>
-        {kr.code}　{kr.description}　<span className="muted">{list.length} 项</span>
-        {kr.progressSummary && kr.progressSummary.totalTasks > 0 && (
-          <span className="muted" style={{ fontWeight: 400 }}>
-            　·　{kr.progressSummary.filledTasks}／{kr.progressSummary.totalTasks} 个任务已填写进度
-            {kr.progressSummary.averageProgress != null &&
-              `，平均 ${kr.progressSummary.averageProgress}%`}
+        <div className="task-group-label">
+          <span>
+            <b>{kr.code}</b>
+            {kr.description}
+            <span className="muted">{list.length} 项</span>
           </span>
-        )}
+          {kr.progressSummary && kr.progressSummary.totalTasks > 0 && (
+            <span className="muted" style={{ fontWeight: 400 }}>
+              {kr.progressSummary.filledTasks}／{kr.progressSummary.totalTasks} 个任务已填写进度
+              {kr.progressSummary.averageProgress != null &&
+                `，平均 ${kr.progressSummary.averageProgress}%`}
+            </span>
+          )}
+        </div>
       </td>
     </tr>,
     ...list.map((t) => (
-      <tr key={t.id}>
+      <tr key={t.id} className="task-table-row">
         <td className="mono">
           {(t.canSubmitPoolReview || t.canDecidePoolReview) && (
             <input
@@ -501,7 +507,13 @@ export default function ProjectTasksPage({
           {taskCode.get(t.id)}
         </td>
         <td>
-          <Button type="link" size="small" style={{ padding: 0 }} onClick={() => setDrawerTaskId(t.id)}>
+          <Button
+            type="link"
+            size="small"
+            className="task-title-link"
+            style={{ padding: 0 }}
+            onClick={() => setDrawerTaskId(t.id)}
+          >
             {t.name}
           </Button>
         </td>
@@ -542,7 +554,7 @@ export default function ProjectTasksPage({
         </td>
         <td>
           {t.progress != null ? (
-            <div>
+            <div className="task-progress-cell">
               <div className="progress">
                 <i style={{ width: `${t.progress}%` }} />
               </div>
@@ -554,9 +566,9 @@ export default function ProjectTasksPage({
             <span className="muted">—</span>
           )}
         </td>
-        <td>{fmtDate(t.startDate)}</td>
-        <td>{fmtDate(t.endDate)}</td>
-        <td>
+        <td className="task-date">{fmtDate(t.startDate)}</td>
+        <td className="task-date">{fmtDate(t.endDate)}</td>
+        <td className="task-output">
           {t.deliverableNames && t.deliverableNames.length > 0 ? (
             t.deliverableNames.join("、")
           ) : (
@@ -735,15 +747,15 @@ export default function ProjectTasksPage({
               </Button>
             </div>
           </div>
-          <div className="data-table-wrap">
-            <table className="data-table">
+          <div className="data-table-wrap task-table-wrap">
+            <table className="data-table task-table">
               <thead>
                 <tr>
                   <th style={{ width: 60 }}>编号</th>
                   <th>任务</th>
                   <th style={{ width: 130 }}>负责人</th>
                   <th style={{ width: 130 }}>状态</th>
-                  <th style={{ width: 80 }}>可选进度</th>
+                  <th style={{ width: 120 }}>进度</th>
                   <th style={{ width: 80 }}>开始</th>
                   <th style={{ width: 80 }}>截止</th>
                   <th style={{ width: 110 }}>预期交付物</th>
@@ -1129,9 +1141,11 @@ function CreateTaskModal({
     setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)));
 
   const krOptions = krList.map((k) => ({ value: k.id, label: `${k.code} · ${k.description}` }));
+  // 负责人列按约 4 个汉字的基础输入宽度（PRD §7.3、AC-54），因此选项只显示姓名；
+  // 账号名不进标签但仍参与姓名匹配（同名成员靠账号名区分）。
   const ownerOptions = members
     .filter((m) => m.role !== "viewer")
-    .map((m) => ({ value: m.userId, label: `${m.displayName}（${m.username}）` }));
+    .map((m) => ({ value: m.userId, label: m.displayName, username: m.username }));
 
   const save = async () => {
     if (rows.length === 0) {
@@ -1245,8 +1259,12 @@ function CreateTaskModal({
                 value={r.ownerId}
                 onChange={(v) => patch(r.key, { ownerId: v })}
                 showSearch
-                optionFilterProp="label"
-                placeholder="任务负责人"
+                filterOption={(input, option) =>
+                  `${option?.label ?? ""}${option?.username ?? ""}`
+                    .toLowerCase()
+                    .includes(input.toLowerCase())
+                }
+                placeholder="负责人"
               />
             </div>
             <div className="task-sheet-cell">

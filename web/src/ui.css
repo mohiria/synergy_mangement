@@ -187,10 +187,11 @@ body {
 
 /* 原型 task-sheet：创建任务表格式弹窗（无预期交付物列的数据模型，列宽按内容宽 1032px 适配）。 */
 .task-sheet { border: 1px solid var(--line); border-radius: var(--radius); overflow: auto; background: #fff; margin-top: 12px; }
+/* 负责人列按约 4 个汉字的基础输入宽度控制（PRD §7.3、AC-54），列宽照原型 task-sheet。 */
 .task-sheet-head, .task-sheet-row {
   display: grid;
-  grid-template-columns: minmax(170px, 1fr) minmax(210px, 1.2fr) 150px 240px minmax(150px, 0.9fr) 36px;
-  min-width: 996px;
+  grid-template-columns: 165px minmax(230px, 1.3fr) 116px 252px minmax(190px, 1fr) 36px;
+  min-width: 1010px;
   align-items: center;
 }
 .task-sheet-head {
@@ -198,7 +199,7 @@ body {
   font-size: var(--type-aux); font-weight: 600; border-bottom: 1px solid var(--line);
 }
 .task-sheet-head span { padding: 0 10px; }
-.task-sheet-row { min-height: 56px; border-bottom: 1px solid #edf0f4; }
+.task-sheet-row { min-height: 58px; border-bottom: 1px solid #edf0f4; }
 .task-sheet-row:last-child { border-bottom: 0; }
 .task-sheet-cell { padding: 8px 10px; min-width: 0; }
 .task-sheet-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
@@ -442,3 +443,22 @@ body {
 /* 按来源落位后的短暂高亮（我的工作 PRD §6.2）：原因、退回理由、卡点在详情里被点出来。 */
 @keyframes focus-flash { from { background: var(--accent-soft); } to { background: transparent; } }
 .focus-flash { animation: focus-flash 2s ease-out; border-radius: var(--radius); }
+
+/* 全部任务列表（AC-54、风格基线 §6）：sticky 表头、任务行 52px、O／KR 分组行 44px，
+   组间以 8px 页面底色带分隔；列名用「进度」，页面不提供批量指派与批量改期。 */
+/* 表头要真的吸顶，滚动容器必须有高度上限；行数少时不撑高。 */
+.task-table-wrap { max-height: calc(100dvh - 280px); }
+.task-table { min-width: 1080px; }
+.task-table th { position: sticky; top: 0; z-index: 1; border-bottom-color: #dfe4eb; }
+.task-table td { height: 52px; }
+.task-table td:nth-child(2) { font-weight: 500; color: #273349; }
+.task-table .table-group td { height: 44px; padding-top: 0; padding-bottom: 0; border-top: 8px solid var(--bg); }
+.task-table .table-group:first-child td { border-top: 0; }
+.task-group-label { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.task-group-label > span:first-child { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.task-group-label b { color: var(--navy); font-weight: 700; }
+.task-title-link { color: #34445f; font-weight: 620; text-align: left; }
+.task-progress-cell { display: flex; align-items: center; gap: 8px; }
+.task-progress-cell .progress { width: 72px; min-width: 72px; }
+.task-date { color: #46536a; white-space: nowrap; }
+.task-output { max-width: 210px; color: #536078; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
