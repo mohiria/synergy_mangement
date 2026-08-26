@@ -21,22 +21,6 @@ type ArtifactPackageItem struct {
 	DeliverableID int64
 }
 
-type Blocker struct {
-	ID                   int64
-	TaskID               int64
-	Kind                 string
-	Missing              string
-	Reason               string
-	ActionOwnerID        int64
-	Level                string
-	ExpectedRecoveryDate pgtype.Date
-	State                string
-	CreatedBy            int64
-	CreatedAt            pgtype.Timestamptz
-	ResolvedAt           pgtype.Timestamptz
-	ResolvedNote         string
-}
-
 type CompletionReview struct {
 	ID                  int64
 	TaskID              int64

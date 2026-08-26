@@ -126,7 +126,7 @@ func (q *Queries) GetEdgeInProject(ctx context.Context, arg GetEdgeInProjectPara
 const listEdgesByProject = `-- name: ListEdgesByProject :many
 SELECT e.id, e.target_task_id, e.source_task_id, e.source_user_id, e.deliverable_id, e.name, e.edge_type, e.necessity, e.expected_date, e.created_by, e.created_at,
     st.name AS source_task_name, st.status AS source_task_status,
-    su.display_name AS source_owner_name,
+    st.owner_id AS source_owner_id, su.display_name AS source_owner_name,
     mu.display_name AS source_user_name,
     tt.name AS target_task_name, tt.owner_id AS target_owner_id, tt.created_by AS target_created_by,
     d.name AS deliverable_name,
@@ -162,6 +162,7 @@ type ListEdgesByProjectRow struct {
 	CreatedAt        pgtype.Timestamptz
 	SourceTaskName   pgtype.Text
 	SourceTaskStatus pgtype.Text
+	SourceOwnerID    pgtype.Int8
 	SourceOwnerName  pgtype.Text
 	SourceUserName   pgtype.Text
 	TargetTaskName   string
@@ -197,6 +198,7 @@ func (q *Queries) ListEdgesByProject(ctx context.Context, projectID int64) ([]Li
 			&i.CreatedAt,
 			&i.SourceTaskName,
 			&i.SourceTaskStatus,
+			&i.SourceOwnerID,
 			&i.SourceOwnerName,
 			&i.SourceUserName,
 			&i.TargetTaskName,

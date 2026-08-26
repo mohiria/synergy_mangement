@@ -63,15 +63,15 @@ func TestMyWorkGrouping(t *testing.T) {
 			// 已完成邀请 → 不出现
 			{ID: 52, KrDescription: "上线自动验收", InviteeID: me, State: TaskInviteCompleted, CreatedAt: recent},
 		},
-		Blockers: []WorkBlockerFact{
+		Blockers: []Blocker{
 			// 我是待行动人 → 与我相关的卡点
-			{ID: 61, TaskID: 40, TaskName: "上游任务", ActionOwnerID: me, TaskOwnerID: 9, KrOwnerID: krOwnerOther, State: BlockerOpen, Kind: BlockerResource, Missing: "环境资源"},
+			{Key: "task_overdue:40", TaskID: 40, TaskName: "上游任务", ActionOwnerIDs: []int64{me}, TaskOwnerID: me, KrOwnerID: krOwnerOther, Kind: BlockerTaskOverdue, Missing: "按期完成任务"},
 			// 我负责的 KR 下的卡点 → 与我相关的卡点
-			{ID: 62, TaskID: 41, TaskName: "KR 下任务", ActionOwnerID: 9, TaskOwnerID: 9, KrOwnerID: krOwnerMe, State: BlockerOpen, Kind: BlockerOther, Missing: "决策"},
+			{Key: "interlock:41", TaskID: 41, TaskName: "KR 下任务", ActionOwnerIDs: []int64{9}, TaskOwnerID: 9, KrOwnerID: krOwnerMe, Kind: BlockerInterlock, Missing: "打破硬前置互锁"},
 			// 「等我提供输入」与待我处理的输入请求同源 → 不进本组（任务 30 上我有待接收请求）
-			{ID: 63, TaskID: 30, TaskName: "下游任务", ActionOwnerID: me, TaskOwnerID: 9, KrOwnerID: krOwnerOther, State: BlockerOpen, Kind: BlockerInputMissing, Missing: "接口口径"},
-			// 已解除 → 不出现
-			{ID: 64, TaskID: 40, TaskName: "上游任务", ActionOwnerID: me, TaskOwnerID: 9, KrOwnerID: krOwnerOther, State: BlockerResolved, Kind: BlockerOther, Missing: "x"},
+			{Key: "upstream_unready:edge:81", TaskID: 30, TaskName: "下游任务", ActionOwnerIDs: []int64{me}, InputProviderID: me, TaskOwnerID: 9, KrOwnerID: krOwnerOther, Kind: BlockerUpstreamUnready, Missing: "接口口径"},
+			// 与我无关 → 不出现
+			{Key: "task_overdue:44", TaskID: 44, TaskName: "他人任务", ActionOwnerIDs: []int64{9}, TaskOwnerID: 9, KrOwnerID: krOwnerOther, Kind: BlockerTaskOverdue, Missing: "按期完成任务"},
 		},
 		Upstreams: []WorkUpstreamFact{
 			// 我任务的未就绪必要上游 → 等待他人

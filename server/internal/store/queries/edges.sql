@@ -18,7 +18,7 @@ DELETE FROM deliverable_edges WHERE id = $1;
 -- 项目全部交付物边，含两端任务事实与就绪派生所需的当前／候选内容存在性（AC-48）。
 SELECT e.*,
     st.name AS source_task_name, st.status AS source_task_status,
-    su.display_name AS source_owner_name,
+    st.owner_id AS source_owner_id, su.display_name AS source_owner_name,
     mu.display_name AS source_user_name,
     tt.name AS target_task_name, tt.owner_id AS target_owner_id, tt.created_by AS target_created_by,
     d.name AS deliverable_name,

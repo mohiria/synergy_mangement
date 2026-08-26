@@ -218,7 +218,6 @@ export default function ProjectTasksPage({
   };
   const [inputTask, setInputTask] = useState<Task | null>(null);
   const [reviewerTask, setReviewerTask] = useState<Task | null>(null);
-  const [blockerTask, setBlockerTask] = useState<Task | null>(null);
   const [batchSelected, setBatchSelected] = useState<Set<number>>(new Set());
 
   const toggleBatch = (id: number) =>
@@ -261,27 +260,16 @@ export default function ProjectTasksPage({
     }
   };
 
-  const remindBlocker = async (blockerId: number) => {
-    const res = await client.POST("/projects/{projectId}/blockers/{blockerId}/remind", {
-      params: { path: { projectId, blockerId } },
+  // 卡点由系统派生、自动解除，页面只保留一键提醒（AC-11）。
+  const remindBlocker = async (blockerKey: string) => {
+    const res = await client.POST("/projects/{projectId}/blockers/remind", {
+      params: { path: { projectId } },
+      body: { key: blockerKey },
     });
     if (res.response.ok) {
-      message.success("已提醒希望行动人");
+      message.success("已提醒当前待行动人");
     } else {
       message.error(res.error?.message ?? "提醒失败");
-    }
-  };
-
-  const resolveBlocker = async (blockerId: number) => {
-    const res = await client.POST("/projects/{projectId}/blockers/{blockerId}/resolve", {
-      params: { path: { projectId, blockerId } },
-      body: {},
-    });
-    if (res.data) {
-      message.success("卡点已解除，处理事实保留");
-      load();
-    } else {
-      message.error(res.error?.message ?? "解除失败");
     }
   };
   const [provideReq, setProvideReq] = useState<number | null>(null);
@@ -811,9 +799,7 @@ export default function ProjectTasksPage({
             setProvideFile(null);
           },
           openInputFile,
-          openReportBlocker: (t) => setBlockerTask(t),
           remindBlocker,
-          resolveBlocker,
           removeEdge,
           openTask: (id) => setDrawerTaskId(id),
           openInGraph: (id) => navigate(`/projects/${projectId}/graph?task=${id}`),
@@ -828,16 +814,6 @@ export default function ProjectTasksPage({
         onClose={() => setInputTask(null)}
         onSaved={() => {
           setInputTask(null);
-          load();
-        }}
-      />
-      <BlockerModal
-        projectId={projectId}
-        task={blockerTask}
-        members={members}
-        onClose={() => setBlockerTask(null)}
-        onSaved={() => {
-          setBlockerTask(null);
           load();
         }}
       />
@@ -1437,9 +1413,7 @@ function TaskDrawer({
     acceptInput: (requestId: number) => void;
     openProvide: (requestId: number) => void;
     openInputFile: (requestId: number) => void;
-    openReportBlocker: (t: Task) => void;
-    remindBlocker: (blockerId: number) => void;
-    resolveBlocker: (blockerId: number) => void;
+    remindBlocker: (blockerKey: string) => void;
     removeEdge: (edgeId: number) => void;
     openTask: (taskId: number) => void;
     openInGraph: (taskId: number) => void;
@@ -1648,11 +1622,11 @@ function TaskDrawer({
           <h3>
             结构化卡点{" "}
             <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>
-              {blockers.filter((b) => b.state === "open").length} 个开放中
+              {blockers.length} 个（系统派生，条件消失即自动解除）
             </span>
           </h3>
           {blockers.map((b) => (
-            <div key={b.id} className="input-fact" style={b.state === "open" ? { borderColor: "#e4b6ba", background: "#fffafa" } : {}}>
+            <div key={b.key} className="input-fact" style={{ borderColor: "#e4b6ba", background: "#fffafa" }}>
               <div>
                 <b>
                   缺失:{b.missing}
@@ -1664,21 +1638,14 @@ function TaskDrawer({
                   </span>
                 </b>
                 <small>
-                  {b.reason} · 待行动人 {b.actionOwnerName}
-                  {b.expectedRecoveryDate ? ` · 预计恢复 ${b.expectedRecoveryDate}` : ""}
-                  {b.state === "resolved" &&
-                    ` · 已解除${b.resolvedNote ? `：${b.resolvedNote}` : ""}`}
+                  {b.reason} · 待行动人 {b.actionOwnerNames.join("、") || "—"}
+                  {b.impactNote ? ` · ${b.impactNote}` : ""}
                 </small>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 {b.canRemind && (
-                  <Button size="small" onClick={() => actions.remindBlocker(b.id)}>
+                  <Button size="small" onClick={() => actions.remindBlocker(b.key)}>
                     一键提醒
-                  </Button>
-                )}
-                {b.canResolve && (
-                  <Button size="small" onClick={() => actions.resolveBlocker(b.id)}>
-                    解除
                   </Button>
                 )}
               </div>
@@ -2186,9 +2153,6 @@ function TaskDrawer({
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           {task.canProposeFieldChange && (
             <Button onClick={() => actions.openEdit(task)}>编辑任务</Button>
-          )}
-          {task.canReportBlocker && (
-            <Button onClick={() => actions.openReportBlocker(task)}>上报卡点</Button>
           )}
           {task.canManageDeliverables && (
             <Button onClick={() => actions.openConfigureInput(task)}>配置输入</Button>
@@ -2721,147 +2685,6 @@ function ReviewersModal({
       />
       <div className="notice" style={{ marginTop: 12 }}>
         中间审核人配置不属于关键字段，可直接调整；提交完成申请后随申请快照锁定。
-      </div>
-    </Modal>
-  );
-}
-
-// 上报卡点（AC-11、§8.4）：类型、缺失输入/条件、阻塞原因、希望行动人必填，预计恢复时间可选。
-function BlockerModal({
-  projectId,
-  task,
-  members,
-  onClose,
-  onSaved,
-}: {
-  projectId: number;
-  task: Task | null;
-  members: ProjectMember[];
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [kind, setKind] = useState<"input_missing" | "approval_waiting" | "resource" | "other">("input_missing");
-  const [missing, setMissing] = useState("");
-  const [reason, setReason] = useState("");
-  const [actionOwnerId, setActionOwnerId] = useState<number | undefined>(undefined);
-  const [level, setLevel] = useState<"warning" | "high_risk">("warning");
-  const [recovery, setRecovery] = useState<Dayjs | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (task) {
-      setKind("input_missing");
-      setMissing("");
-      setReason("");
-      setActionOwnerId(undefined);
-      setLevel("warning");
-      setRecovery(null);
-      setError(null);
-    }
-  }, [task]);
-
-  if (!task) return null;
-
-  const save = async () => {
-    if (!missing.trim() || !reason.trim() || !actionOwnerId) {
-      setError("缺失内容、阻塞原因与希望行动人必填");
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    const res = await client.POST("/projects/{projectId}/tasks/{taskId}/blockers", {
-      params: { path: { projectId, taskId: task.id } },
-      body: {
-        kind,
-        missing: missing.trim(),
-        reason: reason.trim(),
-        actionOwnerId,
-        level,
-        expectedRecoveryDate: recovery ? recovery.format("YYYY-MM-DD") : undefined,
-      },
-    });
-    setSaving(false);
-    if (res.data) {
-      message.success("卡点已上报");
-      onSaved();
-    } else {
-      setError(res.error?.message ?? "上报失败");
-    }
-  };
-
-  return (
-    <Modal
-      title={
-        <div>
-          上报卡点
-          <span className="modal-sub">结构化记录风险事实；解除后保留处理事实</span>
-        </div>
-      }
-      open={!!task}
-      width={560}
-      confirmLoading={saving}
-      onOk={save}
-      onCancel={onClose}
-      okText="上报卡点"
-      cancelText="取消"
-      destroyOnClose
-    >
-      {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
-      <div style={{ display: "grid", gap: 12 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <div>
-            <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>类型</div>
-            <Select
-              style={{ width: "100%" }}
-              value={kind}
-              onChange={setKind}
-              options={[
-                { value: "input_missing", label: "输入缺失" },
-                { value: "approval_waiting", label: "审批等待" },
-                { value: "resource", label: "资源受限" },
-                { value: "other", label: "其他" },
-              ]}
-            />
-          </div>
-          <div>
-            <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>风险等级</div>
-            <Select
-              style={{ width: "100%" }}
-              value={level}
-              onChange={setLevel}
-              options={[
-                { value: "warning", label: "预警" },
-                { value: "high_risk", label: "高风险" },
-              ]}
-            />
-          </div>
-        </div>
-        <div>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>缺失的输入或条件（必填）</div>
-          <Input maxLength={500} value={missing} onChange={(e) => setMissing(e.target.value)} />
-        </div>
-        <div>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>阻塞原因（必填）</div>
-          <Input.TextArea rows={2} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <div>
-            <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>希望行动人（必填）</div>
-            <Select
-              style={{ width: "100%" }}
-              showSearch
-              optionFilterProp="label"
-              value={actionOwnerId}
-              onChange={setActionOwnerId}
-              options={members.map((m) => ({ value: m.userId, label: `${m.displayName}（${m.username}）` }))}
-            />
-          </div>
-          <div>
-            <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>预计恢复时间（选填）</div>
-            <DatePicker style={{ width: "100%" }} value={recovery} onChange={setRecovery} />
-          </div>
-        </div>
       </div>
     </Modal>
   );

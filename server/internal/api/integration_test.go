@@ -2372,7 +2372,9 @@ func TestMemberInputRequests(t *testing.T) {
 
 // 结构化卡点与一键提醒（#15，AC-11）：执行者填写类型/缺失/原因/希望行动人上报，
 // 一键提醒发定向通知；解除后保留处理事实且不可再动作。
-func TestBlockersAndRemind(t *testing.T) {
+// AC-11：卡点由四类结构化事实派生，触发条件消失即自动解除；一键提醒当前待行动人。
+// 审批超时一类需要跨 N×24 小时，只在 domain 单测覆盖。
+func TestDerivedBlockersAndRemind(t *testing.T) {
 	q, pool := setupDB(t)
 	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
 	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
@@ -2412,81 +2414,128 @@ func TestBlockersAndRemind(t *testing.T) {
 	okr := decodeBody[[]api.Objective](t, resp)
 	kr1 := okr[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
-	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+	blockersURL := fmt.Sprintf("%s/projects/%d/blockers", base, created.Id)
+	remindURL := blockersURL + "/remind"
+	// 已过期的周期：截止已过 ⇒ 任务超期；开始时间已到 ⇒ 未就绪的必要输入成卡点。
+	start, end := openapiDate(t, "2020-01-01"), openapiDate(t, "2020-02-01")
 
-	// bob 免审建任务（carol 负责）
+	// bob 免审建两个任务：下游由 carol 负责，上游由 bob 负责。
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "回归验证分析", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
+			{KeyResultId: kr1, Name: "现场数据采集", OwnerId: bobUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("现场数据包")},
 		},
 	})
 	wantStatus(t, resp, http.StatusCreated)
 	tasks := decodeBody[[]api.Task](t, resp)
-	taskID := tasks[0].Id
-	blockersURL := fmt.Sprintf("%s/%d/blockers", tasksURL, taskID)
-
-	// AC-11：负责人 carol 上报卡点（缺失/原因/希望行动人 bob）
-	resp = doJSON(t, carol, http.MethodPost, blockersURL, api.CreateBlockerRequest{
-		Kind: api.InputMissing, Missing: "现场数据包", Reason: "上游未交付且无预计时间",
-		ActionOwnerId: bobUser.ID, Level: api.Warning,
-	})
-	wantStatus(t, resp, http.StatusCreated)
-	blocker := decodeBody[api.Blocker](t, resp)
-	if blocker.State != api.Open || blocker.ActionOwnerName == nil || *blocker.ActionOwnerName != "李四" {
-		t.Fatalf("卡点创建异常: %+v", blocker)
+	var downstream, upstream api.Task
+	for _, tk := range tasks {
+		if tk.Name == "回归验证分析" {
+			downstream = tk
+		} else {
+			upstream = tk
+		}
 	}
 
-	// 校验：等级 normal 422；无关成员上报 403
-	resp = doJSON(t, carol, http.MethodPost, blockersURL, api.CreateBlockerRequest{
-		Kind: api.InputMissing, Missing: "x", Reason: "y", ActionOwnerId: bobUser.ID, Level: api.Normal,
-	})
-	wantStatus(t, resp, http.StatusUnprocessableEntity)
-	resp.Body.Close()
+	// 下游挂一条来自上游任务的必要输入：上游未交付 ⇒ 上游未就绪卡点，待行动人为上游负责人 bob。
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, upstream.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	upstreamDeliverable := decodeBody[api.TaskDetail](t, resp).Deliverables[0].Id
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, downstream.Id),
+		api.CreateTaskInputRequest{
+			Name: "现场数据包", Necessity: api.Required, EdgeType: api.HardPrerequisite,
+			SourceTaskId: upstream.Id, DeliverableId: &upstreamDeliverable,
+		})
+	wantStatus(t, resp, http.StatusCreated)
+	edge := decodeBody[api.DeliverableEdge](t, resp)
 
-	// 任务列表出现卡点计数
+	byKind := func(c *http.Client) map[string]api.Blocker {
+		t.Helper()
+		r := doJSON(t, c, http.MethodGet, blockersURL, nil)
+		wantStatus(t, r, http.StatusOK)
+		out := map[string]api.Blocker{}
+		for _, b := range decodeBody[[]api.Blocker](t, r) {
+			out[b.Key] = b
+		}
+		return out
+	}
+
+	upstreamKey := fmt.Sprintf("upstream_unready:edge:%d", edge.Id)
+	overdueKey := fmt.Sprintf("task_overdue:%d", downstream.Id)
+	got := byKind(carol)
+	unready, ok := got[upstreamKey]
+	if !ok {
+		t.Fatalf("必要输入未就绪应派生卡点: %+v", got)
+	}
+	if len(unready.ActionOwnerIds) != 1 || unready.ActionOwnerIds[0] != bobUser.ID {
+		t.Fatalf("上游未就绪的待行动人应为上游负责人: %+v", unready)
+	}
+	if _, ok := got[overdueKey]; !ok {
+		t.Fatalf("截止已过的任务应派生超期卡点: %+v", got)
+	}
+	if got[overdueKey].Level != api.HighRisk {
+		t.Fatalf("任务超期应为高风险: %+v", got[overdueKey])
+	}
+
+	// 任务列表按派生结果给出卡点计数（下游两条：上游未就绪 + 超期）。
 	resp = doJSON(t, carol, http.MethodGet, tasksURL, nil)
 	wantStatus(t, resp, http.StatusOK)
-	list := decodeBody[[]api.Task](t, resp)
-	if list[0].OpenBlockerCount == nil || *list[0].OpenBlockerCount != 1 {
-		t.Fatalf("开放卡点计数异常: %+v", list[0])
+	for _, tk := range decodeBody[[]api.Task](t, resp) {
+		if tk.Id != downstream.Id {
+			continue
+		}
+		if tk.OpenBlockerCount == nil || *tk.OpenBlockerCount != 2 {
+			t.Fatalf("派生卡点计数异常: %+v", tk)
+		}
 	}
 
-	// AC-11：一键提醒 → bob 收到带上下文通知；行动人自己不能提醒自己
-	remindURL := fmt.Sprintf("%s/projects/%d/blockers/%d/remind", base, created.Id, blocker.Id)
-	resp = doJSON(t, bob, http.MethodPost, remindURL, nil)
+	// AC-11：一键提醒当前待行动人；待行动人自己不能提醒自己。
+	resp = doJSON(t, bob, http.MethodPost, remindURL, api.RemindBlockerRequest{Key: upstreamKey})
 	wantStatus(t, resp, http.StatusForbidden)
 	resp.Body.Close()
-	resp = doJSON(t, carol, http.MethodPost, remindURL, nil)
+	resp = doJSON(t, carol, http.MethodPost, remindURL, api.RemindBlockerRequest{Key: upstreamKey})
 	wantStatus(t, resp, http.StatusNoContent)
 	resp.Body.Close()
 	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
 	wantStatus(t, resp, http.StatusOK)
 	notes := decodeBody[[]api.Notification](t, resp)
-	if len(notes) != 1 || notes[0].Kind != "blocker_remind" || *notes[0].TaskId != taskID {
+	if len(notes) != 1 || notes[0].Kind != "blocker_remind" || *notes[0].TaskId != downstream.Id {
 		t.Fatalf("提醒通知异常: %+v", notes)
 	}
 
-	// 解除：希望行动人 bob 可解除，处理事实保留；再动作冲突
-	resolveURL := fmt.Sprintf("%s/projects/%d/blockers/%d/resolve", base, created.Id, blocker.Id)
-	resp = doJSON(t, bob, http.MethodPost, resolveURL, api.ResolveBlockerRequest{Note: sp("数据包已补交")})
-	wantStatus(t, resp, http.StatusOK)
-	resolved := decodeBody[api.Blocker](t, resp)
-	if resolved.State != api.Resolved || resolved.ResolvedNote == nil || *resolved.ResolvedNote != "数据包已补交" {
-		t.Fatalf("解除事实异常: %+v", resolved)
-	}
-	resp = doJSON(t, carol, http.MethodPost, remindURL, nil)
-	wantStatus(t, resp, http.StatusConflict)
-	resp.Body.Close()
-	resp = doJSON(t, bob, http.MethodPost, resolveURL, api.ResolveBlockerRequest{})
-	wantStatus(t, resp, http.StatusConflict)
+	// 不存在的键（触发条件已消失）按 404 处理，没有手动解除接口。
+	resp = doJSON(t, carol, http.MethodPost, remindURL, api.RemindBlockerRequest{Key: "task_overdue:999999"})
+	wantStatus(t, resp, http.StatusNotFound)
 	resp.Body.Close()
 
-	// 项目卡点列表（解除后仍保留）
-	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/blockers", base, created.Id), nil)
+	// 自动解除：上游任务走完终审、当前内容生效后，上游未就绪卡点消失，下游超期卡点仍在。
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, upstream.Id),
+		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
 	wantStatus(t, resp, http.StatusOK)
-	if got := decodeBody[[]api.Blocker](t, resp); len(got) != 1 || got[0].State != api.Resolved {
-		t.Fatalf("卡点列表异常: %+v", got)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, upstream.Id, upstreamDeliverable),
+		api.UploadCandidateRequest{FileName: "现场数据包.zip"})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, upstream.Id),
+		api.SubmitCompletionRequest{Note: "数据包齐"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, upstream.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	reviewID := decodeBody[api.TaskDetail](t, resp).CompletionReviews[0].Id
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, upstream.Id, reviewID),
+		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	got = byKind(carol)
+	if _, ok := got[upstreamKey]; ok {
+		t.Fatalf("输入就绪后卡点应自动解除: %+v", got)
+	}
+	if _, ok := got[overdueKey]; !ok {
+		t.Fatalf("超期卡点不应被一并解除: %+v", got)
 	}
 }
 
@@ -2619,16 +2668,28 @@ func TestMyWorkFiveGroups(t *testing.T) {
 		t.Fatalf("完成申请应在等待他人并显示当前环节: %+v", carolWork.Waiting)
 	}
 
-	// 卡点：carol 上报（行动人 alice）→ alice 与我相关的卡点
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/blockers", tasksURL, taskID),
-		api.CreateBlockerRequest{Kind: api.Resource, Missing: "验收环境", Reason: "环境未申请", ActionOwnerId: aliceUser.ID, Level: api.Warning})
+	// 卡点：alice 名下一个已超期任务派生任务超期卡点 → alice 与我相关的卡点（AC-11）
+	pastStart, pastEnd := openapiDate(t, "2020-01-01"), openapiDate(t, "2020-02-01")
+	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "验收环境准备", OwnerId: aliceUser.ID, StartDate: pastStart, EndDate: pastEnd},
+		},
+	})
 	wantStatus(t, resp, http.StatusCreated)
-	resp.Body.Close()
+	var overdueTask api.Task
+	for _, tk := range decodeBody[[]api.Task](t, resp) {
+		if tk.Name == "验收环境准备" {
+			overdueTask = tk
+		}
+	}
 	resp = doJSON(t, alice, http.MethodGet, myWorkURL, nil)
 	wantStatus(t, resp, http.StatusOK)
 	aliceWork := decodeBody[api.MyWork](t, resp)
-	if len(aliceWork.Blockers) != 1 || aliceWork.Blockers[0].Kind != "blocker" {
-		t.Fatalf("卡点应在与我相关的卡点: %+v", aliceWork.Blockers)
+	wantKey := fmt.Sprintf("task_overdue:%d", overdueTask.Id)
+	if len(aliceWork.Blockers) != 1 || aliceWork.Blockers[0].Kind != "blocker" ||
+		aliceWork.Blockers[0].RefKey == nil || *aliceWork.Blockers[0].RefKey != wantKey {
+		t.Fatalf("任务超期应进入与我相关的卡点（期望 %s）: %+v", wantKey, aliceWork.Blockers)
 	}
 	// 五组字段齐备（待我接收当前恒空）
 	if aliceWork.Receipts == nil {
@@ -2975,12 +3036,6 @@ func TestProjectReport(t *testing.T) {
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
 
-	// 卡点一枚（开放中）
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/blockers", tasksURL, taskB.Id),
-		api.CreateBlockerRequest{Kind: api.Resource, Missing: "环境", Reason: "未申请", ActionOwnerId: aliceUser.ID, Level: api.Warning})
-	wantStatus(t, resp, http.StatusCreated)
-	resp.Body.Close()
-
 	reportURL := fmt.Sprintf("%s/projects/%d/report", base, created.Id)
 	// 今天范围：完成成果与 completedInRange 均可见（刚刚发生）
 	resp = doJSON(t, alice, http.MethodGet, reportURL+"?range=today", nil)
@@ -2995,7 +3050,9 @@ func TestProjectReport(t *testing.T) {
 	if len(rep.CompletedDeliverables) != 1 || rep.CompletedDeliverables[0].FileName != "验收方案V1.docx" {
 		t.Fatalf("完成成果异常: %+v", rep.CompletedDeliverables)
 	}
-	if len(rep.Blockers) != 1 || rep.Blockers[0].State != api.Open {
+	// B 的必要输入未就绪且已到开始时间 ⇒ 派生一条上游未就绪卡点（AC-11）。
+	if len(rep.Blockers) != 1 || rep.Blockers[0].Kind != api.UpstreamUnready ||
+		rep.Blockers[0].ActionOwnerName == nil || *rep.Blockers[0].ActionOwnerName != "李四" {
 		t.Fatalf("卡点异常: %+v", rep.Blockers)
 	}
 	if len(rep.NextSteps) == 0 {
@@ -3328,11 +3385,11 @@ func TestUnifiedPermissionsAcrossIdentities(t *testing.T) {
 	if ft := flagsOf(alice); ft.CanDecidePoolReview {
 		t.Fatalf("管理员不能替代 KR 负责人审批: %+v", ft)
 	}
-	if ft := flagsOf(dave); ft.CanDecidePoolReview || ft.CanProposeFieldChange || ft.CanReportBlocker == nil || *ft.CanReportBlocker {
+	if ft := flagsOf(dave); ft.CanDecidePoolReview || ft.CanProposeFieldChange {
 		t.Fatalf("只读成员不应有业务动作标志: %+v", ft)
 	}
 
-	// 只读成员：不能建任务/建 OKR/建卡点，但可讨论、可查看下载（§3.4）
+	// 只读成员：不能建任务/建 OKR，但可讨论、可查看下载（§3.4）
 	resp = doJSON(t, dave, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		SubmitForReview: false,
 		Items: []api.CreateTaskItem{

@@ -490,15 +490,15 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 	for _, rv := range reviewerRows {
 		reviewerViews = append(reviewerViews, ReviewerInfo{UserId: rv.UserID, DisplayName: rv.DisplayName})
 	}
-	allBlockers, err := s.blockerViews(r.Context(), projectId, uid, actor)
+	allBlockers, err := s.projectBlockers(r.Context(), projectId)
 	if err != nil {
 		writeInternalError(w)
 		return
 	}
 	taskBlockers := []Blocker{}
 	for _, b := range allBlockers {
-		if b.TaskId == taskId {
-			taskBlockers = append(taskBlockers, b)
+		if b.TaskID == taskId {
+			taskBlockers = append(taskBlockers, blockerView(b, actor, uid))
 		}
 	}
 	inputs, outputs := []DeliverableEdge{}, []DeliverableEdge{}
@@ -619,14 +619,14 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 	if err != nil {
 		return nil, err
 	}
-	// 开放卡点数量（列表徽标用）。
-	blockerCounts, err := s.q.OpenBlockerCountsByProject(ctx, projectID)
+	// 派生卡点数量（列表徽标用）。
+	blockers, err := s.projectBlockers(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
-	openBlockersByTask := make(map[int64]int, len(blockerCounts))
-	for _, c := range blockerCounts {
-		openBlockersByTask[c.TaskID] = int(c.N)
+	openBlockersByTask := map[int64]int{}
+	for _, b := range blockers {
+		openBlockersByTask[b.TaskID]++
 	}
 	// 候选内容数量（提交完成申请的派生标志用）。
 	candidateRows, err := s.q.CandidateCountsByProject(ctx, projectID)
@@ -731,8 +731,6 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 		item.CanSubmitCompletion = &canSubmitCompletion
 		canManageReviewers := domain.CanManageReviewers(actor, userID, facts)
 		item.CanManageReviewers = &canManageReviewers
-		canReportBlocker := domain.CanReportBlocker(actor, userID, facts)
-		item.CanReportBlocker = &canReportBlocker
 		if n := openBlockersByTask[t.ID]; n > 0 {
 			item.OpenBlockerCount = &n
 		}

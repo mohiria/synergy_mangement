@@ -612,26 +612,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/projects/{projectId}/tasks/{taskId}/blockers": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-                taskId: number;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 主动上报结构化卡点（AC-11）：类型、缺失输入／条件、阻塞原因、希望行动人必填 */
-        post: operations["createBlocker"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/projects/{projectId}/blockers": {
         parameters: {
             query?: never;
@@ -641,7 +621,7 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** 项目全部结构化卡点（风险队列数据源；开放在前） */
+        /** 项目当前派生的结构化卡点（风险队列数据源；四类结构化事实读时派生） */
         get: operations["listBlockers"];
         put?: never;
         post?: never;
@@ -651,40 +631,19 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/projects/{projectId}/blockers/{blockerId}/remind": {
+    "/projects/{projectId}/blockers/remind": {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 projectId: number;
-                blockerId: number;
             };
             cookie?: never;
         };
         get?: never;
         put?: never;
-        /** 一键提醒希望行动人（AC-11）：发送带卡点上下文的站内通知 */
+        /** 一键提醒卡点当前待行动人（AC-11）：按派生卡点的合成键定位，发送带任务、缺失条件与截止时间的站内通知 */
         post: operations["remindBlocker"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/projects/{projectId}/blockers/{blockerId}/resolve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-                blockerId: number;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 解除卡点；处理事实保留 */
-        post: operations["resolveBlocker"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1072,7 +1031,7 @@ export interface components {
             progressSummary?: components["schemas"]["ProgressSummary"];
             /** @description 预警／高风险的一行原因（派生字段；来自 KR 下任务的开放卡点，AC-05） */
             riskNote?: string;
-            /** @description KR 下任务的开放卡点数量（派生字段；图谱 KR 节点展示，AC-08） */
+            /** @description KR 下任务的派生卡点数量（派生字段；图谱 KR 节点展示，AC-08） */
             openBlockerCount?: number;
         };
         /** @description KR 层进度数据覆盖度（词汇表「进度数据覆盖度」）；只统计已入池且未取消的任务，平均值任务等权 */
@@ -1214,10 +1173,8 @@ export interface components {
             canSubmitCompletion?: boolean;
             /** @description 当前用户能否调整中间审核人配置（派生字段；负责人／创建人／可编辑项目者，审核中与终态不可） */
             canManageReviewers?: boolean;
-            /** @description 开放中的结构化卡点数量（派生字段） */
+            /** @description 当前派生卡点数量（派生字段） */
             openBlockerCount?: number;
-            /** @description 当前用户能否上报卡点（派生字段；负责人／创建人／可编辑项目者，已入池执行类状态） */
-            canReportBlocker?: boolean;
             /** @description 当前用户能否登记候选交付物内容（派生字段；负责人，执行类状态） */
             canUploadCandidate?: boolean;
             /** @description 当前用户能否提交本任务入池（派生字段；草稿且为创建人／负责人／可编辑项目者） */
@@ -1270,7 +1227,7 @@ export interface components {
             completionReviews: components["schemas"]["CompletionReview"][];
             /** @description 任务级中间审核人配置（或签组；提交完成申请时快照进申请） */
             reviewers: components["schemas"]["ReviewerInfo"][];
-            /** @description 结构化卡点，开放在前（AC-11） */
+            /** @description 本任务当前派生的结构化卡点（AC-11） */
             blockers: components["schemas"]["Blocker"][];
             /** @description 指向本任务的交付物边（必要输入与参考输入，AC-07／28） */
             inputs: components["schemas"]["DeliverableEdge"][];
@@ -1574,13 +1531,13 @@ export interface components {
         };
         ReportBlocker: {
             taskName: string;
+            kind: components["schemas"]["BlockerKind"];
             missing: string;
             reason: string;
             level: components["schemas"]["RiskLevel"];
-            state: components["schemas"]["BlockerState"];
             actionOwnerName?: string;
             /** Format: date-time */
-            createdAt?: string;
+            since?: string;
         };
         ReportNextStep: {
             taskName: string;
@@ -1675,9 +1632,11 @@ export interface components {
             taskName?: string;
             /**
              * Format: int64
-             * @description 事项自身 ID（审批单／输入请求／邀请／卡点）
+             * @description 事项自身 ID（审批单／输入请求／邀请）
              */
             refId?: number;
+            /** @description 派生事项的合成键（卡点）；一键提醒按此寻址 */
+            refKey?: string;
             /**
              * Format: date
              * @description 任务截止或输入期望时间
@@ -1705,62 +1664,40 @@ export interface components {
             blockers: components["schemas"]["WorkItem"][];
         };
         /**
-         * @description 卡点类型（词汇表「结构化卡点」）
+         * @description 四类派生卡点（词汇表「结构化卡点」；我的工作 PRD §8.7）
          * @enum {string}
          */
-        BlockerKind: "input_missing" | "approval_waiting" | "resource" | "other";
-        /** @enum {string} */
-        BlockerState: "open" | "resolved";
-        /** @description 结构化卡点（词汇表）；解除后保留处理事实 */
+        BlockerKind: "upstream_unready" | "task_overdue" | "approval_timeout" | "interlock";
+        /** @description 结构化卡点（词汇表）；由四类结构化事实读时派生，不落库、无人工上报与手动解除，触发条件消失即消失 */
         Blocker: {
-            /** Format: int64 */
-            id: number;
+            /** @description 派生卡点的合成键（形如 task_overdue:42、upstream_unready:edge:17）；一键提醒按此寻址 */
+            key: string;
+            kind: components["schemas"]["BlockerKind"];
             /** Format: int64 */
             taskId: number;
-            kind: components["schemas"]["BlockerKind"];
+            taskName: string;
             /** @description 缺失的输入或条件 */
             missing: string;
             /** @description 阻塞原因 */
             reason: string;
-            /**
-             * Format: int64
-             * @description 希望行动人
-             */
-            actionOwnerId?: number;
-            actionOwnerName?: string;
-            /** @description 预警或高风险（结构化卡点不使用 normal） */
+            /** @description 当前待行动人（或签中间审核、互锁环内 KR 负责人可为多人） */
+            actionOwnerIds: number[];
+            actionOwnerNames: string[];
+            /** @description 按事实严重度派生的预警或高风险（结构化卡点不使用 normal） */
             level: components["schemas"]["RiskLevel"];
-            /** Format: date */
-            expectedRecoveryDate?: string;
-            state: components["schemas"]["BlockerState"];
-            createdByName?: string;
-            /** Format: date-time */
-            createdAt: string;
-            /** Format: date-time */
-            resolvedAt?: string;
-            /** @description 解除说明（处理事实） */
-            resolvedNote?: string;
-            /** @description 当前用户能否一键提醒（派生字段；上报人／任务负责人／可编辑项目者，开放中） */
+            /**
+             * Format: date-time
+             * @description 卡点产生时间（触发事实成立的时点）
+             */
+            since: string;
+            /** @description 影响范围一行说明（派生字段；沿硬前置下游任务汇总） */
+            impactNote?: string;
+            /** @description 当前用户能否一键提醒（派生字段；待行动人本人不可提醒自己，访客不可） */
             canRemind?: boolean;
-            /** @description 当前用户能否解除（派生字段；上报人／希望行动人／任务负责人／可编辑项目者，开放中） */
-            canResolve?: boolean;
         };
-        CreateBlockerRequest: {
-            kind: components["schemas"]["BlockerKind"];
-            missing: string;
-            reason: string;
-            /** Format: int64 */
-            actionOwnerId: number;
-            level: components["schemas"]["RiskLevel"];
-            /**
-             * Format: date
-             * @description 预计恢复时间，选填
-             */
-            expectedRecoveryDate?: string;
-        };
-        ResolveBlockerRequest: {
-            /** @description 解除说明，选填 */
-            note?: string;
+        RemindBlockerRequest: {
+            /** @description 目标卡点的合成键，取自卡点列表或任务详情 */
+            key: string;
         };
         /**
          * @description 输入请求状态（词汇表「输入请求」；PRD §5.5）
@@ -3066,38 +3003,6 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    createBlocker: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-                taskId: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateBlockerRequest"];
-            };
-        };
-        responses: {
-            /** @description 已上报 */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Blocker"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
     listBlockers: {
         parameters: {
             query?: never;
@@ -3128,11 +3033,14 @@ export interface operations {
             header?: never;
             path: {
                 projectId: number;
-                blockerId: number;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RemindBlockerRequest"];
+            };
+        };
         responses: {
             /** @description 已提醒 */
             204: {
@@ -3144,38 +3052,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-        };
-    };
-    resolveBlocker: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-                blockerId: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ResolveBlockerRequest"];
-            };
-        };
-        responses: {
-            /** @description 已解除 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Blocker"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
         };
     };
     createDiscussion: {

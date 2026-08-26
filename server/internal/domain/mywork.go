@@ -72,19 +72,6 @@ type WorkInviteFact struct {
 	CreatedAt     time.Time
 }
 
-type WorkBlockerFact struct {
-	ID            int64
-	TaskID        int64
-	TaskName      string
-	ActionOwnerID int64
-	TaskOwnerID   int64
-	KrOwnerID     *int64
-	State         string
-	Kind          string
-	Missing       string
-	CreatedAt     time.Time
-}
-
 type WorkUpstreamFact struct {
 	EdgeID        int64
 	TargetTaskID  int64
@@ -106,7 +93,7 @@ type MyWorkFacts struct {
 	Completions   []WorkCompletionFact
 	InputRequests []WorkInputRequestFact
 	Invites       []WorkInviteFact
-	Blockers      []WorkBlockerFact
+	Blockers      []Blocker
 	Upstreams     []WorkUpstreamFact
 }
 
@@ -117,6 +104,7 @@ type WorkItem struct {
 	TaskID         *int64
 	TaskName       string
 	RefID          *int64
+	RefKey         string
 	Due            *time.Time
 	WaitingDays    *int
 	Overdue        bool
@@ -202,10 +190,8 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 	}
 
 	// —— 待我处理（Q3：输入对接人；及本人任务）——
-	providerPendingByTask := map[int64]bool{}
 	for _, ir := range f.InputRequests {
 		if ir.ProviderID == me && ir.Notified && (ir.State == InputRequestPending || ir.State == InputRequestAccepted) {
-			providerPendingByTask[ir.TaskID] = true
 			days, _ := waitingDays(ir.CreatedAt)
 			overdue := ir.Expected != nil && f.Now.After(*ir.Expected)
 			g.Pending = append(g.Pending, WorkItem{
@@ -318,21 +304,24 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 
 	// —— 与我相关的卡点（Q7）——
 	for _, b := range f.Blockers {
-		if b.State != BlockerOpen {
+		isActionOwner := false
+		for _, id := range b.ActionOwnerIDs {
+			if id == me {
+				isActionOwner = true
+				break
+			}
+		}
+		if !isActionOwner && b.TaskOwnerID != me && !(b.KrOwnerID != nil && *b.KrOwnerID == me) {
 			continue
 		}
-		related := b.ActionOwnerID == me || b.TaskOwnerID == me || (b.KrOwnerID != nil && *b.KrOwnerID == me)
-		if !related {
+		// 「等我提供输入」类与待我处理的输入请求同源，不进本组、不计数（模块 PRD §3.2.E）。
+		if b.InputProviderID == me {
 			continue
 		}
-		// 「等我提供输入」类与待我处理的输入请求同源，不重复计数（模块 PRD §3.2.E）。
-		if b.ActionOwnerID == me && providerPendingByTask[b.TaskID] {
-			continue
-		}
-		days, _ := waitingDays(b.CreatedAt)
+		days, _ := waitingDays(b.Since)
 		g.Blockers = append(g.Blockers, WorkItem{
 			Kind: "blocker", Title: "[卡点] " + b.TaskName + "：缺 " + b.Missing,
-			TaskID: tid(b.TaskID), TaskName: b.TaskName, RefID: tid(b.ID),
+			TaskID: tid(b.TaskID), TaskName: b.TaskName, RefKey: b.Key,
 			WaitingDays: days, Stage: b.Kind, DrawerTab: "overview",
 		})
 	}
@@ -340,7 +329,7 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 	return g
 }
 
-// KrRiskNote 派生 KR 行的一行风险原因（AC-05）：优先取 KR 下任务的首个开放卡点事实；
+// KrRiskNote 派生 KR 行的一行风险原因（AC-05）：优先取 KR 下任务的首条派生卡点事实；
 // 无卡点但风险等级非正常时给通用说明。
 func KrRiskNote(riskLevel string, blockerNotes []string) string {
 	if len(blockerNotes) > 0 {

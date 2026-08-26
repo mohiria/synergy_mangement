@@ -154,7 +154,7 @@ export default function CollaborationPage({
     });
   };
 
-  const openBlockers = blockers.filter((b) => b.state === "open");
+  const openBlockers = blockers;
 
   // —— O／KR 层级树布局 ——
   const tree = useMemo(() => {
@@ -330,7 +330,7 @@ export default function CollaborationPage({
     providers.forEach((name, id) => opts.push({ value: `member:${id}`, label: `成员 · ${name}` }));
     edges.forEach((e) => opts.push({ value: `edge:${e.id}`, label: `关系 · ${e.name}（→ ${e.targetTaskName ?? ""}）` }));
     openBlockers.forEach((b) =>
-      opts.push({ value: `blocker:${b.id}`, label: `卡点 · ${taskById.get(b.taskId)?.name ?? ""}：缺 ${b.missing}` }),
+      opts.push({ value: `blocker:${b.key}`, label: `卡点 · ${taskById.get(b.taskId)?.name ?? ""}：缺 ${b.missing}` }),
     );
     return opts;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -369,7 +369,7 @@ export default function CollaborationPage({
         break;
       }
       case "blocker": {
-        const b = blockers.find((x) => x.id === id);
+        const b = blockers.find((x) => x.key === v.slice("blocker:".length));
         const t = b ? taskById.get(b.taskId) : undefined;
         if (t) {
           enter({ kind: "kr", krId: t.keyResultId });
@@ -602,13 +602,9 @@ export default function CollaborationPage({
             → {e.targetTaskName} · {e.name}
           </div>
         ))}
-        {inspectorDetail.blockers.filter((b) => b.state === "open").length > 0 && (
+        {inspectorDetail.blockers.length > 0 && (
           <div style={{ color: "var(--red)", fontSize: 12 }}>
-            卡点：
-            {inspectorDetail.blockers
-              .filter((b) => b.state === "open")
-              .map((b) => `缺 ${b.missing}`)
-              .join("；")}
+            卡点：{inspectorDetail.blockers.map((b) => `缺 ${b.missing}`).join("；")}
           </div>
         )}
         <div>
@@ -881,7 +877,7 @@ export default function CollaborationPage({
                   const krId = taskById.get(b.taskId)?.keyResultId;
                   return (
                     <button
-                      key={`rb-${b.id}`}
+                      key={`rb-${b.key}`}
                       type="button"
                       className="risk-queue-item"
                       onClick={() => {

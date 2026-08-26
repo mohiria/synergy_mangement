@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	openapi_types "github.com/oapi-codegen/runtime/types"
@@ -133,29 +134,24 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 		}
 	}
 
-	// 风险卡点：开放中的全部 + 范围内解除的。
-	blockerRows, err := s.q.ListBlockersByProject(ctx, projectId)
+	// 风险卡点：当前派生的全部卡点（触发条件消失即自动解除，没有历史态可汇总）。
+	derived, err := s.projectBlockers(ctx, projectId)
 	if err != nil {
 		writeInternalError(w)
 		return Report{}, false
 	}
 	blockers := []ReportBlocker{}
-	for _, b := range blockerRows {
-		include := b.State == domain.BlockerOpen ||
-			(b.State == domain.BlockerResolved && b.ResolvedAt.Valid && inRange(b.ResolvedAt.Time))
-		if !include {
-			continue
-		}
+	for _, b := range derived {
 		item := ReportBlocker{
 			TaskName:        b.TaskName,
+			Kind:            BlockerKind(b.Kind),
 			Missing:         b.Missing,
 			Reason:          b.Reason,
 			Level:           RiskLevel(b.Level),
-			State:           BlockerState(b.State),
-			ActionOwnerName: optString(b.ActionOwnerName),
+			ActionOwnerName: optString(strings.Join(b.ActionOwnerNames, "、")),
 		}
-		created := b.CreatedAt.Time
-		item.CreatedAt = &created
+		since := b.Since
+		item.Since = &since
 		blockers = append(blockers, item)
 	}
 

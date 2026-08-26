@@ -1211,48 +1211,6 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /projects/{projectId}/tasks/{taskId}/blockers:
-    parameters:
-      - name: projectId
-        in: path
-        required: true
-        schema:
-          type: integer
-          format: int64
-      - name: taskId
-        in: path
-        required: true
-        schema:
-          type: integer
-          format: int64
-    post:
-      operationId: createBlocker
-      tags: [tasks]
-      summary: 主动上报结构化卡点（AC-11）：类型、缺失输入／条件、阻塞原因、希望行动人必填
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateBlockerRequest"
-      responses:
-        "201":
-          description: 已上报
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Blocker"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          $ref: "#/components/responses/Conflict"
-        "422":
-          $ref: "#/components/responses/ValidationError"
-
   /projects/{projectId}/blockers:
     parameters:
       - name: projectId
@@ -1264,7 +1222,7 @@ paths:
     get:
       operationId: listBlockers
       tags: [tasks]
-      summary: 项目全部结构化卡点（风险队列数据源；开放在前）
+      summary: 项目当前派生的结构化卡点（风险队列数据源；四类结构化事实读时派生）
       responses:
         "200":
           description: 卡点列表
@@ -1279,15 +1237,9 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /projects/{projectId}/blockers/{blockerId}/remind:
+  /projects/{projectId}/blockers/remind:
     parameters:
       - name: projectId
-        in: path
-        required: true
-        schema:
-          type: integer
-          format: int64
-      - name: blockerId
         in: path
         required: true
         schema:
@@ -1296,7 +1248,13 @@ paths:
     post:
       operationId: remindBlocker
       tags: [tasks]
-      summary: 一键提醒希望行动人（AC-11）：发送带卡点上下文的站内通知
+      summary: 一键提醒卡点当前待行动人（AC-11）：按派生卡点的合成键定位，发送带任务、缺失条件与截止时间的站内通知
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RemindBlockerRequest"
       responses:
         "204":
           description: 已提醒
@@ -1306,48 +1264,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-        "409":
-          $ref: "#/components/responses/Conflict"
-
-  /projects/{projectId}/blockers/{blockerId}/resolve:
-    parameters:
-      - name: projectId
-        in: path
-        required: true
-        schema:
-          type: integer
-          format: int64
-      - name: blockerId
-        in: path
-        required: true
-        schema:
-          type: integer
-          format: int64
-    post:
-      operationId: resolveBlocker
-      tags: [tasks]
-      summary: 解除卡点；处理事实保留
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ResolveBlockerRequest"
-      responses:
-        "200":
-          description: 已解除
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Blocker"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
 
   /projects/{projectId}/tasks/{taskId}/discussions:
     parameters:
@@ -2025,7 +1943,7 @@ components:
           description: 预警／高风险的一行原因（派生字段；来自 KR 下任务的开放卡点，AC-05）
         openBlockerCount:
           type: integer
-          description: KR 下任务的开放卡点数量（派生字段；图谱 KR 节点展示，AC-08）
+          description: KR 下任务的派生卡点数量（派生字段；图谱 KR 节点展示，AC-08）
     ProgressSummary:
       type: object
       description: KR 层进度数据覆盖度（词汇表「进度数据覆盖度」）；只统计已入池且未取消的任务，平均值任务等权
@@ -2278,10 +2196,7 @@ components:
           description: 当前用户能否调整中间审核人配置（派生字段；负责人／创建人／可编辑项目者，审核中与终态不可）
         openBlockerCount:
           type: integer
-          description: 开放中的结构化卡点数量（派生字段）
-        canReportBlocker:
-          type: boolean
-          description: 当前用户能否上报卡点（派生字段；负责人／创建人／可编辑项目者，已入池执行类状态）
+          description: 当前派生卡点数量（派生字段）
         canUploadCandidate:
           type: boolean
           description: 当前用户能否登记候选交付物内容（派生字段；负责人，执行类状态）
@@ -2391,7 +2306,7 @@ components:
             $ref: "#/components/schemas/ReviewerInfo"
         blockers:
           type: array
-          description: 结构化卡点，开放在前（AC-11）
+          description: 本任务当前派生的结构化卡点（AC-11）
           items:
             $ref: "#/components/schemas/Blocker"
         inputs:
@@ -2907,21 +2822,21 @@ components:
           format: date-time
     ReportBlocker:
       type: object
-      required: [taskName, missing, reason, level, state]
+      required: [taskName, kind, missing, reason, level]
       properties:
         taskName:
           type: string
+        kind:
+          $ref: "#/components/schemas/BlockerKind"
         missing:
           type: string
         reason:
           type: string
         level:
           $ref: "#/components/schemas/RiskLevel"
-        state:
-          $ref: "#/components/schemas/BlockerState"
         actionOwnerName:
           type: string
-        createdAt:
+        since:
           type: string
           format: date-time
     ReportNextStep:
@@ -3104,7 +3019,10 @@ components:
         refId:
           type: integer
           format: int64
-          description: 事项自身 ID（审批单／输入请求／邀请／卡点）
+          description: 事项自身 ID（审批单／输入请求／邀请）
+        refKey:
+          type: string
+          description: 派生事项的合成键（卡点）；一键提醒按此寻址
         dueDate:
           type: string
           format: date
@@ -3154,91 +3072,60 @@ components:
             $ref: "#/components/schemas/WorkItem"
     BlockerKind:
       type: string
-      description: 卡点类型（词汇表「结构化卡点」）
-      enum: [input_missing, approval_waiting, resource, other]
-    BlockerState:
-      type: string
-      enum: [open, resolved]
+      description: 四类派生卡点（词汇表「结构化卡点」；我的工作 PRD §8.7）
+      enum: [upstream_unready, task_overdue, approval_timeout, interlock]
     Blocker:
       type: object
-      description: 结构化卡点（词汇表）；解除后保留处理事实
-      required: [id, taskId, kind, missing, reason, level, state, createdAt]
+      description: 结构化卡点（词汇表）；由四类结构化事实读时派生，不落库、无人工上报与手动解除，触发条件消失即消失
+      required: [key, kind, taskId, taskName, missing, reason, level, actionOwnerIds, actionOwnerNames, since]
       properties:
-        id:
-          type: integer
-          format: int64
+        key:
+          type: string
+          description: 派生卡点的合成键（形如 task_overdue:42、upstream_unready:edge:17）；一键提醒按此寻址
+        kind:
+          $ref: "#/components/schemas/BlockerKind"
         taskId:
           type: integer
           format: int64
-        kind:
-          $ref: "#/components/schemas/BlockerKind"
+        taskName:
+          type: string
         missing:
           type: string
           description: 缺失的输入或条件
         reason:
           type: string
           description: 阻塞原因
-        actionOwnerId:
-          type: integer
-          format: int64
-          description: 希望行动人
-        actionOwnerName:
-          type: string
+        actionOwnerIds:
+          type: array
+          description: 当前待行动人（或签中间审核、互锁环内 KR 负责人可为多人）
+          items:
+            type: integer
+            format: int64
+        actionOwnerNames:
+          type: array
+          items:
+            type: string
         level:
           $ref: "#/components/schemas/RiskLevel"
-          description: 预警或高风险（结构化卡点不使用 normal）
-        expectedRecoveryDate:
-          type: string
-          format: date
-        state:
-          $ref: "#/components/schemas/BlockerState"
-        createdByName:
-          type: string
-        createdAt:
+          description: 按事实严重度派生的预警或高风险（结构化卡点不使用 normal）
+        since:
           type: string
           format: date-time
-        resolvedAt:
+          description: 卡点产生时间（触发事实成立的时点）
+        impactNote:
           type: string
-          format: date-time
-        resolvedNote:
-          type: string
-          description: 解除说明（处理事实）
+          description: 影响范围一行说明（派生字段；沿硬前置下游任务汇总）
         canRemind:
           type: boolean
-          description: 当前用户能否一键提醒（派生字段；上报人／任务负责人／可编辑项目者，开放中）
-        canResolve:
-          type: boolean
-          description: 当前用户能否解除（派生字段；上报人／希望行动人／任务负责人／可编辑项目者，开放中）
-    CreateBlockerRequest:
+          description: 当前用户能否一键提醒（派生字段；待行动人本人不可提醒自己，访客不可）
+    RemindBlockerRequest:
       type: object
-      required: [kind, missing, reason, actionOwnerId, level]
+      required: [key]
       properties:
-        kind:
-          $ref: "#/components/schemas/BlockerKind"
-        missing:
+        key:
           type: string
-          minLength: 1
-          maxLength: 500
-        reason:
-          type: string
-          minLength: 1
-          maxLength: 500
-        actionOwnerId:
-          type: integer
-          format: int64
-        level:
-          $ref: "#/components/schemas/RiskLevel"
-        expectedRecoveryDate:
-          type: string
-          format: date
-          description: 预计恢复时间，选填
-    ResolveBlockerRequest:
-      type: object
-      properties:
-        note:
-          type: string
-          maxLength: 500
-          description: 解除说明，选填
+          maxLength: 200
+          description: 目标卡点的合成键，取自卡点列表或任务详情
     InputRequestState:
       type: string
       description: 输入请求状态（词汇表「输入请求」；PRD §5.5）

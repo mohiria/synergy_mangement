@@ -192,11 +192,6 @@ export default function ReportsPage({
                     >
                       {RISK_LABEL[b.level]}
                     </span>
-                    {b.state === "resolved" && (
-                      <span className="status-pill completed" style={{ marginLeft: 6 }}>
-                        已解除
-                      </span>
-                    )}
                   </b>
                   <small>
                     {b.reason}

@@ -228,18 +228,12 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 			State: iv.State, Note: iv.Note, CreatedAt: iv.CreatedAt.Time,
 		})
 	}
-	blockerRows, err := s.q.ListBlockersByProject(ctx, projectId)
+	blockers, err := s.projectBlockers(ctx, projectId)
 	if err != nil {
 		writeInternalError(w)
 		return
 	}
-	for _, b := range blockerRows {
-		facts.Blockers = append(facts.Blockers, domain.WorkBlockerFact{
-			ID: b.ID, TaskID: b.TaskID, TaskName: b.TaskName, ActionOwnerID: b.ActionOwnerID,
-			TaskOwnerID: b.TaskOwnerID, KrOwnerID: fromPgInt8(b.KrOwnerID), State: b.State,
-			Kind: b.Kind, Missing: b.Missing, CreatedAt: b.CreatedAt.Time,
-		})
-	}
+	facts.Blockers = blockers
 
 	groups := domain.MyWork(facts)
 	writeJSON(w, http.StatusOK, MyWork{
@@ -266,6 +260,9 @@ func toWorkItems(items []domain.WorkItem) []WorkItem {
 		}
 		if it.Due != nil {
 			v.DueDate = &openapi_types.Date{Time: *it.Due}
+		}
+		if it.RefKey != "" {
+			v.RefKey = &it.RefKey
 		}
 		v.WaitingDays = it.WaitingDays
 		if it.RejectedReason != "" {
