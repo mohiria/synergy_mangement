@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"sort"
+	"time"
+)
 
 // 我的工作五分组（词汇表「我的工作事项」；AC-16；模块 PRD §3～5）。
 // 本文件只做纯派生：输入为项目事实切片，输出为五组卡片事实。
@@ -142,6 +145,14 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 	}
 	me := f.UserID
 
+	// MW-14：任务取消后该任务的审批件与输入请求一并消失（卡点侧由「执行中才派生」自然排除）。
+	terminal := make(map[int64]bool, len(f.Tasks))
+	for _, t := range f.Tasks {
+		if t.DisplayStatus == TaskCancelled || t.DisplayStatus == TaskCompleted {
+			terminal[t.ID] = true
+		}
+	}
+
 	waitingDays := func(since time.Time) (*int, bool) {
 		d := int(f.Now.Sub(since).Hours() / 24)
 		return &d, d >= ApprovalTimeoutDays
@@ -150,6 +161,9 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 
 	// —— 待我审批（判定顺序 Q1）——
 	for _, pr := range f.PoolReviews {
+		if terminal[pr.TaskID] {
+			continue
+		}
 		if pr.KrOwnerID != nil && *pr.KrOwnerID == me {
 			days, overdue := waitingDays(pr.SubmittedAt)
 			g.Approvals = append(g.Approvals, WorkItem{
@@ -160,6 +174,9 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		}
 	}
 	for _, fc := range f.FieldChanges {
+		if terminal[fc.TaskID] {
+			continue
+		}
 		if fc.KrOwnerID != nil && *fc.KrOwnerID == me {
 			days, overdue := waitingDays(fc.SubmittedAt)
 			g.Approvals = append(g.Approvals, WorkItem{
@@ -170,6 +187,9 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		}
 	}
 	for _, cr := range f.Completions {
+		if terminal[cr.TaskID] {
+			continue
+		}
 		switch cr.State {
 		case CompletionIntermediate:
 			for _, rv := range cr.Reviewers {
@@ -200,6 +220,9 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 
 	// —— 待我处理（Q3：输入对接人；及本人任务）——
 	for _, ir := range f.InputRequests {
+		if terminal[ir.TaskID] {
+			continue
+		}
 		if ir.ProviderID == me && ir.Notified && (ir.State == InputRequestPending || ir.State == InputRequestAccepted) {
 			days, _ := waitingDays(ir.CreatedAt)
 			overdue := ir.Expected != nil && f.Now.After(*ir.Expected)
@@ -254,6 +277,9 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		}
 	}
 	for _, ir := range f.InputRequests {
+		if terminal[ir.TaskID] {
+			continue
+		}
 		if ir.TaskOwnerID == me && ir.ProviderID != me && (ir.State == InputRequestPending || ir.State == InputRequestAccepted) {
 			days, _ := waitingDays(ir.CreatedAt)
 			overdue := ir.Expected != nil && f.Now.After(*ir.Expected)
@@ -266,6 +292,9 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		}
 	}
 	for _, pr := range f.PoolReviews {
+		if terminal[pr.TaskID] {
+			continue
+		}
 		if pr.SubmittedBy == me && !(pr.KrOwnerID != nil && *pr.KrOwnerID == me) {
 			days, overdue := waitingDays(pr.SubmittedAt)
 			// AC-04：等待他人卡片按当前审批人姓名显示。
@@ -278,6 +307,9 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		}
 	}
 	for _, fc := range f.FieldChanges {
+		if terminal[fc.TaskID] {
+			continue
+		}
 		if fc.SubmittedBy == me && !(fc.KrOwnerID != nil && *fc.KrOwnerID == me) {
 			days, overdue := waitingDays(fc.SubmittedAt)
 			g.Waiting = append(g.Waiting, WorkItem{
@@ -289,6 +321,9 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		}
 	}
 	for _, cr := range f.Completions {
+		if terminal[cr.TaskID] {
+			continue
+		}
 		if cr.TaskOwnerID != me && cr.SubmittedBy != me {
 			continue
 		}
@@ -335,8 +370,68 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		})
 	}
 
+	sortWorkGroups(f.Now, &g)
 	decorateWorkCards(f, &g)
 	return g
+}
+
+// sortWorkGroups 五组共用的固定排序（模块 PRD §7.1、MW-15）：
+// 超期最前，其次今天到期，再按截止／期望时间升序；没有时间字段的事项排在最后并按已等待
+// 时长降序；同一紧急层级内，被阻塞（上游未就绪）的事项沉一档。不提供用户自选排序。
+func sortWorkGroups(now time.Time, g *MyWorkGroups) {
+	for _, group := range [][]WorkItem{g.Pending, g.Approvals, g.Receipts, g.Waiting, g.Blockers} {
+		items := group
+		sort.SliceStable(items, func(i, j int) bool {
+			bi, bj := workUrgency(now, items[i]), workUrgency(now, items[j])
+			if bi != bj {
+				return bi < bj
+			}
+			// 同一紧急层级内被阻塞的沉一档
+			si, sj := workBlocked(items[i]), workBlocked(items[j])
+			if si != sj {
+				return !si
+			}
+			if bi == workUrgencyUndated {
+				return workWaitingDays(items[i]) > workWaitingDays(items[j])
+			}
+			if items[i].Due != nil && items[j].Due != nil && !items[i].Due.Equal(*items[j].Due) {
+				return items[i].Due.Before(*items[j].Due)
+			}
+			return false
+		})
+	}
+}
+
+// 紧急层级：0 超期、1 今天到期、2 有时间、3 无时间。
+const (
+	workUrgencyOverdue = iota
+	workUrgencyToday
+	workUrgencyDated
+	workUrgencyUndated
+)
+
+func workUrgency(now time.Time, it WorkItem) int {
+	if it.Overdue {
+		return workUrgencyOverdue
+	}
+	if it.Due == nil {
+		return workUrgencyUndated
+	}
+	y1, m1, d1 := it.Due.Date()
+	y2, m2, d2 := now.Date()
+	if y1 == y2 && m1 == m2 && d1 == d2 {
+		return workUrgencyToday
+	}
+	return workUrgencyDated
+}
+
+func workBlocked(it WorkItem) bool { return it.UnreadyNote != "" }
+
+func workWaitingDays(it WorkItem) int {
+	if it.WaitingDays == nil {
+		return 0
+	}
+	return *it.WaitingDays
 }
 
 // decorateWorkCards 按分组补齐卡片动作与提醒事实（模块 PRD §5.3、MW-13）：
@@ -377,7 +472,6 @@ func decorateWorkCards(f MyWorkFacts, g *MyWorkGroups) {
 		}
 	}
 }
-
 
 // KrRiskNote 派生 KR 行的一行风险原因（AC-05）：优先取 KR 下任务的首条派生卡点事实；
 // 无卡点但风险等级非正常时给通用说明。

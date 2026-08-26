@@ -444,7 +444,7 @@ func TestProjectMembersAndPermissions(t *testing.T) {
 	resp.Body.Close()
 }
 
-// O／KR 表格式创建（#3，AC-01）：一批建多个 O 与 KR、指定 KR 负责人；
+// O／KR 表格式创建（#3，AC-01；AC-06 展开层所需的量化指标与 KR 负责人由此供给）：一批建多个 O 与 KR、指定 KR 负责人；
 // 仅项目管理员／项目负责人可创建；整批一个事务；已有 O 可继续追加 KR。
 func TestOkrTableBatchCreate(t *testing.T) {
 	q, pool := setupDB(t)
@@ -786,7 +786,7 @@ func TestTaskCreateAndPoolReview(t *testing.T) {
 	}
 }
 
-// 任务创建邀请（#5，AC-03）：KR 负责人邀请成员→受邀人通过邀请创建并提交任务入池→邀请完成；
+// 任务创建邀请（#5，AC-03；MW-19）：KR 负责人邀请成员→受邀人通过邀请创建并提交任务入池→邀请完成；
 // 撤回后不可再响应；无关任务不使邀请结束；普通成员不可发邀请。
 func TestTaskInviteLifecycle(t *testing.T) {
 	q, pool := setupDB(t)
@@ -973,7 +973,8 @@ func TestTaskInviteLifecycle(t *testing.T) {
 	}
 }
 
-// 任务状态与进度（#6，AC-12）：开始执行、可空进度、取消保留原因、KR 覆盖度派生。
+// 任务状态与进度（#6，AC-12；AC-06 展开层所需的任务、负责人、状态、进度事实由此供给）：
+// 开始执行、可空进度、取消保留原因、KR 覆盖度派生。
 func TestTaskStatusAndProgress(t *testing.T) {
 	q, pool := setupDB(t)
 	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
@@ -1654,7 +1655,7 @@ func TestDiscussionsAndNotifications(t *testing.T) {
 	}
 }
 
-// 完成申请与 KR 终审（#10，AC-13/15/38/39/40）：提交→直接待 KR 终审→退回删候选回进行中
+// 完成申请与 KR 终审（#10，AC-13/15/38/39/40；MW-02／MW-03／MW-18）：提交→直接待 KR 终审→退回删候选回进行中
 // →重传重提→通过覆盖当前内容并删除旧文件、任务完成；未包含的当前交付物不变。
 func TestCompletionReviewFlow(t *testing.T) {
 	q, pool := setupDB(t)
@@ -1852,7 +1853,8 @@ func TestCompletionReviewFlow(t *testing.T) {
 	}
 }
 
-// 必要输入与交付物边（#13，AC-07/28/48）：选择已有任务及交付物建边、复杂关系（双向/循环/跨 KR）、
+// 必要输入与交付物边（#13，AC-07/28/48；CR-08 双向与环形、CR-12 候选不提前就绪）：
+// 选择已有任务及交付物建边、复杂关系（双向/循环/跨 KR）、
 // 就绪状态派生（候选不提前满足、当前生效后自动就绪）、必要输入未到显示等待输入。
 func TestDeliverableEdgesAndReadiness(t *testing.T) {
 	q, pool := setupDB(t)
@@ -2050,7 +2052,7 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 	}
 }
 
-// 中间审核或签与退回（#11，AC-14/24/37）：配置或签组→提交进入中间审核→任一人通过进待终审
+// 中间审核或签与退回（#11，AC-14/24/37；MW-07／MW-18）：配置或签组→提交进入中间审核→任一人通过进待终审
 // 且其余待办关闭→终审闭环；退回路径删除候选、意见保留、任务回进行中可重新提交完整流程。
 func TestIntermediateReviewOrSign(t *testing.T) {
 	q, pool := setupDB(t)
@@ -2228,7 +2230,7 @@ func TestIntermediateReviewOrSign(t *testing.T) {
 	}
 }
 
-// 指定成员输入请求（#14，AC-29/30）：草稿阶段不通知→入池通过后带上下文通知→同意接收（不就绪）
+// 指定成员输入请求（#14，AC-29/30；MW-10／MW-11）：草稿阶段不通知→入池通过后带上下文通知→同意接收（不就绪）
 // →提交内容后输入就绪；无拒绝/转派端点。
 func TestMemberInputRequests(t *testing.T) {
 	q, pool := setupDB(t)
@@ -2583,7 +2585,8 @@ func TestMultiSourceInputs(t *testing.T) {
 
 // 结构化卡点与一键提醒（#15，AC-11）：执行者填写类型/缺失/原因/希望行动人上报，
 // 一键提醒发定向通知；解除后保留处理事实且不可再动作。
-// AC-11：卡点由四类结构化事实派生，触发条件消失即自动解除；一键提醒当前待行动人。
+// AC-11、MW-12／MW-13、CR-16（卡点表达的数据侧）：卡点由四类结构化事实派生，
+// 触发条件消失即自动解除；一键提醒当前待行动人。
 // 审批超时一类需要跨 N×24 小时，只在 domain 单测覆盖。
 func TestDerivedBlockersAndRemind(t *testing.T) {
 	q, pool := setupDB(t)
@@ -2750,7 +2753,8 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 	}
 }
 
-// 我的工作五分组（#16，AC-16）：五组齐备；KR 终审归入待我审批；提交人视角在等待他人。
+// 我的工作五分组（#16，AC-16；MW-01／MW-04／MW-08／MW-12）：五组齐备；KR 终审归入待我审批；
+// 提交人视角在等待他人。MW-09 的待接收组恒空——接收方尚未建模。
 func TestMyWorkFiveGroups(t *testing.T) {
 	q, pool := setupDB(t)
 	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
@@ -2908,7 +2912,7 @@ func TestMyWorkFiveGroups(t *testing.T) {
 	}
 }
 
-// 循环互锁与关键路径（#23，AC-10）：硬前置循环标互锁并暂停该部分关键路径；
+// 循环互锁与关键路径（#23，AC-10；CR-09／CR-10 的数据侧）：硬前置循环标互锁并暂停该部分关键路径；
 // 反馈循环不入关键路径；链上硬前置边派生 onCriticalPath。
 func TestInterlockAndCriticalPath(t *testing.T) {
 	q, pool := setupDB(t)
@@ -3496,7 +3500,7 @@ func TestImportAndBatchPool(t *testing.T) {
 	}
 }
 
-// 统一权限验收与外部边界（#28，AC-21/22）：切换身份后项目事实不变，只改变动作权限与
+// 统一权限验收与外部边界（#28，AC-21/22；MW-16）：切换身份后项目事实不变，只改变动作权限与
 // 个人工作内容；全流程只依赖内部账号，外部传递由内部成员（协调人）以输入请求代录。
 func TestUnifiedPermissionsAcrossIdentities(t *testing.T) {
 	q, pool := setupDB(t)
@@ -3688,7 +3692,7 @@ func derefStr(v *string) string {
 	return *v
 }
 
-// 任务动态（#43，ADR 0002）：三道审批的提交与处理留痕，退回理由进动态；
+// 任务动态（#43，ADR 0002；MW-18 退回理由进动态）：三道审批的提交与处理留痕，退回理由进动态；
 // 卡点出现由写操作前后的派生卡点集合 diff 补记，系统派生事件没有行动人。
 func TestTaskActivity(t *testing.T) {
 	q, pool := setupDB(t)

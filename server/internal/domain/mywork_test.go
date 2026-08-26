@@ -6,6 +6,10 @@ import (
 )
 
 // AC-16：五分组派生与判定顺序（模块 PRD §3～4）。
+// 同时覆盖 MW-01（负责人视角）、MW-02（提交完成申请后移出待我处理）、MW-04（成员创建任务）、
+// MW-05（入池退回回到创建人待我处理）、MW-06（变更单同时进两组）、MW-07／MW-08（或签与终审归属）、
+// MW-10／MW-11（输入请求按通知与状态进组）、MW-12（卡点归组与同源去重）、MW-19（邀请退出条件）、
+// MW-20（审批等待达阈值标超期）；MW-09 的待接收组在此断言为恒空——接收方尚未建模。
 func TestMyWorkGrouping(t *testing.T) {
 	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
 	me := int64(5)
@@ -228,7 +232,7 @@ func TestReportRangeFrom(t *testing.T) {
 	}
 }
 
-// 卡点卡片的环节文案用四类中文类型名，不把 kind 枚举原样透给界面（AC-11）。
+// 卡点卡片的环节文案用四类中文类型名，不把 kind 枚举原样透给界面（AC-11、MW-12）。
 func TestMyWorkBlockerStageUsesKindLabel(t *testing.T) {
 	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
 	me := int64(5)

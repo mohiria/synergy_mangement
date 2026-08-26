@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// 卡点留痕（ADR 0001／0002；模块 PRD §8.7）：卡点是读时派生、没有持久身份的，
+// 卡点留痕（ADR 0001／0002；模块 PRD §8.7、MW-12）：卡点是读时派生、没有持久身份的，
 // 出现与解除靠业务写操作前后的卡点集合按合成键 diff 得到。
 func TestBlockerActivityDiff(t *testing.T) {
 	now := time.Date(2026, 8, 26, 10, 0, 0, 0, time.UTC)
