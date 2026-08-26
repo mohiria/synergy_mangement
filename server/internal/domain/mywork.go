@@ -86,6 +86,7 @@ type WorkUpstreamFact struct {
 
 type MyWorkFacts struct {
 	UserID        int64
+	Actor         Actor
 	Now           time.Time
 	Tasks         []WorkTaskFact
 	PoolReviews   []WorkApprovalFact
@@ -112,7 +113,15 @@ type WorkItem struct {
 	UnreadyNote    string
 	Stage          string
 	DrawerTab      string
+	ActionLabel    string
+	CanRemind      bool
 }
+
+// 卡片动作文案（模块 PRD §5.3；AC-55 只用文字按钮）。
+const (
+	WorkActionHandle = "去处理"
+	WorkActionView   = "查看详情"
+)
 
 type MyWorkGroups struct {
 	Pending   []WorkItem
@@ -326,8 +335,49 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		})
 	}
 
+	decorateWorkCards(f, &g)
 	return g
 }
+
+// decorateWorkCards 按分组补齐卡片动作与提醒事实（模块 PRD §5.3、MW-13）：
+// 待我处理／待我审批／待我接收是本人要办的事，用「去处理」；等待他人与卡点只读，用「查看详情」。
+// 提醒按派生卡点的合成键寻址，因此等待他人卡片取同任务上首个可提醒的卡点作为提醒目标；
+// 没有可寻址的卡点（尚未成卡点、待行动人是本人、访客）时不提供提醒。
+func decorateWorkCards(f MyWorkFacts, g *MyWorkGroups) {
+	byKey := make(map[string]Blocker, len(f.Blockers))
+	remindableByTask := map[int64]string{}
+	for _, b := range f.Blockers {
+		byKey[b.Key] = b
+		if _, seen := remindableByTask[b.TaskID]; seen {
+			continue
+		}
+		if CanRemindBlocker(f.Actor, f.UserID, b) {
+			remindableByTask[b.TaskID] = b.Key
+		}
+	}
+	for _, group := range [][]WorkItem{g.Pending, g.Approvals, g.Receipts} {
+		for i := range group {
+			group[i].ActionLabel = WorkActionHandle
+		}
+	}
+	for i := range g.Waiting {
+		g.Waiting[i].ActionLabel = WorkActionView
+		if g.Waiting[i].TaskID == nil {
+			continue
+		}
+		if key, ok := remindableByTask[*g.Waiting[i].TaskID]; ok {
+			g.Waiting[i].RefKey = key
+			g.Waiting[i].CanRemind = true
+		}
+	}
+	for i := range g.Blockers {
+		g.Blockers[i].ActionLabel = WorkActionView
+		if b, ok := byKey[g.Blockers[i].RefKey]; ok {
+			g.Blockers[i].CanRemind = CanRemindBlocker(f.Actor, f.UserID, b)
+		}
+	}
+}
+
 
 // KrRiskNote 派生 KR 行的一行风险原因（AC-05）：优先取 KR 下任务的首条派生卡点事实；
 // 无卡点但风险等级非正常时给通用说明。

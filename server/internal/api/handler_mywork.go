@@ -11,13 +11,14 @@ import (
 // 我的工作五分组（AC-16）。事实装配在此，分组规则在 domain.MyWork。
 
 func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int64) {
-	if _, ok := s.fetchProject(w, r, projectId); !ok {
-		return
-	}
 	uid := currentUser(r).ID
 	ctx := r.Context()
 
-	facts := domain.MyWorkFacts{UserID: uid, Now: s.now()}
+	proj, ok := s.fetchProject(w, r, projectId)
+	if !ok {
+		return
+	}
+	facts := domain.MyWorkFacts{UserID: uid, Actor: projectActor(uid, proj.OwnerID, proj.MyRole), Now: s.now()}
 
 	// 交付物边与输入请求：上游事实、未就绪标记、对接人视角。
 	edgeRows, err := s.q.ListEdgesByProject(ctx, projectId)
@@ -249,11 +250,13 @@ func toWorkItems(items []domain.WorkItem) []WorkItem {
 	out := make([]WorkItem, 0, len(items))
 	for _, it := range items {
 		v := WorkItem{
-			Kind:    it.Kind,
-			Title:   it.Title,
-			TaskId:  it.TaskID,
-			RefId:   it.RefID,
-			Overdue: &it.Overdue,
+			Kind:        it.Kind,
+			Title:       it.Title,
+			TaskId:      it.TaskID,
+			RefId:       it.RefID,
+			Overdue:     &it.Overdue,
+			ActionLabel: it.ActionLabel,
+			CanRemind:   it.CanRemind,
 		}
 		if it.TaskName != "" {
 			v.TaskName = &it.TaskName

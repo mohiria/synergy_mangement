@@ -1,16 +1,52 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Alert, Spin, Tabs } from "antd";
+import { Alert, Spin, Tabs, message } from "antd";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import ProjectShell from "./ProjectShell";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
+type Objective = components["schemas"]["Objective"];
+type Task = components["schemas"]["Task"];
+type TaskStatus = components["schemas"]["TaskStatus"];
 type MyWork = components["schemas"]["MyWork"];
 type WorkItem = components["schemas"]["WorkItem"];
 
-// 我的工作（AC-16）：五分组个人行动与等待事实；卡片入口一律打开任务详情抽屉。
+// 状态色（与全部任务、项目总览各页一致）；状态文案一律消费 API 的 statusLabel（AC-04）。
+const STATUS_CLASS: Record<TaskStatus, string> = {
+  draft: "",
+  pending_pool_review: "warning",
+  not_started: "",
+  waiting_input: "warning",
+  in_progress: "in_progress",
+  pending_intermediate_review: "review",
+  pending_final_review: "review",
+  completed: "completed",
+  cancelled: "",
+};
+
+// 事项类型的单字标记（原型 work-kind 徽标）；分组语义由 Tab 表达，卡片正文不再展开原因。
+const KIND_BADGE: Record<string, string> = {
+  task: "办",
+  task_rejected: "退",
+  input_request: "输",
+  invite: "邀",
+  pool_review: "审",
+  field_change: "审",
+  intermediate_review: "审",
+  final_review: "审",
+  upstream: "等",
+  waiting_input_request: "等",
+  waiting_pool: "等",
+  waiting_field_change: "等",
+  waiting_completion: "等",
+  blocker: "卡",
+};
+
+// 我的工作（AC-16、AC-55、MW-21）：五分组个人行动与等待事实。
+// 卡片正文只显示任务编号与名称、所属 KR、日期和左对齐的任务状态；
+// 原因、输入、影响、已等待天数和退回理由全部进任务详情（模块 PRD §5.1、§5.2）。
 export default function MyWorkPage({
   user,
   onLogout,
@@ -24,14 +60,18 @@ export default function MyWorkPage({
 
   const [project, setProject] = useState<Project | null>(null);
   const [work, setWork] = useState<MyWork | null>(null);
+  const [objectives, setObjectives] = useState<Objective[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [projectRes, workRes] = await Promise.all([
+    const [projectRes, workRes, objectivesRes, tasksRes] = await Promise.all([
       client.GET("/projects/{projectId}", { params: { path: { projectId } } }),
       client.GET("/projects/{projectId}/my-work", { params: { path: { projectId } } }),
+      client.GET("/projects/{projectId}/objectives", { params: { path: { projectId } } }),
+      client.GET("/projects/{projectId}/tasks", { params: { path: { projectId } } }),
     ]);
     if (projectRes.response.status === 401) {
       onLogout();
@@ -44,6 +84,8 @@ export default function MyWorkPage({
     }
     setProject(projectRes.data);
     setWork(workRes.data ?? null);
+    setObjectives(objectivesRes.data ?? []);
+    setTasks(tasksRes.data ?? []);
     setLoading(false);
   }, [projectId, onLogout]);
 
@@ -51,50 +93,97 @@ export default function MyWorkPage({
     load();
   }, [load]);
 
-  const openItem = (item: WorkItem) => {
-    if (item.taskId) {
-      navigate(`/projects/${projectId}/tasks?task=${item.taskId}&tab=${item.drawerTab ?? "overview"}`);
-    } else {
+  // KR 展示编号沿全项目顺序派生，任务编号按 id 顺序派生 T1…（与 OKR、全部任务各页一致）。
+  const krCode = useMemo(() => {
+    let seq = 0;
+    const m = new Map<number, string>();
+    objectives.forEach((o) => o.keyResults.forEach((k) => m.set(k.id, `KR${++seq}`)));
+    return m;
+  }, [objectives]);
+  const taskCode = useMemo(() => {
+    const sorted = [...tasks].sort((a, b) => a.id - b.id);
+    return new Map(sorted.map((t, i) => [t.id, `T${i + 1}`]));
+  }, [tasks]);
+  const taskById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
+
+  // 卡片只负责定位：一律打开任务详情抽屉，并带上来源分组供抽屉落位（模块 PRD §6.2）。
+  const openItem = (item: WorkItem, source: string) => {
+    if (!item.taskId) {
       navigate(`/projects/${projectId}/tasks`);
+      return;
+    }
+    navigate(
+      `/projects/${projectId}/tasks?task=${item.taskId}` +
+        `&tab=${item.drawerTab ?? "overview"}&from=${source}`,
+    );
+  };
+
+  const remind = async (item: WorkItem) => {
+    if (!item.refKey) return;
+    const res = await client.POST("/projects/{projectId}/blockers/remind", {
+      params: { path: { projectId } },
+      body: { key: item.refKey },
+    });
+    if (res.response.status === 204) {
+      message.success("已提醒当前待行动人");
+      load();
+    } else {
+      message.error(res.error?.message ?? "提醒失败");
     }
   };
 
-  const renderGroup = (items: WorkItem[], emptyText: string) => (
-    <div>
-      {items.length === 0 && <div className="empty compact-empty">{emptyText}</div>}
-      {items.map((it, i) => (
-        <div
-          key={`${it.kind}-${it.refId ?? it.taskId ?? i}`}
-          className="input-fact"
-          style={{ cursor: "pointer" }}
-          onClick={() => openItem(it)}
-        >
-          <div style={{ minWidth: 0 }}>
-            <b>
-              {it.title}
-              {it.overdue && (
-                <span className="status-pill risk-high_risk" style={{ marginLeft: 8 }}>
-                  超期
+  const renderGroup = (items: WorkItem[], source: string, emptyText: string) => (
+    <div className="work-list">
+      {items.length === 0 && <div className="work-empty">{emptyText}</div>}
+      {items.map((it, i) => {
+        const task = it.taskId ? taskById.get(it.taskId) : undefined;
+        // 卡片主体一律是所属任务；无关联任务的事项（任务创建邀请）退回事项标题。
+        const title = task ? `${taskCode.get(task.id) ?? ""} ${task.name}` : it.title;
+        const kr = task ? (krCode.get(task.keyResultId) ?? "—") : "—";
+        const blocked = !!it.unreadyNote;
+        return (
+          <article
+            key={`${it.kind}-${it.refId ?? it.refKey ?? it.taskId ?? i}`}
+            className={`work-item${it.overdue ? " overdue" : blocked ? " blocked" : ""}`}
+            onClick={() => openItem(it, source)}
+          >
+            <div className="work-kind" aria-hidden>
+              {KIND_BADGE[it.kind] ?? "事"}
+            </div>
+            <div className="work-main">
+              <h3>{title}</h3>
+              <div className="work-meta">
+                <span>{kr}</span>
+                <span>日期 {it.dueDate ?? "—"}</span>
+              </div>
+            </div>
+            <div className="work-trailing">
+              <div className="work-state">
+                <span className={`status-pill ${task ? STATUS_CLASS[task.status] : ""}`}>
+                  {task ? task.statusLabel : "待处理"}
                 </span>
-              )}
-            </b>
-            <small>
-              {it.stage ? `当前环节:${it.stage}` : ""}
-              {it.dueDate ? `　截止/期望:${it.dueDate}` : ""}
-              {it.waitingDays != null ? `　已等待 ${it.waitingDays} 天` : ""}
-            </small>
-            {it.unreadyNote && (
-              <small style={{ color: "var(--amber)" }}>{it.unreadyNote}</small>
-            )}
-            {it.rejectedReason && (
-              <small style={{ color: "var(--red)" }}>已退回:{it.rejectedReason}</small>
-            )}
-          </div>
-          <span className="muted" style={{ fontSize: 12 }}>
-            去处理 →
-          </span>
-        </div>
-      ))}
+              </div>
+              <div className="work-actions">
+                {it.canRemind && (
+                  <button
+                    type="button"
+                    className="work-text-action quiet"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      remind(it);
+                    }}
+                  >
+                    提醒
+                  </button>
+                )}
+                <button type="button" className="work-text-action">
+                  {it.actionLabel} ›
+                </button>
+              </div>
+            </div>
+          </article>
+        );
+      })}
     </div>
   );
 
@@ -118,35 +207,38 @@ export default function MyWorkPage({
               <p>按当前职责派生的个人行动与等待事实；处理动作在任务详情抽屉中完成。</p>
             </div>
           </div>
-          <Tabs
-            items={[
-              {
-                key: "pending",
-                label: `待我处理 ${work.pending.length}`,
-                children: renderGroup(work.pending, "暂无需要你处理的事项"),
-              },
-              {
-                key: "approvals",
-                label: `待我审批 ${work.approvals.length}`,
-                children: renderGroup(work.approvals, "暂无等待你审批的事项"),
-              },
-              {
-                key: "receipts",
-                label: `待我接收 ${work.receipts.length}`,
-                children: renderGroup(work.receipts, "暂无待你确认接收的交付物"),
-              },
-              {
-                key: "waiting",
-                label: `等待他人 ${work.waiting.length}`,
-                children: renderGroup(work.waiting, "没有停在他人手里的事项"),
-              },
-              {
-                key: "blockers",
-                label: `与我相关的卡点 ${work.blockers.length}`,
-                children: renderGroup(work.blockers, "没有与你相关的卡点"),
-              },
-            ]}
-          />
+          <div className="work-board">
+            <Tabs
+              className="work-tabs"
+              items={[
+                {
+                  key: "pending",
+                  label: `待我处理 ${work.pending.length}`,
+                  children: renderGroup(work.pending, "pending", "暂无需要你处理的事项"),
+                },
+                {
+                  key: "approvals",
+                  label: `待我审批 ${work.approvals.length}`,
+                  children: renderGroup(work.approvals, "approvals", "暂无等待你审批的事项"),
+                },
+                {
+                  key: "receipts",
+                  label: `待我接收 ${work.receipts.length}`,
+                  children: renderGroup(work.receipts, "receipts", "暂无待你确认接收的交付物"),
+                },
+                {
+                  key: "waiting",
+                  label: `等待他人 ${work.waiting.length}`,
+                  children: renderGroup(work.waiting, "waiting", "没有停在他人手里的事项"),
+                },
+                {
+                  key: "blockers",
+                  label: `与我相关的卡点 ${work.blockers.length}`,
+                  children: renderGroup(work.blockers, "blockers", "没有与你相关的卡点"),
+                },
+              ]}
+            />
+          </div>
         </>
       )}
     </ProjectShell>

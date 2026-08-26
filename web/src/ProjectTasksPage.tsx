@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Alert,
@@ -165,6 +165,8 @@ export default function ProjectTasksPage({
   const [searchParams, setSearchParams] = useSearchParams();
   const focusTaskId = searchParams.get("task");
   const focusTab = searchParams.get("tab") ?? "overview";
+  // 来源分组（我的工作卡片带入）：决定抽屉落位区块与进度是否可在概况内编辑（MW-22、§6.2）。
+  const focusSource = searchParams.get("from") ?? "";
   useEffect(() => {
     if (focusTaskId && !loading) {
       setDrawerTaskId(Number(focusTaskId));
@@ -800,6 +802,7 @@ export default function ProjectTasksPage({
         taskCode={taskCode}
         members={members}
         initialTab={drawerTaskId === Number(focusTaskId) ? focusTab : "overview"}
+        source={drawerTaskId === Number(focusTaskId) ? focusSource : ""}
         onClose={() => {
           setDrawerTaskId(null);
           if (focusTaskId) setSearchParams({}, { replace: true });
@@ -820,6 +823,7 @@ export default function ProjectTasksPage({
             setProgressTask(t);
             setProgressValue(t.progress ?? null);
           },
+          saveProgress,
           openEdit: (t) => setEditTask(t),
           approveFieldChange: (t, id) => decideFieldChange(t, id, "approved"),
           openFcReject: (t, id) => {
@@ -1415,6 +1419,7 @@ function TaskDrawer({
   taskCode,
   members,
   initialTab,
+  source,
   onClose,
   actions,
 }: {
@@ -1424,6 +1429,7 @@ function TaskDrawer({
   taskCode: Map<number, string>;
   members: ProjectMember[];
   initialTab?: string;
+  source?: string;
   onClose: () => void;
   actions: {
     start: (t: Task) => void;
@@ -1432,6 +1438,7 @@ function TaskDrawer({
     openReject: (t: Task) => void;
     openCancel: (t: Task) => void;
     openProgress: (t: Task) => void;
+    saveProgress: (t: Task, progress: number | null) => Promise<void>;
     openEdit: (t: Task) => void;
     approveFieldChange: (t: Task, changeId: number) => void;
     openFcReject: (t: Task, changeId: number) => void;
@@ -1451,9 +1458,36 @@ function TaskDrawer({
   };
 }) {
   const [detail, setDetail] = useState<TaskDetail | null>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const [progressEditing, setProgressEditing] = useState(false);
+  const [progressDraft, setProgressDraft] = useState<number | null>(null);
+  const [savingProgress, setSavingProgress] = useState(false);
   const [newDeliverableName, setNewDeliverableName] = useState("");
   const [discussionDraft, setDiscussionDraft] = useState("");
   const [postingDiscussion, setPostingDiscussion] = useState(false);
+
+  // 按来源分组落位（模块 PRD §6.2）：详情就绪后滚动到对应区块并短暂高亮，
+  // 卡片正文因此不再展开原因、输入与影响（MW-01/03/05/06/14 新口径）。
+  useEffect(() => {
+    if (!detail || !source) return;
+    const targets: Record<string, string[]> = {
+      pending: ['[data-focus="inputs"]', ".audit-card.pending", '[data-focus="basic"]'],
+      approvals: [".audit-card.pending", '[data-focus="basic"]'],
+      receipts: ['[data-focus="deliverables"]', '[data-focus="basic"]'],
+      waiting: ['[data-focus="inputs"]', '[data-focus="basic"]'],
+      blockers: ['[data-focus="blockers"]', '[data-focus="basic"]'],
+    };
+    const root = drawerRef.current;
+    if (!root) return;
+    const el = (targets[source] ?? [])
+      .map((sel) => root.querySelector<HTMLElement>(sel))
+      .find((node): node is HTMLElement => node != null);
+    if (!el) return;
+    el.scrollIntoView({ block: "nearest" });
+    el.classList.add("focus-flash");
+    const timer = window.setTimeout(() => el.classList.remove("focus-flash"), 2000);
+    return () => window.clearTimeout(timer);
+  }, [detail, source]);
 
   const postDiscussion = async () => {
     if (!task) return;
@@ -1615,12 +1649,16 @@ function TaskDrawer({
       </div>
     );
 
+  // 概况内进度编辑（MW-22）：只有从「待我处理」打开的、本人可更新进度的任务才给编辑入口，
+  // 其他来源只读。未填写进度时该行平时按 AC-50 隐藏，可编辑时保留以便首次填写。
+  const canEditProgressInline = source === "pending" && !!task.canUpdateProgress;
+
   const overview = (
     <>
       {/* AC-50 基础信息：按 PRD §7.5 顺序紧凑排列，不重复页头已有的编号与 O／KR；
           空字段不显示。「参与人」属 PRD §9.2 按需字段，尚无数据模型，故当前不出行。
           当前环节／待行动人不再单列——statusLabel 已按 AC-04 表达审批等待，属重复提示。 */}
-      <section className="drawer-section" style={{ marginTop: 4 }}>
+      <section className="drawer-section" data-focus="basic" style={{ marginTop: 4 }}>
         <h3>基础信息</h3>
         <div className="task-info-list">
           <div className="task-info-row">
@@ -1646,10 +1684,57 @@ function TaskDrawer({
               )}
             </div>
           </div>
-          {task.progress != null && (
+          {(task.progress != null || canEditProgressInline) && (
             <div className="task-info-row">
               <span>进度</span>
-              <strong>{task.progress}%</strong>
+              {progressEditing ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <InputNumber
+                    size="small"
+                    min={0}
+                    max={100}
+                    value={progressDraft}
+                    onChange={(v) => setProgressDraft(v as number | null)}
+                    style={{ width: 96 }}
+                  />
+                  <Button
+                    size="small"
+                    type="primary"
+                    loading={savingProgress}
+                    onClick={async () => {
+                      setSavingProgress(true);
+                      await actions.saveProgress(task, progressDraft);
+                      setSavingProgress(false);
+                      setProgressEditing(false);
+                      setRefreshTick((n) => n + 1);
+                    }}
+                  >
+                    确认
+                  </Button>
+                  <Button size="small" onClick={() => setProgressEditing(false)}>
+                    取消
+                  </Button>
+                </div>
+              ) : (
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <strong className={task.progress != null ? "" : "muted"}>
+                    {task.progress != null ? `${task.progress}%` : "未填写"}
+                  </strong>
+                  {canEditProgressInline && (
+                    <Button
+                      size="small"
+                      type="text"
+                      aria-label="编辑进度"
+                      onClick={() => {
+                        setProgressDraft(task.progress ?? null);
+                        setProgressEditing(true);
+                      }}
+                    >
+                      ✎
+                    </Button>
+                  )}
+                </div>
+              )}
             </div>
           )}
           {task.description && (
@@ -1667,7 +1752,7 @@ function TaskDrawer({
         </div>
       </section>
       {blockers.length > 0 && (
-        <section className="drawer-section">
+        <section className="drawer-section" data-focus="blockers">
           <h3>
             结构化卡点{" "}
             <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>
@@ -1700,7 +1785,7 @@ function TaskDrawer({
         </section>
       )}
       {requiredInputs.length > 0 && (
-        <section className="drawer-section">
+        <section className="drawer-section" data-focus="inputs">
           <h3>
             必要输入{" "}
             <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>
@@ -1804,7 +1889,7 @@ function TaskDrawer({
       )}
       {/* AC-51：尚无正式提交的交付物时整块不显示；每项只留名称、可预览文件名、格式、大小和更新时间。 */}
       {currentFiles.length > 0 && (
-        <section className="drawer-section">
+        <section className="drawer-section" data-focus="deliverables">
           <h3>
             当前交付物{" "}
             <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>
@@ -2201,6 +2286,7 @@ function TaskDrawer({
         </div>
       }
     >
+      <div ref={drawerRef}>
       <Tabs
         key={task.id}
         className="task-drawer-tabs"
@@ -2211,6 +2297,7 @@ function TaskDrawer({
           { key: "discussion", label: `讨论 ${discussions.length}`, children: discussion },
         ]}
       />
+      </div>
       <Modal
         title={candidateFor ? `上传候选内容 · ${candidateFor.name}` : "上传候选内容"}
         open={!!candidateFor}

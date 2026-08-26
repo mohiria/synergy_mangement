@@ -399,3 +399,46 @@ body {
 .local-preview-fallback { padding: 36px 12px; text-align: center; color: var(--muted); }
 .local-preview-fallback b { display: block; margin-bottom: 6px; color: var(--text); font-size: var(--type-body); }
 .local-preview-fallback p { margin: 0 0 12px; font-size: var(--type-aux); }
+
+/* 我的工作 work-board 行式列表（AC-55、MW-21；原型 .work-item 规格）：
+   卡片正文只有任务编号与名称、所属 KR 和日期；状态列固定宽度左对齐；动作用文字按钮。
+   超期／被阻塞只用左侧 3px 侧边条表达，不在正文加标签。 */
+.work-board { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow-card); }
+.work-board .ant-tabs-nav { margin: 0; padding: 0 12px; background: var(--surface-2); }
+.work-board .ant-tabs-content-holder { padding: 0; }
+.work-list { display: block; }
+.work-item {
+  min-height: 82px; padding: 14px 16px; border-bottom: 1px solid var(--line);
+  display: grid; grid-template-columns: 40px minmax(0, 1fr) minmax(180px, auto);
+  align-items: center; gap: 12px; cursor: pointer;
+  transition: background-color .16s ease, box-shadow .16s ease;
+}
+.work-item:last-child { border-bottom: 0; }
+.work-item:hover { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--line-strong); }
+.work-item.overdue { box-shadow: inset 3px 0 0 var(--red); }
+.work-item.blocked:not(.overdue) { box-shadow: inset 3px 0 0 var(--amber); }
+.work-kind {
+  width: 34px; height: 34px; border-radius: var(--radius);
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent-soft); color: var(--accent); font-size: var(--type-body);
+}
+.work-item.overdue .work-kind { background: var(--red-soft); color: var(--red); }
+.work-item.blocked:not(.overdue) .work-kind { background: var(--amber-soft); color: var(--amber); }
+.work-main { min-width: 0; }
+.work-main h3 { margin: 0; color: var(--text); font-size: var(--type-body); font-weight: 600; line-height: 1.45; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.work-meta { margin-top: 7px; display: flex; gap: 14px; color: var(--muted); font-size: var(--type-aux); }
+.work-trailing { display: grid; grid-template-columns: 92px 116px; align-items: center; justify-content: end; gap: 18px; }
+.work-state { min-width: 92px; display: flex; justify-content: flex-start; }
+.work-actions { min-width: 116px; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.work-text-action {
+  min-height: 30px; padding: 0 5px; border: 0; border-radius: var(--radius); background: transparent;
+  color: var(--accent); font-size: var(--type-body); font-weight: 600; cursor: pointer;
+}
+.work-text-action:hover { background: var(--accent-soft); }
+.work-text-action.quiet { color: var(--muted); font-weight: 500; }
+.work-text-action.quiet:hover { background: var(--surface-3); color: var(--text); }
+.work-empty { min-height: 220px; padding: 36px 20px; display: grid; place-content: center; color: var(--muted); font-size: var(--type-aux); text-align: center; }
+
+/* 按来源落位后的短暂高亮（我的工作 PRD §6.2）：原因、退回理由、卡点在详情里被点出来。 */
+@keyframes focus-flash { from { background: var(--accent-soft); } to { background: transparent; } }
+.focus-flash { animation: focus-flash 2s ease-out; border-radius: var(--radius); }

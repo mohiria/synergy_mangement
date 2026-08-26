@@ -1664,14 +1664,14 @@ export interface components {
              * @description 事项自身 ID（审批单／输入请求／邀请）
              */
             refId?: number;
-            /** @description 派生事项的合成键（卡点）；一键提醒按此寻址 */
+            /** @description 派生卡点的合成键；一键提醒按此寻址（卡点组为本条卡点，等待他人组为同任务上首个可提醒的卡点） */
             refKey?: string;
             /**
              * Format: date
              * @description 任务截止或输入期望时间
              */
             dueDate?: string;
-            /** @description 审批件与输入请求的已等待天数 */
+            /** @description 审批件与输入请求的已等待天数（排序事实；模块 PRD §5.2 规定卡片不显示，仅供排序与详情使用） */
             waitingDays?: number;
             /** @description 超期标红（模块 PRD §5.4） */
             overdue?: boolean;
@@ -1683,6 +1683,10 @@ export interface components {
             stage?: string;
             /** @description 建议打开的任务详情 Tab（overview/audit/discussion） */
             drawerTab?: string;
+            /** @description 卡片文字按钮文案（我的工作 PRD §5.3、AC-55；派生字段）：本人要办的三组为「去处理」，等待他人与卡点为「查看详情」 */
+            actionLabel: string;
+            /** @description 卡片能否直接一键提醒当前待行动人（MW-13；派生字段）；按 refKey 指向的派生卡点寻址，不提醒本人、访客不可 */
+            canRemind: boolean;
         };
         /** @description 我的工作五分组（AC-16；KR 终审归入待我审批） */
         MyWork: {
