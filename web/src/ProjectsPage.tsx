@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Alert, Button, DatePicker, Form, Input, Modal, Popover, Select, Table } from "antd";
+import { Alert, Button, Form, Input, Modal, Popover, Select, Table } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
+import DateRangeField from "./DateRangeField";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
@@ -297,11 +298,7 @@ export default function ProjectsPage({
             <Input maxLength={50} placeholder="业务里程碑，如：联合联调阶段" />
           </Form.Item>
           <Form.Item name="plan" label="计划周期（选填）">
-            <DatePicker.RangePicker
-              style={{ width: "100%" }}
-              allowEmpty={[true, true]}
-              placeholder={["计划开始日期", "计划完成日期"]}
-            />
+            <DateRangeField allowEmpty />
           </Form.Item>
         </Form>
       </Modal>

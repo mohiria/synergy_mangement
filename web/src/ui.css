@@ -364,3 +364,35 @@ body {
   font-size: var(--type-aux); font-weight: 600; font-variant-numeric: tabular-nums;
 }
 .tree-transfer-empty { padding: 36px 12px; text-align: center; color: var(--muted); }
+
+/* 统一上传组件（AC-52）：虚线拖拽区 + 待上传文件行，向原型 .upload-zone / .upload-file-row 对齐。 */
+.upload-zone {
+  position: relative; min-height: 116px; padding: 18px;
+  border: 1px dashed var(--line-strong); border-radius: var(--radius); background: var(--surface-2);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px;
+  text-align: center; color: var(--muted); cursor: pointer; transition: .15s;
+}
+.upload-zone:hover, .upload-zone.dragging, .upload-zone.selected {
+  border-color: var(--accent); background: var(--accent-soft); color: #4655a4;
+}
+.upload-zone[aria-disabled="true"] { cursor: not-allowed; opacity: .6; }
+.upload-zone strong { font-size: var(--type-body); color: var(--text); font-weight: 600; }
+.upload-zone span { font-size: var(--type-aux); }
+.upload-file-row {
+  margin-top: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface); display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.upload-file-row > div { min-width: 0; }
+.upload-file-row span { display: block; margin-top: 3px; color: var(--muted); font-size: var(--type-aux); }
+.upload-file-link {
+  display: block; max-width: 100%; padding: 0; border: 0; background: transparent;
+  color: var(--accent); font-size: var(--type-body); font-weight: 600; text-align: left;
+  text-decoration: underline; text-underline-offset: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
+}
+.upload-file-link:hover { color: var(--accent-hover); }
+.local-preview-image { display: block; max-width: 100%; max-height: 60vh; margin: 0 auto; border-radius: var(--radius); }
+.local-preview-frame { width: 100%; height: 60vh; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.local-preview-fallback { padding: 36px 12px; text-align: center; color: var(--muted); }
+.local-preview-fallback b { display: block; margin-bottom: 6px; color: var(--text); font-size: var(--type-body); }
+.local-preview-fallback p { margin: 0 0 12px; font-size: var(--type-aux); }

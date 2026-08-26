@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Alert, Button, DatePicker, Input, Modal, Select, Spin } from "antd";
+import { Alert, Button, Input, Modal, Select, Spin } from "antd";
 import type { Dayjs } from "dayjs";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import ProjectShell from "./ProjectShell";
 import ImportModal from "./ImportModal";
+import DateRangeField from "./DateRangeField";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
@@ -456,12 +457,10 @@ function OkrBatchModal({
                 />
               </div>
               <div className="okr-sheet-cell">
-                <DatePicker.RangePicker
-                  style={{ width: "100%" }}
-                  allowEmpty={[true, true]}
-                  value={r.period ?? undefined}
+                <DateRangeField
+                  allowEmpty
+                  value={r.period}
                   onChange={(v) => patch(r.key, { period: v })}
-                  placeholder={["开始", "结束"]}
                 />
               </div>
               <Button type="text" size="small" onClick={() => removeRow(r.key)} aria-label="删除该行">

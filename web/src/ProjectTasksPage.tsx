@@ -20,6 +20,8 @@ import type { components } from "./api/schema";
 import ProjectShell from "./ProjectShell";
 import TreeTransfer from "./TreeTransfer";
 import type { TreeTransferItem } from "./TreeTransfer";
+import FileUploadField from "./FileUploadField";
+import DateRangeField from "./DateRangeField";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
@@ -319,6 +321,12 @@ export default function ProjectTasksPage({
     }
   };
 
+  const closeProvide = () => {
+    setProvideReq(null);
+    setProvideText("");
+    setProvideFile(null);
+  };
+
   const provideInput = async () => {
     if (provideReq == null) return;
     setProviding(true);
@@ -339,9 +347,7 @@ export default function ProjectTasksPage({
         }
       }
       message.success("已提交，目标任务输入更新为就绪");
-      setProvideReq(null);
-      setProvideText("");
-      setProvideFile(null);
+      closeProvide();
       load();
     } else {
       message.error(res.error?.message ?? "提交失败");
@@ -866,7 +872,7 @@ export default function ProjectTasksPage({
         cancelText="取消"
         confirmLoading={providing}
         okButtonProps={{ disabled: !provideText.trim() && !provideFile }}
-        onCancel={() => setProvideReq(null)}
+        onCancel={closeProvide}
         onOk={provideInput}
       >
         <p className="muted" style={{ marginTop: 0 }}>
@@ -879,21 +885,11 @@ export default function ProjectTasksPage({
           value={provideText}
           onChange={(e) => setProvideText(e.target.value)}
         />
-        <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
-          <Button
-            size="small"
-            onClick={() => {
-              const input = document.createElement("input");
-              input.type = "file";
-              input.onchange = () => setProvideFile(input.files?.[0] ?? null);
-              input.click();
-            }}
-          >
-            选择文件
-          </Button>
-          <span className="muted" style={{ fontSize: 12 }}>
-            {provideFile ? provideFile.name : "未选择文件"}
-          </span>
+        <div style={{ marginTop: 8 }}>
+          <FileUploadField value={provideFile} onChange={setProvideFile} />
+        </div>
+        <div className="notice" style={{ marginTop: 8 }}>
+          文件在点击「提交」后才上传；关闭窗口不保留本次选择。
         </div>
       </Modal>
       <Modal
@@ -1240,12 +1236,7 @@ function CreateTaskModal({
               />
             </div>
             <div className="task-sheet-cell">
-              <DatePicker.RangePicker
-                style={{ width: "100%" }}
-                value={r.period ?? undefined}
-                onChange={(v) => patch(r.key, { period: v })}
-                placeholder={["开始", "截止"]}
-              />
+              <DateRangeField value={r.period} onChange={(v) => patch(r.key, { period: v })} />
             </div>
             <div className="task-sheet-cell">
               <Input
@@ -1473,6 +1464,8 @@ function TaskDrawer({
     }
   };
   const [uploadingId, setUploadingId] = useState<number | null>(null);
+  const [candidateFor, setCandidateFor] = useState<{ id: number; name: string } | null>(null);
+  const [candidateFile, setCandidateFile] = useState<File | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
 
 
@@ -1520,41 +1513,43 @@ function TaskDrawer({
     }
   };
 
-  const pickAndUpload = (deliverableId: number) => {
-    if (!task) return;
-    const input = document.createElement("input");
-    input.type = "file";
-    input.onchange = async () => {
-      const file = input.files?.[0];
-      if (!file) return;
-      setUploadingId(deliverableId);
-      const res = await client.POST(
-        "/projects/{projectId}/tasks/{taskId}/deliverables/{deliverableId}/candidate",
-        {
-          params: { path: { projectId, taskId: task.id, deliverableId } },
-          body: {
-            fileName: file.name,
-            fileType: file.name.split(".").pop() ?? "",
-            fileSize: file.size,
-          },
+  // 候选内容上传（AC-52）：先在窗口内选择，点「确认上传」才登记并直传；
+  // 关闭窗口丢弃本次选择，不产生任何业务事实。
+  const closeCandidate = () => {
+    setCandidateFor(null);
+    setCandidateFile(null);
+  };
+
+  const uploadCandidate = async () => {
+    if (!task || !candidateFor || !candidateFile) return;
+    const file = candidateFile;
+    setUploadingId(candidateFor.id);
+    const res = await client.POST(
+      "/projects/{projectId}/tasks/{taskId}/deliverables/{deliverableId}/candidate",
+      {
+        params: { path: { projectId, taskId: task.id, deliverableId: candidateFor.id } },
+        body: {
+          fileName: file.name,
+          fileType: file.name.split(".").pop() ?? "",
+          fileSize: file.size,
         },
-      );
-      if (!res.data) {
-        setUploadingId(null);
-        message.error(res.error?.message ?? "登记候选内容失败");
-        return;
-      }
-      try {
-        const put = await fetch(res.data.uploadUrl, { method: "PUT", body: file });
-        if (!put.ok) throw new Error(`HTTP ${put.status}`);
-        message.success("候选内容已上传；随完成申请提交后进入审核");
-      } catch {
-        message.error("文件上传失败，请确认文件服务可用后重试");
-      }
+      },
+    );
+    if (!res.data) {
       setUploadingId(null);
-      setRefreshTick((n) => n + 1);
-    };
-    input.click();
+      message.error(res.error?.message ?? "登记候选内容失败");
+      return;
+    }
+    try {
+      const put = await fetch(res.data.uploadUrl, { method: "PUT", body: file });
+      if (!put.ok) throw new Error(`HTTP ${put.status}`);
+      message.success("候选内容已上传；随完成申请提交后进入审核");
+      closeCandidate();
+    } catch {
+      message.error("文件上传失败，请确认文件服务可用后重试");
+    }
+    setUploadingId(null);
+    setRefreshTick((n) => n + 1);
   };
 
   if (!task) return null;
@@ -1834,7 +1829,11 @@ function TaskDrawer({
               </div>
             </div>
             {task.canUploadCandidate && (
-              <Button size="small" loading={uploadingId === d.id} onClick={() => pickAndUpload(d.id)}>
+              <Button
+                size="small"
+                loading={uploadingId === d.id}
+                onClick={() => setCandidateFor({ id: d.id, name: d.name })}
+              >
                 {d.candidate ? "重传候选内容" : "上传候选内容"}
               </Button>
             )}
@@ -2212,6 +2211,21 @@ function TaskDrawer({
           { key: "audit", label: `审核 ${pendingReviews}`, children: audit },
         ]}
       />
+      <Modal
+        title={candidateFor ? `上传候选内容 · ${candidateFor.name}` : "上传候选内容"}
+        open={!!candidateFor}
+        okText="确认上传"
+        cancelText="取消"
+        confirmLoading={uploadingId != null}
+        okButtonProps={{ disabled: !candidateFile }}
+        onCancel={closeCandidate}
+        onOk={uploadCandidate}
+      >
+        <FileUploadField value={candidateFile} onChange={setCandidateFile} />
+        <div className="notice" style={{ marginTop: 8 }}>
+          文件在点击「确认上传」后才登记为候选内容；关闭窗口不保留本次选择。候选内容随完成申请整体提交后进入审核。
+        </div>
+      </Modal>
     </Drawer>
   );
 }
