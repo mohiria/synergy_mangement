@@ -499,22 +499,14 @@ export default function CollaborationPage({
 
   const selectedEdgeObj = selectedEdge != null ? edges.find((e) => e.id === selectedEdge) : null;
   const edgeInspector = selectedEdgeObj && (
-    <aside
-      style={{
-        position: "absolute",
-        right: 0,
-        top: 0,
-        bottom: 0,
-        width: 300,
-        background: "#fff",
-        borderLeft: "1px solid var(--line)",
-        overflow: "auto",
-        padding: 14,
-        zIndex: 5,
-      }}
-    >
-      <b style={{ fontSize: 14 }}>交付物边 · {selectedEdgeObj.name}</b>
-      <div style={{ fontSize: 14, display: "grid", gap: 6, marginTop: 8 }}>
+    <aside className="graph-inspector">
+      <div className="graph-inspector-head">
+        <h2>交付物边 · {selectedEdgeObj.name}</h2>
+        <button type="button" aria-label="关闭详情" onClick={() => setSelectedEdge(null)}>
+          ✕
+        </button>
+      </div>
+      <div className="graph-inspector-body">
         <div>关系类型：{EDGE_TYPE_LABEL[selectedEdgeObj.edgeType]}</div>
         <div>必要性：{selectedEdgeObj.necessity === "required" ? "必要" : "参考"}</div>
         <div>
@@ -559,33 +551,30 @@ export default function CollaborationPage({
             打开目标任务
           </Button>
         </div>
-        <div className="muted" style={{ fontSize: 12 }}>
-          关系详情为只读；关系维护从任务详情的「配置输入」进入。
-        </div>
+        <div className="muted">关系详情为只读；关系维护从任务详情的「配置输入」进入。</div>
       </div>
     </aside>
   );
 
   const inspector = selectedTask != null && inspectorDetail && (
-    <aside
-      style={{
-        position: "absolute",
-        right: 0,
-        top: 0,
-        bottom: 0,
-        width: 300,
-        background: "#fff",
-        borderLeft: "1px solid var(--line)",
-        overflow: "auto",
-        padding: 14,
-        zIndex: 5,
-      }}
-    >
-      <b style={{ fontSize: 14 }}>{inspectorDetail.task.name}</b>
-      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-        所属：{inspectorDetail.objectiveTitle} / {inspectorDetail.krDescription}
+    <aside className="graph-inspector">
+      <div className="graph-inspector-head">
+        <h2>{inspectorDetail.task.name}</h2>
+        <button
+          type="button"
+          aria-label="关闭详情"
+          onClick={() => {
+            setSelectedTask(null);
+            setImpactMode(false);
+          }}
+        >
+          ✕
+        </button>
       </div>
-      <div style={{ fontSize: 14, display: "grid", gap: 6 }}>
+      <div className="graph-inspector-body">
+        <div className="muted">
+          所属：{inspectorDetail.objectiveTitle} / {inspectorDetail.krDescription}
+        </div>
         <div>负责人：{inspectorDetail.task.ownerName}</div>
         <div>
           状态：<span className="status-pill">{inspectorDetail.task.statusLabel}</span>
@@ -595,18 +584,18 @@ export default function CollaborationPage({
           输入 {inspectorDetail.inputs.length} 条 / 输出 {inspectorDetail.outputs.length} 条
         </div>
         {inspectorDetail.inputs.map((e) => (
-          <div key={e.id} className="muted" style={{ fontSize: 12 }}>
+          <div key={e.id} className="muted">
             ← {e.sourceTaskName ?? e.inputRequest?.providerName} · {e.name} ·{" "}
             {e.ready ? "已就绪" : "未就绪"}
           </div>
         ))}
         {inspectorDetail.outputs.map((e) => (
-          <div key={e.id} className="muted" style={{ fontSize: 12 }}>
+          <div key={e.id} className="muted">
             → {e.targetTaskName} · {e.name}
           </div>
         ))}
         {inspectorDetail.blockers.length > 0 && (
-          <div style={{ color: "var(--red)", fontSize: 12 }}>
+          <div className="muted" style={{ color: "var(--red)" }}>
             卡点：{inspectorDetail.blockers.map((b) => `${b.kindLabel}：缺 ${b.missing}`).join("；")}
           </div>
         )}
@@ -634,17 +623,35 @@ export default function CollaborationPage({
     </aside>
   );
 
+  // CR-21 KR 节点三态：高风险或存在结构化卡点归红态，预警归橙态，其余灰态；
+  // 两个都是 API 派生事实（riskLevel、openBlockerCount），这里只做视觉映射，不重算规则。
+  const krVisualState = (krId: number): "normal" | "warning" | "high_risk" => {
+    const k = krById.get(krId);
+    if (!k) return "normal";
+    if (k.riskLevel === "high_risk" || (k.openBlockerCount ?? 0) > 0) return "high_risk";
+    return k.riskLevel === "warning" ? "warning" : "normal";
+  };
+
+  // AC-08 新口径：KR 节点只显示编号与名称、风险状态和非零卡点数；
+  // CR-21：预警／高风险再叠一个「!」标记，不只靠描边颜色区分。
   const krNodeContent = (krId: number) => {
     const k = krById.get(krId);
     if (!k) return null;
+    const blockers = k.openBlockerCount ?? 0;
+    const visual = krVisualState(krId);
     return (
       <>
+        {visual !== "normal" && (
+          <span className={`gnode-risk-marker risk-${visual}`} aria-hidden>
+            !
+          </span>
+        )}
         <b>
           {k.code} {k.description}
         </b>
         <small>
-          {k.progressSummary?.totalTasks ?? 0} 项任务 · {k.openBlockerCount ?? 0} 个卡点 ·{" "}
           {RISK_LABEL[k.riskLevel]}
+          {blockers > 0 ? ` · ${blockers} 个卡点` : ""}
         </small>
       </>
     );
@@ -664,6 +671,21 @@ export default function CollaborationPage({
               <p>交付物作为关系边连接来源和目标；本模块只读，业务处理从任务相关页面进入。</p>
             </div>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {mode.kind !== "full" ? (
+                <Button type="primary" onClick={() => enter({ kind: "full" })}>
+                  全局展开
+                </Button>
+              ) : (
+                <Button onClick={() => { setMode({ kind: "tree" }); setHistory([]); setSelectedTask(null); }}>
+                  返回层级视图
+                </Button>
+              )}
+            </div>
+          </div>
+          {/* CR-22 顶部控制区单行：左侧搜索与筛选，右侧「图谱／列表」切换。
+              返回上一级、缩放、适应与重新布局属画布操作，放在画布内（模块 PRD §5.1）。 */}
+          <div className="toolbar">
+            <div className="toolbar-group">
               <AutoComplete
                 style={{ width: 240 }}
                 placeholder="搜索 O / KR / 任务 / 成员 / 关系"
@@ -678,84 +700,51 @@ export default function CollaborationPage({
                   String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())
                 }
               />
-              <Button.Group>
-                <Button size="middle" type={viewMode === "graph" ? "primary" : "default"} onClick={() => setViewMode("graph")}>
-                  关系图谱
-                </Button>
-                <Button size="middle" type={viewMode === "list" ? "primary" : "default"} onClick={() => setViewMode("list")}>
-                  关系列表
-                </Button>
-              </Button.Group>
-              <Button disabled={history.length === 0} onClick={back}>
-                ← 返回上一级
+              <Select
+                size="small"
+                style={{ width: 150 }}
+                value={oFilter}
+                onChange={setOFilter}
+                options={[
+                  { value: "all" as const, label: "全部 O" },
+                  ...objectives.map((o) => ({ value: o.id, label: o.title })),
+                ]}
+              />
+              <Select
+                size="small"
+                style={{ width: 140 }}
+                value={krFilter}
+                onChange={setKrFilter}
+                options={[
+                  { value: "all" as const, label: "全部 KR" },
+                  ...krList.map((k) => ({ value: k.id, label: k.code })),
+                ]}
+              />
+              <Select
+                size="small"
+                style={{ width: 150 }}
+                value={personFilter}
+                onChange={setPersonFilter}
+                options={[
+                  { value: "all" as const, label: "全部人员" },
+                  ...[...new Map(tasks.map((t) => [t.ownerId, t.ownerName])).entries()].map(
+                    ([id, name]) => ({ value: id, label: name }),
+                  ),
+                ]}
+              />
+              <span className="muted" style={{ fontSize: 12 }}>
+                显示已完成 <Switch size="small" checked={showCompleted} onChange={setShowCompleted} />
+              </span>
+            </div>
+            <Button.Group>
+              <Button type={viewMode === "graph" ? "primary" : "default"} onClick={() => setViewMode("graph")}>
+                图谱
               </Button>
-              {mode.kind !== "full" ? (
-                <Button type="primary" onClick={() => enter({ kind: "full" })}>
-                  全局展开
-                </Button>
-              ) : (
-                <Button onClick={() => { setMode({ kind: "tree" }); setHistory([]); setSelectedTask(null); }}>
-                  返回层级视图
-                </Button>
-              )}
-            </div>
+              <Button type={viewMode === "list" ? "primary" : "default"} onClick={() => setViewMode("list")}>
+                列表
+              </Button>
+            </Button.Group>
           </div>
-          {(mode.kind === "full" || viewMode === "list") && (
-            <div className="toolbar">
-              <div className="toolbar-group">
-                <Select
-                  size="small"
-                  style={{ width: 150 }}
-                  value={oFilter}
-                  onChange={setOFilter}
-                  options={[
-                    { value: "all" as const, label: "全部 O" },
-                    ...objectives.map((o) => ({ value: o.id, label: o.title })),
-                  ]}
-                />
-                <Select
-                  size="small"
-                  style={{ width: 140 }}
-                  value={krFilter}
-                  onChange={setKrFilter}
-                  options={[
-                    { value: "all" as const, label: "全部 KR" },
-                    ...krList.map((k) => ({ value: k.id, label: k.code })),
-                  ]}
-                />
-                <Select
-                  size="small"
-                  style={{ width: 150 }}
-                  value={personFilter}
-                  onChange={setPersonFilter}
-                  options={[
-                    { value: "all" as const, label: "全部人员" },
-                    ...[...new Map(tasks.map((t) => [t.ownerId, t.ownerName])).entries()].map(
-                      ([id, name]) => ({ value: id, label: name }),
-                    ),
-                  ]}
-                />
-                <span className="muted" style={{ fontSize: 12 }}>
-                  显示已完成 <Switch size="small" checked={showCompleted} onChange={setShowCompleted} />
-                </span>
-              </div>
-              <div className="toolbar-group">
-                <Button size="small" onClick={() => setZoom((z) => Math.max(0.4, z - 0.15))}>
-                  −
-                </Button>
-                <span className="muted" style={{ fontSize: 12 }}>{Math.round(zoom * 100)}%</span>
-                <Button size="small" onClick={() => setZoom((z) => Math.min(1.6, z + 0.15))}>
-                  ＋
-                </Button>
-                <Button size="small" onClick={() => setZoom(1)}>
-                  适应
-                </Button>
-                <Button size="small" onClick={() => setDragOffsets(new Map())}>
-                  重新布局
-                </Button>
-              </div>
-            </div>
-          )}
           {viewMode === "list" ? (
             <>
               <div className="toolbar" style={{ marginTop: -4 }}>
@@ -901,8 +890,38 @@ export default function CollaborationPage({
                 })}
               </aside>
             )}
-            <div className="graph-shell" style={{ position: "relative" }}>
+            <div className="graph-shell">
               {(mode.kind === "full" || mode.kind === "kr") && (edgeInspector || inspector)}
+              <div
+                className={`graph-canvas-ops${
+                  (mode.kind === "full" || mode.kind === "kr") && (edgeInspector || inspector)
+                    ? " with-inspector"
+                    : ""
+                }`}
+              >
+                <Button size="small" disabled={history.length === 0} onClick={back}>
+                  ← 返回上一级
+                </Button>
+                {/* 缩放、适应与重新布局只作用于全局展开画布，其余层级不出现。 */}
+                {mode.kind === "full" && (
+                  <>
+                    <Button size="small" onClick={() => setZoom((z) => Math.max(0.4, z - 0.15))}>
+                      −
+                    </Button>
+                    <span className="muted" style={{ fontSize: 12 }}>{Math.round(zoom * 100)}%</span>
+                    <Button size="small" onClick={() => setZoom((z) => Math.min(1.6, z + 0.15))}>
+                      ＋
+                    </Button>
+                    <Button size="small" onClick={() => setZoom(1)}>
+                      适应
+                    </Button>
+                    <Button size="small" onClick={() => setDragOffsets(new Map())}>
+                      重新布局
+                    </Button>
+                  </>
+                )}
+              </div>
+              <div className="graph-scroll">
               {mode.kind === "tree" || mode.kind === "o" ? (
                 <div className="graph-canvas-inner" style={{ height: tree.height, minWidth: 700 }}>
                   <div className="graph-note">
@@ -934,8 +953,8 @@ export default function CollaborationPage({
                     ) : (
                       <div
                         key={n.key}
-                        className={`gnode ${n.dimmed ? "dimmed" : ""} ${
-                          krById.get(n.id)?.riskLevel !== "normal" ? `risk-${krById.get(n.id)?.riskLevel}` : ""
+                        className={`gnode gnode-kr ${n.dimmed ? "dimmed" : ""} ${
+                          krVisualState(n.id) !== "normal" ? `risk-${krVisualState(n.id)}` : ""
                         }`}
                         style={{ left: n.pos.x, top: n.pos.y, width: n.pos.w, height: n.pos.h }}
                         onClick={() => enter({ kind: "kr", krId: n.id })}
@@ -1108,6 +1127,7 @@ export default function CollaborationPage({
                   </div>
                 </div>
               ) : null}
+              </div>
             </div>
           </div>
           )}
