@@ -112,6 +112,18 @@ export default function CollaborationPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusTaskParam, loading]);
 
+  // 从项目总览的「在协作全景中查看 KRx 影响链」进入：直接落到该 KR 的任务关系层。
+  const focusKrParam = searchParams.get("kr");
+  useEffect(() => {
+    if (!focusKrParam || loading) return;
+    const krId = Number(focusKrParam);
+    if (krList.some((k) => k.id === krId)) {
+      setMode({ kind: "kr", krId });
+      setHistory([{ kind: "tree" }]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusKrParam, loading]);
+
   // 选中任务 → 右侧详情（AC-27）。
   useEffect(() => {
     if (selectedTask == null) {

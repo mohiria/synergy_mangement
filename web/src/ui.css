@@ -236,13 +236,37 @@ body {
 .risk-stripe.warning { background: var(--amber); }
 .risk-stripe.high_risk { background: var(--red); }
 .kr-title-cell small { display: block; color: var(--muted); font-size: var(--type-aux); }
-.kr-tasks { padding: 8px 14px 12px 56px; background: #fafbfc; }
+.kr-tasks { padding: 13px 18px 15px 81px; background: #fafbfc; }
 .kr-meta { color: var(--muted); font-size: var(--type-aux); margin-bottom: 6px; }
 .mini-task {
-  min-height: 38px; display: grid; grid-template-columns: 56px minmax(180px, 1fr) 120px 110px 90px 30px;
-  gap: 10px; align-items: center; border-top: 1px solid #e8ecef; font-size: var(--type-aux);
+  min-height: 42px; display: grid; grid-template-columns: 58px minmax(180px, 1fr) 116px 116px 76px 32px;
+  gap: 10px; align-items: center; border-top: 1px solid #e7eaf0; font-size: var(--type-aux);
 }
 .mini-task > * { min-width: 0; }
+.mini-task.mini-task-head { min-height: 28px; border-top: 0; color: var(--muted); font-size: var(--type-aux); }
+.mini-task:not(.mini-task-head):hover { background: #f5f7fa; }
+.mini-task .mono { color: #43516a; font-weight: 650; }
+.kr-graph-link { padding-top: 8px; }
+
+/* overview-brief 头卡（风格基线 §8）：左侧一句态势，右侧 O／KR 层级事实列。 */
+.overview-brief {
+  position: relative; overflow: hidden; min-height: 116px; margin-bottom: 16px; padding: 20px 22px;
+  border: 1px solid #d9dfeb; border-radius: var(--radius);
+  background: linear-gradient(120deg, #fff 0%, #fff 62%, #f1f3ff 100%);
+  display: grid; grid-template-columns: minmax(320px, 1fr) auto; align-items: center; gap: 40px;
+}
+.overview-brief::after {
+  content: ""; position: absolute; right: -70px; top: -120px; width: 260px; height: 260px;
+  border-radius: 50%; border: 54px solid rgba(79, 98, 216, 0.045); pointer-events: none;
+}
+.overview-brief-copy { position: relative; z-index: 1; }
+.overview-brief h2 { margin: 0; color: var(--navy); font-size: var(--type-title); line-height: 1.4; }
+.overview-brief p { max-width: 700px; margin: 7px 0 0; color: var(--muted); font-size: var(--type-body); }
+.overview-brief-facts { margin: 0; display: flex; position: relative; z-index: 1; }
+.overview-brief-facts > div { min-width: 84px; padding: 3px 18px; border-left: 1px solid #dce1eb; }
+.overview-brief-facts dt { color: var(--muted); font-size: var(--type-aux); white-space: nowrap; }
+.overview-brief-facts dd { margin: 5px 0 0; color: var(--navy); font-size: var(--type-title); line-height: 1; font-weight: 680; }
+.overview-brief-facts .attention dd { color: var(--red); }
 
 /* 协作关系图谱（原型 graph-shell 生效样式；手绘 SVG + 绝对定位节点）。 */
 .graph-layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 12px; }
@@ -505,3 +529,79 @@ body {
 .graph-inspector-head button:hover { background: var(--surface-3); color: var(--text); }
 .graph-inspector-body { display: grid; gap: 6px; padding: 12px 14px; font-size: var(--type-body); }
 .graph-inspector-body .muted { font-size: var(--type-aux); }
+
+/* 项目报告 report-sheet 版式（风格基线 §6）：正文纸张居中，眉题由 ::before 提供。 */
+.report-toolbar { max-width: 920px; margin-left: auto; margin-right: auto; }
+.report-sheet {
+  max-width: 920px; margin: 0 auto; padding: 38px 52px 54px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+}
+.report-title { padding-bottom: 22px; margin-bottom: 8px; border-bottom: 1px solid var(--line-strong); }
+.report-title::before {
+  content: "项目事实报告"; display: block; margin-bottom: 10px;
+  color: var(--accent); font-size: var(--type-aux); font-weight: 650; letter-spacing: 0.08em;
+}
+.report-title h2 { margin: 0 0 7px; color: var(--navy); font-size: var(--type-title); font-weight: 680; }
+.report-title p { margin: 0; color: var(--muted); font-size: var(--type-aux); }
+.report-section { padding: 22px 0 24px; border-bottom: 1px solid #e5e8ee; }
+.report-section:last-child { border-bottom: 0; padding-bottom: 0; }
+.report-section h3 { margin: 0 0 12px; color: #2c3950; font-size: var(--type-title); font-weight: 650; }
+
+/* 项目设置 settings-layout（原型 renderSettings）：左侧分节导航、右侧内容卡、成员卡网格。 */
+.settings-layout { display: grid; grid-template-columns: 208px minmax(0, 1fr); gap: 16px; align-items: start; }
+.settings-nav {
+  padding: 8px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); position: sticky; top: 84px;
+}
+.settings-nav button {
+  width: 100%; height: 40px; padding: 0 11px; border: 0; border-radius: var(--radius);
+  background: transparent; color: #657185; text-align: left; cursor: pointer;
+  font: inherit; font-size: var(--type-body);
+}
+.settings-nav button:hover { background: var(--surface-2); color: var(--text); }
+.settings-nav button.active { background: var(--accent-soft); color: #3f50bd; font-weight: 600; }
+.settings-panel {
+  padding: 16px 18px 18px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow-card);
+}
+.settings-panel-head { margin-bottom: 12px; }
+.settings-panel-head h2 { margin: 0 0 4px; font-size: var(--type-title); font-weight: 650; }
+.settings-panel-head .muted { font-size: var(--type-aux); }
+.member-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.member-card {
+  min-height: 62px; padding: 11px 12px; display: flex; align-items: center; gap: 9px;
+  border: 1px solid #e0e4eb; border-radius: var(--radius); background: var(--surface);
+}
+.member-card:hover { border-color: #c1c9d6; background: #f9fafc; }
+.member-card .avatar { border-radius: var(--radius); }
+.member-card b { display: block; font-size: var(--type-body); }
+.member-card span { display: block; color: var(--muted); font-size: var(--type-aux); }
+.property {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  min-height: 40px; padding: 8px 0; border-bottom: 1px solid #edf0f4;
+}
+.property:last-child { border-bottom: 0; }
+.property label { color: var(--muted); font-size: var(--type-aux); }
+.property strong { font-weight: 500; font-size: var(--type-body); }
+
+/* 成果与归档（原型 artifact-group / package-list）：一个 O 一张分组表，成果包用卡片网格。 */
+.artifact-group { margin-bottom: 12px; }
+.artifact-group-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 11px 14px; background: var(--surface-2);
+  border: 1px solid var(--line); border-bottom: 0;
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.artifact-group-head h3 { margin: 0; font-size: var(--type-body); font-weight: 650; }
+.artifact-group-head .muted { font-size: var(--type-aux); }
+.artifact-group .data-table-wrap { border-radius: 0 0 var(--radius) var(--radius); }
+.artifact-table { min-width: 880px; }
+.package-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.package-item {
+  padding: 13px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow-card);
+}
+.package-item-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.package-item-head .muted { font-size: var(--type-aux); }
+.package-item-body { margin-top: 6px; font-size: var(--type-body); }

@@ -22,6 +22,15 @@ const roleOptions = (Object.keys(ROLE_LABEL) as MemberRole[]).map((r) => ({
   label: ROLE_LABEL[r],
 }));
 
+// 工作职责与系统权限的对应说明（PRD §3.1～3.4 原文口径，只读展示，不承载配置）。
+const RESPONSIBILITY_NOTES: [string, string][] = [
+  ["项目总负责人", "查看完整项目并处理决策"],
+  ["总推进人", "项目录入、维护、协调与报告"],
+  ["KR 负责人", "入池、关键字段变更和完成终审"],
+  ["任务负责人／参与人", "执行、提交成果和处理输入"],
+  ["只读成员", "查看完整上下文，不可修改"],
+];
+
 // 项目设置 → 成员管理（#29；PRD §7.9 将成员与权限归入项目设置）。
 // 管理动作按 canManageMembers 派生字段显隐，前端不复算规则。
 export default function ProjectSettingsPage({
@@ -34,6 +43,7 @@ export default function ProjectSettingsPage({
   const { projectId: projectIdParam } = useParams();
   const projectId = Number(projectIdParam);
 
+  const [tab, setTab] = useState<"members" | "permissions">("members");
   const [project, setProject] = useState<Project | null>(null);
   const [members, setMembers] = useState<ProjectMember[]>([]);
   const [users, setUsers] = useState<UserSummary[]>([]);
@@ -133,16 +143,76 @@ export default function ProjectSettingsPage({
         <>
           <div className="page-head">
             <div>
-              <h1>项目设置 · 成员管理</h1>
+              <h1>项目设置</h1>
               <p>
-                成员角色决定编辑结构与配置的系统权限；KR 负责人等工作职责在 OKR 与任务中指定。
+                配置同一项目中的职责与操作权限；只读成员仍可查看完整上下文。
                 {!canManage && "（你没有成员管理权限，以下为只读展示）"}
               </p>
             </div>
           </div>
           {error && <Alert type="error" message={error} style={{ marginBottom: 16 }} />}
+          {/* settings-layout：左侧分节导航、右侧内容卡。原型另有进度权重、提醒规则、
+              导入记录与操作审计四节，本版没有对应数据模型，故不列入导航。 */}
+          <div className="settings-layout">
+            <aside className="settings-nav">
+              <button
+                type="button"
+                className={tab === "members" ? "active" : ""}
+                onClick={() => setTab("members")}
+              >
+                成员与职责
+              </button>
+              <button
+                type="button"
+                className={tab === "permissions" ? "active" : ""}
+                onClick={() => setTab("permissions")}
+              >
+                系统权限
+              </button>
+            </aside>
+            <section className="settings-panel">
+          {tab === "permissions" ? (
+            <>
+              <div className="settings-panel-head">
+                <h2>统一权限体系</h2>
+              </div>
+              <div className="notice" style={{ marginBottom: 12 }}>
+                所有成员查看同一份项目事实；权限只决定创建、编辑、审批、闭环和配置操作。
+              </div>
+              {RESPONSIBILITY_NOTES.map(([role, note]) => (
+                <div key={role} className="property">
+                  <label>{role}</label>
+                  <strong>{note}</strong>
+                </div>
+              ))}
+            </>
+          ) : (
+            <>
+              <div className="settings-panel-head">
+                <h2>成员与职责</h2>
+                <span className="muted">
+                  成员角色决定编辑结构与配置的系统权限；KR 负责人等工作职责在 OKR 与任务中指定。
+                </span>
+              </div>
+              {/* 只读视角用成员卡；有管理权限时改用可编辑角色与移出的表格，不并列两份同样的名单。 */}
+              {!canManage && (
+                <div className="member-grid">
+                  {members.map((m) => (
+                    <div key={m.userId} className="member-card">
+                      <span className="avatar">{m.displayName.slice(0, 1)}</span>
+                      <div>
+                        <b>{m.displayName}</b>
+                        <span>
+                          {ROLE_LABEL[m.role]} · {m.username}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                  {members.length === 0 && <div className="empty compact-empty">暂无成员</div>}
+                </div>
+              )}
           {canManage && (
-            <Space.Compact block style={{ marginBottom: 16, maxWidth: 560 }}>
+            <Space.Compact block style={{ marginTop: 16, marginBottom: 16, maxWidth: 560 }}>
               <Select
                 style={{ flex: 1 }}
                 options={candidateOptions}
@@ -158,7 +228,8 @@ export default function ProjectSettingsPage({
               </Button>
             </Space.Compact>
           )}
-          <div className="data-table-wrap" style={{ maxWidth: 720 }}>
+          {canManage && (
+          <div className="data-table-wrap">
             <Table<ProjectMember>
               rowKey="userId"
               size="small"
@@ -207,6 +278,11 @@ export default function ProjectSettingsPage({
                   : []),
               ]}
             />
+          </div>
+          )}
+            </>
+          )}
+            </section>
           </div>
         </>
       )}

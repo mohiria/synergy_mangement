@@ -126,112 +126,127 @@ export default function ArtifactsPage({
             )}
           </div>
           {artifacts.length === 0 && <div className="empty">尚无带交付物的任务</div>}
+          {/* 分组表格：一个 O 一张表，KR 作分组行，交付物逐行列出当前内容与生效时间。 */}
           {artifacts.map((o) => (
-            <section key={o.objectiveId} className="objective">
-              <div className="objective-head">
-                <span className="objective-code">O</span>
-                <div>
-                  <h2>{o.title}</h2>
-                </div>
-                <span />
+            <section key={o.objectiveId} className="artifact-group">
+              <div className="artifact-group-head">
+                <h3>{o.title}</h3>
+                <span className="muted">{o.krs.length} 个 KR</span>
               </div>
-              {o.krs.map((kr) => (
-                <div key={kr.keyResultId} style={{ padding: "10px 16px", borderTop: "1px solid #edf0f2" }}>
-                  <b style={{ fontSize: 14 }}>{kr.description}</b>
-                  {kr.tasks.map((t) => (
-                    <div key={t.taskId} style={{ margin: "8px 0 4px 12px" }}>
-                      <div style={{ fontSize: 14, marginBottom: 4 }}>
-                        {t.name}
-                        <Button
-                          type="link"
-                          size="small"
-                          onClick={() =>
-                            navigate(`/projects/${projectId}/tasks?task=${t.taskId}&tab=audit`)
-                          }
-                        >
-                          审批记录 {t.reviewCount} 条
-                        </Button>
-                      </div>
-                      {t.deliverables.map((d) => (
-                        <div key={d.id} className="deliverable-card" style={{ marginLeft: 12 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                            {canCreate && d.current && (
-                              <Checkbox
-                                checked={selected.has(d.id)}
-                                onChange={() => toggle(d.id)}
-                              />
+              <div className="data-table-wrap">
+                <table className="data-table artifact-table">
+                  <thead>
+                    <tr>
+                      {canCreate && <th style={{ width: 40 }} />}
+                      <th>任务</th>
+                      <th style={{ width: 180 }}>交付物</th>
+                      <th style={{ width: 260 }}>当前内容</th>
+                      <th style={{ width: 150 }}>生效时间</th>
+                      <th style={{ width: 150 }} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {o.krs.flatMap((kr) => [
+                      <tr key={`kr-${kr.keyResultId}`} className="table-group">
+                        <td colSpan={canCreate ? 6 : 5}>{kr.description}</td>
+                      </tr>,
+                      ...kr.tasks.flatMap((t) =>
+                        t.deliverables.map((d) => (
+                          <tr key={d.id}>
+                            {canCreate && (
+                              <td>
+                                {d.current && (
+                                  <Checkbox
+                                    checked={selected.has(d.id)}
+                                    onChange={() => toggle(d.id)}
+                                  />
+                                )}
+                              </td>
                             )}
-                            <div>
-                              <b>{d.name}</b>
+                            <td>{t.name}</td>
+                            <td>{d.name}</td>
+                            <td>
                               {d.current ? (
-                                <>
-                                  <span className="file-link" onClick={() => openFile(d.current!.id)}>
-                                    {d.current.fileName}
-                                  </span>
-                                  <div className="muted" style={{ fontSize: 12 }}>
-                                    {d.current.effectiveAt
-                                      ? `生效于 ${fmtTime(d.current.effectiveAt)}`
-                                      : "已生效"}
-                                    {d.candidate && " · 有更新审核中（候选内容见任务审核 Tab）"}
-                                  </div>
-                                </>
+                                <span className="file-link" onClick={() => openFile(d.current!.id)}>
+                                  {d.current.fileName}
+                                </span>
                               ) : (
+                                <span className="muted">尚无已生效当前内容</span>
+                              )}
+                              {d.candidate && (
                                 <div className="muted" style={{ fontSize: 12 }}>
-                                  尚无已生效当前内容
-                                  {d.candidate && " · 候选审核中"}
+                                  有更新审核中（候选内容见任务审核 Tab）
                                 </div>
                               )}
-                            </div>
-                          </div>
-                          {d.current && (
-                            <Button size="small" onClick={() => openFile(d.current!.id)}>
-                              下载
-                            </Button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              ))}
+                            </td>
+                            <td className="task-date">
+                              {d.current?.effectiveAt ? fmtTime(d.current.effectiveAt) : "—"}
+                            </td>
+                            <td>
+                              <div className="row-actions">
+                                {d.current && (
+                                  <Button size="small" onClick={() => openFile(d.current!.id)}>
+                                    下载
+                                  </Button>
+                                )}
+                                <Button
+                                  type="link"
+                                  size="small"
+                                  onClick={() =>
+                                    navigate(`/projects/${projectId}/tasks?task=${t.taskId}&tab=audit`)
+                                  }
+                                >
+                                  审批记录 {t.reviewCount} 条
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        )),
+                      ),
+                    ])}
+                  </tbody>
+                </table>
+              </div>
             </section>
           ))}
           <section className="drawer-section" style={{ marginTop: 24 }}>
             <h3>成果包</h3>
             {packages.length === 0 && <div className="empty compact-empty">尚未生成成果包</div>}
-            {packages.map((p) => (
-              <article key={p.id} className="audit-card">
-                <div className="audit-card-head">
-                  <b>{p.name}</b>
-                  <span className="meta muted" style={{ fontSize: 12 }}>
-                    {p.createdByName} · {fmtTime(p.createdAt)}
-                  </span>
-                </div>
-                <div style={{ marginTop: 6, fontSize: 14 }}>
-                  {p.items.map((it) => (
-                    <div key={it.deliverableId}>
-                      <span className="muted">{it.taskName} / </span>
-                      {it.deliverableName}
-                      {it.fileName ? (
-                        <span className="muted"> → {it.fileName}</span>
-                      ) : (
-                        <span className="muted">（暂无已生效当前内容）</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                <div className="audit-actions">
-                  <Button
-                    size="small"
-                    onClick={() =>
-                      window.open(`/api/v1/projects/${projectId}/packages/${p.id}/download`, "_blank")
-                    }
-                  >
-                    整包下载
-                  </Button>
-                </div>
-              </article>
-            ))}
+            <div className="package-list">
+              {packages.map((p) => (
+                <article key={p.id} className="package-item">
+                  <div className="package-item-head">
+                    <b>{p.name}</b>
+                    <span className="muted">
+                      {p.createdByName} · {fmtTime(p.createdAt)}
+                    </span>
+                  </div>
+                  <div className="package-item-body">
+                    {p.items.map((it) => (
+                      <div key={it.deliverableId}>
+                        <span className="muted">{it.taskName} / </span>
+                        {it.deliverableName}
+                        {it.fileName ? (
+                          <span className="muted"> → {it.fileName}</span>
+                        ) : (
+                          <span className="muted">（暂无已生效当前内容）</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="audit-actions">
+                    <Button
+                      size="small"
+                      onClick={() =>
+                        window.open(`/api/v1/projects/${projectId}/packages/${p.id}/download`, "_blank")
+                      }
+                    >
+                      整包下载
+                    </Button>
+                  </div>
+                </article>
+              ))}
+            </div>
           </section>
           <Modal
             title="生成成果包"

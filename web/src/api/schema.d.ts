@@ -1577,6 +1577,8 @@ export interface components {
             /** Format: date */
             endDate?: string;
             overdue?: boolean;
+            /** @description 「上游未就绪：缺 XX」注记（派生字段，与我的工作同一口径）；状态为「等待输入」时说清缺哪一项，输入齐备时不返回 */
+            unreadyNote?: string;
         };
         /** @description 项目报告（AC-19）：从同一份项目事实生成，不要求成员重复填报 */
         Report: {

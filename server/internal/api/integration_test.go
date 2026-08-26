@@ -3280,6 +3280,10 @@ func TestProjectReport(t *testing.T) {
 	if nextB == nil || nextB.Status != api.TaskStatusWaitingInput || nextB.StatusLabel != "等待输入" {
 		t.Fatalf("下一步显示状态异常: %+v", rep.NextSteps)
 	}
+	// 「等待输入」还要说清缺哪一项（与我的工作同一口径）。
+	if nextB.UnreadyNote == nil || *nextB.UnreadyNote != "上游未就绪：缺 上游数据包" {
+		t.Fatalf("下一步未就绪注记异常: %q", derefStr(nextB.UnreadyNote))
+	}
 
 	// 项目整体（默认 all）与非法范围
 	resp = doJSON(t, alice, http.MethodGet, reportURL, nil)
@@ -3675,4 +3679,11 @@ func TestLoginRateLimit(t *testing.T) {
 	if e.Code != "rate_limited" {
 		t.Fatalf("code = %q, want rate_limited", e.Code)
 	}
+}
+
+func derefStr(v *string) string {
+	if v == nil {
+		return "<nil>"
+	}
+	return *v
 }

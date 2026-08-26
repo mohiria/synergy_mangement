@@ -78,16 +78,18 @@ export default function ReportsPage({
     >
       {notFound ? (
         <Alert type="error" message="项目不存在" description={<Link to="/">返回项目列表</Link>} />
-      ) : loading || !report ? (
+      ) : loading || !report || !project ? (
         <Spin />
       ) : (
         <>
           <div className="page-head">
             <div>
               <h1>项目报告</h1>
-              <p>由项目事实自动生成，不要求成员重复填报 · 生成于 {fmtTime(report.generatedAt)}</p>
+              <p>由项目事实自动生成，不要求成员重复填报</p>
             </div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          </div>
+          <div className="toolbar report-toolbar">
+            <div className="toolbar-group">
               {(Object.keys(RANGE_LABEL) as ReportRange[]).map((r) => (
                 <Button
                   key={r}
@@ -123,7 +125,16 @@ export default function ReportsPage({
             </div>
           </div>
 
-          <section className="drawer-section" style={{ marginTop: 0 }}>
+          {/* report-sheet 版式（风格基线 §6 弹窗／报告规格）：眉题由 CSS 提供，正文分节。 */}
+          <div className="report-sheet">
+            <div className="report-title">
+              <h2>
+                {project.name} · {RANGE_LABEL[report.range]}
+              </h2>
+              <p>生成于 {fmtTime(report.generatedAt)}</p>
+            </div>
+
+          <section className="report-section">
             <h3>O／KR 进展</h3>
             <div className="data-table-wrap">
               <table className="data-table" style={{ minWidth: 0 }}>
@@ -156,7 +167,7 @@ export default function ReportsPage({
             </div>
           </section>
 
-          <section className="drawer-section">
+          <section className="report-section">
             <h3>完成成果（范围内生效）</h3>
             {report.completedDeliverables.length === 0 && (
               <div className="empty compact-empty">该范围内没有新生效的当前成果</div>
@@ -176,7 +187,7 @@ export default function ReportsPage({
             ))}
           </section>
 
-          <section className="drawer-section">
+          <section className="report-section">
             <h3>风险与卡点</h3>
             {report.blockers.length === 0 && (
               <div className="empty compact-empty">没有需要关注的卡点</div>
@@ -199,7 +210,7 @@ export default function ReportsPage({
             ))}
           </section>
 
-          <section className="drawer-section">
+          <section className="report-section">
             <h3>待决策</h3>
             <div className="notice">
               入池审批 {report.pendingApprovals.poolReviews} 件 · 关键字段修改{" "}
@@ -208,7 +219,7 @@ export default function ReportsPage({
             </div>
           </section>
 
-          <section className="drawer-section">
+          <section className="report-section">
             <h3>下一步（临近截止／已超期）</h3>
             {report.nextSteps.length === 0 && (
               <div className="empty compact-empty">未来 7 天内没有临近截止的任务</div>
@@ -227,11 +238,13 @@ export default function ReportsPage({
                   <small>
                     {n.ownerName} · {n.statusLabel}
                     {n.endDate ? ` · 截止 ${n.endDate}` : ""}
+                    {n.unreadyNote ? ` · ${n.unreadyNote}` : ""}
                   </small>
                 </div>
               </div>
             ))}
           </section>
+          </div>
         </>
       )}
     </ProjectShell>

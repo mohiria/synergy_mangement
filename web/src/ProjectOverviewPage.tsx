@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Alert, Spin } from "antd";
+import { Alert, Button, Spin } from "antd";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import ProjectShell from "./ProjectShell";
@@ -89,6 +89,17 @@ export default function ProjectOverviewPage({
       return next;
     });
 
+  // 头卡事实：只汇总 O／KR 层级数量（AC-05 不在概览首层出现任务与进度数字）。
+  const krTotal = objectives.reduce((n, o) => n + o.keyResults.length, 0);
+  const attentionKrs = objectives.reduce(
+    (n, o) => n + o.keyResults.filter((k) => k.riskLevel !== "normal").length,
+    0,
+  );
+  const highRiskKrs = objectives.reduce(
+    (n, o) => n + o.keyResults.filter((k) => k.riskLevel === "high_risk").length,
+    0,
+  );
+
   let krSeq = 0;
 
   return (
@@ -105,6 +116,7 @@ export default function ProjectOverviewPage({
         <Spin />
       ) : (
         <>
+          {/* 标题区不重复「阶段 · 项目态势」眉题（风格基线 §8）：阶段落到下方头卡里。 */}
           <div className="page-head">
             <div>
               <h1>项目总览</h1>
@@ -113,10 +125,36 @@ export default function ProjectOverviewPage({
                   ? `项目周期 ${fmtDate(project.plannedStartDate)}—${fmtDate(project.plannedEndDate)} · `
                   : ""}
                 主负责人 {project.ownerName}
-                {project.stage ? ` · ${project.stage}` : ""}
               </p>
             </div>
           </div>
+          {/* overview-brief 头卡：只汇总 O／KR 层级事实与需关注数量。
+              原型这里还有一列「活跃任务」，但 AC-05 要求概览首层不出现任务与进度数字，
+              因此本实现不列任务数——这是相对原型的有意偏差。 */}
+          <section className="overview-brief" aria-label="项目态势摘要">
+            <div className="overview-brief-copy">
+              <h2>{project.stage || project.name}</h2>
+              <p>
+                {attentionKrs === 0
+                  ? "当前没有预警或高风险 KR；展开 KR 查看任务与进度事实。"
+                  : `${attentionKrs} 个 KR 需要关注，其中 ${highRiskKrs} 个为高风险；建议优先处理硬前置输入与待审批事项。`}
+              </p>
+            </div>
+            <dl className="overview-brief-facts">
+              <div>
+                <dt>目标</dt>
+                <dd>{objectives.length}</dd>
+              </div>
+              <div>
+                <dt>关键结果</dt>
+                <dd>{krTotal}</dd>
+              </div>
+              <div className="attention">
+                <dt>需关注 KR</dt>
+                <dd>{attentionKrs}</dd>
+              </div>
+            </dl>
+          </section>
           {objectives.length === 0 && <div className="empty">暂无 O／KR，请先在 OKR 管理中录入</div>}
           {objectives.map((o, oIndex) => (
             <section key={o.id} className="objective">
@@ -165,6 +203,16 @@ export default function ProjectOverviewPage({
                             </>
                           )}
                         </div>
+                        {krTasks.length > 0 && (
+                          <div className="mini-task mini-task-head" aria-hidden>
+                            <span>编号</span>
+                            <span>任务</span>
+                            <span>负责人</span>
+                            <span>状态</span>
+                            <span>进度</span>
+                            <span />
+                          </div>
+                        )}
                         {krTasks.length === 0 && (
                           <div className="muted" style={{ fontSize: 12, padding: "8px 0" }}>
                             该 KR 下暂无任务
@@ -201,6 +249,16 @@ export default function ProjectOverviewPage({
                             </button>
                           </div>
                         ))}
+                        <div className="kr-graph-link">
+                          <Button
+                            type="link"
+                            size="small"
+                            style={{ padding: 0 }}
+                            onClick={() => navigate(`/projects/${projectId}/graph?kr=${k.id}`)}
+                          >
+                            在协作全景中查看 {code} 影响链 →
+                          </Button>
+                        </div>
                       </div>
                     )}
                   </div>

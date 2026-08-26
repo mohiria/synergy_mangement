@@ -210,6 +210,8 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 		item.EndDate = &d
 		overdue := now.After(t.EndDate.Time.AddDate(0, 0, 1))
 		item.Overdue = &overdue
+		// 「等待输入」要说清缺哪一项（与我的工作同一口径）。
+		item.UnreadyNote = optString(unreadyNoteByTask[t.ID])
 		nextSteps = append(nextSteps, item)
 	}
 	sort.Slice(nextSteps, func(i, j int) bool {
