@@ -12,13 +12,14 @@ import {
   Select,
   Spin,
   Tabs,
-  Transfer,
   message,
 } from "antd";
 import type { Dayjs } from "dayjs";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import ProjectShell from "./ProjectShell";
+import TreeTransfer from "./TreeTransfer";
+import type { TreeTransferItem } from "./TreeTransfer";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
@@ -30,6 +31,7 @@ type ProjectMember = components["schemas"]["ProjectMember"];
 type TaskInvite = components["schemas"]["TaskInvite"];
 type TaskDetail = components["schemas"]["TaskDetail"];
 type EdgeType = components["schemas"]["EdgeType"];
+type MemberRole = components["schemas"]["MemberRole"];
 
 // 状态筛选下拉的选项词表（需要枚举全集，非行级显示；文案对齐原型 taskStatusOptions）。
 // 行级状态显示一律消费 API 派生的 statusLabel（AC-04），不在前端推导。
@@ -64,6 +66,34 @@ const EDGE_TYPE_LABEL: Record<EdgeType, string> = {
   handover: "正式成果接收",
   feedback: "迭代／反馈",
 };
+
+// 成员树分组（AC-53）：原型按团队分组，当前数据模型只有项目成员角色，
+// 故按角色分组；团队字段补齐后改为按团队分组即可，组件本身不变。
+const MEMBER_GROUP_LABEL: Record<MemberRole, string> = {
+  admin: "项目管理员",
+  member: "普通成员",
+  viewer: "只读成员",
+};
+const MEMBER_GROUP_ORDER: MemberRole[] = ["admin", "member", "viewer"];
+
+function memberTreeItems(members: ProjectMember[]): TreeTransferItem[] {
+  return [...members]
+    .sort((a, b) => MEMBER_GROUP_ORDER.indexOf(a.role) - MEMBER_GROUP_ORDER.indexOf(b.role))
+    .map((m) => ({
+      key: String(m.userId),
+      groups: [{ key: m.role, label: MEMBER_GROUP_LABEL[m.role] }],
+      label: (
+        <span className="tree-transfer-row">
+          <span className="avatar">{m.displayName.slice(0, 1)}</span>
+          <span className="tree-transfer-text">
+            <b>{m.displayName}</b>
+            <small>{m.username}</small>
+          </span>
+        </span>
+      ),
+      search: `${m.displayName} ${m.username} ${MEMBER_GROUP_LABEL[m.role]}`.toLowerCase(),
+    }));
+}
 
 export default function ProjectTasksPage({
   user,
@@ -810,6 +840,8 @@ export default function ProjectTasksPage({
         task={inputTask}
         tasks={tasks}
         taskCode={taskCode}
+        objectives={objectives}
+        krList={krList}
         members={members}
         onClose={() => setInputTask(null)}
         onSaved={() => {
@@ -1029,7 +1061,7 @@ export default function ProjectTasksPage({
   );
 }
 
-type KrOption = { id: number; code: string; description: string; ownerId?: number | null };
+type KrOption = { id: number; objectiveId: number; code: string; description: string; ownerId?: number | null };
 
 type TaskRow = {
   key: number;
@@ -1321,7 +1353,7 @@ function InviteOwnersModal({
         </div>
       }
       open={open}
-      width={760}
+      width={900}
       confirmLoading={saving}
       onOk={send}
       onCancel={onClose}
@@ -1347,18 +1379,14 @@ function InviteOwnersModal({
           <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
             选择受邀成员（可多选）
           </div>
-          <Transfer
-            dataSource={candidates.map((m) => ({
-              key: String(m.userId),
-              title: m.displayName,
-              description: m.username,
-            }))}
+          <TreeTransfer
+            items={memberTreeItems(candidates)}
             targetKeys={selected}
-            onChange={(keys) => setSelected(keys.map(String))}
-            render={(item) => `${item.title}（${item.description}）`}
+            onChange={setSelected}
             titles={["可选成员", "已选成员"]}
-            showSearch
-            listStyle={{ width: 320, height: 280 }}
+            unit="人"
+            searchPlaceholder="搜索姓名、账号或分组"
+            listHeight={300}
           />
         </div>
         <div>
@@ -2336,6 +2364,8 @@ function ConfigureInputModal({
   task,
   tasks,
   taskCode,
+  objectives,
+  krList,
   members,
   onClose,
   onSaved,
@@ -2344,6 +2374,8 @@ function ConfigureInputModal({
   task: Task | null;
   tasks: Task[];
   taskCode: Map<number, string>;
+  objectives: Objective[];
+  krList: KrOption[];
   members: ProjectMember[];
   onClose: () => void;
   onSaved: () => void;
@@ -2397,6 +2429,50 @@ function ConfigureInputModal({
 
   if (!task) return null;
   const candidates = tasks.filter((t) => t.id !== task.id && t.status !== "cancelled");
+
+  // 已有任务来源：O → KR → 任务三级树（AC-53）；分组顺序沿用 OKR 页派生的 O／KR 顺序。
+  const objectiveTitle = new Map(objectives.map((o) => [o.id, o.title]));
+  const krById = new Map(krList.map((k) => [k.id, k]));
+  const krOrder = new Map(krList.map((k, i) => [k.id, i]));
+  const taskItems: TreeTransferItem[] = [...candidates]
+    .sort(
+      (a, b) =>
+        (krOrder.get(a.keyResultId) ?? Number.MAX_SAFE_INTEGER) -
+          (krOrder.get(b.keyResultId) ?? Number.MAX_SAFE_INTEGER) || a.id - b.id,
+    )
+    .map((t) => {
+      const kr = krById.get(t.keyResultId);
+      const oTitle = kr ? objectiveTitle.get(kr.objectiveId) ?? "" : "";
+      const code = taskCode.get(t.id) ?? "";
+      const deliverables = t.deliverableNames ?? [];
+      return {
+        key: String(t.id),
+        groups: kr
+          ? [
+              { key: `o${kr.objectiveId}`, label: oTitle },
+              { key: `k${kr.id}`, label: `${kr.code} · ${kr.description}` },
+            ]
+          : [
+              { key: "o0", label: "未归属 O" },
+              { key: "k0", label: "未归属 KR" },
+            ],
+        label: (
+          <span className="tree-transfer-row">
+            <span className="tree-transfer-code">{code}</span>
+            <span className="tree-transfer-text">
+              <b>{t.name}</b>
+              <small>
+                {t.ownerName}
+                {deliverables.length > 0 && ` · ${deliverables.join("、")}`}
+              </small>
+            </span>
+          </span>
+        ),
+        // 支持按任务名称、O、KR、负责人和交付物名称搜索（PRD §7.3）。
+        search: `${code} ${t.name} ${t.ownerName} ${oTitle} ${kr?.code ?? ""} ${kr?.description ?? ""} ${deliverables.join(" ")}`.toLowerCase(),
+      };
+    });
+  const providerItems = memberTreeItems(members.filter((m) => m.role !== "viewer"));
 
   const save = async () => {
     if (!name.trim()) {
@@ -2472,7 +2548,7 @@ function ConfigureInputModal({
         </div>
       }
       open={!!task}
-      width={640}
+      width={900}
       confirmLoading={saving}
       onOk={save}
       onCancel={onClose}
@@ -2497,18 +2573,16 @@ function ConfigureInputModal({
         {mode === "member" && (
           <>
             <div>
-              <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>对接人（可多选）</div>
-              <Select
-                style={{ width: "100%" }}
-                mode="multiple"
-                showSearch
-                optionFilterProp="label"
-                placeholder="选择一名或多名项目成员"
-                value={providerIds}
-                onChange={setProviderIds}
-                options={members
-                  .filter((m) => m.role !== "viewer")
-                  .map((m) => ({ value: m.userId, label: `${m.displayName}（${m.username}）` }))}
+              <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+                对接人（按分组整组选择或多选）
+              </div>
+              <TreeTransfer
+                items={providerItems}
+                targetKeys={providerIds.map(String)}
+                onChange={(keys) => setProviderIds(keys.map(Number))}
+                titles={["可选成员", "已选成员"]}
+                unit="人"
+                searchPlaceholder="搜索姓名、账号或分组"
               />
             </div>
             <div>
@@ -2524,19 +2598,16 @@ function ConfigureInputModal({
         )}
         {mode === "task" && (
         <div>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>来源任务（可多选）</div>
-          <Select
-            style={{ width: "100%" }}
-            mode="multiple"
-            showSearch
-            optionFilterProp="label"
-            placeholder="按任务名称、编号或负责人搜索，可多选"
-            value={sourceTaskIds}
-            onChange={setSourceTaskIds}
-            options={candidates.map((t) => ({
-              value: t.id,
-              label: `${taskCode.get(t.id) ?? ""} ${t.name}（${t.ownerName} · ${t.statusLabel}）`,
-            }))}
+          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+            来源任务（按 O／KR 整组选择或多选）
+          </div>
+          <TreeTransfer
+            items={taskItems}
+            targetKeys={sourceTaskIds.map(String)}
+            onChange={(keys) => setSourceTaskIds(keys.map(Number))}
+            titles={["可选任务", "已选任务"]}
+            unit="项"
+            searchPlaceholder="搜索 O、KR、任务、负责人或交付物"
           />
         </div>
         )}
