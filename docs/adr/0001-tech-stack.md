@@ -7,22 +7,22 @@
 
 ## 决定
 
-| 领域       | 决定                                                                                                                   |
-| -------- | -------------------------------------------------------------------------------------------------------------------- |
-| 后端       | Go，单二进制、单进程                                                                                                          |
-| 前端       | React + TypeScript SPA（Vite 构建），UI 组件库 Ant Design 5（Design Token 配置原型 “Calm Operations” 视觉）                          |
-| 规则归属     | 业务规则（状态派生、卡点、互锁、审批链、权限、进度、五组归类）只存在于后端 domain 包；前端不复刻任何规则，只消费 API 返回的派生字段                                             |
+| 领域       | 决定                                                                                                                                                                               |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 后端       | Go，单二进制、单进程                                                                                                                                                                      |
+| 前端       | React + TypeScript SPA（Vite 构建），UI 组件库 Ant Design 5（Design Token 配置原型 “Calm Operations” 视觉）                                                                                      |
+| 规则归属     | 业务规则（状态派生、卡点、互锁、审批链、权限、进度、五组归类）只存在于后端 domain 包；前端不复刻任何规则，只消费 API 返回的派生字段                                                                                                         |
 | 派生状态     | 读时计算：数据库只存事实，按项目装入内存跑规则，进程内按项目缓存、写后失效；无外部定时设施；写触发的卡点出现/解除 = 每次写操作前后卡点集合对比差异，写入任务动态；时间型卡点（审批超时 N×24h、任务超期）由进程内单 time.Ticker 每小时扫描活跃项目补记动态，事件时间戳取计算出的真实发生时刻（界面显示始终读时派生，不依赖 ticker） |
-| 数据库      | PostgreSQL；镜像用 `pgvector/pgvector:pg16`（基于同版本官方镜像、数据目录兼容，预装 pgvector 为未来 AI 接入留门；V1 不启用扩展、不建向量表）；数据访问 pgx + sqlc，迁移 goose；定时 `pg_dump` 备份 |
-| 文件服务     | MinIO：预签名 URL 上传/下载，同名覆盖对应对象 key 覆盖；成果包整包下载由 Go `archive/zip` 流式生成                                                   |
-| PDF／长图导出 | Gotenberg：项目报告做只读打印视图路由，后端将该页 HTML 交给 Gotenberg 转 PDF；移动端长图复用同一视图走 Gotenberg screenshot 路由（PNG、`clip=false` 整页截取、`waitForExpression` 等待渲染完成，宽度按移动端设定）                   |
-| Excel 导入 | 后端 excelize 解析；模板下载 → 上传 → 字段映射 → 校验 → 失败行回执 Excel                                                                   |
-| 通知       | 站内通知存 Postgres，前端 30–60 秒轮询；外发渠道（企业微信/邮件，预留）统一经 Apprise 单一 HTTP 接口，V1 只部署不配置渠道                                       |
-| 认证会话     | 本地账号；bcrypt 哈希 + HttpOnly Cookie + Postgres session 表；登录失败限速；7 天滑动过期；内网明文 HTTP，HTTPS 留 Caddy 前置选项（不改代码）              |
-| API 契约   | Spec-first：手写 `openapi.yaml` 为唯一契约源；Go 侧 oapi-codegen 生成 server 接口与校验，前端 openapi-typescript + openapi-fetch 生成类型化客户端 |
-| 关系图谱     | React Flow（@xyflow/react）+ elkjs 自动布局（缩放/拖动/小地图/节点虚拟化开箱即用）；互锁环检测仍在后端 domain 规则，前端只上色                                 |
-| 测试       | domain 包 Go 单测逐条覆盖 PRD 第 12 章 49 条验收场景（AC-01～AC-49）；API 集成测试用 httptest + Docker 真 Postgres；2–3 条 Playwright 冒烟                    |
-| 部署       | 单 `docker-compose.yml`：Go 应用 + PostgreSQL + MinIO + Gotenberg + Apprise，共五个容器                                        |
+| 数据库      | PostgreSQL；镜像用 `pgvector/pgvector:pg16`（基于同版本官方镜像、数据目录兼容，预装 pgvector 为未来 AI 接入留门；V1 不启用扩展、不建向量表）；数据访问 pgx + sqlc，迁移 goose；定时 `pg_dump` 备份                                        |
+| 文件服务     | MinIO：预签名 URL 上传/下载，同名覆盖对应对象 key 覆盖；成果包整包下载由 Go `archive/zip` 流式生成                                                                                                               |
+| PDF／长图导出 | Gotenberg：项目报告做只读打印视图路由，后端将该页 HTML 交给 Gotenberg 转 PDF；移动端长图复用同一视图走 Gotenberg screenshot 路由（PNG、`clip=false` 整页截取、`waitForExpression` 等待渲染完成，宽度按移动端设定）                            |
+| Excel 导入 | 后端 excelize 解析；模板下载 → 上传 → 字段映射 → 校验 → 失败行回执 Excel                                                                                                                               |
+| 通知       | 站内通知存 Postgres，前端 30–60 秒轮询；外发渠道（企业微信/邮件，预留）统一经 Apprise 单一 HTTP 接口，V1 只部署不配置渠道                                                                                                   |
+| 认证会话     | 本地账号；bcrypt 哈希 + HttpOnly Cookie + Postgres session 表；登录失败限速；7 天滑动过期；内网明文 HTTP，HTTPS 留 Caddy 前置选项（不改代码）                                                                          |
+| API 契约   | Spec-first：手写 `openapi.yaml` 为唯一契约源；Go 侧 oapi-codegen 生成 server 接口与校验，前端 openapi-typescript + openapi-fetch 生成类型化客户端                                                             |
+| 关系图谱     | React Flow（@xyflow/react）+ elkjs 自动布局（缩放/拖动/小地图/节点虚拟化开箱即用）；互锁环检测仍在后端 domain 规则，前端只上色                                                                                             |
+| 测试       | domain 包 Go 单测逐条覆盖 PRD 第 12 章验收场景（V4.5 起为 AC-01～AC-56）；API 集成测试用 httptest + Docker 真 Postgres；2–3 条 Playwright 冒烟                                                              |
+| 部署       | 单 `docker-compose.yml`：Go 应用 + PostgreSQL + MinIO + Gotenberg + Apprise，共五个容器                                                                                                    |
 
 ## 被否方案（值得记住的）
 

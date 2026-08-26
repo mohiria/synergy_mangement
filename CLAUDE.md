@@ -4,25 +4,26 @@
 
 ## 文档指针（唯一事实源，不在本文件重复）
 
-- 需求：`docs/协同管理工具_详细PRD_V4.4.md`（含 §0.3 V4.4.1 修订记录）+ 我的工作、协作关系两份模块 PRD
+- 需求：`docs/协同管理工具_详细PRD_V4.5.md`（含 §0.3～0.5 继承修订与 §0.6 参考稿取舍说明）+ `docs/我的工作模块_详细PRD_V1.1.md`、`docs/协作关系模块_详细PRD_V1.1.md`；旧版（V4.4、V1.0）仅作历史参考
 - 技术选型与依据：`docs/adr/0001-tech-stack.md`
 - 领域词汇：`docs/CONTEXT.md` —— 代码命名、API 字段用词必须与词汇表一致，含义冲突时先改词汇表再写代码
 
 ## 目录结构
 
 - `docs/`：PRD、词汇表、ADR
-- `collaboration-prototype/`：V4.4 需求验证原型（纯前端、可抛弃；是前端视觉与交互的还原基准，但不复用其代码）
+- `collaboration-prototype-v2/`：V4.5 UI 重设计原型（纯前端、可抛弃；是前端视觉与交互的还原基准，但不复用其代码）
+- `collaboration-prototype/`：旧 V4.4 原型，已废弃，仅作历史参考
 - `server/`：Go 后端（`cmd/`、`internal/domain/`、`internal/api/`、`internal/store/`、`migrations/`）
 - `web/`：React + TypeScript SPA（Vite + Ant Design 5）
 - `openapi.yaml`：唯一 API 契约源（spec-first，手写）
 
 ## Coding 流程（每个功能循环）
 
-1. 从 PRD 验收场景（AC-01～AC-49，主 PRD §12）出发，先改 `openapi.yaml`；
+1. 从 PRD 验收场景（AC-01～AC-56，主 PRD §12）出发，先改 `openapi.yaml`；
 2. 重新生成代码：后端 oapi-codegen，前端 openapi-typescript + openapi-fetch；生成物不手改；
 3. 业务规则（状态派生、卡点、互锁、审批链、权限、进度、五组归类）只写 `server/internal/domain/`；严格 red-green-refactor：先写覆盖对应 AC 的表驱动单测；若编译不过，先补最小桩（空实现／零值返回）让测试可编译运行，再真实跑一次、确认**断言级失败**（红 = 断言失败，编译失败只是中间过程、不算红），然后实现转绿，最后按需重构；从未见断言红的测试不算数，「先写后跑直接全绿」不满足本条；
 4. API handler 保持薄层；集成测试用 httptest + Docker 真 Postgres；
-5. 前端不复刻任何规则，界面反馈只消费 API 派生字段；字段不够时回到契约补字段，不在前端计算；功能范围以 PRD 为准，视觉与交互按 `collaboration-prototype/` 原型逐页还原（布局、配色、组件形态、文案、默认预置项尽量一致，不复用原型代码）；数据模型或范围导致无法还原处，在实现说明中明确指出；调色板、字号契约与组件规格见 `docs/原型设计风格基线.md`（注意原型 styles.css 尾部覆盖块才是生效样式）；
+5. 前端不复刻任何规则，界面反馈只消费 API 派生字段；字段不够时回到契约补字段，不在前端计算；功能范围以 PRD 为准，视觉与交互按 `collaboration-prototype-v2/` 原型逐页还原（布局、配色、组件形态、文案、默认预置项尽量一致，不复用原型代码）；数据模型或范围导致无法还原处，在实现说明中明确指出；调色板、字号契约与组件规格见 `docs/原型设计风格基线.md`（注意 CSS 覆盖顺序：styles.css → collaboration-prototype.css → redesign-v1.css，redesign-v1.css 尾部 4px 圆角 `!important` 契约才是生效样式）；
 6. 数据访问用 sqlc 生成，库结构变更一律走 goose 迁移（`server/migrations/`），不手改数据库。
 
 ## 验证门槛

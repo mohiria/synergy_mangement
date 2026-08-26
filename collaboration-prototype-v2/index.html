@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#f3f5f9" />
+    <meta name="description" content="协同推进项目运营原型：项目总览、OKR、任务、协作关系、个人工作与成果归档。" />
+    <title>协同推进 · Calm Operations 2.0</title>
+    <link rel="stylesheet" href="styles.css?v=44r20" />
+    <link rel="stylesheet" href="collaboration-prototype.css?v=15" />
+    <link rel="stylesheet" href="redesign-v1.css?v=15" />
+  </head>
+  <body>
+    <!-- V4.4 UI redesign V1：从 V4.3 独立复制，保留原有业务事实与交互。 -->
+    <a class="skip-link" href="#page">跳到主要内容</a>
+    <div id="app" class="app-shell">
+      <aside id="sidebar" class="sidebar" aria-label="主导航">
+        <div class="brand">
+          <div class="brand-mark">协</div>
+          <div><strong>协同推进</strong><span>Calm Operations</span></div>
+        </div>
+        <button class="project-switch" data-action="project-menu">
+          <span class="project-dot"></span>
+          <span><b>未来生活科技体验周</b><small>联合联调阶段</small></span>
+          <span data-icon="chevron"></span>
+        </button>
+        <nav id="main-nav" class="main-nav"></nav>
+        <div class="sidebar-foot">
+          <button class="nav-row" data-route="settings"><span data-icon="settings"></span><span>项目设置</span></button>
+          <button class="nav-row" data-action="reset-data"><span data-icon="reset"></span><span>重置演示数据</span></button>
+        </div>
+      </aside>
+      <button id="sidebar-mask" class="sidebar-mask" data-action="close-sidebar" aria-label="关闭导航"></button>
+      <section class="workspace">
+        <header class="topbar">
+          <div class="topbar-left">
+            <button class="icon-btn mobile-menu" data-action="toggle-sidebar" aria-label="打开导航"><span data-icon="menu"></span></button>
+            <div id="breadcrumbs" class="breadcrumbs"></div>
+          </div>
+          <div class="topbar-actions">
+            <button class="icon-btn has-indicator" data-action="notifications" aria-label="通知"><span data-icon="bell"></span><i></i></button>
+            <button id="identity-button" class="identity-button" data-action="identity-menu"></button>
+          </div>
+        </header>
+        <main id="page" class="page" tabindex="-1"></main>
+      </section>
+    </div>
+    <div id="popover-root"></div>
+    <div id="drawer-root"></div>
+    <div id="modal-root"></div>
+    <div id="toast-root" class="toast-root" aria-live="polite"></div>
+    <script src="data.js?v=44r9"></script>
+    <script src="app.js?v=44r33"></script>
+    <script src="collaboration-prototype.js?v=21"></script>
+  </body>
+</html>
