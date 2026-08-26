@@ -3,10 +3,12 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"synergy/server/internal/domain"
@@ -31,8 +33,10 @@ func (s *Server) ListBlockers(w http.ResponseWriter, r *http.Request, projectId 
 	writeJSON(w, http.StatusOK, blockerViews(blockers, actor, uid))
 }
 
-func (s *Server) RemindBlocker(w http.ResponseWriter, r *http.Request, projectId int64) {
-	var req RemindBlockerRequest
+// CreateReminder 一键提醒当前待行动人（AC-11、MW-13）。
+// 提醒目标独立于卡点建模：卡点按卡点键寻址，尚未成卡点的等待事项按 wait:<类型>:<ID> 寻址。
+func (s *Server) CreateReminder(w http.ResponseWriter, r *http.Request, projectId int64) {
+	var req RemindRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_request", Message: "请求内容无法解析"})
 		return
@@ -43,67 +47,138 @@ func (s *Server) RemindBlocker(w http.ResponseWriter, r *http.Request, projectId
 	}
 	uid := currentUser(r).ID
 	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
-	blockers, err := s.projectBlockers(r.Context(), projectId)
+	targets, err := s.projectRemindTargets(r.Context(), projectId)
 	if err != nil {
 		writeInternalError(w)
 		return
 	}
-	key := strings.TrimSpace(req.Key)
-	var target *domain.Blocker
-	for i := range blockers {
-		if blockers[i].Key == key {
-			target = &blockers[i]
+	key := strings.TrimSpace(req.TargetKey)
+	var target *domain.RemindTarget
+	for i := range targets {
+		if targets[i].Key == key {
+			target = &targets[i]
 			break
 		}
 	}
-	// 触发条件已消失的卡点自动解除，按不存在处理。
+	// 条件已消失的卡点自动解除、等待事项已被处理，一律按目标不存在处理。
 	if target == nil {
-		writeJSON(w, http.StatusNotFound, Error{Code: "blocker_not_found", Message: "卡点已不存在或已自动解除"})
+		writeJSON(w, http.StatusNotFound, Error{Code: "remind_target_not_found", Message: "提醒目标已不存在或已处理"})
 		return
 	}
-	if !domain.CanRemindBlocker(actor, uid, *target) {
+	if !domain.CanRemind(actor, uid, *target) {
 		writeForbidden(w)
 		return
 	}
-	// AC-11：提醒带上任务、缺失条件与影响范围。
-	content := fmt.Sprintf("任务「%s」的卡点提醒：缺「%s」（%s）", target.TaskName, target.Missing, target.Reason)
-	if target.ImpactNote != "" {
-		content += "；" + target.ImpactNote
+	// MW-13 冷却：同一人对同一任务每天 1 次。
+	var lastAt *time.Time
+	last, err := s.q.GetLastRemind(r.Context(), store.GetLastRemindParams{TaskID: target.TaskID, SenderID: uid})
+	switch {
+	case err == nil:
+		if last.CreatedAt.Valid {
+			at := last.CreatedAt.Time
+			lastAt = &at
+		}
+	case errors.Is(err, pgx.ErrNoRows):
+	default:
+		writeInternalError(w)
+		return
 	}
+	now := s.now()
+	if !domain.RemindAllowed(lastAt, now) {
+		writeJSON(w, http.StatusConflict, Error{Code: "remind_cooldown", Message: domain.ErrRemindCooldown.Error()})
+		return
+	}
+	content := domain.RemindContent(*target)
 	for _, ownerID := range target.ActionOwnerIDs {
 		if _, err := s.q.CreateNotification(r.Context(), blockerRemindNotification(ownerID, projectId, target.TaskID, content)); err != nil {
 			writeInternalError(w)
 			return
 		}
 	}
+	if _, err := s.q.CreateRemindLog(r.Context(), store.CreateRemindLogParams{
+		TaskID: target.TaskID, SenderID: uid, TargetKey: key,
+		RemindDate: pgtype.Date{Time: now, Valid: true},
+	}); err != nil {
+		writeInternalError(w)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// projectRemindTargets 汇总项目内全部提醒目标：派生卡点，以及尚未成卡点的等待事项
+// （停在当前环节的审批件、待对接人提供的输入请求、未交付的上游任务）。
+func (s *Server) projectRemindTargets(ctx context.Context, projectID int64) ([]domain.RemindTarget, error) {
+	facts, err := s.projectBlockerFacts(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	impact := domain.HardDownstreamNotes(facts.HardEdges, facts.Tasks)
+	tasks := make(map[int64]domain.RemindTaskFact, len(facts.Tasks))
+	for _, t := range facts.Tasks {
+		tasks[t.ID] = domain.RemindTaskFact{
+			Name: t.Name, OwnerID: t.OwnerID, KrOwnerID: t.KrOwnerID,
+			End: t.EndDate, ImpactNote: impact[t.ID],
+		}
+	}
+	waits := []domain.RemindWaitFact{}
+	for _, a := range facts.Approvals {
+		var days *int
+		if !a.StageSince.IsZero() {
+			d := int(facts.Now.Sub(a.StageSince).Hours() / 24)
+			days = &d
+		}
+		waits = append(waits, domain.ApprovalWaitFact(a.Kind, a.RefID, a.TaskID, a.ApproverIDs, a.ApproverNames, days))
+	}
+	for _, in := range facts.Inputs {
+		if in.Ready || in.Necessity != domain.NecessityRequired {
+			continue
+		}
+		switch {
+		case in.RequestID != 0:
+			waits = append(waits, domain.InputRequestWaitFact(in.RequestID, in.TargetTaskID, in.InputName, in.ProviderID, in.ProviderName))
+		case in.SourceTaskID != nil:
+			waits = append(waits, domain.UpstreamWaitFact(in.EdgeID, in.TargetTaskID, in.InputName, in.SourceTaskName, in.SourceOwnerID, in.SourceOwnerName))
+		}
+	}
+	return domain.RemindTargets(domain.RemindFacts{
+		Blockers: domain.DeriveBlockers(facts), Waits: waits, Tasks: tasks,
+	}), nil
 }
 
 // projectBlockers 装配四类结构化事实并派生本项目当前全部卡点。
 func (s *Server) projectBlockers(ctx context.Context, projectID int64) ([]domain.Blocker, error) {
-	taskRows, err := s.q.ListProjectTasks(ctx, projectID)
+	facts, err := s.projectBlockerFacts(ctx, projectID)
 	if err != nil {
 		return nil, err
+	}
+	return domain.DeriveBlockers(facts), nil
+}
+
+// projectBlockerFacts 装配卡点与提醒目标共用的项目结构化事实。
+func (s *Server) projectBlockerFacts(ctx context.Context, projectID int64) (domain.BlockerFacts, error) {
+	taskRows, err := s.q.ListProjectTasks(ctx, projectID)
+	if err != nil {
+		return domain.BlockerFacts{}, err
 	}
 	edgeRows, err := s.q.ListEdgesByProject(ctx, projectID)
 	if err != nil {
-		return nil, err
+		return domain.BlockerFacts{}, err
 	}
 	requestRows, err := s.q.ListInputRequestsByProject(ctx, projectID)
 	if err != nil {
-		return nil, err
+		return domain.BlockerFacts{}, err
 	}
 	poolRows, err := s.q.LatestPoolReviewsByProject(ctx, projectID)
 	if err != nil {
-		return nil, err
+		return domain.BlockerFacts{}, err
 	}
 	changeRows, err := s.q.LatestFieldChangesByProject(ctx, projectID)
 	if err != nil {
-		return nil, err
+		return domain.BlockerFacts{}, err
 	}
 	completionRows, err := s.q.LatestCompletionReviewsByProject(ctx, projectID)
 	if err != nil {
-		return nil, err
+		return domain.BlockerFacts{}, err
 	}
 
 	facts := domain.BlockerFacts{Now: s.now()}
@@ -147,6 +222,7 @@ func (s *Server) projectBlockers(ctx context.Context, projectID int64) ([]domain
 			in.Ready = domain.MemberEdgeReady(ir.State)
 			in.ProviderID = ir.ProviderID
 			in.ProviderName = ir.ProviderName
+			in.RequestID = ir.ID
 		}
 		facts.Inputs = append(facts.Inputs, in)
 		if e.EdgeType == domain.EdgeHardPrerequisite && e.SourceTaskID.Valid {
@@ -182,7 +258,7 @@ func (s *Server) projectBlockers(ctx context.Context, projectID int64) ([]domain
 		case domain.CompletionIntermediate:
 			rvs, err := s.q.ListReviewReviewers(ctx, cr.ID)
 			if err != nil {
-				return nil, err
+				return domain.BlockerFacts{}, err
 			}
 			fact := domain.BlockerApprovalFact{
 				Kind: "intermediate_review", RefID: cr.ID, TaskID: cr.TaskID,
@@ -206,7 +282,7 @@ func (s *Server) projectBlockers(ctx context.Context, projectID int64) ([]domain
 		}
 	}
 
-	return domain.DeriveBlockers(facts), nil
+	return facts, nil
 }
 
 // approverIDs 取任务所属 KR 负责人（入池、关键字段变更与终审的审批人）。

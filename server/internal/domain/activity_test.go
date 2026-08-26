@@ -91,18 +91,19 @@ func TestBlockerActivityDiff(t *testing.T) {
 // 动态类型的中文名（ADR 0002 表格）；行级显示消费派生字段，前端不按枚举拼文案。
 func TestActivityKindLabel(t *testing.T) {
 	cases := map[string]string{
-		ActivityPoolSubmitted:         "提交入池审批",
-		ActivityPoolApproved:          "入池审批通过",
-		ActivityPoolRejected:          "入池审批退回",
-		ActivityFieldChangeSubmitted:  "提交关键字段修改",
-		ActivityFieldChangeApproved:   "关键字段修改生效",
-		ActivityFieldChangeRejected:   "关键字段修改退回",
-		ActivityFieldChangeAbandoned:  "放弃关键字段修改",
-		ActivityCompletionSubmitted:   "提交完成申请",
-		ActivityCompletionApproved:    "完成审核通过",
-		ActivityCompletionRejected:    "完成审核退回",
-		ActivityBlockerOpened:         "卡点出现",
-		ActivityBlockerResolved:       "卡点解除",
+		ActivityPoolSubmitted:          "提交入池审批",
+		ActivityPoolApproved:           "入池审批通过",
+		ActivityPoolRejected:           "入池审批退回",
+		ActivityFieldChangeSubmitted:   "提交关键字段修改",
+		ActivityFieldChangeApproved:    "关键字段修改生效",
+		ActivityFieldChangeRejected:    "关键字段修改退回",
+		ActivityFieldChangeAbandoned:   "放弃关键字段修改",
+		ActivityCompletionSubmitted:    "提交完成申请",
+		ActivityCompletionApproved:     "完成审核通过",
+		ActivityCompletionRejected:     "完成审核退回",
+		ActivityReceiptConfirmed:       "确认接收",
+		ActivityBlockerOpened:          "卡点出现",
+		ActivityBlockerResolved:        "卡点解除",
 		"unknown_kind_not_in_contract": "任务动态",
 	}
 	for kind, want := range cases {

@@ -76,15 +76,17 @@ type WorkInviteFact struct {
 }
 
 type WorkUpstreamFact struct {
-	EdgeID        int64
-	TargetTaskID  int64
-	TargetName    string
-	TargetOwnerID int64
-	SourceTaskID  *int64
-	SourceName    string
-	InputName     string
-	Ready         bool
-	Necessity     string
+	EdgeID          int64
+	TargetTaskID    int64
+	TargetName      string
+	TargetOwnerID   int64
+	SourceTaskID    *int64
+	SourceName      string
+	SourceOwnerID   int64
+	SourceOwnerName string
+	InputName       string
+	Ready           bool
+	Necessity       string
 }
 
 type MyWorkFacts struct {
@@ -109,7 +111,7 @@ type WorkItem struct {
 	TaskID         *int64
 	TaskName       string
 	RefID          *int64
-	RefKey         string
+	RefKey         string // 提醒目标合成键（卡点为卡点键，等待他人为 wait:<类型>:<ID>）
 	Due            *time.Time
 	WaitingDays    *int
 	Overdue        bool
@@ -152,6 +154,24 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		if t.DisplayStatus == TaskCancelled || t.DisplayStatus == TaskCompleted {
 			terminal[t.ID] = true
 		}
+	}
+
+	taskByID := make(map[int64]WorkTaskFact, len(f.Tasks))
+	for _, t := range f.Tasks {
+		taskByID[t.ID] = t
+	}
+	// 等待他人事项的提醒目标（MW-13）：目标是事项本身，不必先成卡点；
+	// 任务负责人／KR 负责人与截止时间由所在任务补齐，没有可寻址待行动人时不给提醒入口。
+	setWaitRemind := func(item *WorkItem, w RemindWaitFact) {
+		if t, ok := taskByID[w.TaskID]; ok {
+			w.TaskName = t.Name
+			w.TaskOwnerID = t.OwnerID
+			w.KrOwnerID = t.KrOwnerID
+			w.Due = t.EndDate
+		}
+		target := WaitRemindTarget(w)
+		item.RefKey = target.Key
+		item.CanRemind = CanRemind(f.Actor, me, target)
 	}
 
 	waitingDays := func(since time.Time) (*int, bool) {
@@ -284,11 +304,15 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 	// —— 等待他人（Q5：停在他人队列；及我任务的上游）——
 	for _, up := range f.Upstreams {
 		if up.TargetOwnerID == me && !up.Ready && up.Necessity == NecessityRequired && up.SourceTaskID != nil {
-			g.Waiting = append(g.Waiting, WorkItem{
+			item := WorkItem{
 				Kind: "upstream", Title: "[上游任务] " + up.SourceName + " → " + up.InputName,
 				TaskID: up.SourceTaskID, TaskName: up.SourceName,
 				RefID: tid(up.EdgeID), Stage: "等待上游交付", DrawerTab: "overview",
-			})
+			}
+			// 提醒目标针对被卡住的下游任务（与「上游未就绪」卡点同口径），待行动人是上游任务负责人。
+			setWaitRemind(&item, UpstreamWaitFact(up.EdgeID, up.TargetTaskID, up.InputName,
+				up.SourceName, up.SourceOwnerID, up.SourceOwnerName))
+			g.Waiting = append(g.Waiting, item)
 		}
 	}
 	for _, ir := range f.InputRequests {
@@ -298,12 +322,14 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		if ir.TaskOwnerID == me && ir.ProviderID != me && (ir.State == InputRequestPending || ir.State == InputRequestAccepted) {
 			days, _ := waitingDays(ir.CreatedAt)
 			overdue := ir.Expected != nil && f.Now.After(*ir.Expected)
-			g.Waiting = append(g.Waiting, WorkItem{
+			item := WorkItem{
 				Kind: "waiting_input_request", Title: "[输入请求] " + ir.InputName + " → " + ir.TaskName,
 				TaskID: tid(ir.TaskID), TaskName: ir.TaskName, RefID: tid(ir.ID),
 				Due: ir.Expected, WaitingDays: days, Overdue: overdue,
 				Stage: "等待对接人提供", DrawerTab: "overview",
-			})
+			}
+			setWaitRemind(&item, InputRequestWaitFact(ir.ID, ir.TaskID, ir.InputName, ir.ProviderID, ""))
+			g.Waiting = append(g.Waiting, item)
 		}
 	}
 	for _, pr := range f.PoolReviews {
@@ -313,12 +339,14 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		if pr.SubmittedBy == me && !(pr.KrOwnerID != nil && *pr.KrOwnerID == me) {
 			days, overdue := waitingDays(pr.SubmittedAt)
 			// AC-04：等待他人卡片按当前审批人姓名显示。
-			g.Waiting = append(g.Waiting, WorkItem{
+			item := WorkItem{
 				Kind: "waiting_pool", Title: "[入池申请] " + pr.TaskName,
 				TaskID: tid(pr.TaskID), TaskName: pr.TaskName, RefID: tid(pr.ID),
 				WaitingDays: days, Overdue: overdue,
 				Stage: ApprovalWaitingLabel([]string{pr.KrOwnerName}), DrawerTab: "audit",
-			})
+			}
+			setWaitRemind(&item, ApprovalWaitFact("pool_review", pr.ID, pr.TaskID, singleApprover(pr.KrOwnerID), []string{pr.KrOwnerName}, days))
+			g.Waiting = append(g.Waiting, item)
 		}
 	}
 	for _, fc := range f.FieldChanges {
@@ -327,12 +355,14 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		}
 		if fc.SubmittedBy == me && !(fc.KrOwnerID != nil && *fc.KrOwnerID == me) {
 			days, overdue := waitingDays(fc.SubmittedAt)
-			g.Waiting = append(g.Waiting, WorkItem{
+			item := WorkItem{
 				Kind: "waiting_field_change", Title: "[关键字段变更] " + fc.TaskName,
 				TaskID: tid(fc.TaskID), TaskName: fc.TaskName, RefID: tid(fc.ID),
 				WaitingDays: days, Overdue: overdue,
 				Stage: ApprovalWaitingLabel([]string{fc.KrOwnerName}), DrawerTab: "audit",
-			})
+			}
+			setWaitRemind(&item, ApprovalWaitFact("field_change", fc.ID, fc.TaskID, singleApprover(fc.KrOwnerID), []string{fc.KrOwnerName}, days))
+			g.Waiting = append(g.Waiting, item)
 		}
 	}
 	for _, cr := range f.Completions {
@@ -354,11 +384,18 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 			stage = ApprovalWaitingLabel(cr.ReviewerNames)
 		}
 		days, overdue := waitingDays(cr.SubmittedAt)
-		g.Waiting = append(g.Waiting, WorkItem{
+		item := WorkItem{
 			Kind: "waiting_completion", Title: "[完成申请] " + cr.TaskName,
 			TaskID: tid(cr.TaskID), TaskName: cr.TaskName, RefID: tid(cr.ID),
 			WaitingDays: days, Overdue: overdue, Stage: stage, DrawerTab: "audit",
-		})
+		}
+		wait := ApprovalWaitFact("final_review", cr.ID, cr.TaskID, singleApprover(cr.KrOwnerID), []string{cr.KrOwnerName}, days)
+		if cr.State == CompletionIntermediate {
+			wait = ApprovalWaitFact("intermediate_review", cr.ID, cr.TaskID,
+				append([]int64(nil), cr.Reviewers...), cr.ReviewerNames, days)
+		}
+		setWaitRemind(&item, wait)
+		g.Waiting = append(g.Waiting, item)
 	}
 
 	// —— 与我相关的卡点（Q7）——
@@ -449,21 +486,13 @@ func workWaitingDays(it WorkItem) int {
 	return *it.WaitingDays
 }
 
-// decorateWorkCards 按分组补齐卡片动作与提醒事实（模块 PRD §5.3、MW-13）：
+// decorateWorkCards 按分组补齐卡片动作（模块 PRD §5.3、MW-13）：
 // 待我处理／待我审批／待我接收是本人要办的事，用「去处理」；等待他人与卡点只读，用「查看详情」。
-// 提醒按派生卡点的合成键寻址，因此等待他人卡片取同任务上首个可提醒的卡点作为提醒目标；
-// 没有可寻址的卡点（尚未成卡点、待行动人是本人、访客）时不提供提醒。
+// 提醒事实在各组派生时已按各自的提醒目标定好：等待他人指向事项本身，卡点指向卡点。
 func decorateWorkCards(f MyWorkFacts, g *MyWorkGroups) {
 	byKey := make(map[string]Blocker, len(f.Blockers))
-	remindableByTask := map[int64]string{}
 	for _, b := range f.Blockers {
 		byKey[b.Key] = b
-		if _, seen := remindableByTask[b.TaskID]; seen {
-			continue
-		}
-		if CanRemindBlocker(f.Actor, f.UserID, b) {
-			remindableByTask[b.TaskID] = b.Key
-		}
 	}
 	for _, group := range [][]WorkItem{g.Pending, g.Approvals, g.Receipts} {
 		for i := range group {
@@ -472,13 +501,6 @@ func decorateWorkCards(f MyWorkFacts, g *MyWorkGroups) {
 	}
 	for i := range g.Waiting {
 		g.Waiting[i].ActionLabel = WorkActionView
-		if g.Waiting[i].TaskID == nil {
-			continue
-		}
-		if key, ok := remindableByTask[*g.Waiting[i].TaskID]; ok {
-			g.Waiting[i].RefKey = key
-			g.Waiting[i].CanRemind = true
-		}
 	}
 	for i := range g.Blockers {
 		g.Blockers[i].ActionLabel = WorkActionView
@@ -524,4 +546,12 @@ func ReportRangeFrom(name string, now time.Time) (*time.Time, error) {
 		return nil, nil
 	}
 	return nil, ErrReportRangeInvalid
+}
+
+// singleApprover 单审批人环节的待行动人列表（未指定 KR 负责人时为空，不给提醒入口）。
+func singleApprover(id *int64) []int64 {
+	if id == nil {
+		return nil
+	}
+	return []int64{*id}
 }

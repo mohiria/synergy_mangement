@@ -121,9 +121,9 @@ export default function MyWorkPage({
 
   const remind = async (item: WorkItem) => {
     if (!item.refKey) return;
-    const res = await client.POST("/projects/{projectId}/blockers/remind", {
+    const res = await client.POST("/projects/{projectId}/reminders", {
       params: { path: { projectId } },
-      body: { key: item.refKey },
+      body: { targetKey: item.refKey },
     });
     if (res.response.status === 204) {
       message.success("已提醒当前待行动人");

@@ -305,10 +305,11 @@ export default function ProjectTasksPage({
   };
 
   // 卡点由系统派生、自动解除，页面只保留一键提醒（AC-11）。
-  const remindBlocker = async (blockerKey: string) => {
-    const res = await client.POST("/projects/{projectId}/blockers/remind", {
+  // 一键提醒（MW-13）：目标既可以是派生卡点，也可以是尚未成卡点的等待事项。
+  const remindBlocker = async (targetKey: string) => {
+    const res = await client.POST("/projects/{projectId}/reminders", {
       params: { path: { projectId } },
-      body: { key: blockerKey },
+      body: { targetKey },
     });
     if (res.response.ok) {
       message.success("已提醒当前待行动人");

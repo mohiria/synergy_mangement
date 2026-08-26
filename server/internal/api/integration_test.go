@@ -2629,7 +2629,7 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 	kr1 := okr[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	blockersURL := fmt.Sprintf("%s/projects/%d/blockers", base, created.Id)
-	remindURL := blockersURL + "/remind"
+	remindURL := fmt.Sprintf("%s/projects/%d/reminders", base, created.Id)
 	// 已过期的周期：截止已过 ⇒ 任务超期；开始时间已到 ⇒ 未就绪的必要输入成卡点。
 	start, end := openapiDate(t, "2020-01-01"), openapiDate(t, "2020-02-01")
 
@@ -2705,10 +2705,10 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 	}
 
 	// AC-11：一键提醒当前待行动人；待行动人自己不能提醒自己。
-	resp = doJSON(t, bob, http.MethodPost, remindURL, api.RemindBlockerRequest{Key: upstreamKey})
+	resp = doJSON(t, bob, http.MethodPost, remindURL, api.RemindRequest{TargetKey: upstreamKey})
 	wantStatus(t, resp, http.StatusForbidden)
 	resp.Body.Close()
-	resp = doJSON(t, carol, http.MethodPost, remindURL, api.RemindBlockerRequest{Key: upstreamKey})
+	resp = doJSON(t, carol, http.MethodPost, remindURL, api.RemindRequest{TargetKey: upstreamKey})
 	wantStatus(t, resp, http.StatusNoContent)
 	resp.Body.Close()
 	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
@@ -2719,7 +2719,7 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 	}
 
 	// 不存在的键（触发条件已消失）按 404 处理，没有手动解除接口。
-	resp = doJSON(t, carol, http.MethodPost, remindURL, api.RemindBlockerRequest{Key: "task_overdue:999999"})
+	resp = doJSON(t, carol, http.MethodPost, remindURL, api.RemindRequest{TargetKey: "task_overdue:999999"})
 	wantStatus(t, resp, http.StatusNotFound)
 	resp.Body.Close()
 
@@ -4026,4 +4026,118 @@ func TestReceiversAndReceipts(t *testing.T) {
 	if !hasReceiptActivity {
 		t.Fatalf("确认接收应进任务动态: %+v", dA.Activities)
 	}
+}
+
+// MW-13 的另一半：等待他人分组里尚未成卡点的等待事项也能提醒当前待行动人；
+// 同一人对同一任务当天第二次提醒被拒；不能提醒本人（模块 PRD §5.3）。
+func TestRemindWaitingTargets(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, bob, carol := newClient(t), newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(bob, "bob", "bob-pass")
+	login(carol, "carol", "carol-pass")
+	sp := func(s string) *string { return &s }
+
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "提醒试点", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	for _, uid := range []int64{bobUser.ID, carolUser.ID} {
+		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+		wantStatus(t, resp, http.StatusCreated)
+		resp.Body.Close()
+	}
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("按时推进"), KeyResults: &[]api.CreateKeyResultInput{{Description: "入池及时审批", OwnerId: &bobUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	okr := decodeBody[[]api.Objective](t, resp)
+	kr1 := okr[0].KeyResults[0].Id
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+
+	// carol 提交入池申请：刚提交，未达审批超时阈值，因此没有任何派生卡点
+	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "等审批的任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	task := decodeBody[[]api.Task](t, resp)[0]
+
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/projects/%d/blockers", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if bs := decodeBody[[]api.Blocker](t, resp); len(bs) != 0 {
+		t.Fatalf("刚提交不应有派生卡点: %+v", bs)
+	}
+
+	// 等待他人卡片按事项自身的提醒目标寻址，且给出提醒入口
+	myWorkURL := fmt.Sprintf("%s/projects/%d/my-work", base, created.Id)
+	resp = doJSON(t, carol, http.MethodGet, myWorkURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	work := decodeBody[api.MyWork](t, resp)
+	var waiting *api.WorkItem
+	for i := range work.Waiting {
+		if work.Waiting[i].Kind == "waiting_pool" {
+			waiting = &work.Waiting[i]
+		}
+	}
+	if waiting == nil {
+		t.Fatalf("等待他人应有入池申请卡片: %+v", work.Waiting)
+	}
+	if !waiting.CanRemind || waiting.RefKey == nil || !strings.HasPrefix(*waiting.RefKey, "wait:pool_review:") {
+		t.Fatalf("尚未成卡点的等待事项也应可提醒并按自身键寻址: %+v", waiting)
+	}
+
+	remindURL := fmt.Sprintf("%s/projects/%d/reminders", base, created.Id)
+	// 不提醒本人：待行动人（KR 负责人 bob）自己不能提醒
+	resp = doJSON(t, bob, http.MethodPost, remindURL, api.RemindRequest{TargetKey: *waiting.RefKey})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+
+	// 提交人可提醒；通知带入任务、缺失环节与截止时间
+	resp = doJSON(t, carol, http.MethodPost, remindURL, api.RemindRequest{TargetKey: *waiting.RefKey})
+	wantStatus(t, resp, http.StatusNoContent)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
+	wantStatus(t, resp, http.StatusOK)
+	notes := decodeBody[[]api.Notification](t, resp)
+	if len(notes) != 1 || notes[0].Kind != "blocker_remind" || notes[0].TaskId == nil || *notes[0].TaskId != task.Id {
+		t.Fatalf("提醒通知异常: %+v", notes)
+	}
+	for _, want := range []string{"等审批的任务", "入池审批处理", "2026-09-30"} {
+		if !strings.Contains(notes[0].Content, want) {
+			t.Fatalf("提醒正文缺「%s」: %s", want, notes[0].Content)
+		}
+	}
+
+	// 冷却：同一人对同一任务当天第二次提醒被拒
+	resp = doJSON(t, carol, http.MethodPost, remindURL, api.RemindRequest{TargetKey: *waiting.RefKey})
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+
+	// 目标已处理后按不存在处理
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, task.Id),
+		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPost, remindURL, api.RemindRequest{TargetKey: *waiting.RefKey})
+	wantStatus(t, resp, http.StatusNotFound)
+	resp.Body.Close()
 }

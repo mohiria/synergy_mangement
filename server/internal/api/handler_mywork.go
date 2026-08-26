@@ -199,6 +199,7 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 			fact := domain.WorkUpstreamFact{
 				EdgeID: e.ID, TargetTaskID: e.TargetTaskID, TargetName: e.TargetTaskName,
 				SourceTaskID: &e.SourceTaskID.Int64, SourceName: e.SourceTaskName.String,
+				SourceOwnerID: e.SourceOwnerID.Int64, SourceOwnerName: e.SourceOwnerName.String,
 				InputName: e.Name, Ready: ready, Necessity: e.Necessity,
 			}
 			if tf, ok := taskFactByID[e.TargetTaskID]; ok {

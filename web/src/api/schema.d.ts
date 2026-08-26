@@ -671,7 +671,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/projects/{projectId}/blockers/remind": {
+    "/projects/{projectId}/reminders": {
         parameters: {
             query?: never;
             header?: never;
@@ -682,8 +682,8 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 一键提醒卡点当前待行动人（AC-11）：按派生卡点的合成键定位，发送带任务、缺失条件与截止时间的站内通知 */
-        post: operations["remindBlocker"];
+        /** 一键提醒当前待行动人（AC-11、MW-13）：目标既可以是派生卡点，也可以是尚未成卡点的等待事项（审批件、输入请求、上游任务）；通知自动带入任务、缺失输入、截止时间与下游影响 */
+        post: operations["createReminder"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1736,7 +1736,7 @@ export interface components {
              * @description 事项自身 ID（审批单／输入请求／邀请）
              */
             refId?: number;
-            /** @description 派生卡点的合成键；一键提醒按此寻址（卡点组为本条卡点，等待他人组为同任务上首个可提醒的卡点） */
+            /** @description 提醒目标的合成键；一键提醒按此寻址（卡点组为本条卡点的键，等待他人组为该等待事项自身的 wait:<事项类型>:<事项 ID>） */
             refKey?: string;
             /**
              * Format: date
@@ -1757,7 +1757,7 @@ export interface components {
             drawerTab?: string;
             /** @description 卡片文字按钮文案（我的工作 PRD §5.3、AC-55；派生字段）：本人要办的三组为「去处理」，等待他人与卡点为「查看详情」 */
             actionLabel: string;
-            /** @description 卡片能否直接一键提醒当前待行动人（MW-13；派生字段）；按 refKey 指向的派生卡点寻址，不提醒本人、访客不可 */
+            /** @description 卡片能否直接一键提醒当前待行动人（MW-13；派生字段）；按 refKey 指向的提醒目标寻址，不提醒本人、访客不可，冷却为同一人对同一任务每天 1 次 */
             canRemind: boolean;
         };
         /** @description 我的工作五分组（AC-16；KR 终审归入待我审批） */
@@ -1802,9 +1802,9 @@ export interface components {
             /** @description 当前用户能否一键提醒（派生字段；待行动人本人不可提醒自己，访客不可） */
             canRemind?: boolean;
         };
-        RemindBlockerRequest: {
-            /** @description 目标卡点的合成键，取自卡点列表或任务详情 */
-            key: string;
+        RemindRequest: {
+            /** @description 提醒目标的合成键；卡点取自卡点列表或任务详情的 key，等待他人事项取自我的工作卡片的 refKey（形如 wait:<事项类型>:<事项 ID>） */
+            targetKey: string;
         };
         /**
          * @description 输入请求状态（词汇表「输入请求」；PRD §5.5）
@@ -3214,7 +3214,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    remindBlocker: {
+    createReminder: {
         parameters: {
             query?: never;
             header?: never;
@@ -3225,7 +3225,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["RemindBlockerRequest"];
+                "application/json": components["schemas"]["RemindRequest"];
             };
         };
         responses: {
@@ -3239,6 +3239,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["ValidationError"];
         };
     };

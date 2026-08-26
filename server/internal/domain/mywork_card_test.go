@@ -7,7 +7,7 @@ import (
 
 // 我的工作卡片动作与提醒（模块 PRD §5.3、AC-55、MW-21、MW-13）：
 // 待我处理／待我审批／待我接收用「去处理」，等待他人与卡点用「查看详情」；
-// 提醒按派生卡点的合成键寻址，故只有能对应到现存卡点、且待行动人不是本人时才可提醒。
+// 提醒按各自的提醒目标寻址：卡点用卡点键，等待他人用事项自身的 wait 键；待行动人是本人或访客时不可提醒。
 func TestMyWorkCardActionAndRemind(t *testing.T) {
 	now := time.Date(2026, 8, 26, 10, 0, 0, 0, time.UTC)
 	end := now.AddDate(0, 0, -3)
@@ -88,23 +88,24 @@ func TestMyWorkCardActionAndRemind(t *testing.T) {
 		}
 	})
 
-	t.Run("等待他人卡片按同任务的现存卡点取得提醒键", func(t *testing.T) {
+	t.Run("等待他人卡片按事项自身的提醒目标寻址", func(t *testing.T) {
 		g := MyWork(base(Actor{Role: RoleMember}, []Blocker{overdueBlocker}))
 		if len(g.Waiting) != 1 {
 			t.Fatalf("等待他人条数 = %d, want 1", len(g.Waiting))
 		}
-		if !g.Waiting[0].CanRemind || g.Waiting[0].RefKey != overdueBlocker.Key {
-			t.Errorf("等待他人卡片应带同任务卡点键并可提醒: %+v", g.Waiting[0])
+		if !g.Waiting[0].CanRemind || g.Waiting[0].RefKey != RemindWaitKey("pool_review", 7) {
+			t.Errorf("等待他人卡片应带自身 wait 键并可提醒: %+v", g.Waiting[0])
 		}
 	})
 
-	t.Run("同任务没有卡点时等待他人不可提醒", func(t *testing.T) {
+	// MW-13 的另一半：审批件尚未达到超时阈值、没有派生卡点时，等待他人同样可提醒。
+	t.Run("尚未成卡点的等待事项同样可提醒", func(t *testing.T) {
 		g := MyWork(base(Actor{Role: RoleMember}, nil))
 		if len(g.Waiting) != 1 {
 			t.Fatalf("等待他人条数 = %d, want 1", len(g.Waiting))
 		}
-		if g.Waiting[0].CanRemind || g.Waiting[0].RefKey != "" {
-			t.Errorf("无卡点可寻址时不应提供提醒: %+v", g.Waiting[0])
+		if !g.Waiting[0].CanRemind || g.Waiting[0].RefKey != RemindWaitKey("pool_review", 7) {
+			t.Errorf("尚未成卡点的等待事项也应可提醒: %+v", g.Waiting[0])
 		}
 	})
 }

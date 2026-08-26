@@ -200,6 +200,15 @@ type ProjectMember struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+type RemindLog struct {
+	ID         int64
+	TaskID     int64
+	SenderID   int64
+	TargetKey  string
+	RemindDate pgtype.Date
+	CreatedAt  pgtype.Timestamptz
+}
+
 type Session struct {
 	Token     string
 	UserID    int64

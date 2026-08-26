@@ -53,6 +53,7 @@ type BlockerInputFact struct {
 	SourceOwnerName string
 	ProviderID      int64 // 来源为指定成员时的对接人
 	ProviderName    string
+	RequestID       int64 // 来源为指定成员时的输入请求 ID（提醒目标寻址用）
 }
 
 // BlockerApprovalFact 停在当前环节等待处理的审批件事实。
@@ -249,24 +250,9 @@ func DeriveBlockers(f BlockerFacts) []Blocker {
 	return out
 }
 
-// CanRemindBlocker 一键提醒（模块 PRD §5.3、§10）：访客不可；待行动人不提醒自己；
-// 任务负责人、所属 KR 负责人与可编辑项目者可提醒。
+// CanRemindBlocker 卡点卡片的一键提醒判定；与等待他人事项共用同一套提醒目标规则（MW-13）。
 func CanRemindBlocker(a Actor, userID int64, b Blocker) bool {
-	if !CanEditProject(a) && a.Role != RoleMember {
-		return false
-	}
-	for _, id := range b.ActionOwnerIDs {
-		if id == userID {
-			return false
-		}
-	}
-	if b.TaskOwnerID == userID {
-		return true
-	}
-	if b.KrOwnerID != nil && *b.KrOwnerID == userID {
-		return true
-	}
-	return CanEditProject(a)
+	return CanRemind(a, userID, BlockerRemindTarget(b, nil))
 }
 
 // blockerTaskInExecution 判定任务是否处于会产生卡点的执行区间：已入池且未终态。
@@ -342,6 +328,16 @@ func interlockActionOwners(comp []int64, taskByID map[int64]BlockerTaskFact) ([]
 		names = append(names, t.KrOwnerName)
 	}
 	return ids, names
+}
+
+// HardDownstreamNotes 沿硬前置边汇总每个任务的下游影响说明（AC-11「定位影响」）；
+// 提醒目标与卡点共用同一口径。
+func HardDownstreamNotes(edges []HardEdge, tasks []BlockerTaskFact) map[int64]string {
+	taskByID := make(map[int64]BlockerTaskFact, len(tasks))
+	for _, t := range tasks {
+		taskByID[t.ID] = t
+	}
+	return downstreamTaskNames(edges, taskByID)
 }
 
 // downstreamTaskNames 沿硬前置边汇总每个任务的下游影响说明（AC-11「定位影响」）。
