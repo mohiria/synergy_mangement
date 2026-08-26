@@ -232,6 +232,7 @@ func blockerView(b domain.Blocker, actor domain.Actor, userID int64) Blocker {
 	item := Blocker{
 		Key:              b.Key,
 		Kind:             BlockerKind(b.Kind),
+		KindLabel:        domain.BlockerKindLabel(b.Kind),
 		TaskId:           b.TaskID,
 		TaskName:         b.TaskName,
 		Missing:          b.Missing,

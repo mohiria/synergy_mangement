@@ -319,3 +319,26 @@ func TestCanRemindBlocker(t *testing.T) {
 }
 
 func ptr64(v int64) *int64 { return &v }
+
+// 四类卡点的类型名（我的工作 PRD §8.7）：行级显示消费派生字段，前端不再按枚举拼文案（AC-11）。
+func TestBlockerKindLabel(t *testing.T) {
+	cases := []struct {
+		name string
+		kind string
+		want string
+	}{
+		{"上游未就绪", BlockerUpstreamUnready, "上游未就绪"},
+		{"任务超期", BlockerTaskOverdue, "任务超期"},
+		{"审批超时", BlockerApprovalTimeout, "审批超时"},
+		{"硬依赖互锁", BlockerInterlock, "硬依赖互锁"},
+		{"未知类型回退为卡点", "something_else", "卡点"},
+		{"空值回退为卡点", "", "卡点"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := BlockerKindLabel(c.kind); got != c.want {
+				t.Fatalf("BlockerKindLabel(%q) = %q，期望 %q", c.kind, got, c.want)
+			}
+		})
+	}
+}

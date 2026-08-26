@@ -1532,6 +1532,8 @@ export interface components {
         ReportBlocker: {
             taskName: string;
             kind: components["schemas"]["BlockerKind"];
+            /** @description 四类卡点的中文类型名（派生字段） */
+            kindLabel: string;
             missing: string;
             reason: string;
             level: components["schemas"]["RiskLevel"];
@@ -1673,6 +1675,8 @@ export interface components {
             /** @description 派生卡点的合成键（形如 task_overdue:42、upstream_unready:edge:17）；一键提醒按此寻址 */
             key: string;
             kind: components["schemas"]["BlockerKind"];
+            /** @description 四类卡点的中文类型名（派生字段）；行级显示消费本字段，前端不按枚举拼文案 */
+            kindLabel: string;
             /** Format: int64 */
             taskId: number;
             taskName: string;

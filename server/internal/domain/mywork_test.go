@@ -227,3 +227,25 @@ func TestReportRangeFrom(t *testing.T) {
 		t.Fatal("非法范围应报错")
 	}
 }
+
+// 卡点卡片的环节文案用四类中文类型名，不把 kind 枚举原样透给界面（AC-11）。
+func TestMyWorkBlockerStageUsesKindLabel(t *testing.T) {
+	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
+	me := int64(5)
+	g := MyWork(MyWorkFacts{
+		UserID: me,
+		Now:    now,
+		Blockers: []Blocker{{
+			Key: "approval_timeout:pool_review:9", Kind: BlockerApprovalTimeout,
+			TaskID: 1, TaskName: "现场调研", Missing: "入池审批",
+			ActionOwnerIDs: []int64{me}, ActionOwnerNames: []string{"我"},
+			Level: "high_risk", Since: now.AddDate(0, 0, -4),
+		}},
+	})
+	if len(g.Blockers) != 1 {
+		t.Fatalf("应有 1 条卡点事项，实际 %d", len(g.Blockers))
+	}
+	if g.Blockers[0].Stage != "审批超时" {
+		t.Fatalf("卡点事项环节应为中文类型名，实际 %q", g.Blockers[0].Stage)
+	}
+}

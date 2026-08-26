@@ -34,6 +34,14 @@ type TaskInvite = components["schemas"]["TaskInvite"];
 type TaskDetail = components["schemas"]["TaskDetail"];
 type EdgeType = components["schemas"]["EdgeType"];
 type MemberRole = components["schemas"]["MemberRole"];
+type RiskLevel = components["schemas"]["RiskLevel"];
+
+// 风险等级词表（与 OKR、总览、图谱、报告各页一致）；卡点类型名一律消费 API 的 kindLabel。
+const RISK_LABEL: Record<RiskLevel, string> = {
+  normal: "正常",
+  warning: "预警",
+  high_risk: "高风险",
+};
 
 // 状态筛选下拉的选项词表（需要枚举全集，非行级显示；文案对齐原型 taskStatusOptions）。
 // 行级状态显示一律消费 API 派生的 statusLabel（AC-04），不在前端推导。
@@ -1652,12 +1660,9 @@ function TaskDrawer({
             <div key={b.key} className="input-fact" style={{ borderColor: "#e4b6ba", background: "#fffafa" }}>
               <div>
                 <b>
-                  缺失:{b.missing}
-                  <span
-                    className={`status-pill ${b.level === "high_risk" ? "risk-high_risk" : "risk-warning"}`}
-                    style={{ marginLeft: 8 }}
-                  >
-                    {b.level === "high_risk" ? "高风险" : "预警"}
+                  {b.kindLabel}:缺 {b.missing}
+                  <span className={`status-pill risk-${b.level}`} style={{ marginLeft: 8 }}>
+                    {RISK_LABEL[b.level]}
                   </span>
                 </b>
                 <small>

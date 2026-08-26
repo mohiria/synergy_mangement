@@ -2830,12 +2830,15 @@ components:
           format: date-time
     ReportBlocker:
       type: object
-      required: [taskName, kind, missing, reason, level]
+      required: [taskName, kind, kindLabel, missing, reason, level]
       properties:
         taskName:
           type: string
         kind:
           $ref: "#/components/schemas/BlockerKind"
+        kindLabel:
+          type: string
+          description: 四类卡点的中文类型名（派生字段）
         missing:
           type: string
         reason:
@@ -3085,13 +3088,16 @@ components:
     Blocker:
       type: object
       description: 结构化卡点（词汇表）；由四类结构化事实读时派生，不落库、无人工上报与手动解除，触发条件消失即消失
-      required: [key, kind, taskId, taskName, missing, reason, level, actionOwnerIds, actionOwnerNames, since]
+      required: [key, kind, kindLabel, taskId, taskName, missing, reason, level, actionOwnerIds, actionOwnerNames, since]
       properties:
         key:
           type: string
           description: 派生卡点的合成键（形如 task_overdue:42、upstream_unready:edge:17）；一键提醒按此寻址
         kind:
           $ref: "#/components/schemas/BlockerKind"
+        kindLabel:
+          type: string
+          description: 四类卡点的中文类型名（派生字段）；行级显示消费本字段，前端不按枚举拼文案
         taskId:
           type: integer
           format: int64

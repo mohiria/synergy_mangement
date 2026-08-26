@@ -322,7 +322,7 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		g.Blockers = append(g.Blockers, WorkItem{
 			Kind: "blocker", Title: "[卡点] " + b.TaskName + "：缺 " + b.Missing,
 			TaskID: tid(b.TaskID), TaskName: b.TaskName, RefKey: b.Key,
-			WaitingDays: days, Stage: b.Kind, DrawerTab: "overview",
+			WaitingDays: days, Stage: BlockerKindLabel(b.Kind), DrawerTab: "overview",
 		})
 	}
 

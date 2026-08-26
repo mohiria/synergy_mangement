@@ -145,6 +145,7 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 		item := ReportBlocker{
 			TaskName:        b.TaskName,
 			Kind:            BlockerKind(b.Kind),
+			KindLabel:       domain.BlockerKindLabel(b.Kind),
 			Missing:         b.Missing,
 			Reason:          b.Reason,
 			Level:           RiskLevel(b.Level),

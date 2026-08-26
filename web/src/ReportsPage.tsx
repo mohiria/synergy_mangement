@@ -185,11 +185,8 @@ export default function ReportsPage({
               <div key={i} className="input-fact">
                 <div>
                   <b>
-                    {b.taskName}：缺 {b.missing}
-                    <span
-                      className={`status-pill ${b.level === "high_risk" ? "risk-high_risk" : "risk-warning"}`}
-                      style={{ marginLeft: 8 }}
-                    >
+                    {b.taskName} · {b.kindLabel}：缺 {b.missing}
+                    <span className={`status-pill risk-${b.level}`} style={{ marginLeft: 8 }}>
                       {RISK_LABEL[b.level]}
                     </span>
                   </b>

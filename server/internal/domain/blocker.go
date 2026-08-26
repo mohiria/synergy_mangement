@@ -380,3 +380,19 @@ func downstreamTaskNames(edges []HardEdge, taskByID map[int64]BlockerTaskFact) m
 	}
 	return notes
 }
+
+var blockerKindLabels = map[string]string{
+	BlockerUpstreamUnready: "上游未就绪",
+	BlockerTaskOverdue:     "任务超期",
+	BlockerApprovalTimeout: "审批超时",
+	BlockerInterlock:       "硬依赖互锁",
+}
+
+// BlockerKindLabel 四类卡点的中文类型名（我的工作 PRD §8.7）。
+// 行级显示消费本派生字段，前端不再按枚举拼文案（AC-11）。
+func BlockerKindLabel(kind string) string {
+	if label, ok := blockerKindLabels[kind]; ok {
+		return label
+	}
+	return "卡点"
+}

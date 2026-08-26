@@ -330,7 +330,10 @@ export default function CollaborationPage({
     providers.forEach((name, id) => opts.push({ value: `member:${id}`, label: `成员 · ${name}` }));
     edges.forEach((e) => opts.push({ value: `edge:${e.id}`, label: `关系 · ${e.name}（→ ${e.targetTaskName ?? ""}）` }));
     openBlockers.forEach((b) =>
-      opts.push({ value: `blocker:${b.key}`, label: `卡点 · ${taskById.get(b.taskId)?.name ?? ""}：缺 ${b.missing}` }),
+      opts.push({
+        value: `blocker:${b.key}`,
+        label: `${b.kindLabel} · ${taskById.get(b.taskId)?.name ?? ""}：缺 ${b.missing}`,
+      }),
     );
     return opts;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -604,7 +607,7 @@ export default function CollaborationPage({
         ))}
         {inspectorDetail.blockers.length > 0 && (
           <div style={{ color: "var(--red)", fontSize: 12 }}>
-            卡点：{inspectorDetail.blockers.map((b) => `缺 ${b.missing}`).join("；")}
+            卡点：{inspectorDetail.blockers.map((b) => `${b.kindLabel}：缺 ${b.missing}`).join("；")}
           </div>
         )}
         <div>
@@ -887,7 +890,9 @@ export default function CollaborationPage({
                         }
                       }}
                     >
-                      <b>{b.level === "high_risk" ? "高风险卡点" : "预警卡点"}</b>
+                      <b>
+                        {b.kindLabel} · {RISK_LABEL[b.level]}
+                      </b>
                       <small>
                         {taskById.get(b.taskId)?.name ?? ""}：缺 {b.missing}
                       </small>
