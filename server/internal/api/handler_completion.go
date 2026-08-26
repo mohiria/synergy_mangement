@@ -421,9 +421,21 @@ func (s *Server) completionReviewList(ctx context.Context, taskID int64, facts d
 			_, err := domain.DecideCompletionRule(facts, userID, true, "")
 			canDecide = err == nil
 		}
+		// AC-04：等待状态按当前审批人姓名显示。
+		krOwnerName := ""
+		if facts.KrOwnerID != nil {
+			if u, err := s.q.GetUserByID(ctx, *facts.KrOwnerID); err == nil {
+				krOwnerName = u.DisplayName
+			}
+		}
+		reviewerNames := make([]string, 0, len(reviewerRows))
+		for _, rv := range reviewerRows {
+			reviewerNames = append(reviewerNames, rv.DisplayName)
+		}
 		item := CompletionReview{
 			Id:              cr.ID,
 			State:           CompletionReviewState(cr.State),
+			StateLabel:      domain.CompletionStateLabel(cr.State, krOwnerName, reviewerNames),
 			Note:            cr.Note,
 			Opinion:         optString(cr.Opinion),
 			Items:           views,

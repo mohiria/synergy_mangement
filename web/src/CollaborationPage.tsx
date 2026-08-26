@@ -13,23 +13,11 @@ type TaskDetail = components["schemas"]["TaskDetail"];
 type DeliverableEdge = components["schemas"]["DeliverableEdge"];
 type Blocker = components["schemas"]["Blocker"];
 type RiskLevel = components["schemas"]["RiskLevel"];
-type TaskStatus = components["schemas"]["TaskStatus"];
 
 const RISK_LABEL: Record<RiskLevel, string> = {
   normal: "正常",
   warning: "预警",
   high_risk: "高风险",
-};
-const STATUS_LABEL: Record<TaskStatus, string> = {
-  draft: "草稿",
-  pending_pool_review: "待入池审批",
-  not_started: "未开始",
-  waiting_input: "等待输入",
-  in_progress: "进行中",
-  pending_intermediate_review: "待中间审核",
-  pending_final_review: "待 KR 终审",
-  completed: "已完成",
-  cancelled: "已取消",
 };
 
 const EDGE_TYPE_LABEL: Record<string, string> = {
@@ -499,7 +487,7 @@ export default function CollaborationPage({
       >
         <b>{t.name}</b>
         <small>
-          {krById.get(t.keyResultId)?.code} · {t.ownerName} · {STATUS_LABEL[t.status]}
+          {krById.get(t.keyResultId)?.code} · {t.ownerName} · {t.statusLabel}
           {taskBlockers.length > 0 && ` · ${taskBlockers.length} 个卡点`}
         </small>
       </div>
@@ -597,7 +585,7 @@ export default function CollaborationPage({
       <div style={{ fontSize: 14, display: "grid", gap: 6 }}>
         <div>负责人：{inspectorDetail.task.ownerName}</div>
         <div>
-          状态：<span className="status-pill">{STATUS_LABEL[inspectorDetail.task.status]}</span>
+          状态：<span className="status-pill">{inspectorDetail.task.statusLabel}</span>
           {inspectorDetail.task.progress != null && ` · ${inspectorDetail.task.progress}%`}
         </div>
         <div>

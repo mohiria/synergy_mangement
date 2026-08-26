@@ -7,23 +7,23 @@ func CurrentStage(t TaskFacts) (string, *int64) {
 	switch t.Status {
 	case TaskDraft:
 		creator := t.CreatorID
-		return "草稿完善", &creator
+		return StageDraft, &creator
 	case TaskPendingPoolReview:
-		return "创建入池审批", t.KrOwnerID
+		return StagePoolReview, t.KrOwnerID
 	case TaskNotStarted:
-		return "待开始执行", &owner
+		return StageNotStarted, &owner
 	case TaskWaitingInput:
-		return "等待输入", &owner
+		return StageWaitingInput, &owner
 	case TaskInProgress:
-		return "任务执行", &owner
+		return StageInProgress, &owner
 	case TaskPendingIntermediateReview:
-		return "中间或签审核", nil
+		return StageIntermediateReview, nil
 	case TaskPendingFinalReview:
-		return "KR 终审", t.KrOwnerID
+		return StageFinalReview, t.KrOwnerID
 	case TaskCompleted:
-		return "已闭环", nil
+		return StageCompleted, nil
 	case TaskCancelled:
-		return "已取消", nil
+		return StageCancelled, nil
 	}
-	return "任务执行", &owner
+	return StageInProgress, &owner
 }

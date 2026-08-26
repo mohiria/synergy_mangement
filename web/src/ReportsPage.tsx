@@ -10,7 +10,6 @@ type Project = components["schemas"]["Project"];
 type Report = components["schemas"]["Report"];
 type ReportRange = components["schemas"]["ReportRange"];
 type RiskLevel = components["schemas"]["RiskLevel"];
-type TaskStatus = components["schemas"]["TaskStatus"];
 
 const RANGE_LABEL: Record<ReportRange, string> = {
   today: "今天",
@@ -22,17 +21,6 @@ const RISK_LABEL: Record<RiskLevel, string> = {
   normal: "正常",
   warning: "预警",
   high_risk: "高风险",
-};
-const STATUS_LABEL: Record<TaskStatus, string> = {
-  draft: "草稿",
-  pending_pool_review: "待入池审批",
-  not_started: "未开始",
-  waiting_input: "等待输入",
-  in_progress: "进行中",
-  pending_intermediate_review: "待中间审核",
-  pending_final_review: "待 KR 终审",
-  completed: "已完成",
-  cancelled: "已取消",
 };
 
 const fmtTime = (s?: string) => (s ? s.slice(0, 16).replace("T", " ") : "");
@@ -245,7 +233,7 @@ export default function ReportsPage({
                     )}
                   </b>
                   <small>
-                    {n.ownerName} · {STATUS_LABEL[n.status]}
+                    {n.ownerName} · {n.statusLabel}
                     {n.endDate ? ` · 截止 ${n.endDate}` : ""}
                   </small>
                 </div>

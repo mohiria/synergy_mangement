@@ -637,6 +637,13 @@ func TestTaskCreateAndPoolReview(t *testing.T) {
 	if list[0].PoolReview == nil || list[0].PoolReview.Status != api.PoolReviewStatusPending || list[0].PoolReview.Exempt {
 		t.Fatalf("审批单异常: %+v", list[0].PoolReview)
 	}
+	// AC-04：面向用户显示当前审批人姓名（入池审批人是 KR 负责人 bob／李四）。
+	if list[0].StatusLabel != "待李四审批" {
+		t.Fatalf("待入池审批任务显示文案 = %q, want 待李四审批", list[0].StatusLabel)
+	}
+	if list[0].PoolReview.StatusLabel != "待李四审批" {
+		t.Fatalf("入池审批单显示文案 = %q, want 待李四审批", list[0].PoolReview.StatusLabel)
+	}
 	// carol 视角不可自审；bob（KR 负责人）视角可审
 	if list[0].CanDecidePoolReview {
 		t.Fatalf("提交人不应可处理审批: %+v", list[0])
@@ -663,6 +670,9 @@ func TestTaskCreateAndPoolReview(t *testing.T) {
 	}
 	if rejected.PoolReview.Opinion == nil || *rejected.PoolReview.Opinion != opinion {
 		t.Fatalf("退回意见未保留: %+v", rejected.PoolReview)
+	}
+	if rejected.StatusLabel != "草稿" || rejected.PoolReview.StatusLabel != "已退回" {
+		t.Fatalf("退回后显示文案异常: %q / %q", rejected.StatusLabel, rejected.PoolReview.StatusLabel)
 	}
 
 	// 草稿可重新提交（生成新审批单），KR 负责人通过 → 未开始
@@ -703,6 +713,9 @@ func TestTaskCreateAndPoolReview(t *testing.T) {
 	}
 	if exemptTask.PoolReview == nil || !exemptTask.PoolReview.Exempt || exemptTask.PoolReview.Status != api.PoolReviewStatusApproved || exemptTask.PoolReview.Opinion == nil {
 		t.Fatalf("免审应生成已通过并记录原因的审批单: %+v", exemptTask.PoolReview)
+	}
+	if exemptTask.PoolReview.StatusLabel != "免审通过" {
+		t.Fatalf("免审审批单显示文案 = %q, want 免审通过", exemptTask.PoolReview.StatusLabel)
 	}
 
 	// KR 未指定负责人时提交入池 422
@@ -1161,7 +1174,8 @@ func TestTaskDetail(t *testing.T) {
 	wantStatus(t, resp, http.StatusCreated)
 	tasks := decodeBody[[]api.Task](t, resp)
 	taskID := tasks[0].Id
-	if tasks[0].CurrentStage != "创建入池审批" || tasks[0].PendingActorName == nil || *tasks[0].PendingActorName != "李四" {
+	// AC-04：当前环节文案同样显示当前审批人姓名（入池审批人是 KR 负责人 bob／李四）。
+	if tasks[0].CurrentStage != "待李四审批" || tasks[0].PendingActorName == nil || *tasks[0].PendingActorName != "李四" {
 		t.Fatalf("当前环节/待行动人派生异常: %+v", tasks[0])
 	}
 
@@ -1737,7 +1751,7 @@ func TestCompletionReviewFlow(t *testing.T) {
 	resp = doJSON(t, carol, http.MethodPost, completionURL, api.SubmitCompletionRequest{Note: "第一批成果，请终审"})
 	wantStatus(t, resp, http.StatusOK)
 	pending := decodeBody[api.Task](t, resp)
-	if pending.Status != api.TaskStatusPendingFinalReview || pending.CurrentStage != "KR 终审" {
+	if pending.Status != api.TaskStatusPendingFinalReview || pending.CurrentStage != "待李四审批" {
 		t.Fatalf("提交后应待 KR 终审: %+v", pending)
 	}
 
@@ -2107,7 +2121,8 @@ func TestIntermediateReviewOrSign(t *testing.T) {
 		api.SubmitCompletionRequest{Note: "请或签审核"})
 	wantStatus(t, resp, http.StatusOK)
 	submitted := decodeBody[api.Task](t, resp)
-	if submitted.Status != api.TaskStatusPendingIntermediateReview || submitted.CurrentStage != "中间或签审核" {
+	// 或签组为 dave（赵六）、erin（钱七）：多人取首位加人数。
+	if submitted.Status != api.TaskStatusPendingIntermediateReview || submitted.CurrentStage != "待赵六等2人审批" {
 		t.Fatalf("提交后应进入中间审核: %+v", submitted)
 	}
 
@@ -2595,7 +2610,8 @@ func TestMyWorkFiveGroups(t *testing.T) {
 	}
 	var hasWaitingCompletion bool
 	for _, it := range carolWork.Waiting {
-		if it.Kind == "waiting_completion" && it.Stage != nil && *it.Stage == "KR 终审" {
+		// AC-04：等待环节显示当前审批人姓名（KR 终审的审批人是 KR 负责人 bob／李四）。
+		if it.Kind == "waiting_completion" && it.Stage != nil && *it.Stage == "待李四审批" {
 			hasWaitingCompletion = true
 		}
 	}
@@ -2830,6 +2846,9 @@ func TestArtifactsAndPackages(t *testing.T) {
 	if at.ReviewCount != 1 || at.Deliverables[0].Current == nil {
 		t.Fatalf("归档任务节点异常: %+v", at)
 	}
+	if at.StatusLabel != "已完成" {
+		t.Fatalf("归档任务显示文案 = %q, want 已完成", at.StatusLabel)
+	}
 
 	// AC-18：普通成员不能建包；管理员勾选当前成果生成
 	pkgURL := fmt.Sprintf("%s/projects/%d/packages", base, created.Id)
@@ -2902,22 +2921,36 @@ func TestProjectReport(t *testing.T) {
 	start := openapiDate(t, "2026-08-01")
 	soon := openapiDate(t, time.Now().AddDate(0, 0, 2).Format("2006-01-02"))
 
-	// 任务 A：走完整链路到完成（产生完成成果与 completedInRange）；任务 B：临近截止（下一步）
+	// 任务 A：走完整链路到完成（产生完成成果与 completedInRange）；任务 B：临近截止（下一步）；
+	// 任务 C：B 的上游，始终不完成，用于让 B 的必要输入未就绪。
+	far := openapiDate(t, "2026-12-31")
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: bobUser.ID, StartDate: start, EndDate: soon, ExpectedDeliverable: sp("验收方案")},
 			{KeyResultId: kr1, Name: "临近截止任务", OwnerId: bobUser.ID, StartDate: start, EndDate: soon},
+			{KeyResultId: kr1, Name: "上游未完成任务", OwnerId: bobUser.ID, StartDate: start, EndDate: far, ExpectedDeliverable: sp("上游数据包")},
 		},
 	})
 	wantStatus(t, resp, http.StatusCreated)
 	tasks := decodeBody[[]api.Task](t, resp)
-	var taskA api.Task
+	var taskA, taskB, taskC api.Task
 	for _, task := range tasks {
-		if task.Name == "输出验收方案" {
+		switch task.Name {
+		case "输出验收方案":
 			taskA = task
+		case "临近截止任务":
+			taskB = task
+		case "上游未完成任务":
+			taskC = task
 		}
 	}
+
+	// B 挂一条来自 C 的必要输入边：C 未交付 ⇒ B 的必要输入未就绪（§5.1 等待输入）。
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, taskB.Id),
+		api.CreateTaskInputRequest{Name: "上游数据包", Necessity: api.Required, EdgeType: api.HardPrerequisite, SourceTaskId: taskC.Id})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, taskA.Id),
 		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
 	wantStatus(t, resp, http.StatusOK)
@@ -2943,11 +2976,8 @@ func TestProjectReport(t *testing.T) {
 	resp.Body.Close()
 
 	// 卡点一枚（开放中）
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/blockers", tasksURL, tasks[1].Id),
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/blockers", tasksURL, taskB.Id),
 		api.CreateBlockerRequest{Kind: api.Resource, Missing: "环境", Reason: "未申请", ActionOwnerId: aliceUser.ID, Level: api.Warning})
-	if tasks[1].Name != "临近截止任务" {
-		// 保障 blocker 打在 B 上（顺序可能不同）
-	}
 	wantStatus(t, resp, http.StatusCreated)
 	resp.Body.Close()
 
@@ -2970,6 +3000,17 @@ func TestProjectReport(t *testing.T) {
 	}
 	if len(rep.NextSteps) == 0 {
 		t.Fatalf("下一步为空: %+v", rep.NextSteps)
+	}
+	// AC-04 + §5.1：下一步条目输出面向用户的状态文案，且与任务列表同口径——
+	// B 的必要输入未就绪，存储态仍是未开始，报告须显示「等待输入」。
+	var nextB *api.ReportNextStep
+	for i := range rep.NextSteps {
+		if rep.NextSteps[i].TaskName == "临近截止任务" {
+			nextB = &rep.NextSteps[i]
+		}
+	}
+	if nextB == nil || nextB.Status != api.TaskStatusWaitingInput || nextB.StatusLabel != "等待输入" {
+		t.Fatalf("下一步显示状态异常: %+v", rep.NextSteps)
 	}
 
 	// 项目整体（默认 all）与非法范围

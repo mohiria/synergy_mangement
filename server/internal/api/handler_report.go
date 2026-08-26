@@ -56,9 +56,27 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 	}
 	krByTask := map[int64]int64{}
 	taskNameByID := map[int64]string{}
+	krOwnerNameByTask := map[int64]string{}
 	for _, t := range taskRows {
 		krByTask[t.ID] = t.KeyResultID
 		taskNameByID[t.ID] = t.Name
+		krOwnerNameByTask[t.ID] = t.KrOwnerName.String
+	}
+	// 必要输入未就绪的任务在报告里同样显示「等待输入」（§5.1；与任务列表、我的工作同口径）。
+	unreadyNoteByTask, err := s.unreadyRequiredInputsByProject(ctx, projectId)
+	if err != nil {
+		writeInternalError(w)
+		return Report{}, false
+	}
+	// 下一步的状态显示文案（AC-04）：或签中任务取审核组姓名。
+	reviewerRows, err := s.q.IntermediateReviewerNamesByProject(ctx, projectId)
+	if err != nil {
+		writeInternalError(w)
+		return Report{}, false
+	}
+	reviewerNamesByTask := map[int64][]string{}
+	for _, rv := range reviewerRows {
+		reviewerNamesByTask[rv.TaskID] = append(reviewerNamesByTask[rv.TaskID], rv.DisplayName)
 	}
 	completedByKr := map[int64]int{}
 	for _, cr := range completionRows {
@@ -184,10 +202,12 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 		if !t.EndDate.Valid || t.EndDate.Time.After(horizon) {
 			continue
 		}
+		display := domain.DeriveDisplayStatus(t.Status, unreadyNoteByTask[t.ID] != "")
 		item := ReportNextStep{
-			TaskName:  t.Name,
-			OwnerName: t.OwnerName,
-			Status:    TaskStatus(t.Status),
+			TaskName:    t.Name,
+			OwnerName:   t.OwnerName,
+			Status:      TaskStatus(display),
+			StatusLabel: domain.StatusLabel(display, krOwnerNameByTask[t.ID], reviewerNamesByTask[t.ID]),
 		}
 		d := openapi_types.Date{Time: t.EndDate.Time}
 		item.EndDate = &d

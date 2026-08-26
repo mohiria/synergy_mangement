@@ -2149,10 +2149,13 @@ components:
     PoolReview:
       type: object
       description: 任务最近一次入池审批单
-      required: [status, exempt]
+      required: [status, statusLabel, exempt]
       properties:
         status:
           $ref: "#/components/schemas/PoolReviewStatus"
+        statusLabel:
+          type: string
+          description: 面向用户的显示文案（AC-04；派生字段）：待审批为“待{所属 KR 负责人姓名}审批”，免审为“免审通过”，其余为“已通过／已退回”
         exempt:
           type: boolean
           description: KR 负责人本人创建免审时由系统自动生成并标记（AC-26）
@@ -2183,6 +2186,7 @@ components:
           startDate,
           endDate,
           status,
+          statusLabel,
           currentStage,
           canProposeFieldChange,
           canStart,
@@ -2215,6 +2219,9 @@ components:
           format: date
         status:
           $ref: "#/components/schemas/TaskStatus"
+        statusLabel:
+          type: string
+          description: 面向用户的状态显示文案（AC-04、决策 34；派生字段）；审批等待状态为“待{当前审批人姓名}审批”，或签多人为“待{首位姓名}等N人审批”，无审批人时退化为“待审批”
         description:
           type: string
           description: 任务说明，选填
@@ -2418,13 +2425,16 @@ components:
     FieldChange:
       type: object
       description: 关键字段变更单（词汇表）；rejected 且 resolved=false 即「退回待处理事项」
-      required: [id, state, reason, resolved, exempt, changes]
+      required: [id, state, stateLabel, reason, resolved, exempt, changes]
       properties:
         id:
           type: integer
           format: int64
         state:
           $ref: "#/components/schemas/FieldChangeState"
+        stateLabel:
+          type: string
+          description: 面向用户的显示文案（AC-04；派生字段）：待审批为“待{所属 KR 负责人姓名}审批”，免审为“免审生效”，其余为“已通过／已退回”
         reason:
           type: string
           description: 修改原因
@@ -2679,6 +2689,9 @@ components:
           type: string
         sourceTaskStatus:
           $ref: "#/components/schemas/TaskStatus"
+        sourceTaskStatusLabel:
+          type: string
+          description: 来源任务状态显示文案（AC-04；派生字段，与 sourceTaskStatus 同缺省）
         sourceOwnerName:
           type: string
           description: 提供方姓名（派生字段）
@@ -2913,7 +2926,7 @@ components:
           format: date-time
     ReportNextStep:
       type: object
-      required: [taskName, ownerName, status]
+      required: [taskName, ownerName, status, statusLabel]
       properties:
         taskName:
           type: string
@@ -2921,6 +2934,9 @@ components:
           type: string
         status:
           $ref: "#/components/schemas/TaskStatus"
+        statusLabel:
+          type: string
+          description: 状态显示文案（AC-04；派生字段）
         endDate:
           type: string
           format: date
@@ -2970,7 +2986,7 @@ components:
     ArtifactTask:
       type: object
       description: 归档视角的任务节点（AC-17）：当前成果、候选状态与审批记录数，无历史版本入口
-      required: [taskId, name, status, reviewCount, deliverables]
+      required: [taskId, name, status, statusLabel, reviewCount, deliverables]
       properties:
         taskId:
           type: integer
@@ -2979,6 +2995,9 @@ components:
           type: string
         status:
           $ref: "#/components/schemas/TaskStatus"
+        statusLabel:
+          type: string
+          description: 状态显示文案（AC-04；派生字段）
         reviewCount:
           type: integer
           description: 完成审核记录条数（详情在任务抽屉审核 Tab）
@@ -3352,13 +3371,16 @@ components:
     CompletionReview:
       type: object
       description: 完成申请（词汇表）；整体通过或整体退回
-      required: [id, state, note, items]
+      required: [id, state, stateLabel, note, items]
       properties:
         id:
           type: integer
           format: int64
         state:
           $ref: "#/components/schemas/CompletionReviewState"
+        stateLabel:
+          type: string
+          description: 面向用户的显示文案（AC-04；派生字段）：中间或签为“待{审核人姓名}审批”（多人为“待{首位姓名}等N人审批”），待终审为“待{所属 KR 负责人姓名}审批”，其余为“已通过／已退回”
         note:
           type: string
           description: 提交说明

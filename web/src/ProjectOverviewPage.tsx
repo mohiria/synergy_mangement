@@ -17,17 +17,6 @@ const RISK_LABEL: Record<RiskLevel, string> = {
   warning: "预警",
   high_risk: "高风险",
 };
-const STATUS_LABEL: Record<TaskStatus, string> = {
-  draft: "草稿",
-  pending_pool_review: "待入池审批",
-  not_started: "未开始",
-  waiting_input: "等待输入",
-  in_progress: "进行中",
-  pending_intermediate_review: "待中间审核",
-  pending_final_review: "待 KR 终审",
-  completed: "已完成",
-  cancelled: "已取消",
-};
 const STATUS_CLASS: Record<TaskStatus, string> = {
   draft: "",
   pending_pool_review: "warning",
@@ -193,7 +182,7 @@ export default function ProjectOverviewPage({
                             </span>
                             <span>
                               <span className={`status-pill ${STATUS_CLASS[t.status]}`}>
-                                {STATUS_LABEL[t.status]}
+                                {t.statusLabel}
                               </span>
                             </span>
                             <span className="muted" style={{ fontSize: 12 }}>

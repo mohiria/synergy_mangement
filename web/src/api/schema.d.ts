@@ -1144,6 +1144,8 @@ export interface components {
         /** @description 任务最近一次入池审批单 */
         PoolReview: {
             status: components["schemas"]["PoolReviewStatus"];
+            /** @description 面向用户的显示文案（AC-04；派生字段）：待审批为“待{所属 KR 负责人姓名}审批”，免审为“免审通过”，其余为“已通过／已退回” */
+            statusLabel: string;
             /** @description KR 负责人本人创建免审时由系统自动生成并标记（AC-26） */
             exempt: boolean;
             /** @description 审批意见；免审时为系统记录的免审原因 */
@@ -1175,6 +1177,8 @@ export interface components {
             /** Format: date */
             endDate: string;
             status: components["schemas"]["TaskStatus"];
+            /** @description 面向用户的状态显示文案（AC-04、决策 34；派生字段）；审批等待状态为“待{当前审批人姓名}审批”，或签多人为“待{首位姓名}等N人审批”，无审批人时退化为“待审批” */
+            statusLabel: string;
             /** @description 任务说明，选填 */
             description?: string;
             /** @description 完成标准，选填 */
@@ -1289,6 +1293,8 @@ export interface components {
             /** Format: int64 */
             id: number;
             state: components["schemas"]["FieldChangeState"];
+            /** @description 面向用户的显示文案（AC-04；派生字段）：待审批为“待{所属 KR 负责人姓名}审批”，免审为“免审生效”，其余为“已通过／已退回” */
+            stateLabel: string;
             /** @description 修改原因 */
             reason: string;
             /** @description 审批意见 */
@@ -1443,6 +1449,8 @@ export interface components {
             sourceTaskId?: number;
             sourceTaskName?: string;
             sourceTaskStatus?: components["schemas"]["TaskStatus"];
+            /** @description 来源任务状态显示文案（AC-04；派生字段，与 sourceTaskStatus 同缺省） */
+            sourceTaskStatusLabel?: string;
             /** @description 提供方姓名（派生字段） */
             sourceOwnerName?: string;
             /** Format: int64 */
@@ -1578,6 +1586,8 @@ export interface components {
             taskName: string;
             ownerName: string;
             status: components["schemas"]["TaskStatus"];
+            /** @description 状态显示文案（AC-04；派生字段） */
+            statusLabel: string;
             /** Format: date */
             endDate?: string;
             overdue?: boolean;
@@ -1607,6 +1617,8 @@ export interface components {
             taskId: number;
             name: string;
             status: components["schemas"]["TaskStatus"];
+            /** @description 状态显示文案（AC-04；派生字段） */
+            statusLabel: string;
             /** @description 完成审核记录条数（详情在任务抽屉审核 Tab） */
             reviewCount: number;
             deliverables: components["schemas"]["Deliverable"][];
@@ -1843,6 +1855,8 @@ export interface components {
             /** Format: int64 */
             id: number;
             state: components["schemas"]["CompletionReviewState"];
+            /** @description 面向用户的显示文案（AC-04；派生字段）：中间或签为“待{审核人姓名}审批”（多人为“待{首位姓名}等N人审批”），待终审为“待{所属 KR 负责人姓名}审批”，其余为“已通过／已退回” */
+            stateLabel: string;
             /** @description 提交说明 */
             note: string;
             /** @description 审核意见；退回意见必填（AC-38） */

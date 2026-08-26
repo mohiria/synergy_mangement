@@ -231,6 +231,44 @@ func (q *Queries) GetCurrentFile(ctx context.Context, deliverableID int64) (Deli
 	return i, err
 }
 
+const intermediateReviewerNamesByProject = `-- name: IntermediateReviewerNamesByProject :many
+SELECT cr.task_id, u.display_name
+FROM completion_reviews cr
+JOIN completion_review_reviewers crr ON crr.review_id = cr.id
+JOIN users u ON u.id = crr.user_id
+JOIN tasks t ON t.id = cr.task_id
+JOIN key_results k ON k.id = t.key_result_id
+JOIN objectives o ON o.id = k.objective_id
+WHERE o.project_id = $1 AND cr.state = 'intermediate_review'
+ORDER BY cr.task_id, crr.user_id
+`
+
+type IntermediateReviewerNamesByProjectRow struct {
+	TaskID      int64
+	DisplayName string
+}
+
+// 或签中任务的当前审核组姓名（AC-04 statusLabel 派生用）。
+func (q *Queries) IntermediateReviewerNamesByProject(ctx context.Context, projectID int64) ([]IntermediateReviewerNamesByProjectRow, error) {
+	rows, err := q.db.Query(ctx, intermediateReviewerNamesByProject, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []IntermediateReviewerNamesByProjectRow
+	for rows.Next() {
+		var i IntermediateReviewerNamesByProjectRow
+		if err := rows.Scan(&i.TaskID, &i.DisplayName); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const latestCompletionReviewsByProject = `-- name: LatestCompletionReviewsByProject :many
 SELECT DISTINCT ON (cr.task_id) cr.id, cr.task_id, cr.submitted_by, cr.note, cr.state, cr.opinion, cr.submitted_at, cr.decided_by, cr.decided_at, cr.intermediate_by, cr.intermediate_at, cr.intermediate_opinion,
     t.name AS task_name, t.owner_id AS task_owner_id, t.end_date AS task_end_date,

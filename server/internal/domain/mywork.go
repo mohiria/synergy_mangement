@@ -28,22 +28,25 @@ type WorkApprovalFact struct {
 	TaskName    string
 	SubmittedBy int64
 	KrOwnerID   *int64
+	KrOwnerName string
 	SubmittedAt time.Time
 	TaskEnd     *time.Time
 	Summary     string
 }
 
 type WorkCompletionFact struct {
-	ID          int64
-	TaskID      int64
-	TaskName    string
-	SubmittedBy int64
-	TaskOwnerID int64
-	KrOwnerID   *int64
-	State       string
-	Reviewers   []int64
-	SubmittedAt time.Time
-	TaskEnd     *time.Time
+	ID            int64
+	TaskID        int64
+	TaskName      string
+	SubmittedBy   int64
+	TaskOwnerID   int64
+	KrOwnerID     *int64
+	KrOwnerName   string
+	State         string
+	Reviewers     []int64
+	ReviewerNames []string
+	SubmittedAt   time.Time
+	TaskEnd       *time.Time
 }
 
 type WorkInputRequestFact struct {
@@ -270,10 +273,12 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 	for _, pr := range f.PoolReviews {
 		if pr.SubmittedBy == me && !(pr.KrOwnerID != nil && *pr.KrOwnerID == me) {
 			days, overdue := waitingDays(pr.SubmittedAt)
+			// AC-04：等待他人卡片按当前审批人姓名显示。
 			g.Waiting = append(g.Waiting, WorkItem{
 				Kind: "waiting_pool", Title: "[入池申请] " + pr.TaskName,
 				TaskID: tid(pr.TaskID), TaskName: pr.TaskName, RefID: tid(pr.ID),
-				WaitingDays: days, Overdue: overdue, Stage: "创建入池审批", DrawerTab: "audit",
+				WaitingDays: days, Overdue: overdue,
+				Stage: ApprovalWaitingLabel([]string{pr.KrOwnerName}), DrawerTab: "audit",
 			})
 		}
 	}
@@ -283,7 +288,8 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 			g.Waiting = append(g.Waiting, WorkItem{
 				Kind: "waiting_field_change", Title: "[关键字段变更] " + fc.TaskName,
 				TaskID: tid(fc.TaskID), TaskName: fc.TaskName, RefID: tid(fc.ID),
-				WaitingDays: days, Overdue: overdue, Stage: "关键字段修改审批", DrawerTab: "audit",
+				WaitingDays: days, Overdue: overdue,
+				Stage: ApprovalWaitingLabel([]string{fc.KrOwnerName}), DrawerTab: "audit",
 			})
 		}
 	}
@@ -298,9 +304,9 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		if cr.State == CompletionPendingFinal && cr.KrOwnerID != nil && *cr.KrOwnerID == me {
 			continue
 		}
-		stage := "KR 终审"
+		stage := ApprovalWaitingLabel([]string{cr.KrOwnerName})
 		if cr.State == CompletionIntermediate {
-			stage = "中间或签审核"
+			stage = ApprovalWaitingLabel(cr.ReviewerNames)
 		}
 		days, overdue := waitingDays(cr.SubmittedAt)
 		g.Waiting = append(g.Waiting, WorkItem{

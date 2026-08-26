@@ -30,23 +30,8 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 		writeInternalError(w)
 		return
 	}
-	requestByEdge := map[int64]int{}
-	for i, ir := range requestRows {
-		requestByEdge[ir.EdgeID] = i
-	}
-	unreadyNoteByTask := map[int64]string{}
+	unreadyNoteByTask := unreadyRequiredInputs(edgeRows, requestRows)
 	taskNameByID := map[int64]string{}
-	for _, e := range edgeRows {
-		ready := domain.EdgeReady(e.CurrentFileID.Valid, e.HasCandidate)
-		if idx, ok := requestByEdge[e.ID]; ok {
-			ready = domain.MemberEdgeReady(requestRows[idx].State)
-		}
-		if e.Necessity == domain.NecessityRequired && !ready {
-			if _, seen := unreadyNoteByTask[e.TargetTaskID]; !seen {
-				unreadyNoteByTask[e.TargetTaskID] = "上游未就绪：缺 " + e.Name
-			}
-		}
-	}
 
 	// 任务事实（含显示状态与退回注记）。
 	taskRows, err := s.q.ListProjectTasks(ctx, projectId)
@@ -97,13 +82,18 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 		}
 		return nil
 	}
+	// 审批显示文案需要 KR 负责人姓名（AC-04）。
+	krOwnerNameByTask := map[int64]string{}
+	for _, t := range taskRows {
+		krOwnerNameByTask[t.ID] = t.KrOwnerName.String
+	}
 	for _, pr := range poolRows {
 		name := taskNameByID[pr.TaskID]
 		switch pr.Status {
 		case domain.PoolReviewPending:
 			fact := domain.WorkApprovalFact{
 				ID: pr.ID, TaskID: pr.TaskID, TaskName: name, SubmittedBy: pr.SubmittedBy,
-				KrOwnerID: krOwnerOf(pr.TaskID),
+				KrOwnerID: krOwnerOf(pr.TaskID), KrOwnerName: krOwnerNameByTask[pr.TaskID],
 			}
 			if pr.SubmittedAt.Valid {
 				fact.SubmittedAt = pr.SubmittedAt.Time
@@ -125,7 +115,7 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 		case domain.FieldChangePendingState:
 			fact := domain.WorkApprovalFact{
 				ID: fc.ID, TaskID: fc.TaskID, TaskName: name, SubmittedBy: fc.SubmittedBy,
-				KrOwnerID: krOwnerOf(fc.TaskID),
+				KrOwnerID: krOwnerOf(fc.TaskID), KrOwnerName: krOwnerNameByTask[fc.TaskID],
 			}
 			if fc.SubmittedAt.Valid {
 				fact.SubmittedAt = fc.SubmittedAt.Time
@@ -147,6 +137,7 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 		fact := domain.WorkCompletionFact{
 			ID: cr.ID, TaskID: cr.TaskID, TaskName: cr.TaskName, SubmittedBy: cr.SubmittedBy,
 			TaskOwnerID: cr.TaskOwnerID, KrOwnerID: fromPgInt8(cr.KrOwnerID), State: cr.State,
+			KrOwnerName: krOwnerNameByTask[cr.TaskID],
 		}
 		if cr.SubmittedAt.Valid {
 			fact.SubmittedAt = cr.SubmittedAt.Time
@@ -162,6 +153,7 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 			}
 			for _, rv := range rvs {
 				fact.Reviewers = append(fact.Reviewers, rv.UserID)
+				fact.ReviewerNames = append(fact.ReviewerNames, rv.DisplayName)
 			}
 		}
 		if cr.State == domain.CompletionRejected && cr.TaskOwnerID == uid && cr.Opinion != "" {

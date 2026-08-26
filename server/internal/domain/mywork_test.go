@@ -152,6 +152,48 @@ func TestMyWorkGrouping(t *testing.T) {
 	}
 }
 
+// AC-04：等待他人卡片按当前审批人姓名显示“待{姓名}审批”（模块 PRD §8.2）。
+func TestMyWorkWaitingApprovalCopy(t *testing.T) {
+	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
+	me := int64(5)
+	krOwnerOther := i64(7)
+	recent := now.AddDate(0, 0, -1)
+
+	facts := MyWorkFacts{
+		UserID: me,
+		Now:    now,
+		PoolReviews: []WorkApprovalFact{
+			{ID: 12, TaskID: 3, TaskName: "重提任务", SubmittedBy: me, KrOwnerID: krOwnerOther, KrOwnerName: "周宁", SubmittedAt: recent},
+		},
+		FieldChanges: []WorkApprovalFact{
+			{ID: 21, TaskID: 1, TaskName: "执行任务", SubmittedBy: me, KrOwnerID: krOwnerOther, KrOwnerName: "周宁", SubmittedAt: recent},
+		},
+		Completions: []WorkCompletionFact{
+			{ID: 33, TaskID: 4, TaskName: "终审中任务", SubmittedBy: me, TaskOwnerID: me, KrOwnerID: krOwnerOther, KrOwnerName: "周宁", State: CompletionPendingFinal, SubmittedAt: recent},
+			{ID: 34, TaskID: 5, TaskName: "或签中任务", SubmittedBy: me, TaskOwnerID: me, KrOwnerID: krOwnerOther, KrOwnerName: "周宁", State: CompletionIntermediate, Reviewers: []int64{8, 9}, ReviewerNames: []string{"张三", "李四"}, SubmittedAt: recent},
+		},
+	}
+
+	g := MyWork(facts)
+	wantStage := map[int64]string{
+		12: "待周宁审批",
+		21: "待周宁审批",
+		33: "待周宁审批",
+		34: "待张三等2人审批",
+	}
+	if len(g.Waiting) != len(wantStage) {
+		t.Fatalf("等待他人数量 = %d, want %d", len(g.Waiting), len(wantStage))
+	}
+	for _, it := range g.Waiting {
+		if it.RefID == nil {
+			t.Fatalf("等待他人卡片缺 RefID: %+v", it)
+		}
+		if want := wantStage[*it.RefID]; it.Stage != want {
+			t.Fatalf("事项 %d Stage = %q, want %q", *it.RefID, it.Stage, want)
+		}
+	}
+}
+
 // AC-05：KR 风险一行原因——有开放卡点时取首个卡点事实，否则风险等级非正常时给通用说明。
 func TestKrRiskNote(t *testing.T) {
 	if got := KrRiskNote("normal", nil); got != "" {

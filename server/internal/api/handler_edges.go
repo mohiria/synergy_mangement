@@ -16,6 +16,45 @@ import (
 
 // 必要输入与交付物边（AC-07、AC-28、AC-48）。业务规则在 domain，handler 仅编排。
 
+// unreadyRequiredInputs 汇总每个下游任务的必要输入未就绪注记（§5.1「等待输入」的唯一口径）：
+// 值为「上游未就绪：缺 XX」，取首条未就绪的必要输入；成员来源按输入请求状态判定就绪。
+func unreadyRequiredInputs(edges []store.ListEdgesByProjectRow, requests []store.ListInputRequestsByProjectRow) map[int64]string {
+	stateByEdge := make(map[int64]string, len(requests))
+	for _, ir := range requests {
+		stateByEdge[ir.EdgeID] = ir.State
+	}
+	notes := map[int64]string{}
+	for _, e := range edges {
+		if e.Necessity != domain.NecessityRequired {
+			continue
+		}
+		ready := domain.EdgeReady(e.CurrentFileID.Valid, e.HasCandidate)
+		if state, ok := stateByEdge[e.ID]; ok {
+			ready = domain.MemberEdgeReady(state)
+		}
+		if ready {
+			continue
+		}
+		if _, seen := notes[e.TargetTaskID]; !seen {
+			notes[e.TargetTaskID] = "上游未就绪：缺 " + e.Name
+		}
+	}
+	return notes
+}
+
+// unreadyRequiredInputsByProject 取项目边与输入请求后汇总未就绪注记。
+func (s *Server) unreadyRequiredInputsByProject(ctx context.Context, projectID int64) (map[int64]string, error) {
+	edges, err := s.q.ListEdgesByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	requests, err := s.q.ListInputRequestsByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	return unreadyRequiredInputs(edges, requests), nil
+}
+
 // CreateTaskInput 新增输入要求：自动建立「来源任务 → 目标任务」的交付物边（AC-28）。
 func (s *Server) CreateTaskInput(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64) {
 	var req CreateTaskInputRequest
@@ -159,7 +198,9 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 		return nil, err
 	}
 	durations := make(map[int64]int, len(taskRows))
+	krOwnerNameByTask := make(map[int64]string, len(taskRows))
 	for _, t := range taskRows {
+		krOwnerNameByTask[t.ID] = t.KrOwnerName.String
 		if t.StartDate.Valid && t.EndDate.Valid {
 			d := int(t.EndDate.Time.Sub(t.StartDate.Time).Hours()/24) + 1
 			if d < 1 {
@@ -167,6 +208,15 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 			}
 			durations[t.ID] = d
 		}
+	}
+	// 来源任务状态显示文案（AC-04）：或签中任务取审核组姓名。
+	reviewerRows, err := s.q.IntermediateReviewerNamesByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	reviewerNamesByTask := make(map[int64][]string)
+	for _, rv := range reviewerRows {
+		reviewerNamesByTask[rv.TaskID] = append(reviewerNamesByTask[rv.TaskID], rv.DisplayName)
 	}
 	hardEdges := []domain.HardEdge{}
 	for _, e := range rows {
@@ -198,6 +248,9 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 		if e.SourceTaskStatus.Valid {
 			st := TaskStatus(e.SourceTaskStatus.String)
 			item.SourceTaskStatus = &st
+			sourceID := e.SourceTaskID.Int64
+			label := domain.StatusLabel(e.SourceTaskStatus.String, krOwnerNameByTask[sourceID], reviewerNamesByTask[sourceID])
+			item.SourceTaskStatusLabel = &label
 		}
 		if e.SourceOwnerName.Valid {
 			item.SourceOwnerName = &e.SourceOwnerName.String

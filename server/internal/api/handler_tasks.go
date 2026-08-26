@@ -525,6 +525,13 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		writeInternalError(w)
 		return
 	}
+	// 审批显示文案需要所属 KR 负责人姓名（AC-04）。
+	krOwnerName := ""
+	if kr.OwnerID.Valid {
+		if ku, err := s.q.GetUserByID(r.Context(), kr.OwnerID.Int64); err == nil {
+			krOwnerName = ku.DisplayName
+		}
+	}
 	prs := make([]PoolReview, 0, len(reviews))
 	for _, pr := range reviews {
 		prs = append(prs, *toPoolReview(store.LatestPoolReviewsByProjectRow{
@@ -532,7 +539,7 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 			Exempt: pr.Exempt, Opinion: pr.Opinion, SubmittedAt: pr.SubmittedAt,
 			DecidedBy: pr.DecidedBy, DecidedAt: pr.DecidedAt,
 			SubmittedByName: pr.SubmittedByName, DecidedByName: pr.DecidedByName,
-		}))
+		}, krOwnerName))
 	}
 	facts := domain.TaskFacts{Status: string(item.Status), CreatorID: task.CreatedBy, OwnerID: task.OwnerID, KrOwnerID: fromPgInt8(task.KrOwnerID)}
 	fcs := make([]FieldChange, 0, len(changeRows))
@@ -608,30 +615,9 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 		changeByTask[fc.TaskID] = fc
 	}
 	// 必要输入未就绪的任务显示「等待输入」（AC-48、§5.1）；成员来源按输入请求状态判定就绪。
-	edgeRows, err := s.q.ListEdgesByProject(ctx, projectID)
+	unreadyNoteByTask, err := s.unreadyRequiredInputsByProject(ctx, projectID)
 	if err != nil {
 		return nil, err
-	}
-	requestRows, err := s.q.ListInputRequestsByProject(ctx, projectID)
-	if err != nil {
-		return nil, err
-	}
-	requestStateByEdge := make(map[int64]string, len(requestRows))
-	for _, ir := range requestRows {
-		requestStateByEdge[ir.EdgeID] = ir.State
-	}
-	unmetByTask := make(map[int64]bool)
-	for _, e := range edgeRows {
-		if e.Necessity != domain.NecessityRequired {
-			continue
-		}
-		ready := domain.EdgeReady(e.CurrentFileID.Valid, e.HasCandidate)
-		if state, ok := requestStateByEdge[e.ID]; ok {
-			ready = domain.MemberEdgeReady(state)
-		}
-		if !ready {
-			unmetByTask[e.TargetTaskID] = true
-		}
 	}
 	// 开放卡点数量（列表徽标用）。
 	blockerCounts, err := s.q.OpenBlockerCountsByProject(ctx, projectID)
@@ -660,6 +646,15 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 	for _, d := range deliverableRows {
 		namesByTask[d.TaskID] = append(namesByTask[d.TaskID], d.Name)
 	}
+	// 或签中任务的当前审核组姓名（AC-04 显示文案）。
+	reviewerRows, err := s.q.IntermediateReviewerNamesByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	reviewerNamesByTask := make(map[int64][]string)
+	for _, rv := range reviewerRows {
+		reviewerNamesByTask[rv.TaskID] = append(reviewerNamesByTask[rv.TaskID], rv.DisplayName)
+	}
 	resp := make([]Task, 0, len(rows))
 	for _, t := range rows {
 		facts := domain.TaskFacts{Status: t.Status, CreatorID: t.CreatedBy, OwnerID: t.OwnerID, KrOwnerID: fromPgInt8(t.KrOwnerID)}
@@ -684,11 +679,14 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 		}
 		// 页面主状态汇总：必要输入未到显示「等待输入」（存储态保持真实执行状态）。
 		displayFacts := facts
-		displayFacts.Status = domain.DeriveDisplayStatus(t.Status, unmetByTask[t.ID])
+		displayFacts.Status = domain.DeriveDisplayStatus(t.Status, unreadyNoteByTask[t.ID] != "")
 		item.Status = TaskStatus(displayFacts.Status)
+		// AC-04：审批等待状态面向用户显示「待{审批人姓名}审批」。
+		item.StatusLabel = domain.StatusLabel(displayFacts.Status, t.KrOwnerName.String, reviewerNamesByTask[t.ID])
 		// 当前环节与待行动人（AC-31 基础信息；名字按身份就近解析）。
+		// 环节文案同样按 AC-04 收口：审批等待环节显示当前审批人姓名。
 		stage, actorID := domain.CurrentStage(displayFacts)
-		item.CurrentStage = stage
+		item.CurrentStage = domain.StageLabel(stage, t.KrOwnerName.String, reviewerNamesByTask[t.ID])
 		if actorID != nil {
 			item.PendingActorId = actorID
 			switch {
@@ -701,7 +699,7 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 			}
 		}
 		if pr, ok := reviewByTask[t.ID]; ok {
-			item.PoolReview = toPoolReview(pr)
+			item.PoolReview = toPoolReview(pr, t.KrOwnerName.String)
 		}
 		// 编辑／关键字段修改动作标志与需要关注的变更单（AC-23）。
 		hasPending := false
@@ -762,9 +760,10 @@ func (s *Server) writeTask(w http.ResponseWriter, r *http.Request, projectID, ta
 	writeInternalError(w)
 }
 
-func toPoolReview(pr store.LatestPoolReviewsByProjectRow) *PoolReview {
+func toPoolReview(pr store.LatestPoolReviewsByProjectRow, krOwnerName string) *PoolReview {
 	out := &PoolReview{
 		Status:          PoolReviewStatus(pr.Status),
+		StatusLabel:     domain.PoolReviewStateLabel(pr.Status, pr.Exempt, krOwnerName),
 		Exempt:          pr.Exempt,
 		Opinion:         optString(pr.Opinion),
 		SubmittedByName: optString(pr.SubmittedByName),

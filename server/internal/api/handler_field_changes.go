@@ -332,9 +332,15 @@ func (s *Server) fieldChangeView(ctx context.Context, fc store.FieldChangeReques
 	}
 	canDecide := domain.DecideFieldChangeRule(fc.State, facts.KrOwnerID, userID) == nil
 	canAbandon := domain.CanAbandonFieldChange(actor, userID, fc.SubmittedBy, fc.State, fc.Resolved)
+	// AC-04：待审批显示「待{所属 KR 负责人姓名}审批」。
+	krOwnerName := ""
+	if facts.KrOwnerID != nil {
+		krOwnerName = nameOf(pgtype.Int8{Int64: *facts.KrOwnerID, Valid: true})
+	}
 	out := FieldChange{
 		Id:              fc.ID,
 		State:           FieldChangeState(fc.State),
+		StateLabel:      domain.FieldChangeStateLabel(fc.State, fc.Exempt, krOwnerName),
 		Reason:          fc.Reason,
 		Opinion:         optString(fc.Opinion),
 		Resolved:        fc.Resolved,

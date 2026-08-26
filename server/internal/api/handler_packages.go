@@ -54,6 +54,25 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 	for _, c := range reviewCounts {
 		countByTask[c.TaskID] = int(c.N)
 	}
+	// 任务状态显示文案（AC-04）：入池与终审取所属 KR 负责人，或签取审核组姓名。
+	taskRows, err := s.q.ListProjectTasks(ctx, projectId)
+	if err != nil {
+		writeInternalError(w)
+		return
+	}
+	krOwnerNameByTask := map[int64]string{}
+	for _, t := range taskRows {
+		krOwnerNameByTask[t.ID] = t.KrOwnerName.String
+	}
+	reviewerRows, err := s.q.IntermediateReviewerNamesByProject(ctx, projectId)
+	if err != nil {
+		writeInternalError(w)
+		return
+	}
+	reviewerNamesByTask := map[int64][]string{}
+	for _, rv := range reviewerRows {
+		reviewerNamesByTask[rv.TaskID] = append(reviewerNamesByTask[rv.TaskID], rv.DisplayName)
+	}
 	filesByDeliverable := map[int64][]store.ListDeliverableFilesByProjectRow{}
 	for _, f := range files {
 		filesByDeliverable[f.DeliverableID] = append(filesByDeliverable[f.DeliverableID], f)
@@ -73,6 +92,7 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 					TaskId:       d.TaskID,
 					Name:         d.TaskName,
 					Status:       TaskStatus(d.TaskStatus),
+					StatusLabel:  domain.StatusLabel(d.TaskStatus, krOwnerNameByTask[d.TaskID], reviewerNamesByTask[d.TaskID]),
 					ReviewCount:  countByTask[d.TaskID],
 					Deliverables: []Deliverable{},
 				},

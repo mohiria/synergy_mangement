@@ -31,10 +31,11 @@ type TaskInvite = components["schemas"]["TaskInvite"];
 type TaskDetail = components["schemas"]["TaskDetail"];
 type EdgeType = components["schemas"]["EdgeType"];
 
-// 任务生命周期状态的中文标签与徽章样式（PRD §5.1；配色按原型 statusClass 规则）。
-const STATUS_LABEL: Record<TaskStatus, string> = {
+// 状态筛选下拉的选项词表（需要枚举全集，非行级显示；文案对齐原型 taskStatusOptions）。
+// 行级状态显示一律消费 API 派生的 statusLabel（AC-04），不在前端推导。
+const STATUS_FILTER_LABEL: Record<TaskStatus, string> = {
   draft: "草稿",
-  pending_pool_review: "待入池审批",
+  pending_pool_review: "待负责人审批",
   not_started: "未开始",
   waiting_input: "等待输入",
   in_progress: "进行中",
@@ -476,7 +477,7 @@ export default function ProjectTasksPage({
           </span>
         </td>
         <td>
-          <span className={`status-pill ${STATUS_CLASS[t.status]}`}>{STATUS_LABEL[t.status]}</span>
+          <span className={`status-pill ${STATUS_CLASS[t.status]}`}>{t.statusLabel}</span>
           {t.status === "draft" && t.poolReview?.status === "rejected" && t.poolReview.opinion && (
             <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
               退回：{t.poolReview.opinion}
@@ -667,9 +668,9 @@ export default function ProjectTasksPage({
                 onChange={setStatusFilter}
                 options={[
                   { value: "all" as const, label: "全部状态" },
-                  ...(Object.keys(STATUS_LABEL) as TaskStatus[]).map((s) => ({
+                  ...(Object.keys(STATUS_FILTER_LABEL) as TaskStatus[]).map((s) => ({
                     value: s,
-                    label: STATUS_LABEL[s],
+                    label: STATUS_FILTER_LABEL[s],
                   })),
                 ]}
               />
@@ -1581,7 +1582,7 @@ function TaskDrawer({
             <span>状态</span>
             <div>
               <span className={`status-pill ${STATUS_CLASS[task.status]}`}>
-                {STATUS_LABEL[task.status]}
+                {task.statusLabel}
               </span>
               {task.status === "cancelled" && task.cancelReason && (
                 <span className="muted" style={{ marginLeft: 8, fontSize: 12 }}>
@@ -1888,7 +1889,7 @@ function TaskDrawer({
                       <small>
                         {EDGE_TYPE_LABEL[e.edgeType]} · {e.name}
                         {e.sourceOwnerName ? ` · 责任人 ${e.sourceOwnerName}` : ""}
-                        {e.sourceTaskStatus ? ` · ${STATUS_LABEL[e.sourceTaskStatus]}` : ""}
+                        {e.sourceTaskStatusLabel ? ` · ${e.sourceTaskStatusLabel}` : ""}
                         {e.currentFileName ? ` · ${e.currentFileName}` : ""}
                       </small>
                     </span>
@@ -2004,13 +2005,7 @@ function TaskDrawer({
                         : "warning")
                 }
               >
-                {cr.state === "pending_final"
-                  ? "待 KR 终审"
-                  : cr.state === "approved"
-                    ? "已通过"
-                    : cr.state === "rejected"
-                      ? "已退回"
-                      : "中间审核中"}
+                {cr.stateLabel}
               </span>
             </div>
             <span className="meta muted" style={{ fontSize: 12 }}>
@@ -2078,7 +2073,7 @@ function TaskDrawer({
                   fc.state === "pending" ? "warning" : fc.state === "approved" ? "completed" : "danger"
                 }`}
               >
-                {fc.exempt ? "免审生效" : fc.state === "pending" ? "待审批" : fc.state === "approved" ? "已通过" : "已退回"}
+                {fc.stateLabel}
               </span>
             </div>
             <span className="meta muted" style={{ fontSize: 12 }}>
@@ -2141,7 +2136,7 @@ function TaskDrawer({
                   r.status === "pending" ? "warning" : r.status === "approved" ? "completed" : "danger"
                 }`}
               >
-                {r.exempt ? "免审通过" : r.status === "pending" ? "待审批" : r.status === "approved" ? "已通过" : "已退回"}
+                {r.statusLabel}
               </span>
             </div>
             <span className="meta muted" style={{ fontSize: 12 }}>
@@ -2573,7 +2568,7 @@ function ConfigureInputModal({
             onChange={setSourceTaskId}
             options={candidates.map((t) => ({
               value: t.id,
-              label: `${taskCode.get(t.id) ?? ""} ${t.name}（${t.ownerName} · ${STATUS_LABEL[t.status]}）`,
+              label: `${taskCode.get(t.id) ?? ""} ${t.name}（${t.ownerName} · ${t.statusLabel}）`,
             }))}
           />
         </div>

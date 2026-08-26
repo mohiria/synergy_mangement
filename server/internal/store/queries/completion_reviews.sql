@@ -84,6 +84,18 @@ JOIN objectives o ON o.id = k.objective_id
 WHERE o.project_id = $1
 ORDER BY cr.task_id, cr.id DESC;
 
+-- name: IntermediateReviewerNamesByProject :many
+-- 或签中任务的当前审核组姓名（AC-04 statusLabel 派生用）。
+SELECT cr.task_id, u.display_name
+FROM completion_reviews cr
+JOIN completion_review_reviewers crr ON crr.review_id = cr.id
+JOIN users u ON u.id = crr.user_id
+JOIN tasks t ON t.id = cr.task_id
+JOIN key_results k ON k.id = t.key_result_id
+JOIN objectives o ON o.id = k.objective_id
+WHERE o.project_id = $1 AND cr.state = 'intermediate_review'
+ORDER BY cr.task_id, crr.user_id;
+
 -- name: CandidateCountsByProject :many
 -- 每个任务的候选内容数量（canSubmitCompletion 派生用）。
 SELECT d.task_id, COUNT(*) AS n
