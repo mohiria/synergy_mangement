@@ -72,3 +72,27 @@ func TestCanEditProject(t *testing.T) {
 		})
 	}
 }
+
+// 读边界依据：PRD §3.3 项目内容仅对「所有项目内成员」可见；
+// §0.4 V4.4.2：项目负责人为独立角色，即便未登记为成员也可读。
+func TestCanReadProject(t *testing.T) {
+	cases := []struct {
+		name  string
+		actor Actor
+		want  bool
+	}{
+		{"项目管理员成员", Actor{Role: RoleAdmin}, true},
+		{"普通成员", Actor{Role: RoleMember}, true},
+		{"只读成员", Actor{Role: RoleViewer}, true},
+		{"项目负责人（未登记为成员）", Actor{IsOwner: true}, true},
+		{"非成员且非负责人", Actor{}, false},
+		{"角色为未知值时不放行", Actor{Role: "superuser"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := CanReadProject(tc.actor); got != tc.want {
+				t.Fatalf("CanReadProject(%+v) = %v, want %v", tc.actor, got, tc.want)
+			}
+		})
+	}
+}

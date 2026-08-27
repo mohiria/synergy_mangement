@@ -1602,9 +1602,9 @@ func TestDiscussionsAndNotifications(t *testing.T) {
 		t.Fatalf("讨论意见异常: %+v", d)
 	}
 
-	// 非项目成员 dave 403
+	// 非项目成员 dave 404：读边界收口后，非成员一律按「项目不存在」处理，不泄露项目是否存在（PRD §3.3）
 	resp = doJSON(t, dave, http.MethodPost, discussURL, api.CreateDiscussionRequest{Content: "外部插话"})
-	wantStatus(t, resp, http.StatusForbidden)
+	wantStatus(t, resp, http.StatusNotFound)
 	resp.Body.Close()
 
 	// 空内容 422；@ 非成员 422
@@ -1636,7 +1636,8 @@ func TestDiscussionsAndNotifications(t *testing.T) {
 	}
 
 	// 详情讨论 Tab 数据；已提交意见无编辑/删除路径（契约不存在对应端点）
-	resp = doJSON(t, dave, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
+	// 用只读成员 carol 读取：非成员 dave 已无读权限（读边界收口，PRD §3.3）
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
 	wantStatus(t, resp, http.StatusOK)
 	detail := decodeBody[api.TaskDetail](t, resp)
 	if len(detail.Discussions) != 1 || detail.Discussions[0].Content != "建议补充断链回退场景。" {
@@ -4255,5 +4256,61 @@ func TestTimeBlockerActivitySweep(t *testing.T) {
 	resp.Body.Close()
 	if again := blockerActivities(alice); len(again) != 1 {
 		t.Fatalf("写触发 diff 不应与 ticker 重复记账: %+v", again)
+	}
+}
+
+// 读边界（PRD §3.3 / AC-21）：非项目成员看不到项目，也读不到项目内任何内容。
+// 回归背景：此前 ListProjects／GetProject 均不按成员过滤，任意登录用户可读任意项目全量内容。
+func TestNonMemberProjectReadBoundary(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	seedUser(t, q, "mallory", "外人", "mallory-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, mallory := newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(mallory, "mallory", "mallory-pass")
+
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "读边界验收", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+
+	// 非成员的项目列表里不出现该项目
+	resp = doJSON(t, mallory, http.MethodGet, base+"/projects", nil)
+	wantStatus(t, resp, http.StatusOK)
+	for _, p := range decodeBody[[]api.Project](t, resp) {
+		if p.Id == created.Id {
+			t.Fatalf("非成员的项目列表出现了他人项目 #%d", created.Id)
+		}
+	}
+
+	// 项目内各读端点统一 404：不泄露项目是否存在
+	for _, path := range []string{"", "/tasks", "/edges", "/blockers", "/artifacts", "/my-work", "/report"} {
+		url := fmt.Sprintf("%s/projects/%d%s", base, created.Id, path)
+		resp = doJSON(t, mallory, http.MethodGet, url, nil)
+		wantStatus(t, resp, http.StatusNotFound)
+		resp.Body.Close()
+	}
+
+	// 成员一侧不受影响（避免过度收紧）
+	resp = doJSON(t, alice, http.MethodGet, base+"/projects", nil)
+	wantStatus(t, resp, http.StatusOK)
+	if list := decodeBody[[]api.Project](t, resp); len(list) != 1 || list[0].Id != created.Id {
+		t.Fatalf("创建人的项目列表异常: %+v", list)
+	}
+	for _, path := range []string{"", "/tasks", "/edges", "/blockers", "/artifacts", "/my-work", "/report"} {
+		url := fmt.Sprintf("%s/projects/%d%s", base, created.Id, path)
+		resp = doJSON(t, alice, http.MethodGet, url, nil)
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
 	}
 }

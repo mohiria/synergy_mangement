@@ -1,9 +1,11 @@
 -- name: ListProjects :many
 -- my_role：当前用户在各项目中的成员角色（非成员为 NULL），供 domain 层判定动作权限。
+-- 只返回当前用户可读的项目：项目内成员或项目负责人（PRD §3.3，见 domain.CanReadProject）。
 SELECT p.*, u.display_name AS owner_name, m.role AS my_role
 FROM projects p
 JOIN users u ON u.id = p.owner_id
 LEFT JOIN project_members m ON m.project_id = p.id AND m.user_id = $1
+WHERE m.user_id IS NOT NULL OR p.owner_id = $1
 ORDER BY p.created_at DESC;
 
 -- name: GetProject :one

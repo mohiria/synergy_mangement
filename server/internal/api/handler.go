@@ -652,15 +652,21 @@ func toOkrBatchItems(reqItems []CreateOkrBatchItem) []domain.OkrBatchItem {
 	return items
 }
 
-// fetchProject 读取项目与当前用户在其中的成员角色；项目不存在时已写出 404 并返回 false。
+// fetchProject 读取项目与当前用户在其中的成员角色；项目不存在或当前用户不可读时已写出 404 并返回 false。
+// 这里是全部项目内端点的唯一读入口：非成员统一按「不存在」处理，不泄露项目是否存在（PRD §3.3）。
 func (s *Server) fetchProject(w http.ResponseWriter, r *http.Request, projectID int64) (store.GetProjectRow, bool) {
-	row, err := s.q.GetProject(r.Context(), store.GetProjectParams{ID: projectID, UserID: currentUser(r).ID})
+	uid := currentUser(r).ID
+	row, err := s.q.GetProject(r.Context(), store.GetProjectParams{ID: projectID, UserID: uid})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, Error{Code: "not_found", Message: "项目不存在"})
 		} else {
 			writeInternalError(w)
 		}
+		return store.GetProjectRow{}, false
+	}
+	if !domain.CanReadProject(projectActor(uid, row.OwnerID, row.MyRole)) {
+		writeJSON(w, http.StatusNotFound, Error{Code: "not_found", Message: "项目不存在"})
 		return store.GetProjectRow{}, false
 	}
 	return row, true

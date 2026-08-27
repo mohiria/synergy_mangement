@@ -41,3 +41,13 @@ func CanManageMembers(a Actor) bool {
 func CanEditProject(a Actor) bool {
 	return a.IsOwner || a.Role == RoleAdmin
 }
+
+// CanReadProject 判定能否读取项目内容：项目内成员或项目负责人（PRD §3.3）。
+// 非成员一律不可读，读越权与写越权同一道边界。
+func CanReadProject(a Actor) bool {
+	if a.IsOwner {
+		return true
+	}
+	_, ok := memberRoles[a.Role]
+	return ok
+}
