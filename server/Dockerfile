@@ -10,6 +10,8 @@ RUN CGO_ENABLED=0 go build -o /out/server ./cmd/server
 RUN CGO_ENABLED=0 go build -o /out/migrate ./cmd/migrate
 # useradd 用来在空库上创建第一个账号：docker compose run --rm --entrypoint /useradd app ...
 RUN CGO_ENABLED=0 go build -o /out/useradd ./cmd/useradd
+# seed 重建演示数据：会先清空全部业务数据，只在演示环境手工执行（见 docs/部署.md）。
+RUN CGO_ENABLED=0 go build -o /out/seed ./cmd/seed
 
 # 运行层用 scratch：二进制是 CGO_ENABLED=0 的静态包，只需补根证书与时区。
 # 不用 gcr.io/distroless（国内网络拉不到），效果等价。
@@ -19,5 +21,6 @@ COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=build /out/server /server
 COPY --from=build /out/migrate /migrate
 COPY --from=build /out/useradd /useradd
+COPY --from=build /out/seed /seed
 EXPOSE 8080
 ENTRYPOINT ["/server"]
