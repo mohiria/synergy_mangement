@@ -9,7 +9,11 @@ RUN CGO_ENABLED=0 go build -o /out/migrate ./cmd/migrate
 # useradd 用来在空库上创建第一个账号：docker compose run --rm --entrypoint /useradd app ...
 RUN CGO_ENABLED=0 go build -o /out/useradd ./cmd/useradd
 
-FROM gcr.io/distroless/static-debian12
+# 运行层用 scratch：二进制是 CGO_ENABLED=0 的静态包，只需补根证书与时区。
+# 不用 gcr.io/distroless（国内网络拉不到），效果等价。
+FROM scratch
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=build /out/server /server
 COPY --from=build /out/migrate /migrate
 COPY --from=build /out/useradd /useradd
