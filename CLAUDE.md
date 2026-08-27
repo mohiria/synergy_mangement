@@ -44,8 +44,8 @@
 
 - 契约生成：`go tool oapi-codegen -config oapi-codegen.yaml ..\openapi.yaml` → `internal/api/api.gen.go`
 - 查询生成：`go tool sqlc generate`（schema 读 `migrations/`，查询在 `internal/store/queries/`）
-- 迁移：`go tool goose -dir migrations postgres "postgres://synergy:synergy@localhost:5432/synergy?sslmode=disable" up`（`status` 查看状态）
-- 重置演示数据：`go run ./cmd/seed`（清空含用户在内的全部业务数据后重建，数据在 `cmd/seed/sql/`，口令统一 `synergy@2026`；`-skip-files` 跳过 MinIO 占位文件）
+- 迁移：先 `$env:DATABASE_URL = "postgres://<用户>:<口令>@localhost:5432/synergy?sslmode=disable"`（口令取本机 `.env`，不写进文档与命令历史），再 `go tool goose -dir migrations postgres $env:DATABASE_URL up`（`status` 查看状态）
+- 重置演示数据：`$env:SEED_PASSWORD = "<自定口令>"; go run ./cmd/seed`（清空含用户在内的全部业务数据后重建，数据在 `cmd/seed/sql/`；演示账号口令统一取 `SEED_PASSWORD`，必填、不入库；`-skip-files` 跳过 MinIO 占位文件）
 
 `web/` 目录下：
 

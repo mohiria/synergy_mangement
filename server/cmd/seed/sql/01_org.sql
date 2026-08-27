@@ -27,24 +27,24 @@ TRUNCATE TABLE
     RESTART IDENTITY CASCADE;
 
 -- ── 用户 ──────────────────────────────────────────────────────────────────────
--- 口令统一为 synergy@2026（bcrypt cost 10）。
+-- 口令统一取环境变量 SEED_PASSWORD（cmd/seed 在事务里 set_config 进来，bcrypt cost 10）。
 INSERT INTO users (id, username, display_name, password_hash, created_at)
 OVERRIDING SYSTEM VALUE VALUES
-    (1,  'zhaowenqi',   '赵文琪', crypt('synergy@2026', gen_salt('bf', 10)), now() - interval '400 days'),
-    (2,  'lijianhui',   '李建辉', crypt('synergy@2026', gen_salt('bf', 10)), now() - interval '398 days'),
-    (3,  'chenmuyang',  '陈牧阳', crypt('synergy@2026', gen_salt('bf', 10)), now() - interval '395 days'),
-    (4,  'wanghaoran',  '王浩然', crypt('synergy@2026', gen_salt('bf', 10)), now() - interval '395 days'),
-    (5,  'liuxinyi',    '刘欣怡', crypt('synergy@2026', gen_salt('bf', 10)), now() - interval '380 days'),
-    (6,  'sunpeng',     '孙鹏',   crypt('synergy@2026', gen_salt('bf', 10)), now() - interval '372 days'),
-    (7,  'zhoujiaqi',   '周佳琪', crypt('synergy@2026', gen_salt('bf', 10)), now() - interval '365 days'),
-    (8,  'wuyufan',     '吴雨凡', crypt('synergy@2026', gen_salt('bf', 10)), now() - interval '333 days'),
-    (9,  'zhengkai',    '郑凯',   crypt('synergy@2026', gen_salt('bf', 10)), now() - interval '330 days'),
-    (10, 'hanmeng',     '韩萌',   crypt('synergy@2026', gen_salt('bf', 10)), now() - interval '300 days'),
-    (11, 'xushuai',     '徐帅',   crypt('synergy@2026', gen_salt('bf', 10)), now() - interval '288 days'),
-    (12, 'guoting',     '郭婷',   crypt('synergy@2026', gen_salt('bf', 10)), now() - interval '260 days'),
-    (13, 'maozhicheng', '毛志成', crypt('synergy@2026', gen_salt('bf', 10)), now() - interval '210 days'),
-    (14, 'linxiaoyu',   '林小雨', crypt('synergy@2026', gen_salt('bf', 10)), now() - interval '188 days'),
-    (15, 'hejing',      '何静',   crypt('synergy@2026', gen_salt('bf', 10)), now() - interval '150 days');
+    (1,  'zhaowenqi',   '赵文琪', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '400 days'),
+    (2,  'lijianhui',   '李建辉', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '398 days'),
+    (3,  'chenmuyang',  '陈牧阳', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '395 days'),
+    (4,  'wanghaoran',  '王浩然', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '395 days'),
+    (5,  'liuxinyi',    '刘欣怡', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '380 days'),
+    (6,  'sunpeng',     '孙鹏',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '372 days'),
+    (7,  'zhoujiaqi',   '周佳琪', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '365 days'),
+    (8,  'wuyufan',     '吴雨凡', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '333 days'),
+    (9,  'zhengkai',    '郑凯',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '330 days'),
+    (10, 'hanmeng',     '韩萌',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '300 days'),
+    (11, 'xushuai',     '徐帅',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '288 days'),
+    (12, 'guoting',     '郭婷',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '260 days'),
+    (13, 'maozhicheng', '毛志成', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '210 days'),
+    (14, 'linxiaoyu',   '林小雨', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '188 days'),
+    (15, 'hejing',      '何静',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '150 days');
 
 -- ── 项目 ──────────────────────────────────────────────────────────────────────
 INSERT INTO projects (id, name, created_by, owner_id, status, stage, planned_start_date, planned_end_date, created_at)
