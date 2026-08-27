@@ -264,7 +264,8 @@ func (s *Server) BatchSubmitPool(w http.ResponseWriter, r *http.Request, project
 // BatchDecidePool 批量通过/退回入池审批（AC-25）：每个任务须由其所属 KR 负责人处理。
 func (s *Server) BatchDecidePool(w http.ResponseWriter, r *http.Request, projectId int64) {
 	var req BatchPoolDecisionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.TaskIds) == 0 {
+	// decision 必须落在枚举内：与其余三处 decide 端点同口径，避免非法值被当作「退回」执行。
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || !req.Decision.Valid() || len(req.TaskIds) == 0 {
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_request", Message: "请求内容无法解析或为空"})
 		return
 	}

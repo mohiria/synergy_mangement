@@ -391,11 +391,13 @@ func TestProjectMembersAndPermissions(t *testing.T) {
 	}
 
 	// 已取消的 editor 角色（V4.4.3）→ 422
+	// 契约校验中间件先于 handler 拦下枚举越界，返回通用 invalid_request；
+	// domain 的 invalid_member_role 作为兜底保留（契约未声明枚举的入口仍走它）。
 	resp = doJSON(t, alice, http.MethodPut, fmt.Sprintf("%s/projects/%d/members/%d", base, created.Id, carolUser.ID),
 		map[string]any{"role": "editor"})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
-	if e := decodeBody[api.Error](t, resp); e.Code != "invalid_member_role" {
-		t.Fatalf("code = %q, want invalid_member_role", e.Code)
+	if e := decodeBody[api.Error](t, resp); e.Code != "invalid_request" && e.Code != "invalid_member_role" {
+		t.Fatalf("code = %q, want invalid_request 或 invalid_member_role", e.Code)
 	}
 
 	// 普通成员仍不能管理成员 → 403
@@ -410,11 +412,11 @@ func TestProjectMembersAndPermissions(t *testing.T) {
 		t.Fatalf("code = %q, want already_member", e.Code)
 	}
 
-	// 非法角色 422
+	// 非法角色 422（契约校验先拦，见上方说明）
 	resp = doJSON(t, alice, http.MethodPost, membersURL, map[string]any{"userId": bobUser.ID, "role": "boss"})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
-	if e := decodeBody[api.Error](t, resp); e.Code != "invalid_member_role" {
-		t.Fatalf("code = %q, want invalid_member_role", e.Code)
+	if e := decodeBody[api.Error](t, resp); e.Code != "invalid_request" && e.Code != "invalid_member_role" {
+		t.Fatalf("code = %q, want invalid_request 或 invalid_member_role", e.Code)
 	}
 
 	// 用户不存在 422
@@ -3461,8 +3463,26 @@ func TestImportAndBatchPool(t *testing.T) {
 		t.Fatalf("批量提交后待审批数量异常: %d", pendingCount)
 	}
 
-	// 非 KR 负责人批量处理 403；KR 负责人 bob 批量通过
 	decideURL := fmt.Sprintf("%s/projects/%d/tasks/batch-pool-decision", base, created.Id)
+
+	// 非法 decision 必须 422，且不得改变任何任务状态。
+	// 回归背景：此前 decision 未校验，approve 由 == "approved" 推出，任意非法值都会静默执行「批量退回」。
+	resp = doJSON(t, bob, http.MethodPost, decideURL, map[string]any{"taskIds": kr1Tasks, "decision": "APPROVE"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/projects/%d/tasks", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	stillPending := 0
+	for _, task := range decodeBody[[]api.Task](t, resp) {
+		if task.Status == api.TaskStatusPendingPoolReview {
+			stillPending++
+		}
+	}
+	if stillPending != 2 {
+		t.Fatalf("非法 decision 后待审批数量 = %d, want 2（不应被静默退回）", stillPending)
+	}
+
+	// 非 KR 负责人批量处理 403；KR 负责人 bob 批量通过
 	resp = doJSON(t, alice, http.MethodPost, decideURL, api.BatchPoolDecisionRequest{TaskIds: kr1Tasks, Decision: api.BatchPoolDecisionRequestDecisionApproved})
 	wantStatus(t, resp, http.StatusForbidden)
 	resp.Body.Close()

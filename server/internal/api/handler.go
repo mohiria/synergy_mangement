@@ -8,10 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/getkin/kin-openapi/openapi3filter"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	nethttpmiddleware "github.com/oapi-codegen/nethttp-middleware"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	"synergy/server/internal/domain"
@@ -46,7 +48,33 @@ func NewHandlerFromServer(s *Server, baseURL string) http.Handler {
 	return HandlerWithOptions(s, StdHTTPServerOptions{
 		BaseURL:     baseURL,
 		BaseRouter:  http.NewServeMux(),
-		Middlewares: []MiddlewareFunc{s.sessionMiddleware},
+		Middlewares: []MiddlewareFunc{s.sessionMiddleware, requestValidator()},
+	})
+}
+
+// requestValidator 用契约本身兜底校验请求：enum、required、长度与格式不再依赖各 handler 手工判定。
+// 鉴权仍由 sessionMiddleware 负责，这里只放行安全方案（避免与会话校验重复）。
+func requestValidator() MiddlewareFunc {
+	swagger, err := GetSwagger()
+	if err != nil {
+		panic("加载嵌入契约失败: " + err.Error())
+	}
+	return nethttpmiddleware.OapiRequestValidatorWithOptions(swagger, &nethttpmiddleware.Options{
+		SilenceServersWarning: true,
+		Options: openapi3filter.Options{
+			AuthenticationFunc: func(context.Context, *openapi3filter.AuthenticationInput) error { return nil },
+		},
+		ErrorHandlerWithOpts: func(_ context.Context, err error, w http.ResponseWriter, _ *http.Request, opts nethttpmiddleware.ErrorHandlerOpts) {
+			switch opts.StatusCode {
+			case http.StatusNotFound:
+				writeJSON(w, http.StatusNotFound, Error{Code: "not_found", Message: "资源不存在"})
+			case http.StatusMethodNotAllowed:
+				w.WriteHeader(http.StatusMethodNotAllowed)
+			default:
+				// 契约校验不通过统一按 422 回，与各 handler 手工校验同口径。
+				writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_request", Message: err.Error()})
+			}
+		},
 	})
 }
 
