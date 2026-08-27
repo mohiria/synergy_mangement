@@ -1,5 +1,7 @@
 FROM golang:1.26 AS build
 WORKDIR /src
+# 默认走国内代理（部署目标在国内，直连 proxy.golang.org 会超时）；direct 兜底。
+ENV GOPROXY=https://goproxy.cn,direct
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .

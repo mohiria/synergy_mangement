@@ -1,5 +1,7 @@
 FROM node:22-alpine AS build
 WORKDIR /src
+# 同 server/Dockerfile：默认走国内 npm 镜像，版本由 package-lock.json 钉死。
+RUN npm config set registry https://registry.npmmirror.com
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
