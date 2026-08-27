@@ -1,55 +1,101 @@
-# 单机内网部署：五容器（ADR 0001）。凭据为开发默认值，正式部署时改环境变量。
+# 单机内网部署（ADR 0001）：Caddy(web) + Go 应用 + PostgreSQL + MinIO + Gotenberg + Apprise。
+#
+# 部署方式：服务器上 git clone 本仓库 → cp .env.example .env 并填真实口令 → docker compose up -d --build
+# 镜像在服务器本地构建，不依赖任何外部镜像仓库；更新版本只需 git pull 后重跑同一条命令。
+# 本机开发：同样先建 .env（.env.example 里的默认值即可），只起库用 docker compose up -d postgres。
+#
+# 口令一律从 .env 读，compose 里不留默认值：漏配会直接报错，不会静默用弱口令跑起来。
 services:
+  # 前端与反向代理：静态托管 dist + 把 /api/* 转给 app，保证 SPA 与 API 同源。
+  web:
+    build: ./web
+    image: synergy-web:local
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    depends_on:
+      - app
+
   app:
     build: ./server
-    ports:
-      - "8080:8080"
+    image: synergy-app:local
+    restart: unless-stopped
     environment:
-      DATABASE_URL: postgres://synergy:synergy@postgres:5432/synergy?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-synergy}:${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-synergy}?sslmode=disable
       MINIO_ENDPOINT: minio:9000
-      # 预签名 URL 面向浏览器的地址；内网部署改为主机 IP:9000。
-      MINIO_PUBLIC_ENDPOINT: localhost:9000
-      MINIO_ACCESS_KEY: synergy
-      MINIO_SECRET_KEY: synergy-dev-secret
+      # 预签名 URL 面向浏览器：必须填浏览器可达的地址（服务器 IP 或主机名），不能是 localhost。
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:?请在 .env 中设置 MINIO_PUBLIC_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-synergy}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?请在 .env 中设置 MINIO_ROOT_PASSWORD}
       GOTENBERG_URL: http://gotenberg:3000
       APPRISE_URL: http://apprise:8000
     depends_on:
-      - postgres
-      - minio
-      - gotenberg
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      minio:
+        condition: service_started
+      gotenberg:
+        condition: service_started
+
+  # 一次性迁移：与 app 同镜像、换入口；成功退出后 app 才启动，保证空库冷启动也能直接用。
+  migrate:
+    build: ./server
+    image: synergy-app:local
+    entrypoint: ["/migrate"]
+    restart: "no"
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-synergy}:${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-synergy}?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   postgres:
     image: pgvector/pgvector:pg16
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: synergy
-      POSTGRES_PASSWORD: synergy
-      POSTGRES_DB: synergy
+      POSTGRES_USER: ${POSTGRES_USER:-synergy}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-synergy}
+    # 只绑回环：供本机 psql 与 go test 用，不对内网暴露。
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-synergy} -d ${POSTGRES_DB:-synergy}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
 
   minio:
     image: minio/minio
+    restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: synergy
-      MINIO_ROOT_PASSWORD: synergy-dev-secret
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-synergy}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?请在 .env 中设置 MINIO_ROOT_PASSWORD}
+    # 9000 必须对浏览器可达（预签名 URL 直连，不经 Caddy——改写路径会破坏签名）；控制台 9001 只绑回环。
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "${MINIO_PORT:-9000}:9000"
+      - "127.0.0.1:9001:9001"
     volumes:
       - miniodata:/data
 
   gotenberg:
     image: gotenberg/gotenberg:8
+    restart: unless-stopped
+    # 只有 app 经容器网络调用；绑回环仅为本机跑报告导出集成测试（GOTENBERG_URL）。
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
 
+  # V1 只部署不配置渠道（ADR 0001「通知」）：外发渠道预留，Go 侧暂未接入 APPRISE_URL。
   apprise:
     image: caronc/apprise:latest
+    restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
 
 volumes:
   pgdata:

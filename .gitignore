@@ -7,6 +7,7 @@ dist/
 # 本地环境与日志
 .env
 .env.*
+!.env.example
 *.log
 
 # 本地素材（非项目事实源）

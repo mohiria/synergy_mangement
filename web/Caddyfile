@@ -1,0 +1,16 @@
+# 同源提供 SPA 与 API：前端用相对路径 /api/v1（web/src/api/client.ts），必须与后端同源。
+# 内网明文 HTTP（ADR 0001「认证会话」）；日后上 HTTPS 时把 :80 换成域名即可，代码不用改。
+:80 {
+	encode gzip
+	root * /srv
+
+	handle /api/* {
+		reverse_proxy app:8080
+	}
+
+	# SPA history fallback：react-router 的深链接（如 /projects/1/tasks）交给 index.html。
+	handle {
+		try_files {path} /index.html
+		file_server
+	}
+}

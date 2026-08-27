@@ -1,0 +1,7 @@
+# 依赖与产物在镜像里重新装／重新构建，不从宿主机带进上下文。
+node_modules
+dist
+Dockerfile
+.dockerignore
+*.log
+*.tsbuildinfo

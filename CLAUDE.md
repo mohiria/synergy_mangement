@@ -52,10 +52,11 @@
 - 契约类型生成：`npm run gen:api` → `src/api/schema.d.ts`
 - 构建（含 tsc）：`npm run build`；开发：`npm run dev`（/api 代理到 :8080）
 
-仓库根：
+仓库根（先 `cp .env.example .env` 填好口令，compose 对口令类变量不设默认值）：
 
-- 开发只起数据库：`docker compose up -d postgres`（凭据 synergy/synergy，库名 synergy）
-- 全量五容器：`docker compose up -d`
+- 开发只起数据库：`docker compose up -d postgres`（用户名与库名默认 synergy，口令取 `.env`）
+- 全量启动（本地构建镜像）：`docker compose up -d --build`
+- 部署见 `docs/部署.md`（服务器上 clone + `docker compose up -d --build`，镜像本地构建，不走镜像仓库）
 - Playwright 冒烟：尚未搭建，首个业务功能落地后补
 
 生成物（api.gen.go、store/*.sql.go、schema.d.ts）提交进仓库，但不手改。

@@ -1,0 +1,7 @@
+# 构建上下文只需要 Go 源码与 go.mod/go.sum。
+Dockerfile
+.dockerignore
+*.log
+*.exe
+oapi-codegen.yaml
+sqlc.yaml
