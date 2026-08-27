@@ -424,29 +424,38 @@ body {
 .handled-fact { margin-top: 8px; padding: 8px 10px; border-radius: var(--radius); background: #f7f9fb; font-size: var(--type-aux); color: #52606d; }
 .audit-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 .compact-empty { padding: 26px 16px; }
-.deliverable-card {
+.notice.warning { background: var(--amber-soft); color: var(--amber); border-left-color: #d9a94a; }
+/* 事实卡：任务输入、交付物、协作关系、卡点、讨论与报告列表共用的一套基座 + 修饰类。 */
+.fact-card {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   border: 1px solid var(--line); border-radius: var(--radius); background: #fff;
   padding: 10px 12px; margin-bottom: 8px;
 }
-.deliverable-card b { display: block; }
-.deliverable-card .file-link { color: var(--accent); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; font-size: var(--type-aux); }
-.notice.warning { background: var(--amber-soft); color: var(--amber); border-left-color: #d9a94a; }
-.input-fact {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  border: 1px solid var(--line); border-radius: var(--radius); background: #fff;
-  padding: 9px 12px; margin-bottom: 8px; font-size: var(--type-aux);
+.fact-card b { display: block; }
+.fact-card small { display: block; color: var(--muted); font-size: 12px; }
+.fact-card .file-link { color: var(--accent); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; font-size: var(--type-aux); }
+.fact-card-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+/* 紧凑正文（输入、卡点等一行事实）。 */
+.fact-card-aux { padding: 9px 12px; font-size: var(--type-aux); }
+/* 多行内容顶对齐（讨论意见）。 */
+.fact-card-top { align-items: flex-start; }
+/* 风险底色（结构化卡点）。 */
+.fact-card-risk { border-color: #e4b6ba; background: #fffafa; }
+/* 可点击整卡（协作关系，button 元素需重置 font 与对齐）。 */
+.fact-card-link {
+  width: 100%; padding: 9px 12px; margin-bottom: 6px; font: inherit;
+  font-size: var(--type-aux); cursor: pointer; text-align: left;
 }
-.input-fact b { display: block; }
-.input-fact small { display: block; color: var(--muted); font-size: 12px; }
-.relation-card {
-  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  border: 1px solid var(--line); border-radius: var(--radius); background: #fff;
-  padding: 9px 12px; margin-bottom: 6px; cursor: pointer; text-align: left; font: inherit;
+.fact-card-link:hover { border-color: #aeb9c7; background: #f8f9fc; }
+/* 区块小标题右侧的计数与口径注记。 */
+.section-count { font-weight: 400; font-size: 12px; color: var(--muted); }
+/* 任务输入行的必要／参考徽标。 */
+.necessity-tag {
+  display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: var(--radius);
+  font-size: 12px; font-weight: 400; line-height: 18px; vertical-align: 1px;
 }
-.relation-card:hover { border-color: #aeb9c7; background: #f8f9fc; }
-.relation-card b { display: block; font-size: var(--type-aux); }
-.relation-card small { display: block; color: var(--muted); font-size: 12px; }
+.necessity-tag.required { background: #eef1fd; color: var(--accent); border: 1px solid #ccd4f6; }
+.necessity-tag.reference { background: #f4f6f8; color: var(--muted); border: 1px solid var(--line); }
 
 /* 登录页：居中单卡（原型无对应页，按基线调色板与组件规格设计）。 */
 .login-shell {

@@ -317,7 +317,7 @@ export default function ImportModal({
             <div className="empty compact-empty">表格中没有人员列</div>
           )}
           {personNames.map((n) => (
-            <div key={n} className="input-fact">
+            <div key={n} className="fact-card fact-card-aux">
               <div>
                 <b>{n}</b>
                 <small>{memberByName.has(n) ? "已按姓名精确匹配" : "未匹配，请指定项目成员"}</small>

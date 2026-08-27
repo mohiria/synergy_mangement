@@ -78,6 +78,9 @@ const EDGE_TYPE_LABEL: Record<EdgeType, string> = {
   feedback: "迭代／反馈",
 };
 
+// 「动态与讨论」Tab 上段默认只展示最近 5 条动态，其余折在「展开全部」后面。
+const ACTIVITY_PREVIEW = 5;
+
 // 成员树分组（AC-53）：原型按团队分组，当前数据模型只有项目成员角色，
 // 故按角色分组；团队字段补齐后改为按团队分组即可，组件本身不变。
 const MEMBER_GROUP_LABEL: Record<MemberRole, string> = {
@@ -1512,6 +1515,7 @@ function TaskDrawer({
   const [newDeliverableName, setNewDeliverableName] = useState("");
   const [discussionDraft, setDiscussionDraft] = useState("");
   const [postingDiscussion, setPostingDiscussion] = useState(false);
+  const [activityExpanded, setActivityExpanded] = useState(false);
 
   // 按来源分组落位（模块 PRD §6.2）：详情就绪后滚动到对应区块并短暂高亮，
   // 卡片正文因此不再展开原因、输入与影响（MW-01/03/05/06/14 新口径）。
@@ -1522,7 +1526,8 @@ function TaskDrawer({
       approvals: [".audit-card.pending", '[data-focus="basic"]'],
       receipts: ['[data-focus="receipts"]', '[data-focus="deliverables"]', '[data-focus="basic"]'],
       waiting: ['[data-focus="inputs"]', '[data-focus="basic"]'],
-      blockers: ['[data-focus="blockers"]', '[data-focus="basic"]'],
+      // 协作关系已独立成 Tab，一次落位只能命中一个 Tab，故卡点组只定位卡点区块（MW §6.2）。
+      blockers: ['[data-focus="blockers"]'],
     };
     const root = drawerRef.current;
     if (!root) return;
@@ -1561,6 +1566,8 @@ function TaskDrawer({
   const [candidateFile, setCandidateFile] = useState<File | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
 
+  // 换一个任务时动态回到默认的最近 5 条（刷新同一任务不收起）。
+  useEffect(() => setActivityExpanded(false), [task?.id]);
 
   useEffect(() => {
     if (!task) {
@@ -1658,14 +1665,21 @@ function TaskDrawer({
   const blockers = detail?.blockers ?? [];
   const inputs = detail?.inputs ?? [];
   const activities = detail?.activities ?? [];
+  const discussions = detail?.discussions ?? [];
   const upstream = detail?.upstream ?? [];
   const downstream = detail?.downstream ?? [];
+  const relationCount = upstream.length + downstream.length;
   const requiredInputs = inputs.filter((e) => e.necessity === "required");
   const referenceInputs = inputs.filter((e) => e.necessity === "reference");
-  const currentFiles = (detail?.deliverables ?? [])
-    .filter((d) => d.current)
-    .map((d) => ({ d, f: d.current! }));
-  const candidateCount = (detail?.deliverables ?? []).filter((d) => d.candidate).length;
+  // 上游未就绪卡点按边寻址（Blocker.key 形如 upstream_unready:edge:17），供任务输入行取缺失原因。
+  const inputBlockers = new Map(
+    blockers
+      .filter((b) => b.key.startsWith("upstream_unready:edge:"))
+      .map((b) => [Number(b.key.slice("upstream_unready:edge:".length)), b] as const),
+  );
+  const deliverables = detail?.deliverables ?? [];
+  const currentFiles = deliverables.filter((d) => d.current);
+  const candidateCount = deliverables.filter((d) => d.candidate).length;
   const pendingReviews =
     (detail?.poolReviews ?? []).filter((r) => r.status === "pending").length +
     (detail?.fieldChanges ?? []).filter((fc) => fc.state === "pending").length +
@@ -1685,7 +1699,7 @@ function TaskDrawer({
           <button
             key={`${title}-${rel.taskId}-${rel.edgeType}`}
             type="button"
-            className="relation-card"
+            className="fact-card fact-card-link"
             onClick={() => actions.openTask(rel.taskId)}
           >
             <span>
@@ -1807,149 +1821,110 @@ function TaskDrawer({
           )}
         </div>
       </section>
-      {blockers.length > 0 && (
-        <section className="drawer-section" data-focus="blockers">
-          <h3>
-            结构化卡点{" "}
-            <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>
-              {blockers.length} 个（系统派生，条件消失即自动解除）
-            </span>
-          </h3>
-          {blockers.map((b) => (
-            <div key={b.key} className="input-fact" style={{ borderColor: "#e4b6ba", background: "#fffafa" }}>
-              <div>
-                <b>
-                  {b.kindLabel}:缺 {b.missing}
-                  <span className={`status-pill risk-${b.level}`} style={{ marginLeft: 8 }}>
-                    {RISK_LABEL[b.level]}
-                  </span>
-                </b>
-                <small>
-                  {b.reason} · 待行动人 {b.actionOwnerNames.join("、") || "—"}
-                  {b.impactNote ? ` · ${b.impactNote}` : ""}
-                </small>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                {b.canRemind && (
-                  <Button size="small" onClick={() => actions.remindBlocker(b.key)}>
-                    一键提醒
-                  </Button>
-                )}
-              </div>
-            </div>
-          ))}
-        </section>
-      )}
-      {requiredInputs.length > 0 && (
+      {/* 任务输入（§7.5）：必要与参考同区块展示，合并只合展示不合语义——
+          只有必要输入未就绪才派生卡点与「等待他人」，参考输入永远只提示，故每行必须标出类别。 */}
+      {inputs.length > 0 && (
         <section className="drawer-section" data-focus="inputs">
           <h3>
-            必要输入{" "}
-            <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>
-              {requiredInputs.length} 项
+            任务输入{" "}
+            <span className="section-count">
+              必要 {requiredInputs.length} 项 · 参考 {referenceInputs.length} 项
             </span>
           </h3>
-          {requiredInputs.map((e) => (
-            <div key={e.id} className="input-fact">
-              <div>
-                <b>{e.name}</b>
-                <small>
-                  {e.inputRequest
-                    ? `指定项目成员提供 · 对接人 ${e.inputRequest.providerName}` +
-                      (e.inputRequest.contentNote ? ` · ${e.inputRequest.contentNote}` : "")
-                    : `已有任务 · ${e.sourceTaskName ?? "—"}` +
-                      (e.deliverableName ? ` · ${e.deliverableName}` : "") +
-                      (e.sourceOwnerName ? ` · 提供人 ${e.sourceOwnerName}` : "")}
-                </small>
-                {e.inputRequest?.state === "provided" && (
+          {[...requiredInputs, ...referenceInputs].map((e) => {
+            const required = e.necessity === "required";
+            // 未就绪的必要输入才补缺失原因与待行动人，取同一条边派生的上游未就绪卡点。
+            const blocker = required && !e.ready ? inputBlockers.get(e.id) : undefined;
+            return (
+              <div key={e.id} className="fact-card fact-card-aux">
+                <div>
+                  <b>
+                    <span className={`necessity-tag ${required ? "required" : "reference"}`}>
+                      {required ? "必要" : "参考"}
+                    </span>
+                    {e.name}
+                  </b>
                   <small>
-                    已提供:{e.inputRequest.providedText || ""}
-                    {e.inputRequest.providedFileName && (
-                      <span
-                        className="file-link"
-                        style={{ marginLeft: 6 }}
-                        onClick={() => actions.openInputFile(e.inputRequest!.id)}
-                      >
-                        {e.inputRequest.providedFileName}
-                      </span>
-                    )}
+                    {(e.inputRequest
+                      ? `指定项目成员提供 · 对接人 ${e.inputRequest.providerName}` +
+                        (e.inputRequest.contentNote ? ` · ${e.inputRequest.contentNote}` : "")
+                      : `已有任务 · ${e.sourceTaskName ?? "—"}` +
+                        (e.deliverableName ? ` · ${e.deliverableName}` : "") +
+                        (e.sourceOwnerName ? ` · 提供人 ${e.sourceOwnerName}` : "")) +
+                      ` · ${EDGE_TYPE_LABEL[e.edgeType]}`}
                   </small>
-                )}
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                {e.inputRequest && (
-                  <span
-                    className={`status-pill ${
-                      e.inputRequest.state === "provided"
-                        ? "completed"
+                  {e.inputRequest?.state === "provided" && (
+                    <small>
+                      已提供:{e.inputRequest.providedText || ""}
+                      {e.inputRequest.providedFileName && (
+                        <span
+                          className="file-link"
+                          style={{ marginLeft: 6 }}
+                          onClick={() => actions.openInputFile(e.inputRequest!.id)}
+                        >
+                          {e.inputRequest.providedFileName}
+                        </span>
+                      )}
+                    </small>
+                  )}
+                  {blocker && (
+                    <small>
+                      缺失原因:{blocker.reason} · 待行动人 {blocker.actionOwnerNames.join("、") || "—"}
+                    </small>
+                  )}
+                </div>
+                <div className="fact-card-actions">
+                  {e.inputRequest ? (
+                    <span
+                      className={`status-pill ${
+                        e.inputRequest.state === "provided"
+                          ? "completed"
+                          : e.inputRequest.state === "accepted"
+                            ? "review"
+                            : "warning"
+                      }`}
+                    >
+                      {e.inputRequest.state === "provided"
+                        ? "已提供"
                         : e.inputRequest.state === "accepted"
-                          ? "review"
-                          : "warning"
-                    }`}
-                  >
-                    {e.inputRequest.state === "provided"
-                      ? "已提供"
-                      : e.inputRequest.state === "accepted"
-                        ? "已接收"
-                        : "待接收"}
-                  </span>
-                )}
-                {!e.inputRequest && (
-                  <span className={`status-pill ${e.ready ? "completed" : "warning"}`}>
-                    {e.ready ? "已就绪" : "未就绪"}
-                  </span>
-                )}
-                {e.inputRequest?.canAccept && (
-                  <Button size="small" onClick={() => actions.acceptInput(e.inputRequest!.id)}>
-                    同意接收
-                  </Button>
-                )}
-                {e.inputRequest?.canProvide && (
-                  <Button size="small" type="primary" onClick={() => actions.openProvide(e.inputRequest!.id)}>
-                    提交内容
-                  </Button>
-                )}
-                {e.canRemove && (
-                  <Button size="small" type="text" onClick={() => actions.removeEdge(e.id)}>
-                    解除
-                  </Button>
-                )}
+                          ? "已接收"
+                          : "待接收"}
+                    </span>
+                  ) : (
+                    <span className={`status-pill ${e.ready ? "completed" : "warning"}`}>
+                      {e.ready ? "已就绪" : "未就绪"}
+                    </span>
+                  )}
+                  {e.inputRequest?.canAccept && (
+                    <Button size="small" onClick={() => actions.acceptInput(e.inputRequest!.id)}>
+                      同意接收
+                    </Button>
+                  )}
+                  {e.inputRequest?.canProvide && (
+                    <Button size="small" type="primary" onClick={() => actions.openProvide(e.inputRequest!.id)}>
+                      提交内容
+                    </Button>
+                  )}
+                  {e.canRemove && (
+                    <Button size="small" type="text" onClick={() => actions.removeEdge(e.id)}>
+                      解除
+                    </Button>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </section>
       )}
-      {referenceInputs.length > 0 && (
-        <section className="drawer-section">
-          <h3>
-            参考输入{" "}
-            <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>
-              仅提示，不产生“等待他人”事项
-            </span>
-          </h3>
-          {referenceInputs.map((e) => (
-            <div key={e.id} className="input-fact">
-              <div>
-                <b>{e.name}</b>
-                <small>
-                  {e.sourceTaskName ?? "—"} · {EDGE_TYPE_LABEL[e.edgeType]}
-                </small>
-              </div>
-              {e.canRemove && (
-                <Button size="small" type="text" onClick={() => actions.removeEdge(e.id)}>
-                  解除
-                </Button>
-              )}
-            </div>
-          ))}
-        </section>
-      )}
-      {/* AC-51：尚无正式提交的交付物时整块不显示；每项只留名称、可预览文件名、格式、大小和更新时间。 */}
-      {currentFiles.length > 0 && (
+      {/* 交付物（AC-50/AC-51）：交付物项与当前内容合成一块，每项一行事实——
+          当前文件或「尚无当前内容」、候选提示，有权限时给上传／新增。
+          无交付物项且无配置权限时整块隐藏，否则负责人失去唯一的新增／上传候选内容入口。 */}
+      {(deliverables.length > 0 || task.canManageDeliverables) && (
         <section className="drawer-section" data-focus="deliverables">
           <h3>
-            当前交付物{" "}
-            <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>
-              {currentFiles.length} 项
+            交付物{" "}
+            <span className="section-count">
+              {deliverables.length} 项 · 已有当前内容 {currentFiles.length} 项
             </span>
           </h3>
           {candidateCount > 0 && (
@@ -1957,31 +1932,73 @@ function TaskDrawer({
               有 {candidateCount} 项更新审核中，候选内容请在“审核”Tab 查看；当前内容继续有效。
             </div>
           )}
-          {currentFiles.map(({ d, f }) => (
-            <article key={f.id} className="deliverable-card">
-              <div>
+          {deliverables.length === 0 && <div className="empty compact-empty">尚无交付物项</div>}
+          {deliverables.map((d) => (
+            <article key={d.id} className="fact-card">
+              <div style={{ minWidth: 0 }}>
                 <b>{d.name}</b>
-                <span className="file-link" onClick={() => openFile(f.id)}>
-                  {f.fileName}
-                </span>
-                <div className="muted" style={{ fontSize: 12 }}>
-                  {fileTypeLabel(f.fileName)}
-                  {f.fileSize ? ` · ${formatFileSize(f.fileSize)}` : ""}
-                  {f.effectiveAt ? ` · 更新于 ${fmtTime(f.effectiveAt)}` : ""}
-                </div>
+                {d.current ? (
+                  <>
+                    <span className="file-link" onClick={() => openFile(d.current!.id)}>
+                      {d.current.fileName}
+                    </span>
+                    <div className="muted" style={{ fontSize: 12 }}>
+                      {fileTypeLabel(d.current.fileName)}
+                      {d.current.fileSize ? ` · ${formatFileSize(d.current.fileSize)}` : ""}
+                      {d.current.effectiveAt ? ` · 更新于 ${fmtTime(d.current.effectiveAt)}` : ""}
+                    </div>
+                  </>
+                ) : (
+                  <div className="muted" style={{ fontSize: 12 }}>
+                    尚无当前内容
+                  </div>
+                )}
+                {d.candidate && (
+                  <div className="muted" style={{ fontSize: 12 }}>
+                    候选「{d.candidate.fileName}」审核准备中
+                  </div>
+                )}
               </div>
-              <Button size="small" onClick={() => openFile(f.id)}>
-                下载
-              </Button>
+              <div className="fact-card-actions">
+                {d.current && (
+                  <Button size="small" onClick={() => openFile(d.current!.id)}>
+                    下载
+                  </Button>
+                )}
+                {task.canUploadCandidate && (
+                  <Button
+                    size="small"
+                    loading={uploadingId === d.id}
+                    onClick={() => setCandidateFor({ id: d.id, name: d.name })}
+                  >
+                    {d.candidate ? "重传候选内容" : "上传候选内容"}
+                  </Button>
+                )}
+              </div>
             </article>
           ))}
+          {task.canManageDeliverables && (
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <Input
+                size="small"
+                maxLength={100}
+                placeholder="新增交付物项名称"
+                value={newDeliverableName}
+                onChange={(e) => setNewDeliverableName(e.target.value)}
+                style={{ width: 240 }}
+              />
+              <Button size="small" onClick={addDeliverable} disabled={!newDeliverableName.trim()}>
+                ＋ 新增交付物项
+              </Button>
+            </div>
+          )}
         </section>
       )}
-      {/* 成果接收（词汇表「接收方」「接收记录」；模块 PRD §8.6、MW-09）：
+      {/* 交付物接收方（词汇表「接收方」「接收记录」；模块 PRD §8.6、MW-09）：
           未配置接收方且本人无配置权限时整块不显示；确认接收只对接收方本人显示，接收方无审核权、不提供退回。 */}
       {(task.receiverScope !== "none" || task.canManageReceivers) && (
         <section className="drawer-section" data-focus="receipts">
-          <h3>成果接收</h3>
+          <h3>交付物接收方</h3>
           <div className="task-info-list">
             <div className="task-info-row">
               <span>接收方</span>
@@ -2022,148 +2039,148 @@ function TaskDrawer({
           )}
         </section>
       )}
-      {/* AC-50 空区块不显示：无交付物项且无配置权限时整块隐藏；
-          有配置权限时保留，否则负责人失去唯一的新增／上传候选内容入口。 */}
-      {((detail?.deliverables ?? []).length > 0 || task.canManageDeliverables) && (
-        <section className="drawer-section">
+      {/* 当前卡点收在概况末尾（MW PRD §6.1 顺序）：无卡点不显示。 */}
+      {blockers.length > 0 && (
+        <section className="drawer-section" data-focus="blockers">
           <h3>
-            交付物项{" "}
-            <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>
-              {(detail?.deliverables ?? []).length} 项
-            </span>
+            结构化卡点{" "}
+            <span className="section-count">{blockers.length} 个（系统派生，条件消失即自动解除）</span>
           </h3>
-          {(detail?.deliverables ?? []).map((d) => (
-            <article key={d.id} className="deliverable-card">
+          {blockers.map((b) => (
+            <div key={b.key} className="fact-card fact-card-aux fact-card-risk">
               <div>
-                <b>{d.name}</b>
-                <div className="muted" style={{ fontSize: 12 }}>
-                  {d.current ? "已有当前内容" : "尚无当前内容"}
-                  {d.candidate ? ` · 候选「${d.candidate.fileName}」审核准备中` : ""}
-                </div>
+                <b>
+                  {b.kindLabel}:缺 {b.missing}
+                  <span className={`status-pill risk-${b.level}`} style={{ marginLeft: 8 }}>
+                    {RISK_LABEL[b.level]}
+                  </span>
+                </b>
+                <small>
+                  {b.reason} · 待行动人 {b.actionOwnerNames.join("、") || "—"}
+                  {b.impactNote ? ` · ${b.impactNote}` : ""}
+                </small>
               </div>
-              {task.canUploadCandidate && (
-                <Button
-                  size="small"
-                  loading={uploadingId === d.id}
-                  onClick={() => setCandidateFor({ id: d.id, name: d.name })}
-                >
-                  {d.candidate ? "重传候选内容" : "上传候选内容"}
-                </Button>
-              )}
-            </article>
-          ))}
-          {task.canManageDeliverables && (
-            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-              <Input
-                size="small"
-                maxLength={100}
-                placeholder="新增交付物项名称"
-                value={newDeliverableName}
-                onChange={(e) => setNewDeliverableName(e.target.value)}
-                style={{ width: 240 }}
-              />
-              <Button size="small" onClick={addDeliverable} disabled={!newDeliverableName.trim()}>
-                ＋ 新增交付物项
-              </Button>
+              <div className="fact-card-actions">
+                {b.canRemind && (
+                  <Button size="small" onClick={() => actions.remindBlocker(b.key)}>
+                    一键提醒
+                  </Button>
+                )}
+              </div>
             </div>
-          )}
-        </section>
-      )}
-      {/* 任务动态（词汇表、ADR 0002）：已发生事实的倒序留痕，只读；
-          文案由服务端写入时定型，前端不拼装、不按 kind 拼中文名。无动态时整块不显示。 */}
-      {activities.length > 0 && (
-        <section className="drawer-section">
-          <h3>
-            任务动态{" "}
-            <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>
-              {activities.length} 条
-            </span>
-          </h3>
-          <ol className="activity-feed">
-            {activities.map((a) => (
-              <li key={a.id}>
-                <span className="activity-dot" aria-hidden />
-                <div>
-                  <b>{a.summary}</b>
-                  <small>
-                    {a.actorName ?? "系统"} · {fmtTime(a.occurredAt)}
-                  </small>
-                </div>
-              </li>
-            ))}
-          </ol>
-        </section>
-      )}
-      {/* 协作关系摘要（AC-41/AC-50、词汇表）：直接消费 API 的 upstream／downstream 派生分组，
-          前端不再过滤或合并；空组不显示，两组皆空时整块不显示，且不插入交付物节点。 */}
-      {(upstream.length > 0 || downstream.length > 0) && (
-        <section className="drawer-section">
-          <h3 style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            协作关系
-            <Button
-              type="link"
-              size="small"
-              onClick={() => actions.openInGraph(task.id)}
-            >
-              在关系图谱中查看 →
-            </Button>
-          </h3>
-          {relationGroup("直接上游", upstream)}
-          {relationGroup("直接下游", downstream)}
+          ))}
         </section>
       )}
     </>
   );
 
-  const discussions = detail?.discussions ?? [];
-  const discussion = (
-    <div>
-      {discussions.length === 0 && <div className="empty compact-empty">尚无讨论意见</div>}
-      {discussions.map((d) => (
-        <article key={d.id} className="deliverable-card" style={{ alignItems: "flex-start" }}>
-          <div style={{ minWidth: 0 }}>
-            <b>
-              {d.authorName}
-              <span className="muted" style={{ fontWeight: 400, fontSize: 12, marginLeft: 8 }}>
-                {fmtTime(d.createdAt)}
-                {d.mentionNames && d.mentionNames.length > 0 && ` · @ ${d.mentionNames.join("、")}`}
-              </span>
-            </b>
-            <div style={{ whiteSpace: "pre-wrap" }}>{d.content}</div>
-          </div>
-        </article>
-      ))}
-      <div style={{ marginTop: 12 }}>
-        <Mentions
-          rows={3}
-          placeholder="输入文字意见，可使用 @姓名 提醒项目成员"
-          value={discussionDraft}
-          onChange={setDiscussionDraft}
-          options={members.map((m) => ({ value: m.displayName, label: m.displayName }))}
-        />
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginTop: 8,
-            gap: 8,
-          }}
-        >
-          <span className="muted" style={{ fontSize: 12 }}>
-            提交后不可编辑、不可删除；任务负责人和被 @ 成员会收到通知。
-          </span>
-          <Button
-            type="primary"
-            size="small"
-            loading={postingDiscussion}
-            disabled={!discussionDraft.trim()}
-            onClick={postDiscussion}
-          >
-            提交讨论
+  // 协作关系 Tab（AC-41/AC-42、协作关系 PRD）：直接消费 API 的 upstream／downstream 派生分组，
+  // 前端不再过滤或合并，也不插入交付物节点；两组皆空时 Tab 常驻并显示空态，保证 Tab 数量稳定。
+  const relations = (
+    <div style={{ paddingTop: 4 }}>
+      <section className="drawer-section" style={{ marginTop: 4 }} data-focus="relations">
+        <h3 style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          协作关系
+          <Button type="link" size="small" onClick={() => actions.openInGraph(task.id)}>
+            在关系图谱中查看 →
           </Button>
+        </h3>
+        {relationCount === 0 ? (
+          <div className="empty compact-empty">本任务尚无直接上游或直接下游</div>
+        ) : (
+          <>
+            {relationGroup("直接上游", upstream)}
+            {relationGroup("直接下游", downstream)}
+          </>
+        )}
+      </section>
+    </div>
+  );
+
+  // 动态与讨论 Tab：上段任务动态（ADR 0002）只读倒序、默认最近 5 条；下段讨论意见正序 + 输入框。
+  // 两段同 Tab 但不同流：动态不收讨论意见，动态不折叠会把讨论压到很下面、通知跳回也会落错位置。
+  const activityAndDiscussion = (
+    <div style={{ paddingTop: 4 }}>
+      <section className="drawer-section" style={{ marginTop: 4 }}>
+        <h3>
+          任务动态 <span className="section-count">{activities.length} 条</span>
+        </h3>
+        {activities.length === 0 ? (
+          <div className="empty compact-empty">尚无任务动态</div>
+        ) : (
+          <>
+            <ol className="activity-feed">
+              {(activityExpanded ? activities : activities.slice(0, ACTIVITY_PREVIEW)).map((a) => (
+                <li key={a.id}>
+                  <span className="activity-dot" aria-hidden />
+                  <div>
+                    <b>{a.summary}</b>
+                    <small>
+                      {a.actorName ?? "系统"} · {fmtTime(a.occurredAt)}
+                    </small>
+                  </div>
+                </li>
+              ))}
+            </ol>
+            {activities.length > ACTIVITY_PREVIEW && (
+              <Button type="link" size="small" onClick={() => setActivityExpanded((v) => !v)}>
+                {activityExpanded ? "收起" : `展开全部 ${activities.length} 条`}
+              </Button>
+            )}
+          </>
+        )}
+      </section>
+      <section className="drawer-section">
+        <h3>
+          讨论意见 <span className="section-count">{discussions.length} 条</span>
+        </h3>
+        {discussions.length === 0 && <div className="empty compact-empty">尚无讨论意见</div>}
+        {discussions.map((d) => (
+          <article key={d.id} className="fact-card fact-card-top">
+            <div style={{ minWidth: 0 }}>
+              <b>
+                {d.authorName}
+                <span className="muted" style={{ fontWeight: 400, fontSize: 12, marginLeft: 8 }}>
+                  {fmtTime(d.createdAt)}
+                  {d.mentionNames && d.mentionNames.length > 0 && ` · @ ${d.mentionNames.join("、")}`}
+                </span>
+              </b>
+              <div style={{ whiteSpace: "pre-wrap" }}>{d.content}</div>
+            </div>
+          </article>
+        ))}
+        <div style={{ marginTop: 12 }}>
+          <Mentions
+            rows={3}
+            placeholder="输入文字意见，可使用 @姓名 提醒项目成员"
+            value={discussionDraft}
+            onChange={setDiscussionDraft}
+            options={members.map((m) => ({ value: m.displayName, label: m.displayName }))}
+          />
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginTop: 8,
+              gap: 8,
+            }}
+          >
+            <span className="muted" style={{ fontSize: 12 }}>
+              提交后不可编辑、不可删除；任务负责人和被 @ 成员会收到通知。
+            </span>
+            <Button
+              type="primary"
+              size="small"
+              loading={postingDiscussion}
+              disabled={!discussionDraft.trim()}
+              onClick={postDiscussion}
+            >
+              提交讨论
+            </Button>
+          </div>
         </div>
-      </div>
+      </section>
     </div>
   );
 
@@ -2419,8 +2436,13 @@ function TaskDrawer({
         defaultActiveKey={initialTab ?? "overview"}
         items={[
           { key: "overview", label: "任务概况", children: overview },
+          { key: "relations", label: `协作关系 ${relationCount}`, children: relations },
           { key: "audit", label: `审核 ${pendingReviews}`, children: audit },
-          { key: "discussion", label: `讨论 ${discussions.length}`, children: discussion },
+          {
+            key: "discussion",
+            label: `动态与讨论 ${discussions.length}`,
+            children: activityAndDiscussion,
+          },
         ]}
       />
       </div>

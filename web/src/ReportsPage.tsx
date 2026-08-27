@@ -173,7 +173,7 @@ export default function ReportsPage({
               <div className="empty compact-empty">该范围内没有新生效的当前成果</div>
             )}
             {report.completedDeliverables.map((d, i) => (
-              <div key={i} className="input-fact">
+              <div key={i} className="fact-card fact-card-aux">
                 <div>
                   <b>
                     {d.taskName} / {d.deliverableName}
@@ -193,7 +193,7 @@ export default function ReportsPage({
               <div className="empty compact-empty">没有需要关注的卡点</div>
             )}
             {report.blockers.map((b, i) => (
-              <div key={i} className="input-fact">
+              <div key={i} className="fact-card fact-card-aux">
                 <div>
                   <b>
                     {b.taskName} · {b.kindLabel}：缺 {b.missing}
@@ -225,7 +225,7 @@ export default function ReportsPage({
               <div className="empty compact-empty">未来 7 天内没有临近截止的任务</div>
             )}
             {report.nextSteps.map((n, i) => (
-              <div key={i} className="input-fact">
+              <div key={i} className="fact-card fact-card-aux">
                 <div>
                   <b>
                     {n.taskName}
