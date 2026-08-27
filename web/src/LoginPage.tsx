@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Alert, Button, Card, Form, Input, Typography } from "antd";
+import { Alert, Button, Form, Input } from "antd";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
+import Icon from "./icons";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 
@@ -23,7 +24,7 @@ export default function LoginPage({ onLogin }: { onLogin: (u: CurrentUser) => vo
 
   return (
     <div className="login-shell">
-      <div style={{ width: 360 }}>
+      <div className="login-panel">
         <div className="login-brand">
           <span className="brand-mark">协</span>
           <div className="brand-name">
@@ -31,23 +32,36 @@ export default function LoginPage({ onLogin }: { onLogin: (u: CurrentUser) => vo
             <span>O／KR／任务协同推进</span>
           </div>
         </div>
-        <Card>
-          {error && <Alert type="error" message={error} style={{ marginBottom: 16 }} />}
+        <div className="login-card">
+          <div className="login-card-head">
+            <h1>登录</h1>
+            <p>使用管理员分配的账号进入协作空间</p>
+          </div>
+          {error && <Alert type="error" message={error} style={{ marginBottom: 14 }} />}
           <Form layout="vertical" onFinish={submit} requiredMark={false}>
-            <Form.Item name="username" label="用户名" rules={[{ required: true, message: "请输入用户名" }]}>
-              <Input autoFocus autoComplete="username" />
+            <Form.Item
+              name="username"
+              label="用户名"
+              rules={[{ required: true, message: "请输入用户名" }]}
+            >
+              <Input autoFocus autoComplete="username" placeholder="请输入用户名" />
             </Form.Item>
-            <Form.Item name="password" label="口令" rules={[{ required: true, message: "请输入口令" }]}>
-              <Input.Password autoComplete="current-password" />
+            <Form.Item
+              name="password"
+              label="口令"
+              rules={[{ required: true, message: "请输入口令" }]}
+            >
+              <Input.Password autoComplete="current-password" placeholder="请输入口令" />
             </Form.Item>
             <Button type="primary" htmlType="submit" block loading={submitting}>
               登录
             </Button>
           </Form>
-        </Card>
-        <Typography.Paragraph className="muted" style={{ textAlign: "center", marginTop: 14 }}>
+        </div>
+        <p className="login-foot">
+          <Icon name="lock" size={13} />
           内网部署 · 账号由管理员分配
-        </Typography.Paragraph>
+        </p>
       </div>
     </div>
   );

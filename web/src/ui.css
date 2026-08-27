@@ -79,6 +79,67 @@ body {
   background: #fff; color: var(--navy); font-weight: 600;
   box-shadow: 0 1px 2px rgba(23, 32, 51, .08), 0 5px 16px rgba(23, 32, 51, .04);
 }
+.nav-row .icon { flex: none; color: #7b8697; }
+.nav-row:hover .icon { color: #5c6879; }
+.nav-row.active .icon { color: currentColor; stroke-width: 2.3; }
+
+/* 项目切换器（原型 .project-switch）：绿点 + 项目名 + 阶段 + chevron。 */
+.project-switch {
+  width: 100%; margin: 2px 0 14px; padding: 11px 10px;
+  border: 1px solid #d9dfe8; border-radius: var(--radius);
+  background: rgba(255, 255, 255, .72); color: var(--text);
+  display: grid; grid-template-columns: 8px minmax(0, 1fr) 16px; gap: 9px; align-items: center;
+  text-align: left; cursor: pointer; font: inherit; flex: none;
+}
+.project-switch:hover { background: #fff; border-color: #c8d0db; box-shadow: 0 4px 12px rgba(29, 42, 69, .06); }
+.project-switch .icon { color: var(--subtle); }
+.project-switch-text { min-width: 0; }
+.project-switch-text b {
+  display: block; font-size: var(--type-body); font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.project-switch-text small {
+  display: block; margin-top: 2px; font-size: var(--type-aux); color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* 状态圆点：4px 圆角契约的圆形例外。 */
+.project-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex: none;
+  background: #4a9b75; box-shadow: 0 0 0 3px rgba(74, 155, 117, .12);
+}
+.project-dot.not_started { background: #97a2b3; box-shadow: 0 0 0 3px rgba(151, 162, 179, .14); }
+.project-dot.completed { background: var(--accent); box-shadow: 0 0 0 3px rgba(79, 98, 216, .12); }
+.project-dot.archived { background: #b6bdc9; box-shadow: 0 0 0 3px rgba(182, 189, 201, .14); }
+
+.sidebar-foot { flex: none; padding: 9px 0 0; border-top: 1px solid #d8dee7; display: grid; gap: 2px; }
+
+/* 项目切换浮层：列出可见项目，当前项打勾，底部回到项目列表。 */
+.project-menu { width: 268px; }
+.project-menu-search { margin-bottom: 6px; }
+.project-menu-list { max-height: 320px; overflow: auto; display: grid; gap: 2px; }
+.project-menu-item {
+  width: 100%; padding: 8px 9px; border: 0; border-radius: var(--radius);
+  background: transparent; cursor: pointer; font: inherit; text-align: left;
+  display: grid; grid-template-columns: 7px minmax(0, 1fr) 15px; gap: 9px; align-items: center;
+}
+.project-menu-item:hover { background: var(--surface-2); }
+.project-menu-item.active { background: var(--accent-soft); color: #3f50bd; }
+.project-menu-item .icon { color: var(--accent); }
+.project-menu-text { min-width: 0; }
+.project-menu-text b {
+  display: block; font-size: var(--type-body); font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.project-menu-text small { display: block; font-size: var(--type-aux); color: var(--muted); }
+.project-menu-item.active .project-menu-text small { color: #6f7cc8; }
+.project-menu-empty { padding: 18px 0; text-align: center; color: var(--muted); font-size: var(--type-aux); }
+.project-menu-foot {
+  width: 100%; margin-top: 6px; padding-top: 8px; border: 0; border-top: 1px solid var(--line);
+  background: transparent; color: var(--accent); cursor: pointer; font: inherit;
+  font-size: var(--type-aux); font-weight: 600;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+}
+.project-menu-foot:hover { color: var(--accent-hover); }
 
 .workspace { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .topbar {
@@ -100,6 +161,21 @@ body {
   cursor: pointer; font: inherit; color: var(--text);
 }
 .identity:hover { border-color: var(--line-strong); background: #f7f8fb; }
+.identity .who { min-width: 0; }
+.identity .who b { display: block; font-size: var(--type-body); font-weight: 600; line-height: 1.25; }
+.identity .who small { display: block; font-size: var(--type-aux); color: var(--muted); line-height: 1.25; }
+.identity .icon { color: var(--subtle); flex: none; }
+/* 图标按钮（原型 .icon-btn）：顶栏通知、成员卡更多操作。 */
+.icon {
+  display: inline-block; vertical-align: middle;
+}
+.icon-btn {
+  width: 36px; height: 36px; flex: none;
+  border: 1px solid transparent; border-radius: var(--radius);
+  background: transparent; color: #5c6879; cursor: pointer;
+  display: grid; place-items: center;
+}
+.icon-btn:hover { border-color: #d6dce5; background: #f4f6f9; color: var(--text); }
 .avatar {
   width: 26px; height: 26px; border-radius: 50%; flex: none;
   background: #e8edff; color: #4055c7;
@@ -205,6 +281,13 @@ body {
 .task-sheet-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
 
 .row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 3px; }
+.row-actions.left { justify-content: flex-start; gap: 10px; }
+/* 文字按钮（原型 .link-btn）：表格行内动作，避免 antd link Button 的额外内边距。 */
+.link-btn {
+  padding: 0; border: 0; background: none; color: var(--accent); cursor: pointer;
+  font: inherit; font-size: var(--type-body); font-weight: 500; text-decoration: none;
+}
+.link-btn:hover { color: var(--accent-hover); text-decoration: underline; }
 
 /* 原型 .progress：可选进度条。 */
 .progress { height: 6px; min-width: 66px; background: #e8ebf1; border-radius: var(--radius); overflow: hidden; }
@@ -365,8 +448,44 @@ body {
 .relation-card b { display: block; font-size: var(--type-aux); }
 .relation-card small { display: block; color: var(--muted); font-size: 12px; }
 
-.login-shell { min-height: 100vh; display: grid; place-items: center; background: var(--bg); }
-.login-brand { display: flex; align-items: center; gap: 10px; justify-content: center; margin-bottom: 18px; }
+/* 登录页：居中单卡（原型无对应页，按基线调色板与组件规格设计）。 */
+.login-shell {
+  min-height: 100vh; padding: 40px 20px; display: grid; place-items: center;
+  background:
+    radial-gradient(680px 380px at 50% -8%, rgba(79, 98, 216, .10), transparent 70%),
+    radial-gradient(520px 320px at 92% 108%, rgba(23, 42, 73, .07), transparent 70%),
+    var(--bg);
+}
+.login-panel { width: 100%; max-width: 372px; }
+.login-brand { display: flex; align-items: center; gap: 11px; justify-content: center; margin-bottom: 20px; }
+.login-brand .brand-mark { width: 38px; height: 38px; font-size: var(--type-title); }
+.login-brand .brand-name { text-align: left; }
+.login-card {
+  padding: 24px 24px 26px; background: var(--surface);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 18px 48px rgba(27, 38, 64, .10), 0 1px 2px rgba(24, 34, 52, .04);
+}
+.login-card-head { margin-bottom: 18px; }
+.login-card-head h1 { margin: 0; font-size: var(--type-title); font-weight: 650; letter-spacing: -.01em; }
+.login-card-head p { margin: 5px 0 0; color: var(--muted); font-size: var(--type-aux); }
+.login-card .ant-form-item { margin-bottom: 16px; }
+.login-foot {
+  margin: 16px 0 0; display: flex; align-items: center; justify-content: center; gap: 6px;
+  color: var(--subtle); font-size: var(--type-aux);
+}
+
+/* 项目列表：表格容器复用 data-table-wrap，antd 表格去掉自带描边与圆角。 */
+.flat-table .ant-table { background: transparent; }
+.flat-table .ant-table-container,
+.flat-table .ant-table-content > table { border-radius: 0; }
+.project-name-cell { display: inline-flex; align-items: center; gap: 8px; color: var(--text); text-decoration: none; }
+.project-name-cell strong { font-weight: 600; }
+.project-name-cell:hover strong { color: var(--accent); }
+
+/* 弹窗内的轻量表单栈（不需要 antd Form 校验时使用）。 */
+.form-stack { display: grid; gap: 14px; }
+.form-stack > label { display: grid; gap: 6px; }
+.form-stack > label > span { color: #536270; font-size: var(--type-aux); font-weight: 500; }
 
 /* antd 细节向原型对齐（token 覆盖不到的部分）。 */
 .ant-table-wrapper .ant-table-thead > tr > th {
@@ -552,7 +671,7 @@ body {
 .settings-layout { display: grid; grid-template-columns: 208px minmax(0, 1fr); gap: 16px; align-items: start; }
 .settings-nav {
   padding: 8px; background: var(--surface); border: 1px solid var(--line);
-  border-radius: var(--radius); position: sticky; top: 84px;
+  border-radius: var(--radius); box-shadow: var(--shadow-card); position: sticky; top: 84px;
 }
 .settings-nav button {
   width: 100%; height: 40px; padding: 0 11px; border: 0; border-radius: var(--radius);
@@ -562,21 +681,38 @@ body {
 .settings-nav button:hover { background: var(--surface-2); color: var(--text); }
 .settings-nav button.active { background: var(--accent-soft); color: #3f50bd; font-weight: 600; }
 .settings-panel {
-  padding: 16px 18px 18px; background: var(--surface); border: 1px solid var(--line);
+  background: var(--surface); border: 1px solid var(--line);
   border-radius: var(--radius); box-shadow: var(--shadow-card);
 }
-.settings-panel-head { margin-bottom: 12px; }
+/* 原型 card-head：最小高 48px、下边框、右侧动作。 */
+.settings-panel-head {
+  min-height: 56px; padding: 12px 16px; border-bottom: 1px solid var(--line);
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+}
 .settings-panel-head h2 { margin: 0 0 4px; font-size: var(--type-title); font-weight: 650; }
-.settings-panel-head .muted { font-size: var(--type-aux); }
+.settings-panel-head .muted { display: block; font-size: var(--type-aux); }
+.settings-panel-body { padding: 16px; }
 .member-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .member-card {
   min-height: 62px; padding: 11px 12px; display: flex; align-items: center; gap: 9px;
   border: 1px solid #e0e4eb; border-radius: var(--radius); background: var(--surface);
 }
 .member-card:hover { border-color: #c1c9d6; background: #f9fafc; }
-.member-card .avatar { border-radius: var(--radius); }
-.member-card b { display: block; font-size: var(--type-body); }
-.member-card span { display: block; color: var(--muted); font-size: var(--type-aux); }
+.member-card .avatar { width: 30px; height: 30px; border-radius: var(--radius); font-size: var(--type-body); }
+.member-card-text { min-width: 0; flex: 1; }
+.member-card-text b {
+  display: block; font-size: var(--type-body); font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.member-card-text span {
+  display: block; margin-top: 2px; color: var(--muted); font-size: var(--type-aux);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* 更多操作：常态弱化，hover／键盘聚焦时显现，避免成员多时按钮阵列喧宾夺主。 */
+.member-card-more { width: 28px; height: 28px; opacity: 0; transition: opacity .12s ease; }
+.member-card:hover .member-card-more,
+.member-card:focus-within .member-card-more,
+.member-card-more[aria-expanded="true"] { opacity: 1; }
 .property {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   min-height: 40px; padding: 8px 0; border-bottom: 1px solid #edf0f4;

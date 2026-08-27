@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Alert, Button, Select, Space, Spin, Table } from "antd";
+import { Alert, Button, Dropdown, Modal, Select, Spin } from "antd";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import ProjectShell from "./ProjectShell";
+import Icon from "./icons";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
@@ -17,10 +18,9 @@ const ROLE_LABEL: Record<MemberRole, string> = {
   viewer: "只读成员",
 };
 
-const roleOptions = (Object.keys(ROLE_LABEL) as MemberRole[]).map((r) => ({
-  value: r,
-  label: ROLE_LABEL[r],
-}));
+const ROLE_ORDER: MemberRole[] = ["admin", "member", "viewer"];
+
+const roleOptions = ROLE_ORDER.map((r) => ({ value: r, label: ROLE_LABEL[r] }));
 
 // 工作职责与系统权限的对应说明（PRD §3.1～3.4 原文口径，只读展示，不承载配置）。
 const RESPONSIBILITY_NOTES: [string, string][] = [
@@ -32,6 +32,7 @@ const RESPONSIBILITY_NOTES: [string, string][] = [
 ];
 
 // 项目设置 → 成员管理（#29；PRD §7.9 将成员与权限归入项目设置）。
+// 视觉按原型 renderSettings：card-head + member-grid 成员卡一种形态；
 // 管理动作按 canManageMembers 派生字段显隐，前端不复算规则。
 export default function ProjectSettingsPage({
   user,
@@ -50,6 +51,7 @@ export default function ProjectSettingsPage({
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [inviteOpen, setInviteOpen] = useState(false);
   const [addUserId, setAddUserId] = useState<number | undefined>();
   const [addRole, setAddRole] = useState<MemberRole>("member");
   const [saving, setSaving] = useState(false);
@@ -81,6 +83,13 @@ export default function ProjectSettingsPage({
 
   const canManage = project?.canManageMembers ?? false;
 
+  const openInvite = () => {
+    setAddUserId(undefined);
+    setAddRole("member");
+    setError(null);
+    setInviteOpen(true);
+  };
+
   const add = async () => {
     if (addUserId == null) return;
     setSaving(true);
@@ -91,6 +100,7 @@ export default function ProjectSettingsPage({
     });
     setSaving(false);
     if (res.data) {
+      setInviteOpen(false);
       setAddUserId(undefined);
       load();
     } else {
@@ -126,6 +136,10 @@ export default function ProjectSettingsPage({
   const candidateOptions = users
     .filter((u) => !members.some((m) => m.userId === u.id))
     .map((u) => ({ value: u.id, label: `${u.displayName}（${u.username}）` }));
+
+  const sortedMembers = [...members].sort(
+    (a, b) => ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role),
+  );
 
   return (
     <ProjectShell
@@ -171,119 +185,134 @@ export default function ProjectSettingsPage({
               </button>
             </aside>
             <section className="settings-panel">
-          {tab === "permissions" ? (
-            <>
-              <div className="settings-panel-head">
-                <h2>统一权限体系</h2>
-              </div>
-              <div className="notice" style={{ marginBottom: 12 }}>
-                所有成员查看同一份项目事实；权限只决定创建、编辑、审批、闭环和配置操作。
-              </div>
-              {RESPONSIBILITY_NOTES.map(([role, note]) => (
-                <div key={role} className="property">
-                  <label>{role}</label>
-                  <strong>{note}</strong>
-                </div>
-              ))}
-            </>
-          ) : (
-            <>
-              <div className="settings-panel-head">
-                <h2>成员与职责</h2>
-                <span className="muted">
-                  成员角色决定编辑结构与配置的系统权限；KR 负责人等工作职责在 OKR 与任务中指定。
-                </span>
-              </div>
-              {/* 只读视角用成员卡；有管理权限时改用可编辑角色与移出的表格，不并列两份同样的名单。 */}
-              {!canManage && (
-                <div className="member-grid">
-                  {members.map((m) => (
-                    <div key={m.userId} className="member-card">
-                      <span className="avatar">{m.displayName.slice(0, 1)}</span>
-                      <div>
-                        <b>{m.displayName}</b>
-                        <span>
-                          {ROLE_LABEL[m.role]} · {m.username}
-                        </span>
-                      </div>
+              {tab === "permissions" ? (
+                <>
+                  <div className="settings-panel-head">
+                    <div>
+                      <h2>统一权限体系</h2>
                     </div>
-                  ))}
-                  {members.length === 0 && <div className="empty compact-empty">暂无成员</div>}
-                </div>
+                  </div>
+                  <div className="settings-panel-body">
+                    <div className="notice" style={{ marginBottom: 12 }}>
+                      所有成员查看同一份项目事实；权限只决定创建、编辑、审批、闭环和配置操作。
+                    </div>
+                    {RESPONSIBILITY_NOTES.map(([role, note]) => (
+                      <div key={role} className="property">
+                        <label>{role}</label>
+                        <strong>{note}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="settings-panel-head">
+                    <div>
+                      <h2>成员与职责</h2>
+                      <span className="muted">
+                        成员角色决定编辑结构与配置的系统权限；KR
+                        负责人等工作职责在 OKR 与任务中指定。
+                      </span>
+                    </div>
+                    {canManage && (
+                      <Button size="small" icon={<Icon name="plus" size={14} />} onClick={openInvite}>
+                        邀请成员
+                      </Button>
+                    )}
+                  </div>
+                  <div className="settings-panel-body">
+                    <div className="member-grid">
+                      {sortedMembers.map((m) => (
+                        <div key={m.userId} className="member-card">
+                          <span className="avatar">{m.displayName.slice(0, 1)}</span>
+                          <div className="member-card-text">
+                            <b>{m.displayName}</b>
+                            <span>
+                              {ROLE_LABEL[m.role]} · {m.username}
+                            </span>
+                          </div>
+                          {canManage && (
+                            <Dropdown
+                              trigger={["click"]}
+                              placement="bottomRight"
+                              menu={{
+                                items: [
+                                  {
+                                    key: "role",
+                                    type: "group",
+                                    label: "调整角色",
+                                    children: ROLE_ORDER.map((r) => ({
+                                      key: r,
+                                      label: ROLE_LABEL[r],
+                                      disabled: r === m.role,
+                                      onClick: () => changeRole(m.userId, r),
+                                    })),
+                                  },
+                                  { type: "divider" as const, key: "d" },
+                                  {
+                                    key: "remove",
+                                    label: "移出项目",
+                                    danger: true,
+                                    onClick: () => remove(m.userId),
+                                  },
+                                ],
+                              }}
+                            >
+                              <button
+                                className="icon-btn member-card-more"
+                                type="button"
+                                aria-label={`管理成员 ${m.displayName}`}
+                              >
+                                <Icon name="more" size={16} />
+                              </button>
+                            </Dropdown>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    {members.length === 0 && <div className="empty">暂无成员</div>}
+                  </div>
+                </>
               )}
-          {canManage && (
-            <Space.Compact block style={{ marginTop: 16, marginBottom: 16, maxWidth: 560 }}>
-              <Select
-                style={{ flex: 1 }}
-                options={candidateOptions}
-                value={addUserId}
-                onChange={setAddUserId}
-                showSearch
-                optionFilterProp="label"
-                placeholder="选择要加入的用户"
-              />
-              <Select style={{ width: 130 }} options={roleOptions} value={addRole} onChange={setAddRole} />
-              <Button type="primary" onClick={add} loading={saving} disabled={addUserId == null}>
-                加入
-              </Button>
-            </Space.Compact>
-          )}
-          {canManage && (
-          <div className="data-table-wrap">
-            <Table<ProjectMember>
-              rowKey="userId"
-              size="small"
-              dataSource={members}
-              locale={{ emptyText: "暂无成员" }}
-              pagination={false}
-              columns={[
-                {
-                  title: "成员",
-                  render: (_, m) => (
-                    <span className="owner-cell">
-                      <span className="avatar">{m.displayName.slice(0, 1)}</span>
-                      {m.displayName}
-                      <span className="muted">（{m.username}）</span>
-                    </span>
-                  ),
-                },
-                {
-                  title: "角色",
-                  width: 150,
-                  render: (_, m) =>
-                    canManage ? (
-                      <Select
-                        size="small"
-                        style={{ width: 130 }}
-                        options={roleOptions}
-                        value={m.role}
-                        onChange={(role) => changeRole(m.userId, role)}
-                      />
-                    ) : (
-                      ROLE_LABEL[m.role]
-                    ),
-                },
-                ...(canManage
-                  ? [
-                      {
-                        title: "操作",
-                        width: 80,
-                        render: (_: unknown, m: ProjectMember) => (
-                          <Button type="link" size="small" danger onClick={() => remove(m.userId)}>
-                            移出
-                          </Button>
-                        ),
-                      },
-                    ]
-                  : []),
-              ]}
-            />
-          </div>
-          )}
-            </>
-          )}
             </section>
           </div>
+          <Modal
+            title="邀请成员"
+            open={inviteOpen}
+            confirmLoading={saving}
+            okText="加入"
+            cancelText="取消"
+            okButtonProps={{ disabled: addUserId == null }}
+            onOk={add}
+            onCancel={() => setInviteOpen(false)}
+            width={480}
+            destroyOnClose
+          >
+            <div className="form-stack">
+              <label>
+                <span>选择用户</span>
+                <Select
+                  style={{ width: "100%" }}
+                  options={candidateOptions}
+                  value={addUserId}
+                  onChange={setAddUserId}
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder="搜索姓名或用户名"
+                  notFoundContent="没有可加入的用户"
+                />
+              </label>
+              <label>
+                <span>成员角色</span>
+                <Select
+                  style={{ width: "100%" }}
+                  options={roleOptions}
+                  value={addRole}
+                  onChange={setAddRole}
+                />
+              </label>
+            </div>
+          </Modal>
         </>
       )}
     </ProjectShell>

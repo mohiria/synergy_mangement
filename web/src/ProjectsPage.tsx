@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Alert, Button, Form, Input, Modal, Popover, Select, Table } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import DateRangeField from "./DateRangeField";
+import Icon from "./icons";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
@@ -50,6 +51,8 @@ export default function ProjectsPage({
   const [editing, setEditing] = useState<Project | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<ProjectStatus | "all">("all");
   const [form] = Form.useForm<ProjectFormValues>();
 
   const load = useCallback(async () => {
@@ -126,6 +129,16 @@ export default function ProjectsPage({
     label: `${u.displayName}（${u.username}）`,
   }));
 
+  // 搜索与状态筛选只作用于展示，不改变服务端返回的事实。
+  const visible = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return projects.filter((p) => {
+      if (statusFilter !== "all" && p.status !== statusFilter) return false;
+      if (!needle) return true;
+      return (p.name + p.ownerName + (p.stage ?? "")).toLowerCase().includes(needle);
+    });
+  }, [projects, search, statusFilter]);
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -138,7 +151,8 @@ export default function ProjectsPage({
         </div>
         <nav>
           <button className="nav-row active" type="button">
-            项目列表
+            <Icon name="package" />
+            <span>项目列表</span>
           </button>
         </nav>
       </aside>
@@ -167,7 +181,11 @@ export default function ProjectsPage({
           >
             <button className="identity" type="button" aria-label="当前身份">
               <span className="avatar">{user.displayName.slice(0, 1)}</span>
-              <span>{user.displayName}</span>
+              <span className="who">
+                <b>{user.displayName}</b>
+                <small>{user.username}</small>
+              </span>
+              <Icon name="down" size={15} />
             </button>
           </Popover>
         </header>
@@ -177,85 +195,119 @@ export default function ProjectsPage({
               <h1>项目列表</h1>
               <p>组织多个 O 的协作空间；选择项目后进入项目总览与我的工作。</p>
             </div>
-            <Button type="primary" onClick={openCreate}>
+            <Button type="primary" onClick={openCreate} icon={<Icon name="plus" size={15} />}>
               新建项目
             </Button>
           </div>
-          <Table<Project>
-            rowKey="id"
-            loading={loading}
-            dataSource={projects}
-            locale={{ emptyText: "暂无项目" }}
-            pagination={false}
-            columns={[
-              {
-                title: "项目名称",
-                dataIndex: "name",
-                render: (v: string, p) => (
-                  <Link to={`/projects/${p.id}`}>
-                    <strong>{v}</strong>
-                  </Link>
-                ),
-              },
-              {
-                title: "负责人",
-                dataIndex: "ownerName",
-                width: 140,
-                render: (v: string) => (
-                  <span className="owner-cell">
-                    <span className="avatar">{v.slice(0, 1)}</span>
-                    {v}
-                  </span>
-                ),
-              },
-              {
-                title: "状态",
-                dataIndex: "status",
-                width: 110,
-                render: (v: ProjectStatus) => (
-                  <span className={`status-pill ${v}`}>{STATUS_LABEL[v]}</span>
-                ),
-              },
-              {
-                title: "阶段",
-                dataIndex: "stage",
-                width: 160,
-                render: (v?: string) => v ?? <span className="muted">—</span>,
-              },
-              {
-                title: "计划周期",
-                width: 220,
-                render: (_, p) =>
-                  p.plannedStartDate || p.plannedEndDate ? (
-                    <span>
-                      {p.plannedStartDate ?? "…"} ～ {p.plannedEndDate ?? "…"}
-                    </span>
-                  ) : (
-                    <span className="muted">—</span>
+          <div className="toolbar">
+            <div className="toolbar-group">
+              <Input
+                allowClear
+                style={{ width: 240 }}
+                placeholder="搜索项目、负责人或阶段"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              <Select
+                style={{ width: 150 }}
+                value={statusFilter}
+                onChange={setStatusFilter}
+                options={[
+                  { value: "all" as const, label: "全部状态" },
+                  ...(Object.keys(STATUS_LABEL) as ProjectStatus[]).map((s) => ({
+                    value: s,
+                    label: STATUS_LABEL[s],
+                  })),
+                ]}
+              />
+            </div>
+            <span className="muted" style={{ fontSize: "var(--type-aux)" }}>
+              共 {visible.length} 个项目
+            </span>
+          </div>
+          <div className="data-table-wrap">
+            <Table<Project>
+              className="flat-table"
+              rowKey="id"
+              loading={loading}
+              dataSource={visible}
+              locale={{ emptyText: projects.length ? "没有匹配的项目" : "暂无项目" }}
+              pagination={false}
+              columns={[
+                {
+                  title: "项目名称",
+                  dataIndex: "name",
+                  render: (v: string, p) => (
+                    <Link className="project-name-cell" to={`/projects/${p.id}`}>
+                      <span className={"project-dot " + p.status} />
+                      <strong>{v}</strong>
+                    </Link>
                   ),
-              },
-              {
-                title: "创建时间",
-                dataIndex: "createdAt",
-                width: 170,
-                render: (v: string) => dayjs(v).format("YYYY-MM-DD HH:mm"),
-              },
-              {
-                title: "操作",
-                width: 130,
-                render: (_, p) => (
-                  <>
-                    {p.canEdit && (
-                      <Button type="link" size="small" onClick={() => openEdit(p)}>
-                        编辑
-                      </Button>
-                    )}
-
-                  </>
-                ),
-              },
-            ]}
-          />
+                },
+                {
+                  title: "负责人",
+                  dataIndex: "ownerName",
+                  width: 150,
+                  render: (v: string) => (
+                    <span className="owner-cell">
+                      <span className="avatar">{v.slice(0, 1)}</span>
+                      {v}
+                    </span>
+                  ),
+                },
+                {
+                  title: "状态",
+                  dataIndex: "status",
+                  width: 110,
+                  render: (v: ProjectStatus) => (
+                    <span className={`status-pill ${v}`}>{STATUS_LABEL[v]}</span>
+                  ),
+                },
+                {
+                  title: "阶段",
+                  dataIndex: "stage",
+                  width: 170,
+                  render: (v?: string) => v ?? <span className="muted">—</span>,
+                },
+                {
+                  title: "计划周期",
+                  width: 210,
+                  render: (_, p) =>
+                    p.plannedStartDate || p.plannedEndDate ? (
+                      <span className="mono">
+                        {p.plannedStartDate ?? "…"} ～ {p.plannedEndDate ?? "…"}
+                      </span>
+                    ) : (
+                      <span className="muted">—</span>
+                    ),
+                },
+                {
+                  title: "创建时间",
+                  dataIndex: "createdAt",
+                  width: 160,
+                  render: (v: string) => (
+                    <span className="mono">{dayjs(v).format("YYYY-MM-DD HH:mm")}</span>
+                  ),
+                },
+                {
+                  title: "操作",
+                  width: 110,
+                  render: (_, p) => (
+                    <span className="row-actions left">
+                      <Link className="link-btn" to={`/projects/${p.id}`}>
+                        进入
+                      </Link>
+                      {p.canEdit && (
+                        <button className="link-btn" type="button" onClick={() => openEdit(p)}>
+                          编辑
+                        </button>
+                      )}
+                    </span>
+                  ),
+                },
+              ]}
+            />
+          </div>
         </main>
       </section>
       <Modal
