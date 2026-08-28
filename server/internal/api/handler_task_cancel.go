@@ -32,7 +32,6 @@ func (s *Server) RequestTaskCancellation(w http.ResponseWriter, r *http.Request,
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "cancel_reason_required", Message: err.Error()})
 		return
 	}
-	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
 
 	// 互斥判定与写入同事务：先锁任务行再读未决单，避免两个并发请求各自看到「没有未决单」（R2／R3）。
 	tx, err := s.db.Begin(r.Context())
@@ -95,7 +94,6 @@ func (s *Server) RequestTaskCancellation(w http.ResponseWriter, r *http.Request,
 	} else {
 		s.actionActivity(r.Context(), taskId, domain.ActivityCancelRequested, uid, reason)
 	}
-	s.recordBlockerChanges(r.Context(), projectId, blockersBefore)
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 

@@ -20,9 +20,12 @@ import (
 // BlockerSweepInterval ticker 扫描间隔（ADR 0001 定为每小时）。
 const BlockerSweepInterval = time.Hour
 
-// SweepBlockerActivities 扫描一遍活跃项目，补记时间型卡点的「卡点出现」动态。
-// 补记是幂等的：同一条卡点的时间戳与合成键不随扫描时刻变化，落库唯一键挡住重复记账，
-// 因此重复扫描、进程重启后重扫都不会重记；只要卡点还在，漏掉的一次扫描下次会补上。
+// SweepBlockerActivities 扫描一遍活跃项目：补记时间型卡点的「卡点出现」，
+// 并补记所有悬空的「卡点解除」（R9）。
+// 出现的补记幂等靠「自上次解除以来只记一条」判定，不再依赖含发生时刻的唯一键——
+// 上游未就绪取任务开始日、任务超期取截止日，都是常量，旧口径会让二次出现被静默丢弃。
+// 解除的补记则解决另一半问题：时间型卡点消失时没有任何写操作可依附，
+// 不在这里补就永远留下「出现却无解除」的悬空条目。
 func (s *Server) SweepBlockerActivities(ctx context.Context) {
 	ids, err := s.q.ListActiveProjectIDs(ctx)
 	if err != nil {
@@ -41,6 +44,28 @@ func (s *Server) SweepBlockerActivities(ctx context.Context) {
 		for _, a := range domain.TimeTriggeredBlockerActivities(blockers) {
 			s.recordActivity(ctx, a)
 		}
+		s.sweepStaleBlockerResolutions(ctx, projectID, blockers)
+	}
+}
+
+// sweepStaleBlockerResolutions 把「留痕里还记着出现、但卡点已经不成立」的那些补记为解除。
+func (s *Server) sweepStaleBlockerResolutions(ctx context.Context, projectID int64, current []domain.Blocker) {
+	rows, err := s.q.ListOpenBlockerActivities(ctx, projectID)
+	if err != nil {
+		log.Printf("blocker sweep: list open activities project=%d failed: %v", projectID, err)
+		return
+	}
+	open := make([]domain.OpenBlockerFact, 0, len(rows))
+	for _, row := range rows {
+		if row.Kind != domain.ActivityBlockerOpened {
+			continue // 最近一条已经是解除，说明这条卡点已经收尾
+		}
+		open = append(open, domain.OpenBlockerFact{
+			TaskID: row.TaskID, Key: row.BlockerKey.String, Summary: row.Summary,
+		})
+	}
+	for _, a := range domain.StaleBlockerResolutions(open, current, s.now()) {
+		s.recordActivity(ctx, a)
 	}
 }
 
@@ -106,9 +131,27 @@ func (s *Server) StartBlockerActivityTicker(ctx context.Context, interval time.D
 	}
 }
 
-// recordBlockerActivity 落一条卡点动态；重复的（同任务、同类型、同合成键、同发生时刻）忽略。
+// recordBlockerActivity 落一条卡点动态，按「自上次解除以来只记一条出现」去重（R9）：
+// 同一条卡点解除后再次出现要能记上，所以去重看的是该键最近一条动态是出现还是解除，
+// 而不是发生时刻——上游未就绪与任务超期的发生时刻都是常量，按时刻去重会丢掉二次出现。
 func (s *Server) recordBlockerActivity(ctx context.Context, a domain.TaskActivity) error {
-	_, err := s.q.CreateBlockerActivity(ctx, store.CreateBlockerActivityParams{
+	isOpen, err := s.q.BlockerActivityOpen(ctx, store.BlockerActivityOpenParams{
+		TaskID: a.TaskID, BlockerKey: toPgText(a.BlockerKey),
+	})
+	if err != nil {
+		return err
+	}
+	switch a.Kind {
+	case domain.ActivityBlockerOpened:
+		if isOpen {
+			return nil // 已经记过出现且尚未解除
+		}
+	case domain.ActivityBlockerResolved:
+		if !isOpen {
+			return nil // 没有待解除的出现事件，不记孤立的解除
+		}
+	}
+	_, err = s.q.CreateBlockerActivity(ctx, store.CreateBlockerActivityParams{
 		TaskID:     a.TaskID,
 		Kind:       a.Kind,
 		Summary:    a.Summary,

@@ -9,6 +9,7 @@ import Icon from "./icons";
 type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
 type ProjectMember = components["schemas"]["ProjectMember"];
+type AuditLog = components["schemas"]["AuditLog"];
 type MemberRole = components["schemas"]["MemberRole"];
 type UserSummary = components["schemas"]["UserSummary"];
 type ProjectSettings = components["schemas"]["ProjectSettings"];
@@ -83,7 +84,9 @@ export default function ProjectSettingsPage({
   const { projectId: projectIdParam } = useParams();
   const projectId = Number(projectIdParam);
 
-  const [tab, setTab] = useState<"members" | "permissions" | "rules">("members");
+  const [tab, setTab] = useState<"members" | "permissions" | "rules" | "audit">("members");
+  // 操作审计（§10.4）：由后端写路径装饰器统一记录，这里只读展示。
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [project, setProject] = useState<Project | null>(null);
   const [members, setMembers] = useState<ProjectMember[]>([]);
   const [users, setUsers] = useState<UserSummary[]>([]);
@@ -99,11 +102,13 @@ export default function ProjectSettingsPage({
   const [savingRules, setSavingRules] = useState(false);
 
   const load = useCallback(async () => {
-    const [projectRes, membersRes, usersRes, settingsRes] = await Promise.all([
+    const [projectRes, membersRes, usersRes, settingsRes, auditRes] = await Promise.all([
       client.GET("/projects/{projectId}", { params: { path: { projectId } } }),
       client.GET("/projects/{projectId}/members", { params: { path: { projectId } } }),
       client.GET("/users"),
       client.GET("/projects/{projectId}/settings", { params: { path: { projectId } } }),
+      // 只有项目管理员能读审计；非管理员会拿到 403，此时留空即可（导航里也不显示这一节）。
+      client.GET("/projects/{projectId}/audit-logs", { params: { path: { projectId } } }),
     ]);
     if (projectRes.response.status === 401) {
       onLogout();
@@ -119,6 +124,7 @@ export default function ProjectSettingsPage({
     setUsers(usersRes.data ?? []);
     setSettings(settingsRes.data ?? null);
     setRules(settingsRes.data ?? null);
+    setAuditLogs(auditRes.data ?? []);
     setLoading(false);
   }, [projectId, onLogout]);
 
@@ -237,7 +243,7 @@ export default function ProjectSettingsPage({
           </div>
           {error && <Alert type="error" message={error} style={{ marginBottom: 16 }} />}
           {/* settings-layout：左侧分节导航、右侧内容卡。原型的「进度权重」一节已随
-              AC-63 裁决取消（KR 汇总固定任务等权）；导入记录与操作审计另见 #64／#68。 */}
+              AC-63 裁决取消（KR 汇总固定任务等权）；导入记录另见 #68。 */}
           <div className="settings-layout">
             <aside className="settings-nav">
               <button
@@ -261,9 +267,58 @@ export default function ProjectSettingsPage({
               >
                 规则设置
               </button>
+              {project?.canEdit && (
+                <button
+                  type="button"
+                  className={tab === "audit" ? "active" : ""}
+                  onClick={() => setTab("audit")}
+                >
+                  操作审计
+                </button>
+              )}
             </aside>
             <section className="settings-panel">
-              {tab === "rules" ? (
+              {tab === "audit" ? (
+                <>
+                  <div className="settings-panel-head">
+                    <div>
+                      <h2>操作审计</h2>
+                      <span className="muted">
+                        项目内每一次成功的写操作都在这里留痕（§10.4）：谁、什么时候、对哪个对象做了什么。
+                        由后端写路径统一记录，新增功能自动覆盖。
+                      </span>
+                    </div>
+                  </div>
+                  {auditLogs.length === 0 ? (
+                    <div className="empty">暂无操作记录</div>
+                  ) : (
+                    <div className="data-table-wrap">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th style={{ width: 170 }}>时间</th>
+                            <th style={{ width: 110 }}>操作人</th>
+                            <th>动作</th>
+                            <th style={{ width: 160 }}>对象</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {auditLogs.map((a) => (
+                            <tr key={a.id}>
+                              <td className="mono">{new Date(a.occurredAt).toLocaleString("zh-CN")}</td>
+                              <td>{a.actorName ?? "系统"}</td>
+                              <td>{a.action}</td>
+                              <td className="muted">
+                                {a.objectType ? `${a.objectType}${a.objectId ? ` #${a.objectId}` : ""}` : "—"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
+              ) : tab === "rules" ? (
                 <>
                   <div className="settings-panel-head">
                     <div>

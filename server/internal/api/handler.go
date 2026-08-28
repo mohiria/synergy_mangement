@@ -53,7 +53,9 @@ func NewHandlerFromServer(s *Server, baseURL string) http.Handler {
 	return HandlerWithOptions(s, StdHTTPServerOptions{
 		BaseURL:     baseURL,
 		BaseRouter:  http.NewServeMux(),
-		Middlewares: []MiddlewareFunc{requestIDMiddleware, s.sessionMiddleware, requestValidator()},
+		// 切片里靠前的先包住 handler，也就是越靠前越内层：写路径装饰器要放最前，
+		// 才能在会话中间件之后运行、拿得到当前用户。
+		Middlewares: []MiddlewareFunc{s.writePathMiddleware, requestIDMiddleware, s.sessionMiddleware, requestValidator()},
 	})
 }
 

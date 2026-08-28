@@ -793,6 +793,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/audit-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        /** 项目操作审计（§10.4；仅项目管理员）——由写路径装饰器统一记录，新增写路径自动覆盖 */
+        get: operations["listAuditLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/blockers": {
         parameters: {
             query?: never;
@@ -2009,6 +2028,23 @@ export interface components {
          * @enum {string}
          */
         BlockerKind: "upstream_unready" | "task_overdue" | "approval_timeout" | "interlock";
+        /** @description 一条项目操作审计（§10.4、R8）：谁在什么时候对哪个对象做了什么写操作 */
+        AuditLog: {
+            /** Format: int64 */
+            id: number;
+            /** @description 动作名（派生字段；未登记路由退化为通用词，但留痕本身不缺） */
+            action: string;
+            method: string;
+            /** @description 契约路由模板 */
+            route: string;
+            /** @description 直接对象类型（tasks／members／edges…） */
+            objectType?: string;
+            /** Format: int64 */
+            objectId?: number;
+            actorName?: string;
+            /** Format: date-time */
+            occurredAt: string;
+        };
         /** @description 结构化卡点（词汇表）；由四类结构化事实读时派生，不落库、无人工上报与手动解除，触发条件消失即消失 */
         Blocker: {
             /** @description 派生卡点的合成键（形如 task_overdue:42、upstream_unready:edge:17）；一键提醒按此寻址 */
@@ -3757,6 +3793,33 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listAuditLogs: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 审计记录，最新在前 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditLog"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };

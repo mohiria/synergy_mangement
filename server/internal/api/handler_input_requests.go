@@ -80,11 +80,9 @@ func (s *Server) CreateMemberInput(w http.ResponseWriter, r *http.Request, proje
 		NewValue: fmt.Sprintf("新增「%s」，对接人：%s", input.Name, strings.Join(providerNames, "、")),
 		Request:  raw,
 	}
-	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
 	if !s.commitStructureChange(w, r, projectId, taskId, uid, outcome, payload, payload.NewValue) {
 		return
 	}
-	s.recordBlockerChanges(r.Context(), projectId, blockersBefore)
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 

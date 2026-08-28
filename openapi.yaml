@@ -1616,6 +1616,42 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /projects/{projectId}/audit-logs:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    get:
+      operationId: listAuditLogs
+      tags: [projects]
+      summary: 项目操作审计（§10.4；仅项目管理员）——由写路径装饰器统一记录，新增写路径自动覆盖
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 100
+      responses:
+        "200":
+          description: 审计记录，最新在前
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditLog"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /projects/{projectId}/blockers:
     parameters:
       - name: projectId
@@ -3755,6 +3791,33 @@ components:
       type: string
       description: 四类派生卡点（词汇表「结构化卡点」；我的工作 PRD §8.7）
       enum: [upstream_unready, task_overdue, approval_timeout, interlock]
+    AuditLog:
+      type: object
+      description: 一条项目操作审计（§10.4、R8）：谁在什么时候对哪个对象做了什么写操作
+      required: [id, action, method, route, occurredAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        action:
+          type: string
+          description: 动作名（派生字段；未登记路由退化为通用词，但留痕本身不缺）
+        method:
+          type: string
+        route:
+          type: string
+          description: 契约路由模板
+        objectType:
+          type: string
+          description: 直接对象类型（tasks／members／edges…）
+        objectId:
+          type: integer
+          format: int64
+        actorName:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
     Blocker:
       type: object
       description: 结构化卡点（词汇表）；由四类结构化事实读时派生，不落库、无人工上报与手动解除，触发条件消失即消失

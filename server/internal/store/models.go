@@ -21,6 +21,19 @@ type ArtifactPackageItem struct {
 	DeliverableID int64
 }
 
+type AuditLog struct {
+	ID         int64
+	ProjectID  int64
+	ActorID    pgtype.Int8
+	Action     string
+	Method     string
+	Route      string
+	ObjectType string
+	ObjectID   pgtype.Int8
+	Summary    string
+	CreatedAt  pgtype.Timestamptz
+}
+
 type CompletionReview struct {
 	ID                  int64
 	TaskID              int64

@@ -131,11 +131,9 @@ func (s *Server) CreateTaskInput(w http.ResponseWriter, r *http.Request, project
 		NewValue: fmt.Sprintf("新增「%s」，来源任务：%s", inputs.Name, strings.Join(sourceNames, "、")),
 		Request:  raw,
 	}
-	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
 	if !s.commitStructureChange(w, r, projectId, taskId, uid, outcome, payload, payload.NewValue) {
 		return
 	}
-	s.recordBlockerChanges(r.Context(), projectId, blockersBefore)
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 
@@ -178,12 +176,10 @@ func (s *Server) RemoveEdge(w http.ResponseWriter, r *http.Request, projectId in
 		NewValue: "解除该输入关系",
 		Request:  raw,
 	}
-	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
 	if !s.commitStructureChange(w, r, projectId, edge.TargetTaskID, uid, outcome, payload,
 		fmt.Sprintf("解除输入「%s」", edge.Name)) {
 		return
 	}
-	s.recordBlockerChanges(r.Context(), projectId, blockersBefore)
 	s.writeTask(w, r, projectId, edge.TargetTaskID, uid, actor)
 }
 

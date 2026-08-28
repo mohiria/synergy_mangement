@@ -59,7 +59,6 @@ func (s *Server) SubmitCompletion(w http.ResponseWriter, r *http.Request, projec
 	}
 	// AC-13/14：无中间审核人直接待 KR 终审；配置了则进入中间或签（配置快照进申请）。
 	reviewState, taskStatus := domain.SubmitCompletionOutcome(len(reviewers))
-	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -101,7 +100,6 @@ func (s *Server) SubmitCompletion(w http.ResponseWriter, r *http.Request, projec
 		return
 	}
 	s.actionActivity(r.Context(), taskId, domain.ActivityCompletionSubmitted, uid, note)
-	s.recordBlockerChanges(r.Context(), projectId, blockersBefore)
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 
@@ -124,7 +122,6 @@ func (s *Server) DecideCompletion(w http.ResponseWriter, r *http.Request, projec
 		opinion = strings.TrimSpace(*req.Opinion)
 	}
 	approve := req.Decision == CompletionDecisionRequestDecisionApproved
-	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
 
 	// 规则与写入放在同一个事务里，先锁任务行再重读事实与审批单（R2：或签与终审的写-写竞态）。
 	tx, err := s.db.Begin(r.Context())
@@ -149,7 +146,7 @@ func (s *Server) DecideCompletion(w http.ResponseWriter, r *http.Request, projec
 	}
 	// 中间或签阶段（AC-14/24/37）：仅或签组成员可处理。
 	if review.State == domain.CompletionIntermediate {
-		s.decideIntermediate(w, r, tx, qtx, projectId, taskId, review, facts, uid, actor, approve, opinion, blockersBefore)
+		s.decideIntermediate(w, r, tx, qtx, projectId, taskId, review, facts, uid, actor, approve, opinion)
 		return
 	}
 	if review.State != domain.CompletionPendingFinal {
@@ -257,14 +254,13 @@ func (s *Server) DecideCompletion(w http.ResponseWriter, r *http.Request, projec
 	} else {
 		s.actionActivity(r.Context(), taskId, domain.ActivityCompletionRejected, uid, opinion)
 	}
-	s.recordBlockerChanges(r.Context(), projectId, blockersBefore)
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 
 // decideIntermediate 或签处理：任一人通过→待 KR 终审（留痕）；任一人退回→整体退回并删除候选。
 func (s *Server) decideIntermediate(w http.ResponseWriter, r *http.Request, tx pgx.Tx, qtx *store.Queries,
 	projectId, taskId int64, review store.CompletionReview, facts domain.TaskFacts, uid int64, actor domain.Actor,
-	approve bool, opinion string, blockersBefore []domain.Blocker,
+	approve bool, opinion string,
 ) {
 	reviewerRows, err := qtx.ListReviewReviewers(r.Context(), review.ID)
 	if err != nil {
@@ -342,7 +338,6 @@ func (s *Server) decideIntermediate(w http.ResponseWriter, r *http.Request, tx p
 	} else {
 		s.actionActivity(r.Context(), taskId, domain.ActivityCompletionRejected, uid, opinion)
 	}
-	s.recordBlockerChanges(r.Context(), projectId, blockersBefore)
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 

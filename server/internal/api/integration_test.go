@@ -5069,6 +5069,123 @@ func TestDeleteExpiredSessions(t *testing.T) {
 	}
 }
 
+// §10.4／R8：写路径装饰器给项目内每一次成功写操作留痕——
+// 成员增删、关系解除、成果包创建这些此前完全无痕的动作都要有据可查，
+// 失败的请求不留痕，只读请求不留痕，只有项目管理员能看。
+func TestWritePathAudit(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	sp := func(v string) *string { return &v }
+
+	alice, bob := newClient(t), newClient(t)
+	for _, l := range []struct {
+		c              *http.Client
+		user, password string
+	}{{alice, "alice", "alice-pass"}, {bob, "bob", "bob-pass"}} {
+		resp := doJSON(t, l.c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: l.user, Password: l.password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "留痕", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	membersURL := fmt.Sprintf("%s/projects/%d/members", base, created.Id)
+	for _, id := range []int64{bobUser.ID, carolUser.ID} {
+		resp = doJSON(t, alice, http.MethodPost, membersURL, api.AddProjectMemberRequest{UserId: id, Role: api.Member})
+		wantStatus(t, resp, http.StatusCreated)
+		resp.Body.Close()
+	}
+	// 失败的写请求不留痕
+	resp = doJSON(t, alice, http.MethodPost, membersURL, api.AddProjectMemberRequest{UserId: bobUser.ID, Role: api.Member})
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+	// 没有职责占位的成员可以移出
+	resp = doJSON(t, alice, http.MethodDelete, fmt.Sprintf("%s/%d", membersURL, carolUser.ID), nil)
+	wantStatus(t, resp, http.StatusNoContent)
+	resp.Body.Close()
+
+	auditURL := fmt.Sprintf("%s/projects/%d/audit-logs", base, created.Id)
+	resp = doJSON(t, bob, http.MethodGet, auditURL, nil)
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodGet, auditURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	logs := decodeBody[[]api.AuditLog](t, resp)
+	actions := map[string]int{}
+	for _, l := range logs {
+		actions[l.Action]++
+		if l.ActorName == nil || *l.ActorName != aliceUser.DisplayName {
+			t.Fatalf("审计应记下行动人: %+v", l)
+		}
+	}
+	if actions["新增项目成员"] != 2 {
+		t.Fatalf("成员新增留痕条数异常（失败的那次不应留痕）: %+v", actions)
+	}
+	if actions["移出项目成员"] != 1 {
+		t.Fatalf("成员移出未留痕: %+v", actions)
+	}
+	// 读请求不留痕：再取一次审计，条数不变
+	before := len(logs)
+	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/tasks", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodGet, auditURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	if after := len(decodeBody[[]api.AuditLog](t, resp)); after != before {
+		t.Fatalf("读请求不应留痕: %d → %d", before, after)
+	}
+
+	// 关系解除也留痕（此前完全无痕的一类）
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &aliceUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	kr1 := decodeBody[[]api.Objective](t, resp)[0].KeyResults[0].Id
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "上游", OwnerId: aliceUser.ID, StartDate: start, EndDate: end},
+			{KeyResultId: kr1, Name: "下游", OwnerId: aliceUser.ID, StartDate: start, EndDate: end},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	var up, down int64
+	for _, tk := range decodeBody[[]api.Task](t, resp) {
+		if tk.Name == "上游" {
+			up = tk.Id
+		} else {
+			down = tk.Id
+		}
+	}
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, down),
+		api.CreateTaskInputRequest{Name: "上游材料", Necessity: api.Required, EdgeType: api.HardPrerequisite, SourceTaskIds: []int64{up}})
+	wantStructureAccepted(t, resp)
+	edge := edgeOf(t, alice, base, created.Id, down, "上游材料")
+	resp = doJSON(t, alice, http.MethodDelete, fmt.Sprintf("%s/projects/%d/edges/%d", base, created.Id, edge.Id), nil)
+	wantStructureAccepted(t, resp)
+
+	resp = doJSON(t, alice, http.MethodGet, auditURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	actions = map[string]int{}
+	for _, l := range decodeBody[[]api.AuditLog](t, resp) {
+		actions[l.Action]++
+	}
+	for _, want := range []string{"创建 O／KR", "创建任务", "配置任务输入", "解除交付物边"} {
+		if actions[want] == 0 {
+			t.Fatalf("%q 未留痕: %+v", want, actions)
+		}
+	}
+}
+
 // AC-64 编号稳定：O 编号为自然数、KR 形如 KR1.1、任务形如 1.1.1；
 // 编号创建时分配并持久保存，删除 O2 后 O3 编号不变、新建的 O 也不复用 2。
 func TestEntityCodesStable(t *testing.T) {

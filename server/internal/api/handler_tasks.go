@@ -230,7 +230,6 @@ func (s *Server) SubmitTaskPoolReview(w http.ResponseWriter, r *http.Request, pr
 		writeForbidden(w)
 		return
 	}
-	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
 	hasPending, err := s.q.HasPendingFieldChange(r.Context(), taskId)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -269,7 +268,6 @@ func (s *Server) SubmitTaskPoolReview(w http.ResponseWriter, r *http.Request, pr
 		return
 	}
 	s.actionActivity(r.Context(), taskId, domain.ActivityPoolSubmitted, uid, "")
-	s.recordBlockerChanges(r.Context(), projectId, blockersBefore)
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 
@@ -286,7 +284,6 @@ func (s *Server) DecideTaskPoolReview(w http.ResponseWriter, r *http.Request, pr
 	uid := currentUser(r).ID
 	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
 	approve := req.Decision == PoolReviewDecisionRequestDecisionApproved
-	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
 	opinion := ""
 	if req.Opinion != nil {
 		opinion = strings.TrimSpace(*req.Opinion)
@@ -349,7 +346,6 @@ func (s *Server) DecideTaskPoolReview(w http.ResponseWriter, r *http.Request, pr
 	} else {
 		s.actionActivity(r.Context(), taskId, domain.ActivityPoolRejected, uid, opinion)
 	}
-	s.recordBlockerChanges(r.Context(), projectId, blockersBefore)
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 

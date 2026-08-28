@@ -71,7 +71,6 @@ func (s *Server) SubmitFieldChange(w http.ResponseWriter, r *http.Request, proje
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_field_change", Message: err.Error()})
 		return
 	}
-	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -120,7 +119,6 @@ func (s *Server) SubmitFieldChange(w http.ResponseWriter, r *http.Request, proje
 	case domain.FieldChangePending:
 		s.actionActivity(r.Context(), taskId, domain.ActivityFieldChangeSubmitted, uid, reason)
 	}
-	s.recordBlockerChanges(r.Context(), projectId, blockersBefore)
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 
@@ -141,7 +139,6 @@ func (s *Server) DecideFieldChange(w http.ResponseWriter, r *http.Request, proje
 		opinion = strings.TrimSpace(*req.Opinion)
 	}
 	approve := req.Decision == FieldChangeDecisionRequestDecisionApproved
-	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
 
 	// 规则与写入同事务：先锁任务行再重读事实与变更单，避免变更被批准到已终止的任务上（R2／R3）。
 	tx, err := s.db.Begin(r.Context())
@@ -234,7 +231,6 @@ func (s *Server) DecideFieldChange(w http.ResponseWriter, r *http.Request, proje
 	default:
 		s.actionActivity(r.Context(), taskId, domain.ActivityFieldChangeRejected, uid, opinion)
 	}
-	s.recordBlockerChanges(r.Context(), projectId, blockersBefore)
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 
