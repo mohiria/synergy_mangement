@@ -358,8 +358,17 @@ export default function ProjectTasksPage({
         try {
           const put = await fetch(res.data.uploadUrl, { method: "PUT", body: provideFile });
           if (!put.ok) throw new Error(String(put.status));
+          // 附件先落 uploading，确认写入后输入才转为已提供，下游就绪度随之更新。
+          const commit = await client.POST(
+            "/projects/{projectId}/input-requests/{requestId}/commit",
+            { params: { path: { projectId, requestId: provideReq } } },
+          );
+          if (!commit.data) throw new Error(commit.error?.message ?? "确认失败");
         } catch {
           message.error("文件上传失败，请确认文件服务可用后重试");
+          setProviding(false);
+          load();
+          return;
         }
       }
       message.success("已提交，目标任务输入更新为就绪");
@@ -1643,6 +1652,15 @@ function TaskDrawer({
     try {
       const put = await fetch(res.data.uploadUrl, { method: "PUT", body: file });
       if (!put.ok) throw new Error(`HTTP ${put.status}`);
+      // 两阶段提交第二步：服务端校验对象确已写入后，内容才成为候选。
+      const commit = await client.POST(
+        "/projects/{projectId}/tasks/{taskId}/deliverables/{deliverableId}/candidate/commit",
+        {
+          params: { path: { projectId, taskId: task.id, deliverableId: candidateFor.id } },
+          body: { fileId: res.data.file.id },
+        },
+      );
+      if (!commit.data) throw new Error(commit.error?.message ?? "确认失败");
       message.success("候选内容已上传；随完成申请提交后进入审核");
       closeCandidate();
     } catch {

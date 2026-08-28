@@ -196,8 +196,14 @@ func (s *Server) ProvideInput(w http.ResponseWriter, r *http.Request, projectId 
 			return
 		}
 	}
+	// 带附件时先停在 uploading：预签名直传绕过服务端，不等确认就置 provided 等于
+	// 「没传也算已提供」，下游等待输入会被错误解除（R4）。
+	newState := domain.InputRequestProvided
+	if fileName != "" {
+		newState = domain.InputRequestUploading
+	}
 	updated, err := s.q.ProvideInputRequest(r.Context(), store.ProvideInputRequestParams{
-		ID: requestId, ProvidedText: text, FileName: fileName, ObjectKey: objectKey,
+		ID: requestId, ProvidedText: text, FileName: fileName, ObjectKey: objectKey, State: newState,
 	})
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -208,6 +214,46 @@ func (s *Server) ProvideInput(w http.ResponseWriter, r *http.Request, projectId 
 		resp.UploadUrl = &uploadURL
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// CommitInputRequestFile 两阶段提交第二步：校验附件确已写入对象存储后，uploading → provided（R4）。
+func (s *Server) CommitInputRequestFile(w http.ResponseWriter, r *http.Request, projectId int64, requestId int64) {
+	if _, ok := s.fetchProject(w, r, projectId); !ok {
+		return
+	}
+	uid := currentUser(r).ID
+	ir, err := s.q.GetInputRequestInProject(r.Context(), store.GetInputRequestInProjectParams{ID: requestId, ProjectID: projectId})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, Error{Code: "request_not_found", Message: "输入请求不存在"})
+		} else {
+			writeInternalError(w, r, err)
+		}
+		return
+	}
+	if ir.ProviderID != uid {
+		writeForbidden(w)
+		return
+	}
+	if ir.State != domain.InputRequestUploading || ir.ObjectKey == "" {
+		writeJSON(w, http.StatusConflict, Error{Code: "upload_state_conflict", Message: "没有待确认的上传记录"})
+		return
+	}
+	size, err := s.files.Stat(r.Context(), ir.ObjectKey)
+	if err != nil {
+		writeJSON(w, http.StatusConflict, Error{Code: "upload_not_found", Message: "文件尚未上传完成，请重试"})
+		return
+	}
+	if err := domain.ValidateUploadSize(size); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_file", Message: err.Error()})
+		return
+	}
+	updated, err := s.q.CommitInputRequestUpload(r.Context(), requestId)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.inputRequestView(updated, ir.ProviderName, uid))
 }
 
 func (s *Server) GetInputRequestFileUrl(w http.ResponseWriter, r *http.Request, projectId int64, requestId int64) {

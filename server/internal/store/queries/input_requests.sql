@@ -42,7 +42,22 @@ WHERE id = $1
 RETURNING *;
 
 -- name: ProvideInputRequest :one
+-- 带附件时先落 uploading（$5），客户端确认写入后才由 CommitInputRequestFile 转 provided。
 UPDATE input_requests
-SET state = 'provided', provided_at = now(), provided_text = $2, file_name = $3, object_key = $4
+SET state = $5, provided_at = now(), provided_text = $2, file_name = $3, object_key = $4
 WHERE id = $1
+RETURNING *;
+
+-- name: ResetStaleInputUploads :many
+-- 迟迟未确认的输入附件：回到已接受状态，等对接人重新提交（预签名地址已过期）。
+UPDATE input_requests
+SET state = 'accepted', provided_at = NULL, provided_text = '', file_name = '', object_key = ''
+WHERE state = 'uploading' AND provided_at < now() - $1::interval
+RETURNING object_key;
+
+-- name: CommitInputRequestUpload :one
+-- 确认输入附件已写入对象存储：uploading → provided。
+UPDATE input_requests
+SET state = 'provided', provided_at = now()
+WHERE id = $1 AND state = 'uploading'
 RETURNING *;

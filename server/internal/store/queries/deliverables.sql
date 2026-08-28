@@ -39,6 +39,25 @@ SELECT * FROM deliverable_files
 WHERE deliverable_id = $1 AND state = 'candidate'
 LIMIT 1;
 
+-- name: GetUploadingFile :one
+-- 已建记录但尚未确认写入对象存储的内容（两阶段提交的中间态）。
+SELECT * FROM deliverable_files
+WHERE deliverable_id = $1 AND state = 'uploading'
+LIMIT 1;
+
+-- name: DeleteStaleUploadingFiles :many
+-- 清理迟迟未确认的待上传记录（预签名地址已过期，客户端不会再来 commit）。
+DELETE FROM deliverable_files
+WHERE state = 'uploading' AND uploaded_at < now() - $1::interval
+RETURNING object_key;
+
+-- name: CommitUploadingFile :one
+-- 确认上传：uploading → candidate，并按对象存储的真实大小回填。
+UPDATE deliverable_files
+SET state = 'candidate', file_size = $2, uploaded_at = now()
+WHERE id = $1 AND state = 'uploading'
+RETURNING *;
+
 -- name: CreateDeliverableFile :one
 INSERT INTO deliverable_files (deliverable_id, state, file_name, file_type, file_size, object_key, uploaded_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7)

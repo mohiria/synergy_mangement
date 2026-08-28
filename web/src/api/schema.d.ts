@@ -392,6 +392,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/tasks/{taskId}/deliverables/{deliverableId}/candidate/commit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+                deliverableId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 确认候选内容已写入对象存储（两阶段提交第二步；服务端校验对象存在后才转为候选） */
+        post: operations["commitCandidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/files/{fileId}/download-url": {
         parameters: {
             query?: never;
@@ -587,6 +608,26 @@ export interface paths {
         put?: never;
         /** 对接人提交内容或文件（AC-30）；提交后输入请求变为已提供，目标任务输入更新为就绪 */
         post: operations["provideInput"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/input-requests/{requestId}/commit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                requestId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 确认输入附件已写入对象存储（两阶段提交第二步；校验通过后输入才转为已提供） */
+        post: operations["commitInputRequestFile"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1390,12 +1431,22 @@ export interface components {
             decision: "approved" | "rejected";
             opinion?: string;
         };
+        CommitUploadRequest: {
+            /**
+             * Format: int64
+             * @description 第一步返回的内容记录 id
+             */
+            fileId: number;
+        };
         /** @description 交付物内容（词汇表「交付物」；当前已生效或候选审核中） */
         DeliverableFile: {
             /** Format: int64 */
             id: number;
-            /** @enum {string} */
-            state: "current" | "candidate";
+            /**
+             * @description uploading 表示已建记录但文件尚未确认写入对象存储，未确认前不参与就绪判定
+             * @enum {string}
+             */
+            state: "current" | "candidate" | "uploading";
             fileName: string;
             fileType?: string;
             /**
@@ -1807,10 +1858,10 @@ export interface components {
             targetKey: string;
         };
         /**
-         * @description 输入请求状态（词汇表「输入请求」；PRD §5.5）
+         * @description 输入请求状态（词汇表「输入请求」；PRD §5.5）。uploading：已登记待上传，文件确认写入后才转 provided
          * @enum {string}
          */
-        InputRequestState: "pending" | "accepted" | "provided";
+        InputRequestState: "pending" | "accepted" | "provided" | "uploading";
         /** @description 指定项目成员的输入请求（附着在成员 → 目标任务的交付物边上） */
         InputRequest: {
             /** Format: int64 */
@@ -2816,6 +2867,39 @@ export interface operations {
             422: components["responses"]["ValidationError"];
         };
     };
+    commitCandidate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+                deliverableId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CommitUploadRequest"];
+            };
+        };
+        responses: {
+            /** @description 已确认，内容成为候选 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliverableFile"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
     getFileDownloadUrl: {
         parameters: {
             query?: never;
@@ -3115,6 +3199,33 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["ValidationError"];
+        };
+    };
+    commitInputRequestFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                requestId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已确认，输入转为已提供 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InputRequest"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     getInputRequestFileUrl: {

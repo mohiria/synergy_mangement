@@ -11,6 +11,8 @@ const (
 	InputRequestPending  = "pending"
 	InputRequestAccepted = "accepted"
 	InputRequestProvided = "provided"
+	// InputRequestUploading 已登记待上传：附件确认写入对象存储后才转 provided（R4 两阶段提交）。
+	InputRequestUploading = "uploading"
 )
 
 // NotifyInputRequest 站内通知类型。

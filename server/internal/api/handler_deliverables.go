@@ -101,7 +101,8 @@ func (s *Server) UploadCandidate(w http.ResponseWriter, r *http.Request, project
 	if req.FileSize != nil {
 		size = *req.FileSize
 	}
-	// 删旧候选与建新候选必须同事务：中途失败会让旧候选永久消失且无新记录顶替（D1）。
+	// 两阶段提交第一步：只落 uploading 记录（R4）。旧候选此刻不动——文件还没上传，
+	// 提前删掉就会让「传了一半」的操作把已生效的候选弄丢（D1）。
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -109,23 +110,23 @@ func (s *Server) UploadCandidate(w http.ResponseWriter, r *http.Request, project
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
 	qtx := s.q.WithTx(tx)
-	// 重复登记覆盖旧候选（不留历史版本，§5.3）；对象删除延后到提交之后。
-	oldKey := ""
-	old, err := qtx.GetCandidateFile(r.Context(), deliverableId)
+	// 同一交付物项同时只允许一条待上传记录：重新发起时顶掉上一条。
+	staleKey := ""
+	stale, err := qtx.GetUploadingFile(r.Context(), deliverableId)
 	switch {
 	case err == nil:
-		if _, err := qtx.DeleteDeliverableFile(r.Context(), old.ID); err != nil {
+		if _, err := qtx.DeleteDeliverableFile(r.Context(), stale.ID); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
-		oldKey = old.ObjectKey
+		staleKey = stale.ObjectKey
 	case !errors.Is(err, pgx.ErrNoRows):
 		writeInternalError(w, r, err)
 		return
 	}
 	f, err := qtx.CreateDeliverableFile(r.Context(), store.CreateDeliverableFileParams{
 		DeliverableID: deliverableId,
-		State:         domain.DeliverableCandidate,
+		State:         domain.DeliverableUploading,
 		FileName:      fileName,
 		FileType:      fileType,
 		FileSize:      size,
@@ -140,8 +141,8 @@ func (s *Server) UploadCandidate(w http.ResponseWriter, r *http.Request, project
 		writeInternalError(w, r, err)
 		return
 	}
-	if oldKey != "" {
-		_ = s.files.Remove(r.Context(), oldKey)
+	if staleKey != "" {
+		_ = s.files.Remove(r.Context(), staleKey)
 	}
 	uploadURL, err := s.files.PresignPut(r.Context(), key, presignExpiry)
 	if err != nil {
@@ -153,6 +154,90 @@ func (s *Server) UploadCandidate(w http.ResponseWriter, r *http.Request, project
 		File:      toDeliverableFile(f, user.DisplayName),
 		UploadUrl: uploadURL,
 	})
+}
+
+// CommitCandidate 两阶段提交第二步：校验对象确已写入后，uploading → candidate 并覆盖旧候选（R4）。
+func (s *Server) CommitCandidate(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64, deliverableId int64) {
+	var req CommitUploadRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_request", Message: "请求内容无法解析"})
+		return
+	}
+	proj, ok := s.fetchProject(w, r, projectId)
+	if !ok {
+		return
+	}
+	uid := currentUser(r).ID
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	d, err := s.q.GetDeliverableInProject(r.Context(), store.GetDeliverableInProjectParams{ID: deliverableId, ID_2: taskId, ProjectID: projectId})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, Error{Code: "deliverable_not_found", Message: "交付物不存在"})
+		} else {
+			writeInternalError(w, r, err)
+		}
+		return
+	}
+	facts := domain.TaskFacts{Status: d.TaskStatus, CreatorID: d.TaskCreatedBy, OwnerID: d.TaskOwnerID}
+	if !domain.CanUploadCandidate(actor, uid, facts) {
+		writeForbidden(w)
+		return
+	}
+	pending, err := s.q.GetUploadingFile(r.Context(), deliverableId)
+	if err != nil || pending.ID != req.FileId {
+		writeJSON(w, http.StatusConflict, Error{Code: "upload_state_conflict", Message: "没有待确认的上传记录"})
+		return
+	}
+	// 对象必须真的写进了存储：预签名直传绕过服务端，不校验就等于「没传也算已提交」。
+	size, err := s.files.Stat(r.Context(), pending.ObjectKey)
+	if err != nil {
+		writeJSON(w, http.StatusConflict, Error{Code: "upload_not_found", Message: "文件尚未上传完成，请重试"})
+		return
+	}
+	// 大小按对象存储的真实值兜底：客户端自报的 fileSize 与前端限制都可绕过。
+	if err := domain.ValidateUploadSize(size); err != nil {
+		if _, delErr := s.q.DeleteDeliverableFile(r.Context(), pending.ID); delErr != nil {
+			writeInternalError(w, r, delErr)
+			return
+		}
+		_ = s.files.Remove(r.Context(), pending.ObjectKey)
+		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_file", Message: err.Error()})
+		return
+	}
+	tx, err := s.db.Begin(r.Context())
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	qtx := s.q.WithTx(tx)
+	// 确认成功才覆盖旧候选（不留历史版本，§5.3）。
+	oldKey := ""
+	old, err := qtx.GetCandidateFile(r.Context(), deliverableId)
+	switch {
+	case err == nil:
+		if _, err := qtx.DeleteDeliverableFile(r.Context(), old.ID); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		oldKey = old.ObjectKey
+	case !errors.Is(err, pgx.ErrNoRows):
+		writeInternalError(w, r, err)
+		return
+	}
+	f, err := qtx.CommitUploadingFile(r.Context(), store.CommitUploadingFileParams{ID: pending.ID, FileSize: size})
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if oldKey != "" {
+		_ = s.files.Remove(r.Context(), oldKey)
+	}
+	writeJSON(w, http.StatusOK, toDeliverableFile(f, currentUser(r).DisplayName))
 }
 
 func (s *Server) GetFileDownloadUrl(w http.ResponseWriter, r *http.Request, projectId int64, fileId int64) {

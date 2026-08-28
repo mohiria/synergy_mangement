@@ -44,6 +44,30 @@ func (s *Server) SweepBlockerActivities(ctx context.Context) {
 	}
 }
 
+// staleUploadAge 待上传记录的存活上限：预签名地址过期后客户端不会再来确认，留着只会占住
+// 「同一交付物项至多一条待上传」的名额。
+const staleUploadAge = 2 * presignExpiry
+
+// SweepStaleUploads 清理迟迟未确认的两阶段上传（R4）：删掉过期的待上传记录与其占位对象，
+// 输入请求回到已接受状态等对接人重提。
+func (s *Server) SweepStaleUploads(ctx context.Context) {
+	interval := pgtype.Interval{Microseconds: staleUploadAge.Microseconds(), Valid: true}
+	keys, err := s.q.DeleteStaleUploadingFiles(ctx, interval)
+	if err != nil {
+		log.Printf("upload sweep: 清理候选待上传记录失败: %v", err)
+	}
+	inputKeys, err := s.q.ResetStaleInputUploads(ctx, interval)
+	if err != nil {
+		log.Printf("upload sweep: 重置输入待上传记录失败: %v", err)
+	}
+	for _, key := range append(keys, inputKeys...) {
+		if key == "" {
+			continue
+		}
+		_ = s.files.Remove(ctx, key)
+	}
+}
+
 // StartBlockerActivityTicker 启动进程内单 ticker（ADR 0001：无外部定时设施）。
 // 启动时立即扫一次——进程停机期间出现的时间型卡点因此不会漏记。返回的函数停止并等待退出。
 func (s *Server) StartBlockerActivityTicker(ctx context.Context, interval time.Duration) func() {
@@ -54,12 +78,14 @@ func (s *Server) StartBlockerActivityTicker(ctx context.Context, interval time.D
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		s.SweepBlockerActivities(ctx)
+		s.SweepStaleUploads(ctx)
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
 				s.SweepBlockerActivities(ctx)
+				s.SweepStaleUploads(ctx)
 			}
 		}
 	}()

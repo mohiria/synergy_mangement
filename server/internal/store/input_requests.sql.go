@@ -38,6 +38,34 @@ func (q *Queries) AcceptInputRequest(ctx context.Context, id int64) (InputReques
 	return i, err
 }
 
+const commitInputRequestUpload = `-- name: CommitInputRequestUpload :one
+UPDATE input_requests
+SET state = 'provided', provided_at = now()
+WHERE id = $1 AND state = 'uploading'
+RETURNING id, edge_id, provider_id, content_note, state, notified_at, accepted_at, provided_at, provided_text, file_name, object_key, created_at
+`
+
+// 确认输入附件已写入对象存储：uploading → provided。
+func (q *Queries) CommitInputRequestUpload(ctx context.Context, id int64) (InputRequest, error) {
+	row := q.db.QueryRow(ctx, commitInputRequestUpload, id)
+	var i InputRequest
+	err := row.Scan(
+		&i.ID,
+		&i.EdgeID,
+		&i.ProviderID,
+		&i.ContentNote,
+		&i.State,
+		&i.NotifiedAt,
+		&i.AcceptedAt,
+		&i.ProvidedAt,
+		&i.ProvidedText,
+		&i.FileName,
+		&i.ObjectKey,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createInputRequest = `-- name: CreateInputRequest :one
 INSERT INTO input_requests (edge_id, provider_id, content_note, notified_at)
 VALUES ($1, $2, $3, $4)
@@ -269,7 +297,7 @@ func (q *Queries) MarkInputRequestNotified(ctx context.Context, id int64) error 
 
 const provideInputRequest = `-- name: ProvideInputRequest :one
 UPDATE input_requests
-SET state = 'provided', provided_at = now(), provided_text = $2, file_name = $3, object_key = $4
+SET state = $5, provided_at = now(), provided_text = $2, file_name = $3, object_key = $4
 WHERE id = $1
 RETURNING id, edge_id, provider_id, content_note, state, notified_at, accepted_at, provided_at, provided_text, file_name, object_key, created_at
 `
@@ -279,14 +307,17 @@ type ProvideInputRequestParams struct {
 	ProvidedText string
 	FileName     string
 	ObjectKey    string
+	State        string
 }
 
+// 带附件时先落 uploading（$5），客户端确认写入后才由 CommitInputRequestFile 转 provided。
 func (q *Queries) ProvideInputRequest(ctx context.Context, arg ProvideInputRequestParams) (InputRequest, error) {
 	row := q.db.QueryRow(ctx, provideInputRequest,
 		arg.ID,
 		arg.ProvidedText,
 		arg.FileName,
 		arg.ObjectKey,
+		arg.State,
 	)
 	var i InputRequest
 	err := row.Scan(
@@ -304,4 +335,32 @@ func (q *Queries) ProvideInputRequest(ctx context.Context, arg ProvideInputReque
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const resetStaleInputUploads = `-- name: ResetStaleInputUploads :many
+UPDATE input_requests
+SET state = 'accepted', provided_at = NULL, provided_text = '', file_name = '', object_key = ''
+WHERE state = 'uploading' AND provided_at < now() - $1::interval
+RETURNING object_key
+`
+
+// 迟迟未确认的输入附件：回到已接受状态，等对接人重新提交（预签名地址已过期）。
+func (q *Queries) ResetStaleInputUploads(ctx context.Context, dollar_1 pgtype.Interval) ([]string, error) {
+	rows, err := q.db.Query(ctx, resetStaleInputUploads, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var object_key string
+		if err := rows.Scan(&object_key); err != nil {
+			return nil, err
+		}
+		items = append(items, object_key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

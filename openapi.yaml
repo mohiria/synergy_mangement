@@ -807,6 +807,54 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /projects/{projectId}/tasks/{taskId}/deliverables/{deliverableId}/candidate/commit:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: taskId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: deliverableId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    post:
+      operationId: commitCandidate
+      tags: [deliverables]
+      summary: 确认候选内容已写入对象存储（两阶段提交第二步；服务端校验对象存在后才转为候选）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommitUploadRequest"
+      responses:
+        "200":
+          description: 已确认，内容成为候选
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliverableFile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
   /projects/{projectId}/files/{fileId}/download-url:
     parameters:
       - name: projectId
@@ -1205,6 +1253,40 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /projects/{projectId}/input-requests/{requestId}/commit:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: requestId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    post:
+      operationId: commitInputRequestFile
+      tags: [inputs]
+      summary: 确认输入附件已写入对象存储（两阶段提交第二步；校验通过后输入才转为已提供）
+      responses:
+        "200":
+          description: 已确认，输入转为已提供
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InputRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    
   /projects/{projectId}/input-requests/{requestId}/file-url:
     parameters:
       - name: projectId
@@ -2612,6 +2694,14 @@ components:
         opinion:
           type: string
           maxLength: 500
+    CommitUploadRequest:
+      type: object
+      required: [fileId]
+      properties:
+        fileId:
+          type: integer
+          format: int64
+          description: 第一步返回的内容记录 id
     DeliverableFile:
       type: object
       description: 交付物内容（词汇表「交付物」；当前已生效或候选审核中）
@@ -2622,7 +2712,8 @@ components:
           format: int64
         state:
           type: string
-          enum: [current, candidate]
+          enum: [current, candidate, uploading]
+          description: uploading 表示已建记录但文件尚未确认写入对象存储，未确认前不参与就绪判定
         fileName:
           type: string
         fileType:
@@ -3336,8 +3427,8 @@ components:
           description: 提醒目标的合成键；卡点取自卡点列表或任务详情的 key，等待他人事项取自我的工作卡片的 refKey（形如 wait:<事项类型>:<事项 ID>）
     InputRequestState:
       type: string
-      description: 输入请求状态（词汇表「输入请求」；PRD §5.5）
-      enum: [pending, accepted, provided]
+      description: 输入请求状态（词汇表「输入请求」；PRD §5.5）。uploading：已登记待上传，文件确认写入后才转 provided
+      enum: [pending, accepted, provided, uploading]
     InputRequest:
       type: object
       description: 指定项目成员的输入请求（附着在成员 → 目标任务的交付物边上）

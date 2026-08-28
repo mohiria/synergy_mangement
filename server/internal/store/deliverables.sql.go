@@ -11,6 +11,37 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const commitUploadingFile = `-- name: CommitUploadingFile :one
+UPDATE deliverable_files
+SET state = 'candidate', file_size = $2, uploaded_at = now()
+WHERE id = $1 AND state = 'uploading'
+RETURNING id, deliverable_id, state, file_name, file_type, file_size, object_key, uploaded_by, uploaded_at, effective_at
+`
+
+type CommitUploadingFileParams struct {
+	ID       int64
+	FileSize int64
+}
+
+// 确认上传：uploading → candidate，并按对象存储的真实大小回填。
+func (q *Queries) CommitUploadingFile(ctx context.Context, arg CommitUploadingFileParams) (DeliverableFile, error) {
+	row := q.db.QueryRow(ctx, commitUploadingFile, arg.ID, arg.FileSize)
+	var i DeliverableFile
+	err := row.Scan(
+		&i.ID,
+		&i.DeliverableID,
+		&i.State,
+		&i.FileName,
+		&i.FileType,
+		&i.FileSize,
+		&i.ObjectKey,
+		&i.UploadedBy,
+		&i.UploadedAt,
+		&i.EffectiveAt,
+	)
+	return i, err
+}
+
 const createDeliverable = `-- name: CreateDeliverable :one
 INSERT INTO deliverables (task_id, name, created_by)
 VALUES ($1, $2, $3)
@@ -88,6 +119,33 @@ func (q *Queries) DeleteDeliverableFile(ctx context.Context, id int64) (int64, e
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const deleteStaleUploadingFiles = `-- name: DeleteStaleUploadingFiles :many
+DELETE FROM deliverable_files
+WHERE state = 'uploading' AND uploaded_at < now() - $1::interval
+RETURNING object_key
+`
+
+// 清理迟迟未确认的待上传记录（预签名地址已过期，客户端不会再来 commit）。
+func (q *Queries) DeleteStaleUploadingFiles(ctx context.Context, dollar_1 pgtype.Interval) ([]string, error) {
+	rows, err := q.db.Query(ctx, deleteStaleUploadingFiles, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var object_key string
+		if err := rows.Scan(&object_key); err != nil {
+			return nil, err
+		}
+		items = append(items, object_key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getCandidateFile = `-- name: GetCandidateFile :one
@@ -201,6 +259,31 @@ func (q *Queries) GetDeliverableInProject(ctx context.Context, arg GetDeliverabl
 		&i.TaskOwnerID,
 		&i.TaskCreatedBy,
 		&i.TaskStatus,
+	)
+	return i, err
+}
+
+const getUploadingFile = `-- name: GetUploadingFile :one
+SELECT id, deliverable_id, state, file_name, file_type, file_size, object_key, uploaded_by, uploaded_at, effective_at FROM deliverable_files
+WHERE deliverable_id = $1 AND state = 'uploading'
+LIMIT 1
+`
+
+// 已建记录但尚未确认写入对象存储的内容（两阶段提交的中间态）。
+func (q *Queries) GetUploadingFile(ctx context.Context, deliverableID int64) (DeliverableFile, error) {
+	row := q.db.QueryRow(ctx, getUploadingFile, deliverableID)
+	var i DeliverableFile
+	err := row.Scan(
+		&i.ID,
+		&i.DeliverableID,
+		&i.State,
+		&i.FileName,
+		&i.FileType,
+		&i.FileSize,
+		&i.ObjectKey,
+		&i.UploadedBy,
+		&i.UploadedAt,
+		&i.EffectiveAt,
 	)
 	return i, err
 }

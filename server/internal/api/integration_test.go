@@ -33,14 +33,63 @@ import (
 
 func newTestHandler(t *testing.T, pool *pgxpool.Pool) http.Handler {
 	t.Helper()
-	// presign 为纯签名计算，测试无需真实 MinIO 服务。
-	files, err := filestore.NewMinio("localhost:9000", "", "synergy", "synergy-dev-secret", "synergy-test", false)
+	// 上传两阶段提交后，候选内容必须真的落进对象存储，MinIO 与 Postgres 一样是集成测试的前置依赖。
+	// 凭据取自环境变量（与 compose 同名），本地默认值对应 .env.example。
+	files, err := filestore.NewMinio(
+		envOr("TEST_MINIO_ENDPOINT", "localhost:9000"), "",
+		envOr("MINIO_ROOT_USER", "synergy"),
+		envOr("MINIO_ROOT_PASSWORD", "synergy-dev-secret"),
+		"synergy-test", false)
 	if err != nil {
 		t.Fatalf("filestore: %v", err)
 	}
 	// MinIO 容器可达时确保测试桶存在（真实上传/打包路径）；不可达时相关断言自动降级。
 	_ = files.EnsureBucket(context.Background())
 	return api.NewHandler(pool, "/api/v1", files)
+}
+
+// putObject 直传对象；MinIO 与 Postgres 一样是集成测试的前置依赖（docker compose up -d minio）。
+func putObject(t *testing.T, url, content string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPut, url, strings.NewReader(content))
+	if err != nil {
+		t.Fatalf("构造上传请求: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("MinIO 不可达（docker compose up -d minio）: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		t.Fatalf("上传对象失败: %d", resp.StatusCode)
+	}
+}
+
+// uploadCandidate 走完候选内容的两阶段提交：登记 uploading → 直传对象 → commit 转 candidate。
+func uploadCandidate(t *testing.T, c *http.Client, tasksURL string, taskID, deliverableID int64, req api.UploadCandidateRequest, content string) api.DeliverableFile {
+	t.Helper()
+	url := fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskID, deliverableID)
+	resp := doJSON(t, c, http.MethodPost, url, req)
+	wantStatus(t, resp, http.StatusCreated)
+	up := decodeBody[api.UploadCandidateResponse](t, resp)
+	if up.UploadUrl == "" || up.File.State != api.DeliverableFileStateUploading {
+		t.Fatalf("候选登记异常: %+v", up)
+	}
+	putObject(t, up.UploadUrl, content)
+	resp = doJSON(t, c, http.MethodPost, url+"/commit", api.CommitUploadRequest{FileId: up.File.Id})
+	wantStatus(t, resp, http.StatusOK)
+	f := decodeBody[api.DeliverableFile](t, resp)
+	if f.State != api.DeliverableFileStateCandidate {
+		t.Fatalf("确认后应为候选: %+v", f)
+	}
+	return f
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
 
 func setupDB(t *testing.T) (*store.Queries, *pgxpool.Pool) {
@@ -1477,19 +1526,30 @@ func TestDeliverablesAndFiles(t *testing.T) {
 		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskID, second.Id),
+	candidateURL := fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskID, second.Id)
+	resp = doJSON(t, bob, http.MethodPost, candidateURL,
 		api.UploadCandidateRequest{FileName: "现场验收记录.xlsx", FileType: sp("xlsx")})
 	wantStatus(t, resp, http.StatusCreated)
 	up := decodeBody[api.UploadCandidateResponse](t, resp)
-	if up.UploadUrl == "" || up.File.State != api.Candidate {
+	if up.UploadUrl == "" || up.File.State != api.DeliverableFileStateUploading {
 		t.Fatalf("候选登记异常: %+v", up)
 	}
+	// R4：文件没真的上传就点确认，必须被拒；此时也还不是候选内容
+	resp = doJSON(t, bob, http.MethodPost, candidateURL+"/commit", api.CommitUploadRequest{FileId: up.File.Id})
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if d := decodeBody[api.TaskDetail](t, resp); d.Deliverables[1].Candidate != nil {
+		t.Fatalf("未确认上传不应成为候选内容: %+v", d.Deliverables[1].Candidate)
+	}
+	putObject(t, up.UploadUrl, "candidate-bytes")
+	resp = doJSON(t, bob, http.MethodPost, candidateURL+"/commit", api.CommitUploadRequest{FileId: up.File.Id})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
 
 	// 非负责人 alice 也可（管理员纠错）；无关成员会被拒——此处验证重复登记覆盖旧候选
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskID, second.Id),
-		api.UploadCandidateRequest{FileName: "现场验收记录-rev2.xlsx"})
-	wantStatus(t, resp, http.StatusCreated)
-	resp.Body.Close()
+	uploadCandidate(t, bob, tasksURL, taskID, second.Id, api.UploadCandidateRequest{FileName: "现场验收记录-rev2.xlsx"}, "candidate-bytes")
 
 	// 种入一份已生效当前内容（#10 终审前的展示语义验证）
 	ctx := context.Background()
@@ -1739,10 +1799,7 @@ func TestCompletionReviewFlow(t *testing.T) {
 	detail := decodeBody[api.TaskDetail](t, resp)
 	d1, d2 := detail.Deliverables[0].Id, detail.Deliverables[1].Id
 	for i, did := range []int64{d1, d2} {
-		resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskID, did),
-			api.UploadCandidateRequest{FileName: fmt.Sprintf("成果-%d.docx", i+1)})
-		wantStatus(t, resp, http.StatusCreated)
-		resp.Body.Close()
+		uploadCandidate(t, carol, tasksURL, taskID, did, api.UploadCandidateRequest{FileName: fmt.Sprintf("成果-%d.docx", i+1)}, "candidate-bytes")
 	}
 
 	// AC-13：提交完成申请直接进入待 KR 终审；canSubmitCompletion 派生
@@ -1805,10 +1862,7 @@ func TestCompletionReviewFlow(t *testing.T) {
 	}
 
 	// 重传候选（仅第一项）并重提 → AC-39/15：通过后候选成为当前内容、任务完成
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskID, d1),
-		api.UploadCandidateRequest{FileName: "成果-终版.docx"})
-	wantStatus(t, resp, http.StatusCreated)
-	resp.Body.Close()
+	uploadCandidate(t, carol, tasksURL, taskID, d1, api.UploadCandidateRequest{FileName: "成果-终版.docx"}, "candidate-bytes")
 	// 先给第二项种一份当前内容，验证「未包含的当前交付物不变」
 	seeded, err := q.CreateDeliverableFile(context.Background(), store.CreateDeliverableFileParams{
 		DeliverableID: d2, State: "current", FileName: "旧成果-2.docx", ObjectKey: "deliverables/test/old-2.docx", UploadedBy: carolUser.ID,
@@ -1979,10 +2033,7 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskA.Id, dA),
-		api.UploadCandidateRequest{FileName: "现场数据包.zip"})
-	wantStatus(t, resp, http.StatusCreated)
-	resp.Body.Close()
+	uploadCandidate(t, bob, tasksURL, taskA.Id, dA, api.UploadCandidateRequest{FileName: "现场数据包.zip"}, "candidate-bytes")
 
 	// 仅候选时仍未就绪（AC-48）
 	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/projects/%d/edges", base, created.Id), nil)
@@ -2135,10 +2186,7 @@ func TestIntermediateReviewOrSign(t *testing.T) {
 	wantStatus(t, resp, http.StatusOK)
 	detail := decodeBody[api.TaskDetail](t, resp)
 	dA := detail.Deliverables[0].Id
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskID, dA),
-		api.UploadCandidateRequest{FileName: "验收方案V1.docx"})
-	wantStatus(t, resp, http.StatusCreated)
-	resp.Body.Close()
+	uploadCandidate(t, carol, tasksURL, taskID, dA, api.UploadCandidateRequest{FileName: "验收方案V1.docx"}, "candidate-bytes")
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskID),
 		api.SubmitCompletionRequest{Note: "请或签审核"})
 	wantStatus(t, resp, http.StatusOK)
@@ -2190,10 +2238,7 @@ func TestIntermediateReviewOrSign(t *testing.T) {
 	}
 
 	// 重新提交完整流程：重传候选→提交→dave 通过（或签任一人）→ 待 KR 终审、erin 待办关闭
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskID, dA),
-		api.UploadCandidateRequest{FileName: "验收方案V2.docx"})
-	wantStatus(t, resp, http.StatusCreated)
-	resp.Body.Close()
+	uploadCandidate(t, carol, tasksURL, taskID, dA, api.UploadCandidateRequest{FileName: "验收方案V2.docx"}, "candidate-bytes")
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskID),
 		api.SubmitCompletionRequest{Note: "修正口径后重提"})
 	wantStatus(t, resp, http.StatusOK)
@@ -2368,9 +2413,26 @@ func TestMemberInputRequests(t *testing.T) {
 	resp = doJSON(t, dave, http.MethodPost, provideURL, api.ProvideInputRequest{Text: sp("口径见附件"), FileName: sp("接口口径.xlsx")})
 	wantStatus(t, resp, http.StatusOK)
 	provided := decodeBody[api.ProvideInputResponse](t, resp)
-	if provided.Request.State != api.InputRequestStateProvided || provided.UploadUrl == nil {
+	// R4：带附件时先停在 uploading，文件真的写进对象存储并确认后才转已提供
+	if provided.Request.State != api.InputRequestStateUploading || provided.UploadUrl == nil {
 		t.Fatalf("提交结果异常: %+v", provided)
 	}
+	commitURL := fmt.Sprintf("%s/projects/%d/input-requests/%d/commit", base, created.Id, requestID)
+	resp = doJSON(t, dave, http.MethodPost, commitURL, nil)
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if d := decodeBody[api.TaskDetail](t, resp); d.Inputs[0].Ready || d.Task.Status != api.TaskStatusWaitingInput {
+		t.Fatalf("附件未上传前不应就绪: %+v %v", d.Inputs[0], d.Task.Status)
+	}
+	putObject(t, *provided.UploadUrl, "input-bytes")
+	resp = doJSON(t, dave, http.MethodPost, commitURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	if got := decodeBody[api.InputRequest](t, resp); got.State != api.InputRequestStateProvided {
+		t.Fatalf("确认后应为已提供: %+v", got)
+	}
+
 	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
 	wantStatus(t, resp, http.StatusOK)
 	detail := decodeBody[api.TaskDetail](t, resp)
@@ -2731,10 +2793,7 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, upstream.Id, upstreamDeliverable),
-		api.UploadCandidateRequest{FileName: "现场数据包.zip"})
-	wantStatus(t, resp, http.StatusCreated)
-	resp.Body.Close()
+	uploadCandidate(t, bob, tasksURL, upstream.Id, upstreamDeliverable, api.UploadCandidateRequest{FileName: "现场数据包.zip"}, "candidate-bytes")
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, upstream.Id),
 		api.SubmitCompletionRequest{Note: "数据包齐"})
 	wantStatus(t, resp, http.StatusOK)
@@ -2848,10 +2907,7 @@ func TestMyWorkFiveGroups(t *testing.T) {
 	wantStatus(t, resp, http.StatusOK)
 	detail := decodeBody[api.TaskDetail](t, resp)
 	dA := detail.Deliverables[0].Id
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskID, dA),
-		api.UploadCandidateRequest{FileName: "验收方案.docx"})
-	wantStatus(t, resp, http.StatusCreated)
-	resp.Body.Close()
+	uploadCandidate(t, carol, tasksURL, taskID, dA, api.UploadCandidateRequest{FileName: "验收方案.docx"}, "candidate-bytes")
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskID),
 		api.SubmitCompletionRequest{Note: "请终审"})
 	wantStatus(t, resp, http.StatusOK)
@@ -3087,19 +3143,7 @@ func TestArtifactsAndPackages(t *testing.T) {
 	wantStatus(t, resp, http.StatusOK)
 	detail := decodeBody[api.TaskDetail](t, resp)
 	dA := detail.Deliverables[0].Id
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskID, dA),
-		api.UploadCandidateRequest{FileName: "验收方案V1.docx"})
-	wantStatus(t, resp, http.StatusCreated)
-	up := decodeBody[api.UploadCandidateResponse](t, resp)
-
-	// 真实上传候选对象（MinIO 不可达时跳过对象断言）
-	minioUp := false
-	if req, err := http.NewRequest(http.MethodPut, up.UploadUrl, strings.NewReader("acceptance-doc-bytes")); err == nil {
-		if putResp, err := http.DefaultClient.Do(req); err == nil {
-			putResp.Body.Close()
-			minioUp = putResp.StatusCode < 300
-		}
-	}
+	uploadCandidate(t, bob, tasksURL, taskID, dA, api.UploadCandidateRequest{FileName: "验收方案V1.docx"}, "acceptance-doc-bytes")
 
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskID),
 		api.SubmitCompletionRequest{Note: "请终审"})
@@ -3141,28 +3185,21 @@ func TestArtifactsAndPackages(t *testing.T) {
 		t.Fatalf("成果包目录异常: %+v", pkg)
 	}
 
-	// 整包下载（zip）。对象不可读时必须整体失败：以前会把错误文本塞进包里再回 200（E1）。
+	// 整包下载（zip）。对象不可读时整体失败：以前会把错误文本塞进包里再回 200（E1）。
 	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d/download", pkgURL, pkg.Id), nil)
-	if !minioUp {
-		wantStatus(t, resp, http.StatusBadGateway)
-		if e := decodeBody[api.Error](t, resp); e.Code != "package_incomplete" {
-			t.Fatalf("对象不可读时 code = %q, want package_incomplete", e.Code)
-		}
-	} else {
-		wantStatus(t, resp, http.StatusOK)
-		if ct := resp.Header.Get("Content-Type"); ct != "application/zip" {
-			t.Fatalf("下载内容类型异常: %q", ct)
-		}
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if len(body) == 0 {
-			t.Fatalf("zip 内容为空")
-		}
-		if !bytes.Contains(body, []byte("acceptance-doc-bytes")) {
-			// zip 默认 Deflate 会压缩内容，改校验 zip 目录含文件名即可。
-			if !bytes.Contains(body, []byte(".docx")) {
-				t.Fatalf("zip 未包含当前内容条目")
-			}
+	wantStatus(t, resp, http.StatusOK)
+	if ct := resp.Header.Get("Content-Type"); ct != "application/zip" {
+		t.Fatalf("下载内容类型异常: %q", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if len(body) == 0 {
+		t.Fatalf("zip 内容为空")
+	}
+	if !bytes.Contains(body, []byte("acceptance-doc-bytes")) {
+		// zip 默认 Deflate 会压缩内容，改校验 zip 目录含文件名即可。
+		if !bytes.Contains(body, []byte(".docx")) {
+			t.Fatalf("zip 未包含当前内容条目")
 		}
 	}
 }
@@ -3245,10 +3282,7 @@ func TestProjectReport(t *testing.T) {
 	wantStatus(t, resp, http.StatusOK)
 	detail := decodeBody[api.TaskDetail](t, resp)
 	dA := detail.Deliverables[0].Id
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskA.Id, dA),
-		api.UploadCandidateRequest{FileName: "验收方案V1.docx"})
-	wantStatus(t, resp, http.StatusCreated)
-	resp.Body.Close()
+	uploadCandidate(t, bob, tasksURL, taskA.Id, dA, api.UploadCandidateRequest{FileName: "验收方案V1.docx"}, "candidate-bytes")
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskA.Id),
 		api.SubmitCompletionRequest{Note: "请终审"})
 	wantStatus(t, resp, http.StatusOK)
@@ -3966,10 +4000,7 @@ func TestReceiversAndReceipts(t *testing.T) {
 		r := doJSON(t, carol, http.MethodGet, detailURL, nil)
 		wantStatus(t, r, http.StatusOK)
 		d := decodeBody[api.TaskDetail](t, r)
-		r = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskID, d.Deliverables[0].Id),
-			api.UploadCandidateRequest{FileName: fileName})
-		wantStatus(t, r, http.StatusCreated)
-		r.Body.Close()
+		uploadCandidate(t, carol, tasksURL, taskID, d.Deliverables[0].Id, api.UploadCandidateRequest{FileName: fileName}, "candidate-bytes")
 		r = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskID),
 			api.SubmitCompletionRequest{Note: "请终审"})
 		wantStatus(t, r, http.StatusOK)

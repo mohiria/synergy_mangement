@@ -84,3 +84,25 @@ func TestValidateCandidateFileName(t *testing.T) {
 		t.Fatalf("超长文件名应被拒: %v", err)
 	}
 }
+
+// 上传大小上限（R4／E2）：预签名直传绕过服务端，前端的 20MB 限制改一个 fetch 即可绕过，
+// 服务端在两阶段提交的确认步骤按对象存储的真实大小兜底。
+func TestValidateUploadSize(t *testing.T) {
+	cases := []struct {
+		name    string
+		size    int64
+		wantErr error
+	}{
+		{"正常文件", 5 << 20, nil},
+		{"刚好到上限", MaxUploadSize, nil},
+		{"超出上限", MaxUploadSize + 1, ErrFileTooLarge},
+		{"空文件", 0, ErrFileEmpty},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ValidateUploadSize(tc.size); !errors.Is(got, tc.wantErr) {
+				t.Fatalf("ValidateUploadSize(%d) = %v, want %v", tc.size, got, tc.wantErr)
+			}
+		})
+	}
+}
