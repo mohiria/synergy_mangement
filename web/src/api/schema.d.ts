@@ -162,7 +162,7 @@ export interface paths {
         /** 调整成员角色（仅项目管理员／项目负责人） */
         put: operations["updateProjectMemberRole"];
         post?: never;
-        /** 将成员移出项目（仅项目管理员／项目负责人） */
+        /** 将成员移出项目（仅项目管理员／项目负责人；此人仍在担任 KR 负责人、任务负责人、中间审核人、接收方或输入对接人时返回 409 并列出待交接项，AC-61） */
         delete: operations["removeProjectMember"];
         options?: never;
         head?: never;
@@ -187,6 +187,49 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/objectives/{objectiveId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                objectiveId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除 O（AC-65；仅项目管理员，且 O 下没有 KR） */
+        delete: operations["deleteObjective"];
+        options?: never;
+        head?: never;
+        /** 编辑 O（AC-65；仅项目管理员） */
+        patch: operations["updateObjective"];
+        trace?: never;
+    };
+    "/projects/{projectId}/key-results/{keyResultId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                keyResultId: number;
+            };
+            cookie?: never;
+        };
+        /** 更换 KR 负责人前的确认信息（AC-61；返回该 KR 下未决审批单条数） */
+        get: operations["getKrHandoverPreview"];
+        put?: never;
+        post?: never;
+        /** 删除 KR（AC-65；仅项目管理员，且 KR 下没有任务，含已完成与已取消） */
+        delete: operations["deleteKeyResult"];
+        options?: never;
+        head?: never;
+        /** 编辑 KR（AC-61、AC-65；项目管理员或本 KR 负责人；负责人不可置空，更换时可转交未决审批） */
+        patch: operations["updateKeyResult"];
         trace?: never;
     };
     "/projects/{projectId}/tasks": {
@@ -1154,6 +1197,12 @@ export interface components {
             riskNote?: string;
             /** @description KR 下任务的派生卡点数量（派生字段；图谱 KR 节点展示，AC-08） */
             openBlockerCount?: number;
+            /** @description KR 下任务数量（派生字段；OKR 表「任务」列，含已完成与已取消，AC-65） */
+            taskCount?: number;
+            /** @description 当前用户能否编辑本 KR（派生字段；项目管理员或本 KR 负责人，AC-65） */
+            canEdit?: boolean;
+            /** @description 当前用户能否删除本 KR（派生字段；仅项目管理员且 KR 下无任务，AC-65） */
+            canDelete?: boolean;
         };
         /** @description KR 层进度数据覆盖度（词汇表「进度数据覆盖度」）；只统计已入池且未取消的任务，平均值任务等权 */
         ProgressSummary: {
@@ -1188,6 +1237,39 @@ export interface components {
             description?: string;
             sortOrder: number;
             keyResults: components["schemas"]["KeyResult"][];
+            /** @description 当前用户能否编辑本 O（派生字段；仅项目管理员，AC-65） */
+            canEdit?: boolean;
+            /** @description 当前用户能否删除本 O（派生字段；仅项目管理员且 O 下无 KR，AC-65） */
+            canDelete?: boolean;
+        };
+        /** @description 编辑 O（AC-65）：只传要改的字段 */
+        UpdateObjectiveRequest: {
+            title?: string;
+            description?: string;
+        };
+        /** @description 编辑 KR（AC-61、AC-65）：只传要改的字段；ownerId 不可置空 */
+        UpdateKeyResultRequest: {
+            description?: string;
+            metric?: string;
+            /**
+             * Format: int64
+             * @description 新的 KR 负责人（非只读项目成员）；不可置空
+             */
+            ownerId?: number;
+            /** Format: date */
+            startDate?: string;
+            /** Format: date */
+            endDate?: string;
+            /**
+             * @description 更换负责人时是否把该 KR 下的未决审批单转交继任者（AC-61）。 默认转交并向继任者发站内通知；取消勾选则保留给原负责人处理
+             * @default true
+             */
+            transferPendingApprovals: boolean;
+        };
+        /** @description 更换 KR 负责人前的确认信息（AC-61）：该 KR 下当前有多少未决审批单 */
+        KrHandoverPreview: {
+            /** @description 待入池审批、待处理变更单与待终审完成申请的合计条数 */
+            pendingApprovals: number;
         };
         CreateKeyResultInput: {
             description: string;
@@ -2568,6 +2650,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     listObjectives: {
@@ -2616,6 +2699,144 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Objective"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    deleteObjective: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                objectiveId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    updateObjective: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                objectiveId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateObjectiveRequest"];
+            };
+        };
+        responses: {
+            /** @description 已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Objective"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    getKrHandoverPreview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                keyResultId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 未决审批单条数 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KrHandoverPreview"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteKeyResult: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                keyResultId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    updateKeyResult: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                keyResultId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateKeyResultRequest"];
+            };
+        };
+        responses: {
+            /** @description 已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KeyResult"];
                 };
             };
             401: components["responses"]["Unauthorized"];

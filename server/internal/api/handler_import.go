@@ -37,11 +37,11 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 		writeInternalError(w, r, err)
 		return
 	}
-	memberSet := make(map[int64]bool, len(members))
+	roleByID := make(map[int64]string, len(members))
 	for _, m := range members {
-		memberSet[m.UserID] = true
+		roleByID[m.UserID] = m.Role
 	}
-	isMember := func(id int64) bool { return memberSet[id] }
+	roleOf := func(id int64) string { return roleByID[id] }
 
 	// 预校验：O/KR 结构复用 OKR 批量规则；任务复用任务草稿规则。
 	okrItems := make([]domain.OkrBatchItem, 0, len(req.Items))
@@ -68,7 +68,7 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 				if k.Tasks != nil {
 					for _, tk := range *k.Tasks {
 						nt := domain.NewTask{Name: strings.TrimSpace(tk.Name), OwnerID: tk.OwnerId, Start: tk.StartDate.Time, End: tk.EndDate.Time}
-						if err := domain.ValidateNewTask(nt, isMember); err != nil {
+						if err := domain.ValidateNewTask(nt, roleOf); err != nil {
 							writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_task", Message: err.Error()})
 							return
 						}
@@ -84,7 +84,7 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 		}
 		okrItems = append(okrItems, oi)
 	}
-	if err := domain.ValidateOkrBatch(okrItems, isMember); err != nil {
+	if err := domain.ValidateOkrBatch(okrItems, roleOf); err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_okr", Message: err.Error()})
 		return
 	}
@@ -182,7 +182,7 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 		writeInternalError(w, r, err)
 		return
 	}
-	objectives, err := s.okrList(r.Context(), projectId)
+	objectives, err := s.okrList(r.Context(), projectId, actor, uid)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -303,7 +303,7 @@ func (s *Server) BatchDecidePool(w http.ResponseWriter, r *http.Request, project
 		if !ok {
 			return
 		}
-		newStatus, err := domain.DecidePoolReview(facts, uid, approve, opinion)
+		newStatus, err := domain.DecidePoolReview(actor, facts, uid, approve, opinion)
 		if err != nil {
 			switch {
 			case errors.Is(err, domain.ErrPoolReviewNotPending):

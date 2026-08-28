@@ -327,7 +327,7 @@ paths:
     delete:
       operationId: removeProjectMember
       tags: [projects]
-      summary: 将成员移出项目（仅项目管理员／项目负责人）
+      summary: 将成员移出项目（仅项目管理员／项目负责人；此人仍在担任 KR 负责人、任务负责人、中间审核人、接收方或输入对接人时返回 409 并列出待交接项，AC-61）
       responses:
         "204":
           description: 已移出
@@ -337,6 +337,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /projects/{projectId}/objectives:
     parameters:
@@ -390,6 +392,133 @@ paths:
           $ref: "#/components/responses/NotFound"
         "422":
           $ref: "#/components/responses/ValidationError"
+
+  /projects/{projectId}/objectives/{objectiveId}:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: objectiveId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    patch:
+      operationId: updateObjective
+      tags: [okr]
+      summary: 编辑 O（AC-65；仅项目管理员）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateObjectiveRequest"
+      responses:
+        "200":
+          description: 已更新
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Objective"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    delete:
+      operationId: deleteObjective
+      tags: [okr]
+      summary: 删除 O（AC-65；仅项目管理员，且 O 下没有 KR）
+      responses:
+        "204":
+          description: 已删除
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /projects/{projectId}/key-results/{keyResultId}:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: keyResultId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    get:
+      operationId: getKrHandoverPreview
+      tags: [okr]
+      summary: 更换 KR 负责人前的确认信息（AC-61；返回该 KR 下未决审批单条数）
+      responses:
+        "200":
+          description: 未决审批单条数
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KrHandoverPreview"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: updateKeyResult
+      tags: [okr]
+      summary: 编辑 KR（AC-61、AC-65；项目管理员或本 KR 负责人；负责人不可置空，更换时可转交未决审批）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateKeyResultRequest"
+      responses:
+        "200":
+          description: 已更新
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KeyResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    delete:
+      operationId: deleteKeyResult
+      tags: [okr]
+      summary: 删除 KR（AC-65；仅项目管理员，且 KR 下没有任务，含已完成与已取消）
+      responses:
+        "204":
+          description: 已删除
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /projects/{projectId}/tasks:
     parameters:
@@ -2203,6 +2332,15 @@ components:
         openBlockerCount:
           type: integer
           description: KR 下任务的派生卡点数量（派生字段；图谱 KR 节点展示，AC-08）
+        taskCount:
+          type: integer
+          description: KR 下任务数量（派生字段；OKR 表「任务」列，含已完成与已取消，AC-65）
+        canEdit:
+          type: boolean
+          description: 当前用户能否编辑本 KR（派生字段；项目管理员或本 KR 负责人，AC-65）
+        canDelete:
+          type: boolean
+          description: 当前用户能否删除本 KR（派生字段；仅项目管理员且 KR 下无任务，AC-65）
     ProgressSummary:
       type: object
       description: KR 层进度数据覆盖度（词汇表「进度数据覆盖度」）；只统计已入池且未取消的任务，平均值任务等权
@@ -2262,6 +2400,58 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/KeyResult"
+        canEdit:
+          type: boolean
+          description: 当前用户能否编辑本 O（派生字段；仅项目管理员，AC-65）
+        canDelete:
+          type: boolean
+          description: 当前用户能否删除本 O（派生字段；仅项目管理员且 O 下无 KR，AC-65）
+    UpdateObjectiveRequest:
+      type: object
+      description: 编辑 O（AC-65）：只传要改的字段
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 500
+    UpdateKeyResultRequest:
+      type: object
+      description: 编辑 KR（AC-61、AC-65）：只传要改的字段；ownerId 不可置空
+      properties:
+        description:
+          type: string
+          minLength: 1
+          maxLength: 200
+        metric:
+          type: string
+          maxLength: 100
+        ownerId:
+          type: integer
+          format: int64
+          description: 新的 KR 负责人（非只读项目成员）；不可置空
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        transferPendingApprovals:
+          type: boolean
+          default: true
+          description: >-
+            更换负责人时是否把该 KR 下的未决审批单转交继任者（AC-61）。
+            默认转交并向继任者发站内通知；取消勾选则保留给原负责人处理
+    KrHandoverPreview:
+      type: object
+      description: 更换 KR 负责人前的确认信息（AC-61）：该 KR 下当前有多少未决审批单
+      required: [pendingApprovals]
+      properties:
+        pendingApprovals:
+          type: integer
+          description: 待入池审批、待处理变更单与待终审完成申请的合计条数
     CreateKeyResultInput:
       type: object
       required: [description]

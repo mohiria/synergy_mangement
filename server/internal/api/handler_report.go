@@ -38,9 +38,15 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 	}
 	inRange := func(t time.Time) bool { return from == nil || !t.Before(*from) }
 	ctx := r.Context()
+	proj, ok := s.fetchProject(w, r, projectId)
+	if !ok {
+		return Report{}, false
+	}
+	uid := currentUser(r).ID
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
 
 	// KR 进展：覆盖度 + 范围内终审通过任务数。
-	objectives, err := s.okrList(ctx, projectId)
+	objectives, err := s.okrList(ctx, projectId, actor, uid)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return Report{}, false

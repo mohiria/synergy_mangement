@@ -18,7 +18,8 @@ func day(s string) *time.Time {
 }
 
 func TestValidateOkrBatch(t *testing.T) {
-	members := func(id int64) bool { return id == 1 || id == 2 }
+	roles := map[int64]string{1: RoleMember, 2: RoleAdmin, 8: RoleViewer}
+	roleOf := func(id int64) string { return roles[id] }
 
 	kr := func(mut func(*NewKeyResult)) NewKeyResult {
 		k := NewKeyResult{Description: "上线转化率提升到 5%", OwnerID: i64(1)}
@@ -73,7 +74,7 @@ func TestValidateOkrBatch(t *testing.T) {
 		{"KR 负责人非项目成员", []OkrBatchItem{{
 			Title:      "提升产品体验",
 			KeyResults: []NewKeyResult{kr(func(k *NewKeyResult) { k.OwnerID = i64(99) })},
-		}}, ErrKrOwnerNotMember},
+		}}, ErrKrOwnerNotEligible},
 		{"KR 负责人可不指定", []OkrBatchItem{{
 			Title:      "提升产品体验",
 			KeyResults: []NewKeyResult{kr(func(k *NewKeyResult) { k.OwnerID = nil })},
@@ -95,7 +96,7 @@ func TestValidateOkrBatch(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := ValidateOkrBatch(tc.items, members)
+			got := ValidateOkrBatch(tc.items, roleOf)
 			if !errors.Is(got, tc.want) {
 				t.Fatalf("ValidateOkrBatch() = %v, want %v", got, tc.want)
 			}

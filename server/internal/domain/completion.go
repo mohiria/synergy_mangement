@@ -41,6 +41,9 @@ func SubmitCompletionRule(t TaskFacts, candidateCount int, note string) error {
 
 // CanSubmitCompletion 判定提交完成申请的动作人：任务负责人（管理员／项目负责人纠错）。
 func CanSubmitCompletion(a Actor, userID int64, t TaskFacts, candidateCount int) bool {
+	if !CanWriteProject(a) {
+		return false
+	}
 	if SubmitCompletionRule(t, candidateCount, "占位") != nil {
 		return false
 	}
@@ -49,11 +52,11 @@ func CanSubmitCompletion(a Actor, userID int64, t TaskFacts, candidateCount int)
 
 // DecideCompletionRule 终审规则（AC-15、AC-38）：仅所属 KR 负责人处理待终审申请；
 // 通过→任务完成（意见选填），退回→意见必填、任务回到进行中。
-func DecideCompletionRule(t TaskFacts, actorID int64, approve bool, opinion string) (string, error) {
+func DecideCompletionRule(a Actor, t TaskFacts, actorID int64, approve bool, opinion string) (string, error) {
 	if t.Status != TaskPendingFinalReview {
 		return "", ErrCompletionNotPending
 	}
-	if t.KrOwnerID == nil || *t.KrOwnerID != actorID {
+	if !CanWriteProject(a) || t.KrOwnerID == nil || *t.KrOwnerID != actorID {
 		return "", ErrNotKrOwner
 	}
 	if approve {

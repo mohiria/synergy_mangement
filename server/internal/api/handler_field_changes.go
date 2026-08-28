@@ -62,12 +62,12 @@ func (s *Server) SubmitFieldChange(w http.ResponseWriter, r *http.Request, proje
 		writeInternalError(w, r, err)
 		return
 	}
-	memberSet := make(map[int64]bool, len(members))
+	roleByID := make(map[int64]string, len(members))
 	for _, m := range members {
-		memberSet[m.UserID] = true
+		roleByID[m.UserID] = m.Role
 	}
 	if err := domain.ValidateKeyFieldChanges(changes, reason, outcome != domain.FieldChangeDirect,
-		func(id int64) bool { return memberSet[id] }, task.StartDate.Time); err != nil {
+		func(id int64) string { return roleByID[id] }, task.StartDate.Time); err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_field_change", Message: err.Error()})
 		return
 	}
@@ -164,7 +164,7 @@ func (s *Server) DecideFieldChange(w http.ResponseWriter, r *http.Request, proje
 		}
 		return
 	}
-	if err := domain.DecideFieldChangeRule(fc.State, facts, uid, approve, opinion); err != nil {
+	if err := domain.DecideFieldChangeRule(actor, fc.State, facts, uid, approve, opinion); err != nil {
 		if errors.Is(err, domain.ErrChangeNotPending) {
 			writeJSON(w, http.StatusConflict, Error{Code: "change_state_conflict", Message: err.Error()})
 		} else if errors.Is(err, domain.ErrChangeTaskTerminal) {
@@ -394,7 +394,7 @@ func (s *Server) fieldChangeView(ctx context.Context, fc store.FieldChangeReques
 		}
 		diffs = append(diffs, FieldChangeDiff{Field: "endDate", Label: "截止时间", OldValue: old, NewValue: fc.NewEndDate.Time.Format("2006-01-02")})
 	}
-	canDecide := domain.DecideFieldChangeRule(fc.State, facts, userID, true, "") == nil
+	canDecide := domain.DecideFieldChangeRule(actor, fc.State, facts, userID, true, "") == nil
 	canAbandon := domain.CanAbandonFieldChange(actor, userID, fc.SubmittedBy, fc.State, fc.Resolved)
 	// AC-04：待审批显示「待{所属 KR 负责人姓名}审批」。
 	krOwnerName := ""

@@ -51,9 +51,9 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 		writeInternalError(w, r, err)
 		return
 	}
-	memberSet := make(map[int64]bool, len(members))
+	roleByID := make(map[int64]string, len(members))
 	for _, m := range members {
-		memberSet[m.UserID] = true
+		roleByID[m.UserID] = m.Role
 	}
 	// 通过任务创建邀请响应时（AC-03）：邀请必须待处理、发给本人，且本批含指定 KR 的任务并提交入池。
 	var invite store.GetTaskInviteInProjectRow
@@ -101,7 +101,7 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 		}
 		krOwners[i] = fromPgInt8(kr.OwnerID)
 		nt := domain.NewTask{Name: strings.TrimSpace(item.Name), OwnerID: item.OwnerId, Start: item.StartDate.Time, End: item.EndDate.Time}
-		if err := domain.ValidateNewTask(nt, func(id int64) bool { return memberSet[id] }); err != nil {
+		if err := domain.ValidateNewTask(nt, func(id int64) string { return roleByID[id] }); err != nil {
 			writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_task", Message: err.Error()})
 			return
 		}
@@ -303,7 +303,7 @@ func (s *Server) DecideTaskPoolReview(w http.ResponseWriter, r *http.Request, pr
 	if !ok {
 		return
 	}
-	newStatus, err := domain.DecidePoolReview(facts, uid, approve, opinion)
+	newStatus, err := domain.DecidePoolReview(actor, facts, uid, approve, opinion)
 	if err != nil {
 		switch {
 		case errors.Is(err, domain.ErrPoolReviewNotPending):
@@ -491,7 +491,7 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		return
 	}
 	factsForReviews := domain.TaskFacts{Status: task.Status, CreatorID: task.CreatedBy, OwnerID: task.OwnerID, KrOwnerID: fromPgInt8(task.KrOwnerID)}
-	completions, err := s.completionReviewList(r.Context(), taskId, factsForReviews, uid)
+	completions, err := s.completionReviewList(r.Context(), taskId, factsForReviews, actor, uid)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -788,7 +788,7 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 			CanUpdateProgress:   domain.CanUpdateProgress(actor, userID, facts),
 			CanCancel:           domain.CanCancelTask(actor, userID, facts, hasPending),
 			CanSubmitPoolReview: domain.CanSubmitPoolReview(actor, userID, facts, hasPending),
-			CanDecidePoolReview: domain.CanDecidePoolReview(userID, facts),
+			CanDecidePoolReview: domain.CanDecidePoolReview(actor, userID, facts),
 		}
 		// 页面主状态汇总：必要输入未到显示「等待输入」（存储态保持真实执行状态）。
 		displayFacts := facts

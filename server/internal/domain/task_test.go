@@ -11,8 +11,8 @@ func date(s string) time.Time { return *day(s) }
 
 // AC-04／AC-26 前置：任务草稿最小骨架校验（PRD §9.1：名称、所属 KR、负责人、开始／截止时间）。
 func TestValidateNewTask(t *testing.T) {
-	members := map[int64]bool{1: true, 2: true}
-	isMember := func(id int64) bool { return members[id] }
+	roles := map[int64]string{1: RoleMember, 2: RoleAdmin, 8: RoleViewer}
+	roleOf := func(id int64) string { return roles[id] }
 	base := NewTask{Name: "验证现场联动异常回退", OwnerID: 1, Start: date("2026-09-12"), End: date("2026-09-21")}
 
 	cases := []struct {
@@ -23,14 +23,15 @@ func TestValidateNewTask(t *testing.T) {
 		{"合法草稿", func(*NewTask) {}, nil},
 		{"名称为空", func(n *NewTask) { n.Name = "   " }, ErrTaskNameEmpty},
 		{"名称超长", func(n *NewTask) { n.Name = string(make([]rune, 0)) + repeat("长", 201) }, ErrTaskNameTooLong},
-		{"负责人不是项目成员", func(n *NewTask) { n.OwnerID = 99 }, ErrTaskOwnerNotMember},
+		{"负责人不是项目成员", func(n *NewTask) { n.OwnerID = 99 }, ErrTaskOwnerNotEligible},
+		{"负责人是只读成员", func(n *NewTask) { n.OwnerID = 8 }, ErrTaskOwnerNotEligible},
 		{"截止早于开始", func(n *NewTask) { n.End = date("2026-09-01") }, ErrTaskPeriodInverted},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			n := base
 			tc.mut(&n)
-			if got := ValidateNewTask(n, isMember); !errors.Is(got, tc.want) {
+			if got := ValidateNewTask(n, roleOf); !errors.Is(got, tc.want) {
 				t.Fatalf("ValidateNewTask() = %v, want %v", got, tc.want)
 			}
 		})
@@ -160,7 +161,7 @@ func TestDecidePoolReview(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			status, err := DecidePoolReview(tc.t, tc.actor, tc.approve, tc.opinion)
+			status, err := DecidePoolReview(Actor{Role: RoleMember}, tc.t, tc.actor, tc.approve, tc.opinion)
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("DecidePoolReview() err = %v, want %v", err, tc.wantErr)
 			}
@@ -187,7 +188,7 @@ func TestCanDecidePoolReview(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := CanDecidePoolReview(tc.user, tc.t); got != tc.want {
+			if got := CanDecidePoolReview(Actor{Role: RoleMember}, tc.user, tc.t); got != tc.want {
 				t.Fatalf("CanDecidePoolReview() = %v, want %v", got, tc.want)
 			}
 		})

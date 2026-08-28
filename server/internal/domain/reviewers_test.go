@@ -79,7 +79,7 @@ func TestDecideIntermediateRule(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			taskStatus, reviewState, err := DecideIntermediateRule(tc.t, tc.actor, isReviewer, tc.approve, tc.opinion)
+			taskStatus, reviewState, err := DecideIntermediateRule(Actor{Role: RoleMember}, tc.t, tc.actor, isReviewer, tc.approve, tc.opinion)
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("err = %v, want %v", err, tc.wantErr)
 			}

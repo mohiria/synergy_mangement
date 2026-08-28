@@ -77,13 +77,13 @@ func TestPendingCancelBlocksOtherApprovals(t *testing.T) {
 // AC-57：取消单进入所属 KR 负责人的待我审批，处理规则与关键字段变更同源。
 func TestDecideCancelRequest(t *testing.T) {
 	inProgress := TaskFacts{Status: TaskInProgress, CreatorID: 3, OwnerID: 5, KrOwnerID: i64(7)}
-	if err := DecideFieldChangeRule(FieldChangePendingState, inProgress, 7, true, ""); err != nil {
+	if err := DecideFieldChangeRule(Actor{Role: RoleMember}, FieldChangePendingState, inProgress, 7, true, ""); err != nil {
 		t.Fatalf("KR 负责人应可通过取消单: %v", err)
 	}
-	if err := DecideFieldChangeRule(FieldChangePendingState, inProgress, 5, true, ""); !errors.Is(err, ErrNotKrOwner) {
+	if err := DecideFieldChangeRule(Actor{Role: RoleMember}, FieldChangePendingState, inProgress, 5, true, ""); !errors.Is(err, ErrNotKrOwner) {
 		t.Fatalf("非 KR 负责人不能处理取消单: %v", err)
 	}
-	if err := DecideFieldChangeRule(FieldChangePendingState, inProgress, 7, false, "  "); !errors.Is(err, ErrRejectOpinionRequired) {
+	if err := DecideFieldChangeRule(Actor{Role: RoleMember}, FieldChangePendingState, inProgress, 7, false, "  "); !errors.Is(err, ErrRejectOpinionRequired) {
 		t.Fatalf("退回取消单必须写理由: %v", err)
 	}
 }

@@ -788,3 +788,7 @@ body {
 }
 .activity-feed b { display: block; font-size: var(--type-body); font-weight: 500; }
 .activity-feed small { display: block; margin-top: 2px; color: var(--muted); font-size: var(--type-aux); }
+
+/* OKR 表：有编辑权限的 O／KR 行整行可点，打开右侧编辑抽屉（PRD §7.2）。 */
+.data-table tbody tr.row-clickable { cursor: pointer; }
+.data-table tbody tr.row-clickable:hover td { background: #f2f5ff; }

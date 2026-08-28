@@ -42,6 +42,15 @@ func CanEditProject(a Actor) bool {
 	return a.IsOwner || a.Role == RoleAdmin
 }
 
+// CanWriteProject 判定当前身份是否具备写入资格：项目负责人、管理员或普通成员。
+// 只读成员与已被移出项目的人一律不可写（§3.4 权限矩阵「只读列全部为 —」）。
+// 这是全部 Can／Decide 判定的前置：任务负责人、KR 负责人、中间审核人这些职责
+// 只在人还是非只读项目成员时才生效——成员被移除或降为只读后，职责随之失效（S2）。
+// 唯一例外是「确认接收」，只读成员被指定为接收方时可以确认（AC-62）。
+func CanWriteProject(a Actor) bool {
+	return a.IsOwner || a.Role == RoleAdmin || a.Role == RoleMember
+}
+
 // CanReadProject 判定能否读取项目内容：项目内成员或项目负责人（PRD §3.3）。
 // 非成员一律不可读，读越权与写越权同一道边界。
 func CanReadProject(a Actor) bool {

@@ -57,7 +57,7 @@ const (
 )
 
 // ValidateKeyFieldChanges 校验拟议值（§9.1：至少一项拟议值、修改原因；草稿直接完善不要求原因）。
-func ValidateKeyFieldChanges(c KeyFieldChanges, reason string, reasonRequired bool, isMember func(int64) bool, taskStart time.Time) error {
+func ValidateKeyFieldChanges(c KeyFieldChanges, reason string, reasonRequired bool, roleOf func(int64) string, taskStart time.Time) error {
 	if c.Empty() {
 		return ErrChangeEmpty
 	}
@@ -73,8 +73,8 @@ func ValidateKeyFieldChanges(c KeyFieldChanges, reason string, reasonRequired bo
 			return ErrTaskNameTooLong
 		}
 	}
-	if c.OwnerID != nil && !isMember(*c.OwnerID) {
-		return ErrTaskOwnerNotMember
+	if c.OwnerID != nil && !eligibleOwner(roleOf(*c.OwnerID)) {
+		return ErrTaskOwnerNotEligible
 	}
 	if c.EndDate != nil && c.EndDate.Before(taskStart) {
 		return ErrTaskPeriodInverted
@@ -86,6 +86,9 @@ func ValidateKeyFieldChanges(c KeyFieldChanges, reason string, reasonRequired bo
 // 草稿由创建人／负责人／可编辑项目者直接完善；已入池任务 KR 负责人本人免审即时生效，
 // 其余进入审批（同一任务最多一张待审批变更单）；审批中／审核中／终态不可修改。
 func FieldChangeRoute(a Actor, userID int64, t TaskFacts, hasPending bool) (FieldChangeOutcome, error) {
+	if !CanWriteProject(a) {
+		return 0, ErrChangeForbidden
+	}
 	editorAllowed := userID == t.CreatorID || userID == t.OwnerID || CanEditProject(a)
 	switch t.Status {
 	case TaskDraft:
@@ -111,14 +114,14 @@ func FieldChangeRoute(a Actor, userID int64, t TaskFacts, hasPending bool) (Fiel
 
 // DecideFieldChangeRule 变更单处理规则：仅所属 KR 负责人、仅待审批状态（管理员不可替代，§3.3）；
 // 任务已进入终态时变更单不得再被处理。
-func DecideFieldChangeRule(state string, t TaskFacts, actorID int64, approve bool, opinion string) error {
+func DecideFieldChangeRule(a Actor, state string, t TaskFacts, actorID int64, approve bool, opinion string) error {
 	if state != FieldChangePendingState {
 		return ErrChangeNotPending
 	}
 	if t.Status == TaskCompleted || t.Status == TaskCancelled {
 		return ErrChangeTaskTerminal
 	}
-	if t.KrOwnerID == nil || *t.KrOwnerID != actorID {
+	if !CanWriteProject(a) || t.KrOwnerID == nil || *t.KrOwnerID != actorID {
 		return ErrNotKrOwner
 	}
 	// MW-18：退回必须写清理由，与入池审批、完成审核同口径。
@@ -130,7 +133,7 @@ func DecideFieldChangeRule(state string, t TaskFacts, actorID int64, approve boo
 
 // CanAbandonFieldChange 判定能否放弃已退回的变更（词汇表「退回待处理事项」）。
 func CanAbandonFieldChange(a Actor, userID, submitterID int64, state string, resolved bool) bool {
-	if state != FieldChangeRejectedState || resolved {
+	if !CanWriteProject(a) || state != FieldChangeRejectedState || resolved {
 		return false
 	}
 	return userID == submitterID || CanEditProject(a)
@@ -172,6 +175,9 @@ func PendingApprovalOnTask(t TaskFacts, hasPendingChange bool) bool {
 func CancelRoute(a Actor, userID int64, t TaskFacts, hasPendingChange bool) (FieldChangeOutcome, error) {
 	if t.Status == TaskCompleted || t.Status == TaskCancelled {
 		return 0, ErrCannotCancel
+	}
+	if !CanWriteProject(a) {
+		return 0, ErrCancelForbidden
 	}
 	if PendingApprovalOnTask(t, hasPendingChange) {
 		return 0, ErrCancelPendingExists

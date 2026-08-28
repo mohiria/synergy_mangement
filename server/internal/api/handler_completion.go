@@ -156,7 +156,7 @@ func (s *Server) DecideCompletion(w http.ResponseWriter, r *http.Request, projec
 		writeJSON(w, http.StatusConflict, Error{Code: "review_state_conflict", Message: domain.ErrCompletionNotPending.Error()})
 		return
 	}
-	newStatus, err := domain.DecideCompletionRule(facts, uid, approve, opinion)
+	newStatus, err := domain.DecideCompletionRule(actor, facts, uid, approve, opinion)
 	if err != nil {
 		switch {
 		case errors.Is(err, domain.ErrCompletionNotPending):
@@ -265,7 +265,7 @@ func (s *Server) decideIntermediate(w http.ResponseWriter, r *http.Request, tx p
 	for _, rv := range reviewerRows {
 		reviewerSet[rv.UserID] = true
 	}
-	newTaskStatus, newReviewState, err := domain.DecideIntermediateRule(facts, uid, func(id int64) bool { return reviewerSet[id] }, approve, opinion)
+	newTaskStatus, newReviewState, err := domain.DecideIntermediateRule(actor, facts, uid, func(id int64) bool { return reviewerSet[id] }, approve, opinion)
 	if err != nil {
 		switch {
 		case errors.Is(err, domain.ErrCompletionNotIntermediate):
@@ -417,7 +417,7 @@ func (s *Server) SetTaskReviewers(w http.ResponseWriter, r *http.Request, projec
 }
 
 // completionReviewList 组装完成申请记录（含项快照与派生动作标志）。
-func (s *Server) completionReviewList(ctx context.Context, taskID int64, facts domain.TaskFacts, userID int64) ([]CompletionReview, error) {
+func (s *Server) completionReviewList(ctx context.Context, taskID int64, facts domain.TaskFacts, actor domain.Actor, userID int64) ([]CompletionReview, error) {
 	rows, err := s.q.ListCompletionReviewsByTask(ctx, taskID)
 	if err != nil {
 		return nil, err
@@ -450,10 +450,10 @@ func (s *Server) completionReviewList(ctx context.Context, taskID int64, facts d
 		var canDecide bool
 		switch cr.State {
 		case domain.CompletionIntermediate:
-			_, _, err := domain.DecideIntermediateRule(facts, userID, func(id int64) bool { return reviewerSet[id] }, true, "")
+			_, _, err := domain.DecideIntermediateRule(actor, facts, userID, func(id int64) bool { return reviewerSet[id] }, true, "")
 			canDecide = err == nil
 		case domain.CompletionPendingFinal:
-			_, err := domain.DecideCompletionRule(facts, userID, true, "")
+			_, err := domain.DecideCompletionRule(actor, facts, userID, true, "")
 			canDecide = err == nil
 		}
 		// AC-04：等待状态按当前审批人姓名显示。

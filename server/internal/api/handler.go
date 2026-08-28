@@ -457,6 +457,20 @@ func (s *Server) RemoveProjectMember(w http.ResponseWriter, r *http.Request, pro
 		writeForbidden(w)
 		return
 	}
+	// AC-21／AC-61：仍在承担职责的人不能被移出——KR 负责人一走，待终审的完成申请
+	// 就再也无人可决策。先列清待交接项，让管理员知道要先做什么。
+	duties, err := s.memberDuties(r.Context(), projectId, userId)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if err := domain.RemoveMemberRule(duties); err != nil {
+		writeJSON(w, http.StatusConflict, Error{
+			Code:    "member_has_duties",
+			Message: err.Error() + "（" + domain.MemberDutiesSummary(duties) + "）",
+		})
+		return
+	}
 	n, err := s.q.DeleteProjectMember(r.Context(), store.DeleteProjectMemberParams{
 		ProjectID: projectId,
 		UserID:    userId,
@@ -470,6 +484,35 @@ func (s *Server) RemoveProjectMember(w http.ResponseWriter, r *http.Request, pro
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// memberDuties 汇总某成员在项目里仍占着的职责（AC-21、AC-61）。
+func (s *Server) memberDuties(ctx context.Context, projectID, userID int64) (domain.MemberDuties, error) {
+	out := domain.MemberDuties{}
+	krs, err := s.q.ListKeyResultsOwnedBy(ctx, store.ListKeyResultsOwnedByParams{ProjectID: projectID, OwnerID: pgtype.Int8{Int64: userID, Valid: true}})
+	if err != nil {
+		return out, err
+	}
+	for _, k := range krs {
+		out.KeyResults = append(out.KeyResults, k.Description)
+	}
+	tasks, err := s.q.ListTasksOwnedBy(ctx, store.ListTasksOwnedByParams{ProjectID: projectID, OwnerID: userID})
+	if err != nil {
+		return out, err
+	}
+	for _, t := range tasks {
+		out.Tasks = append(out.Tasks, t.Name)
+	}
+	if out.Reviewers, err = s.q.ListReviewerDutiesOf(ctx, store.ListReviewerDutiesOfParams{ProjectID: projectID, UserID: userID}); err != nil {
+		return out, err
+	}
+	if out.Receivers, err = s.q.ListReceiverDutiesOf(ctx, store.ListReceiverDutiesOfParams{ProjectID: projectID, UserID: userID}); err != nil {
+		return out, err
+	}
+	if out.InputProviders, err = s.q.ListInputProviderDutiesOf(ctx, store.ListInputProviderDutiesOfParams{ProjectID: projectID, ProviderID: userID}); err != nil {
+		return out, err
+	}
+	return out, nil
 }
 
 func (s *Server) GetProject(w http.ResponseWriter, r *http.Request, projectId int64) {
@@ -492,10 +535,12 @@ func (s *Server) GetProject(w http.ResponseWriter, r *http.Request, projectId in
 }
 
 func (s *Server) ListObjectives(w http.ResponseWriter, r *http.Request, projectId int64) {
-	if _, ok := s.fetchProject(w, r, projectId); !ok {
+	proj, ok := s.fetchProject(w, r, projectId)
+	if !ok {
 		return
 	}
-	resp, err := s.okrList(r.Context(), projectId)
+	uid := currentUser(r).ID
+	resp, err := s.okrList(r.Context(), projectId, projectActor(uid, proj.OwnerID, proj.MyRole), uid)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -522,12 +567,12 @@ func (s *Server) CreateOkrBatch(w http.ResponseWriter, r *http.Request, projectI
 		writeInternalError(w, r, err)
 		return
 	}
-	memberSet := make(map[int64]bool, len(members))
+	roleByID := make(map[int64]string, len(members))
 	for _, m := range members {
-		memberSet[m.UserID] = true
+		roleByID[m.UserID] = m.Role
 	}
 	items := toOkrBatchItems(req.Items)
-	if err := domain.ValidateOkrBatch(items, func(id int64) bool { return memberSet[id] }); err != nil {
+	if err := domain.ValidateOkrBatch(items, func(id int64) string { return roleByID[id] }); err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_okr", Message: err.Error()})
 		return
 	}
@@ -587,7 +632,7 @@ func (s *Server) CreateOkrBatch(w http.ResponseWriter, r *http.Request, projectI
 		writeInternalError(w, r, err)
 		return
 	}
-	resp, err := s.okrList(r.Context(), projectId)
+	resp, err := s.okrList(r.Context(), projectId, projectActor(currentUser(r).ID, proj.OwnerID, proj.MyRole), currentUser(r).ID)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -596,7 +641,8 @@ func (s *Server) CreateOkrBatch(w http.ResponseWriter, r *http.Request, projectI
 }
 
 // okrList 组装 O 含下属 KR 的层级列表（按排序返回）。
-func (s *Server) okrList(ctx context.Context, projectID int64) ([]Objective, error) {
+// okrList 组装项目 O／KR 列表与派生字段（覆盖度、风险、任务数与编辑／删除动作标志）。
+func (s *Server) okrList(ctx context.Context, projectID int64, actor domain.Actor, userID int64) ([]Objective, error) {
 	objectives, err := s.q.ListObjectives(ctx, projectID)
 	if err != nil {
 		return nil, err
@@ -647,7 +693,16 @@ func (s *Server) okrList(ctx context.Context, projectID int64) ([]Objective, err
 	if err != nil {
 		return nil, err
 	}
+	// KR 下任务数（含已完成与已取消）：OKR 表「任务」列与删除守卫同源（AC-65）。
+	taskCounts, err := s.taskCountByKeyResult(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
 	now := s.now()
+	krCountByObjective := make(map[int64]int, len(objectives))
+	for _, k := range krs {
+		krCountByObjective[k.ObjectiveID]++
+	}
 	byObjective := make(map[int64][]KeyResult, len(objectives))
 	for _, k := range krs {
 		summary := domain.ProgressCoverage(factsByKr[k.ID])
@@ -676,6 +731,9 @@ func (s *Server) okrList(ctx context.Context, projectID int64) ([]Objective, err
 				}
 				return &n
 			}(),
+			TaskCount: intPtr(taskCounts[k.ID]),
+			CanEdit:   boolPtr(domain.CanEditKeyResult(actor, userID, fromPgInt8(k.OwnerID))),
+			CanDelete: boolPtr(domain.CanDeleteKeyResult(actor, taskCounts[k.ID])),
 		})
 	}
 	resp := make([]Objective, 0, len(objectives))
@@ -691,6 +749,8 @@ func (s *Server) okrList(ctx context.Context, projectID int64) ([]Objective, err
 			Description: optString(o.Description),
 			SortOrder:   int(o.SortOrder),
 			KeyResults:  kr,
+			CanEdit:     boolPtr(domain.CanEditObjective(actor)),
+			CanDelete:   boolPtr(domain.CanDeleteObjective(actor, krCountByObjective[o.ID])),
 		})
 	}
 	return resp, nil
@@ -822,6 +882,11 @@ func fromPgText(t pgtype.Text) *string {
 	}
 	return &t.String
 }
+
+// boolPtr／intPtr 把派生标志装进契约的可选字段。
+func boolPtr(v bool) *bool { return &v }
+
+func intPtr(v int) *int { return &v }
 
 func optString(s string) *string {
 	if s == "" {

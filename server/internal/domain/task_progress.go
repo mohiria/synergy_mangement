@@ -53,7 +53,7 @@ func ValidateCancelReason(reason string) error {
 // CanUpdateProgress 判定能否更新进度：负责人填写真实情况（§5.6），管理员／项目负责人可全局纠错；
 // 仅执行中状态可改（未开始不产生进度，完成态由终审定论）。
 func CanUpdateProgress(a Actor, userID int64, t TaskFacts) bool {
-	if t.Status != TaskInProgress {
+	if !CanWriteProject(a) || t.Status != TaskInProgress {
 		return false
 	}
 	return userID == t.OwnerID || CanEditProject(a)
@@ -84,6 +84,9 @@ func ProgressCoverage(tasks []TaskProgressFact) ProgressSummaryFacts {
 
 // CanStartTask 判定能否开始执行（派生动作标志）：任务负责人或可编辑项目者，且状态允许。
 func CanStartTask(a Actor, userID int64, t TaskFacts) bool {
+	if !CanWriteProject(a) {
+		return false
+	}
 	if _, err := StartTask(t.Status); err != nil {
 		return false
 	}

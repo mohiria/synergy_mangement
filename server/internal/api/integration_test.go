@@ -4510,6 +4510,221 @@ func TestNonMemberProjectReadBoundary(t *testing.T) {
 	}
 }
 
+// O／KR 编辑删除、KR 负责人交接与成员移出守卫（AC-21、AC-61、AC-65，回归 S2／U6）。
+func TestOkrEditHandoverAndMemberRemoval(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
+	daveUser := seedUser(t, q, "dave", "赵六", "dave-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	sp := func(v string) *string { return &v }
+
+	alice, bob, carol, dave := newClient(t), newClient(t), newClient(t), newClient(t)
+	for _, l := range []struct {
+		c              *http.Client
+		user, password string
+	}{{alice, "alice", "alice-pass"}, {bob, "bob", "bob-pass"}, {carol, "carol", "carol-pass"}, {dave, "dave", "dave-pass"}} {
+		resp := doJSON(t, l.c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: l.user, Password: l.password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "OKR 编辑", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	membersURL := fmt.Sprintf("%s/projects/%d/members", base, created.Id)
+	for _, m := range []struct {
+		id   int64
+		role api.MemberRole
+	}{{bobUser.ID, api.Member}, {carolUser.ID, api.Member}, {daveUser.ID, api.Member}} {
+		resp = doJSON(t, alice, http.MethodPost, membersURL, api.AddProjectMemberRequest{UserId: m.id, Role: m.role})
+		wantStatus(t, resp, http.StatusCreated)
+		resp.Body.Close()
+	}
+
+	// dave 降为只读，后面用来验证「只读成员不能被任命为负责人」（S2）
+	resp = doJSON(t, alice, http.MethodPut, fmt.Sprintf("%s/%d", membersURL, daveUser.ID),
+		api.UpdateProjectMemberRoleRequest{Role: api.Viewer})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	objectivesURL := fmt.Sprintf("%s/projects/%d/objectives", base, created.Id)
+	resp = doJSON(t, alice, http.MethodPost, objectivesURL,
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	okr := decodeBody[[]api.Objective](t, resp)
+	objectiveID, kr1 := okr[0].Id, okr[0].KeyResults[0].Id
+
+	// 只读成员不能被任命为 KR 负责人（创建路径）
+	resp = doJSON(t, alice, http.MethodPost, objectivesURL,
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("只读负责人"), KeyResults: &[]api.CreateKeyResultInput{{Description: "不该建成", OwnerId: &daveUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+
+	// AC-65：O 只有项目管理员可编辑；KR 由管理员或本 KR 负责人编辑
+	objURL := fmt.Sprintf("%s/projects/%d/objectives/%d", base, created.Id, objectiveID)
+	krURL := fmt.Sprintf("%s/projects/%d/key-results/%d", base, created.Id, kr1)
+	resp = doJSON(t, bob, http.MethodPatch, objURL, api.UpdateObjectiveRequest{Title: sp("越权改 O")})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPatch, objURL, api.UpdateObjectiveRequest{Title: sp("提升交付质量 V2")})
+	wantStatus(t, resp, http.StatusOK)
+	if got := decodeBody[api.Objective](t, resp); got.Title != "提升交付质量 V2" {
+		t.Fatalf("O 标题未更新: %+v", got)
+	}
+	resp = doJSON(t, carol, http.MethodPatch, krURL, api.UpdateKeyResultRequest{Description: sp("越权改 KR")})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodPatch, krURL, api.UpdateKeyResultRequest{Description: sp("上线自动验收 V2")})
+	wantStatus(t, resp, http.StatusOK)
+	if got := decodeBody[api.KeyResult](t, resp); got.Description != "上线自动验收 V2" {
+		t.Fatalf("KR 描述未更新: %+v", got)
+	}
+
+	// AC-61：负责人不可置空；只读成员不能接任
+	resp = doJSON(t, alice, http.MethodPatch, krURL, map[string]any{"ownerId": nil})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPatch, krURL, api.UpdateKeyResultRequest{OwnerId: &daveUser.ID})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+
+	// 造一件未决审批：carol 建任务提交入池，待 KR 负责人 bob 处理
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true,
+		Items:           []api.CreateTaskItem{{KeyResultId: kr1, Name: "联调验证", OwnerId: carolUser.ID, StartDate: start, EndDate: end}},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	taskID := decodeBody[[]api.Task](t, resp)[0].Id
+
+	// AC-61：交接确认信息给出未决审批条数
+	resp = doJSON(t, alice, http.MethodGet, krURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	if preview := decodeBody[api.KrHandoverPreview](t, resp); preview.PendingApprovals != 1 {
+		t.Fatalf("未决审批条数异常: %+v", preview)
+	}
+
+	// AC-21／AC-61：bob 仍是 KR 负责人，不能被移出，409 里点名待交接的 KR
+	resp = doJSON(t, alice, http.MethodDelete, fmt.Sprintf("%s/%d", membersURL, bobUser.ID), nil)
+	wantStatus(t, resp, http.StatusConflict)
+	if e := decodeBody[api.Error](t, resp); !strings.Contains(e.Message, "上线自动验收 V2") {
+		t.Fatalf("409 未列出待交接的 KR: %+v", e)
+	}
+
+	// S2：bob 被降为只读后，仍挂着 KR 负责人也不能再审批
+	resp = doJSON(t, alice, http.MethodPut, fmt.Sprintf("%s/%d", membersURL, bobUser.ID),
+		api.UpdateProjectMemberRoleRequest{Role: api.Viewer})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, taskID),
+		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodPatch, krURL, api.UpdateKeyResultRequest{Description: sp("只读也想改")})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPut, fmt.Sprintf("%s/%d", membersURL, bobUser.ID),
+		api.UpdateProjectMemberRoleRequest{Role: api.Member})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	// AC-61：交接给 carol，未决审批转交并发站内通知，审批件进入其「待我审批」
+	resp = doJSON(t, alice, http.MethodPatch, krURL, api.UpdateKeyResultRequest{OwnerId: &carolUser.ID})
+	wantStatus(t, resp, http.StatusOK)
+	if got := decodeBody[api.KeyResult](t, resp); got.OwnerId == nil || *got.OwnerId != carolUser.ID {
+		t.Fatalf("KR 负责人未交接: %+v", got)
+	}
+	resp = doJSON(t, carol, http.MethodGet, base+"/notifications", nil)
+	wantStatus(t, resp, http.StatusOK)
+	notes := decodeBody[[]api.Notification](t, resp)
+	if len(notes) != 1 || notes[0].Kind != "kr_handover" {
+		t.Fatalf("继任者未收到交接通知: %+v", notes)
+	}
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/projects/%d/my-work", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	work := decodeBody[api.MyWork](t, resp)
+	found := false
+	for _, it := range work.Approvals {
+		if it.TaskId != nil && *it.TaskId == taskID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("转交后审批件应进入继任者待我审批: %+v", work.Approvals)
+	}
+	// 原负责人不再持有该审批件
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/projects/%d/my-work", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	for _, it := range decodeBody[api.MyWork](t, resp).Approvals {
+		if it.TaskId != nil && *it.TaskId == taskID {
+			t.Fatalf("交接后原负责人不应再持有审批件: %+v", it)
+		}
+	}
+
+	// AC-65：KR 下有任务、O 下有 KR 时删除被拒
+	resp = doJSON(t, alice, http.MethodDelete, krURL, nil)
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodDelete, objURL, nil)
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+
+	// 派生标志与「任务」列
+	resp = doJSON(t, alice, http.MethodGet, objectivesURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	list := decodeBody[[]api.Objective](t, resp)
+	var target api.KeyResult
+	for _, o := range list {
+		for _, k := range o.KeyResults {
+			if k.Id == kr1 {
+				target = k
+			}
+		}
+	}
+	if target.TaskCount == nil || *target.TaskCount != 1 {
+		t.Fatalf("KR 任务数派生异常: %+v", target.TaskCount)
+	}
+	if target.CanDelete == nil || *target.CanDelete {
+		t.Fatalf("有任务的 KR 不应可删: %+v", target.CanDelete)
+	}
+	if target.CanEdit == nil || !*target.CanEdit {
+		t.Fatalf("管理员应可编辑 KR: %+v", target.CanEdit)
+	}
+
+	// 空 O 可删（管理员），普通成员不可删
+	resp = doJSON(t, alice, http.MethodPost, objectivesURL,
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{{Title: sp("待删除的 O")}}})
+	wantStatus(t, resp, http.StatusCreated)
+	var emptyObjective int64
+	for _, o := range decodeBody[[]api.Objective](t, resp) {
+		if o.Title == "待删除的 O" {
+			emptyObjective = o.Id
+		}
+	}
+	emptyURL := fmt.Sprintf("%s/projects/%d/objectives/%d", base, created.Id, emptyObjective)
+	resp = doJSON(t, carol, http.MethodDelete, emptyURL, nil)
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodDelete, emptyURL, nil)
+	wantStatus(t, resp, http.StatusNoContent)
+	resp.Body.Close()
+
+	// 没有职责占位的成员可以正常移出
+	resp = doJSON(t, alice, http.MethodDelete, fmt.Sprintf("%s/%d", membersURL, daveUser.ID), nil)
+	wantStatus(t, resp, http.StatusNoContent)
+	resp.Body.Close()
+}
+
 // 结构变更被退回后不生效（AC-23、§5.2.B，回归 R1）：输出属关键字段，
 // 已入池任务由任务负责人提交后进所属 KR 负责人审批，退回则交付物项不产生，
 // 且退回未处理期间不接受新的变更单。
