@@ -20,6 +20,15 @@ const RISK_LABEL: Record<RiskLevel, string> = {
   high_risk: "高风险",
 };
 
+// 箭头按边色分档：SVG marker 不继承所属 path 的 stroke（context-stroke 支持面不稳），
+// 只能一色一个 marker。取值与 edgeStroke 保持一致。
+const ARROW_COLORS: Record<string, string> = {
+  interlock: "#c44752",
+  feedback: "#5a62c9",
+  hard: "#436d84",
+  plain: "#8ea3b0",
+};
+
 const EDGE_TYPE_LABEL: Record<string, string> = {
   hard_prerequisite: "硬前置交付",
   information: "信息输入",
@@ -168,6 +177,15 @@ export default function CollaborationPage({
 
   const openBlockers = blockers;
 
+  // AC-45：可见任务口径只此一份。已取消任务在图谱与列表两侧一律不出现，
+  // 已完成任务由「显示已完成」开关控制；tree / kr / full / list 四处都走这里，
+  // 免得再出现某一层漏带过滤的情况（U1）。
+  const isTaskVisible = useCallback(
+    (t: Task | undefined) =>
+      !!t && t.status !== "cancelled" && (showCompleted || t.status !== "completed"),
+    [showCompleted],
+  );
+
   // —— O／KR 层级树布局 ——
   const tree = useMemo(() => {
     const nodes: { key: string; kind: "o" | "kr"; id: number; pos: NodePos; dimmed: boolean }[] = [];
@@ -201,7 +219,7 @@ export default function CollaborationPage({
     if (mode.kind !== "kr") return null;
     const kr = krById.get(mode.krId);
     if (!kr) return null;
-    const inKr = tasks.filter((t) => t.keyResultId === mode.krId);
+    const inKr = tasks.filter((t) => t.keyResultId === mode.krId && isTaskVisible(t));
     const inKrIds = new Set(inKr.map((t) => t.id));
     const relevantEdges = edges.filter(
       (e) => (e.sourceTaskId != null && inKrIds.has(e.sourceTaskId)) || inKrIds.has(e.targetTaskId),
@@ -211,7 +229,7 @@ export default function CollaborationPage({
       if (e.sourceTaskId != null && !inKrIds.has(e.sourceTaskId)) neighborIds.add(e.sourceTaskId);
       if (!inKrIds.has(e.targetTaskId)) neighborIds.add(e.targetTaskId);
     }
-    const neighbors = tasks.filter((t) => neighborIds.has(t.id));
+    const neighbors = tasks.filter((t) => neighborIds.has(t.id) && isTaskVisible(t));
     const nodeW = 250;
     const nodeH = 66;
     const gap = 16;
@@ -228,14 +246,12 @@ export default function CollaborationPage({
       }
     });
     return { kr, inKr, neighbors, relevantEdges, positions, memberNodes, height: height + 40 };
-  }, [mode, krById, tasks, edges]);
+  }, [mode, krById, tasks, edges, isTaskVisible]);
 
   // —— 全局展开布局（AC-09）：O/KR 分组骨架 + 全部任务 + 关系相关项目成员 ——
   const full = useMemo(() => {
     if (mode.kind !== "full") return null;
-    const visibleTasks = tasks.filter(
-      (t) => t.status !== "cancelled" && (showCompleted || t.status !== "completed"),
-    );
+    const visibleTasks = tasks.filter(isTaskVisible);
     const visibleIds = new Set(visibleTasks.map((t) => t.id));
     const nodeW = 240;
     const nodeH = 62;
@@ -285,7 +301,7 @@ export default function CollaborationPage({
       return targetOK && sourceOK;
     });
     return { visibleTasks, positions, groups, memberNodes, visibleEdges, height: y + 30, width: groupX + groupW + 40 };
-  }, [mode, tasks, edges, objectives, krList, showCompleted]);
+  }, [mode, tasks, edges, objectives, krList, isTaskVisible]);
 
   // 筛选淡化（AC-09；细化 AC-45 随 #20）：O/KR/人员不匹配 → 淡化保留上下文。
   const taskMatchesFilter = (t: Task) => {
@@ -400,9 +416,7 @@ export default function CollaborationPage({
     let rows = edges.filter((e) => {
       const target = taskById.get(e.targetTaskId);
       const source = e.sourceTaskId != null ? taskById.get(e.sourceTaskId) : undefined;
-      if (!showCompleted) {
-        if (target?.status === "completed" || source?.status === "completed") return false;
-      }
+      if (!isTaskVisible(target) || (e.sourceTaskId != null && !isTaskVisible(source))) return false;
       if (hasFilter) {
         const match = (target ? taskMatchesFilter(target) : false) || (source ? taskMatchesFilter(source) : false);
         if (!match) return false;
@@ -424,16 +438,55 @@ export default function CollaborationPage({
     }
     return rows;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [edges, taskById, showCompleted, oFilter, krFilter, personFilter, listSearch, listSort]);
+  }, [edges, taskById, isTaskVisible, oFilter, krFilter, personFilter, listSearch, listSort]);
 
+  // AC-07：边是有向的。锚点按源目相对位置选，方向靠 marker-end 的箭头表达；
+  // 反向边走相反的曲率（bow），避免 A→B 与 B→A 落在同一条曲线上无法区分。
+  // 同列（KR 内部任务同排一列）不能从右缘反折回左缘横穿整列，改从两端右缘向外绕（U2）。
   const edgePath = (from: NodePos, to: NodePos) => {
-    const x1 = from.x + from.w;
     const y1 = from.y + from.h / 2;
-    const x2 = to.x;
     const y2 = to.y + to.h / 2;
-    const mx = (x1 + x2) / 2;
-    return `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
+    const bow = 16;
+    if (to.x >= from.x + from.w) {
+      const x1 = from.x + from.w;
+      const x2 = to.x;
+      const mx = (x1 + x2) / 2;
+      return `M ${x1} ${y1} C ${mx} ${y1 - bow}, ${mx} ${y2 - bow}, ${x2} ${y2}`;
+    }
+    if (from.x >= to.x + to.w) {
+      const x1 = from.x;
+      const x2 = to.x + to.w;
+      const mx = (x1 + x2) / 2;
+      return `M ${x1} ${y1} C ${mx} ${y1 + bow}, ${mx} ${y2 + bow}, ${x2} ${y2}`;
+    }
+    const x1 = from.x + from.w;
+    const x2 = to.x + to.w;
+    // 外绕幅度封顶：KR 层画布固定 700 宽，绕太远会被裁掉。
+    const detour = Math.max(x1, x2) + 36 + Math.min(Math.abs(y2 - y1) / 3, 40);
+    return `M ${x1} ${y1} C ${detour} ${y1}, ${detour} ${y2}, ${x2} ${y2}`;
   };
+
+  const arrowKind = (e: DeliverableEdge) =>
+    e.interlockRisk ? "interlock" : e.edgeType === "feedback" ? "feedback" : e.edgeType === "hard_prerequisite" ? "hard" : "plain";
+  // 原型 collaboration-prototype.js:316 的箭头形状与尺寸。
+  const arrowDefs = (
+    <defs>
+      {Object.entries(ARROW_COLORS).map(([kind, color]) => (
+        <marker
+          key={kind}
+          id={`cp-arrow-${kind}`}
+          viewBox="0 0 10 10"
+          refX="9"
+          refY="5"
+          markerWidth="6"
+          markerHeight="6"
+          orient="auto-start-reverse"
+        >
+          <path d="M0 0 10 5 0 10Z" fill={color} />
+        </marker>
+      ))}
+    </defs>
+  );
 
   const edgeStroke = (e: DeliverableEdge) => {
     const interlock = !!e.interlockRisk;
@@ -982,6 +1035,7 @@ export default function CollaborationPage({
                     {krLayer.kr.code} 任务关系层：硬前置加粗、关键路径最粗、互锁红色虚线、反馈紫色虚线
                   </div>
                   <svg className="graph-svg" width="700" height={krLayer.height}>
+                    {arrowDefs}
                     {krLayer.relevantEdges.map((e) => {
                       const from =
                         e.sourceTaskId != null ? krLayer.positions.get(e.sourceTaskId) : krLayer.positions.get(-e.id);
@@ -992,7 +1046,14 @@ export default function CollaborationPage({
                       const isSel = selectedEdge === e.id;
                       return (
                         <g key={e.id}>
-                          <path d={d} fill="none" stroke={st.stroke} strokeWidth={isSel ? st.width + 1.5 : st.width} strokeDasharray={st.dash} />
+                          <path
+                            d={d}
+                            fill="none"
+                            stroke={st.stroke}
+                            strokeWidth={isSel ? st.width + 1.5 : st.width}
+                            strokeDasharray={st.dash}
+                            markerEnd={`url(#cp-arrow-${arrowKind(e)})`}
+                          />
                           <path
                             d={d}
                             fill="none"
@@ -1042,6 +1103,7 @@ export default function CollaborationPage({
                     }}
                   >
                     <svg className="graph-svg" width={full.width} height={full.height}>
+                      {arrowDefs}
                       {full.visibleEdges.map((e) => {
                         const fromBase = e.sourceTaskId != null ? full.positions.get(e.sourceTaskId) : full.positions.get(-e.id);
                         const toBase = full.positions.get(e.targetTaskId);
@@ -1071,6 +1133,7 @@ export default function CollaborationPage({
                               strokeWidth={isSel ? st.width + 1.5 : st.width}
                               strokeDasharray={st.dash}
                               opacity={dim ? 0.15 : 1}
+                              markerEnd={`url(#cp-arrow-${arrowKind(e)})`}
                             />
                             <path
                               d={edgePath(from, to)}
