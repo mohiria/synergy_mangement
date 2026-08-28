@@ -403,7 +403,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 为任务新增交付物项（任务负责人／创建人／可编辑项目者；非终态任务） */
+        /** 为任务新增交付物项（AC-23；输出属关键字段，已入池任务进所属 KR 负责人审批，草稿直改、KR 负责人本人免审） */
         post: operations["createDeliverable"];
         delete?: never;
         options?: never;
@@ -484,7 +484,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** 配置接收方（按需字段，与输入／输出配置同口径直接生效；模块 PRD §8.6、MW-09） */
+        /** 配置接收方（AC-23；接收方属关键字段，已入池任务进所属 KR 负责人审批；模块 PRD §8.6、MW-09） */
         put: operations["setTaskReceivers"];
         post?: never;
         delete?: never;
@@ -586,7 +586,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 新增输入要求并自动建立「来源任务 → 目标任务」交付物边（AC-28；可一次多选来源任务，AC-53；任务负责人／可编辑项目者） */
+        /** 新增输入要求并自动建立「来源任务 → 目标任务」交付物边（AC-28；可一次多选来源任务，AC-53）；输入与输入源属关键字段，已入池任务进所属 KR 负责人审批（AC-23） */
         post: operations["createTaskInput"];
         delete?: never;
         options?: never;
@@ -606,7 +606,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 指定项目成员提供输入（AC-29；可一次多选对接人，AC-53）：为每名对接人建立「成员 → 目标任务」交付物边并生成输入请求；任务已入池时立即发站内通知，否则待入池审批通过后发送 */
+        /** 指定项目成员提供输入（AC-29；可一次多选对接人，AC-53）：为每名对接人建立「成员 → 目标任务」交付物边并生成输入请求；输入源属关键字段，已入池任务进所属 KR 负责人审批（AC-23），生效后任务已入池即发站内通知 */
         post: operations["createMemberInput"];
         delete?: never;
         options?: never;
@@ -707,7 +707,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** 解除交付物边（目标任务负责人／可编辑项目者） */
+        /** 解除交付物边（AC-23；输入源属关键字段，已入池任务进所属 KR 负责人审批） */
         delete: operations["removeEdge"];
         options?: never;
         head?: never;
@@ -1426,10 +1426,10 @@ export interface components {
             newValue: string;
         };
         /**
-         * @description 变更类型（PRD §5.2.B）：关键字段修改，或复用同一张变更单的任务取消申请
+         * @description 变更类型（PRD §5.2.B）：关键字段修改（标题／说明／量化标准／负责人／截止时间）、 结构变更（输入、输入源、输出、接收方）或任务取消申请，三者复用同一张变更单
          * @enum {string}
          */
-        FieldChangeType: "key_fields" | "cancel";
+        FieldChangeType: "key_fields" | "structure" | "cancel";
         /** @description 关键字段变更单（词汇表）；rejected 且 resolved=false 即「退回待处理事项」 */
         FieldChange: {
             /** Format: int64 */
@@ -2968,13 +2968,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 已创建 */
-            201: {
+            /** @description 已受理，返回任务最新状态（进入审批时交付物项尚未创建，任务上带待审批变更单） */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Deliverable"];
+                    "application/json": components["schemas"]["Task"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -3091,7 +3091,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 已配置，返回任务最新事实 */
+            /** @description 已受理，返回任务最新事实（进入审批时配置未变，任务上带待审批变更单） */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -3103,6 +3103,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["ValidationError"];
         };
     };
@@ -3246,13 +3247,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 已建立（按 sourceTaskIds 顺序返回新建的各条交付物边） */
-            201: {
+            /** @description 已受理，返回任务最新状态（进入审批时边尚未建立，任务上带待审批变更单） */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DeliverableEdge"][];
+                    "application/json": components["schemas"]["Task"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -3277,13 +3278,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 已建立（按 providerIds 顺序返回新建的各条交付物边） */
-            201: {
+            /** @description 已受理，返回任务最新状态（进入审批时边与输入请求尚未建立，任务上带待审批变更单） */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DeliverableEdge"][];
+                    "application/json": components["schemas"]["Task"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -3415,16 +3416,20 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description 已解除 */
-            204: {
+            /** @description 已受理，返回目标任务最新状态（进入审批时边仍在，任务上带待审批变更单） */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["Task"];
+                };
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
         };
     };
     listEdges: {

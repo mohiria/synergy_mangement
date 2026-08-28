@@ -825,7 +825,7 @@ paths:
     post:
       operationId: createDeliverable
       tags: [tasks]
-      summary: 为任务新增交付物项（任务负责人／创建人／可编辑项目者；非终态任务）
+      summary: 为任务新增交付物项（AC-23；输出属关键字段，已入池任务进所属 KR 负责人审批，草稿直改、KR 负责人本人免审）
       requestBody:
         required: true
         content:
@@ -833,12 +833,12 @@ paths:
             schema:
               $ref: "#/components/schemas/CreateDeliverableRequest"
       responses:
-        "201":
-          description: 已创建
+        "200":
+          description: 已受理，返回任务最新状态（进入审批时交付物项尚未创建，任务上带待审批变更单）
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Deliverable"
+                $ref: "#/components/schemas/Task"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -993,7 +993,7 @@ paths:
     put:
       operationId: setTaskReceivers
       tags: [tasks]
-      summary: 配置接收方（按需字段，与输入／输出配置同口径直接生效；模块 PRD §8.6、MW-09）
+      summary: 配置接收方（AC-23；接收方属关键字段，已入池任务进所属 KR 负责人审批；模块 PRD §8.6、MW-09）
       requestBody:
         required: true
         content:
@@ -1002,7 +1002,7 @@ paths:
               $ref: "#/components/schemas/SetReceiversRequest"
       responses:
         "200":
-          description: 已配置，返回任务最新事实
+          description: 已受理，返回任务最新事实（进入审批时配置未变，任务上带待审批变更单）
           content:
             application/json:
               schema:
@@ -1013,6 +1013,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/ValidationError"
 
@@ -1201,7 +1203,7 @@ paths:
     post:
       operationId: createTaskInput
       tags: [tasks]
-      summary: 新增输入要求并自动建立「来源任务 → 目标任务」交付物边（AC-28；可一次多选来源任务，AC-53；任务负责人／可编辑项目者）
+      summary: 新增输入要求并自动建立「来源任务 → 目标任务」交付物边（AC-28；可一次多选来源任务，AC-53）；输入与输入源属关键字段，已入池任务进所属 KR 负责人审批（AC-23）
       requestBody:
         required: true
         content:
@@ -1209,14 +1211,12 @@ paths:
             schema:
               $ref: "#/components/schemas/CreateTaskInputRequest"
       responses:
-        "201":
-          description: 已建立（按 sourceTaskIds 顺序返回新建的各条交付物边）
+        "200":
+          description: 已受理，返回任务最新状态（进入审批时边尚未建立，任务上带待审批变更单）
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/DeliverableEdge"
+                $ref: "#/components/schemas/Task"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1243,7 +1243,7 @@ paths:
     post:
       operationId: createMemberInput
       tags: [tasks]
-      summary: 指定项目成员提供输入（AC-29；可一次多选对接人，AC-53）：为每名对接人建立「成员 → 目标任务」交付物边并生成输入请求；任务已入池时立即发站内通知，否则待入池审批通过后发送
+      summary: 指定项目成员提供输入（AC-29；可一次多选对接人，AC-53）：为每名对接人建立「成员 → 目标任务」交付物边并生成输入请求；输入源属关键字段，已入池任务进所属 KR 负责人审批（AC-23），生效后任务已入池即发站内通知
       requestBody:
         required: true
         content:
@@ -1251,14 +1251,12 @@ paths:
             schema:
               $ref: "#/components/schemas/CreateMemberInputRequest"
       responses:
-        "201":
-          description: 已建立（按 providerIds 顺序返回新建的各条交付物边）
+        "200":
+          description: 已受理，返回任务最新状态（进入审批时边与输入请求尚未建立，任务上带待审批变更单）
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/DeliverableEdge"
+                $ref: "#/components/schemas/Task"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1425,16 +1423,24 @@ paths:
     delete:
       operationId: removeEdge
       tags: [tasks]
-      summary: 解除交付物边（目标任务负责人／可编辑项目者）
+      summary: 解除交付物边（AC-23；输入源属关键字段，已入池任务进所属 KR 负责人审批）
       responses:
-        "204":
-          description: 已解除
+        "200":
+          description: 已受理，返回目标任务最新状态（进入审批时边仍在，任务上带待审批变更单）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
 
   /projects/{projectId}/edges:
     parameters:
@@ -2706,8 +2712,10 @@ components:
           type: string
     FieldChangeType:
       type: string
-      description: 变更类型（PRD §5.2.B）：关键字段修改，或复用同一张变更单的任务取消申请
-      enum: [key_fields, cancel]
+      description: >-
+        变更类型（PRD §5.2.B）：关键字段修改（标题／说明／量化标准／负责人／截止时间）、
+        结构变更（输入、输入源、输出、接收方）或任务取消申请，三者复用同一张变更单
+      enum: [key_fields, structure, cancel]
     FieldChange:
       type: object
       description: 关键字段变更单（词汇表）；rejected 且 resolved=false 即「退回待处理事项」

@@ -71,7 +71,8 @@ func (q *Queries) DeleteEdge(ctx context.Context, id int64) (int64, error) {
 }
 
 const getEdgeInProject = `-- name: GetEdgeInProject :one
-SELECT e.id, e.target_task_id, e.source_task_id, e.source_user_id, e.deliverable_id, e.name, e.edge_type, e.necessity, e.expected_date, e.created_by, e.created_at, tt.owner_id AS target_owner_id, tt.created_by AS target_created_by, tt.status AS target_status
+SELECT e.id, e.target_task_id, e.source_task_id, e.source_user_id, e.deliverable_id, e.name, e.edge_type, e.necessity, e.expected_date, e.created_by, e.created_at, tt.owner_id AS target_owner_id, tt.created_by AS target_created_by, tt.status AS target_status,
+    k.owner_id AS target_kr_owner_id
 FROM deliverable_edges e
 JOIN tasks tt ON tt.id = e.target_task_id
 JOIN key_results k ON k.id = tt.key_result_id
@@ -99,6 +100,7 @@ type GetEdgeInProjectRow struct {
 	TargetOwnerID   int64
 	TargetCreatedBy int64
 	TargetStatus    string
+	TargetKrOwnerID pgtype.Int8
 }
 
 func (q *Queries) GetEdgeInProject(ctx context.Context, arg GetEdgeInProjectParams) (GetEdgeInProjectRow, error) {
@@ -119,6 +121,7 @@ func (q *Queries) GetEdgeInProject(ctx context.Context, arg GetEdgeInProjectPara
 		&i.TargetOwnerID,
 		&i.TargetCreatedBy,
 		&i.TargetStatus,
+		&i.TargetKrOwnerID,
 	)
 	return i, err
 }

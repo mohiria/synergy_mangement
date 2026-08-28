@@ -187,8 +187,19 @@ func (s *Server) DecideFieldChange(w http.ResponseWriter, r *http.Request, proje
 		return
 	}
 	isCancel := fc.ChangeType == domain.FieldChangeTypeCancel
+	isStructure := fc.ChangeType == domain.FieldChangeTypeStructure
 	if approve {
-		if isCancel {
+		if isStructure {
+			// AC-23：结构变更（输入、输入源、输出、接收方）到这一刻才真正写入。
+			var p structurePayload
+			if err := json.Unmarshal(fc.Payload, &p); err != nil {
+				writeInternalError(w, r, err)
+				return
+			}
+			if !s.applyStructureOrFail(w, r, qtx, projectId, taskId, fc.SubmittedBy, p) {
+				return
+			}
+		} else if isCancel {
 			// AC-57：取消单通过后任务进入已取消并保留原因。
 			if _, err := qtx.UpdateTaskStatusWithReason(r.Context(), store.UpdateTaskStatusWithReasonParams{
 				ID: taskId, Status: domain.TaskCancelled, CancelReason: fc.Reason,
@@ -353,6 +364,14 @@ func (s *Server) fieldChangeView(ctx context.Context, fc store.FieldChangeReques
 	addText := func(field, label string, oldV, newV pgtype.Text) {
 		if newV.Valid {
 			diffs = append(diffs, FieldChangeDiff{Field: field, Label: label, OldValue: oldV.String, NewValue: newV.String})
+		}
+	}
+	if len(fc.Payload) > 0 {
+		var p structurePayload
+		if err := json.Unmarshal(fc.Payload, &p); err == nil && p.Op != "" {
+			diffs = append(diffs, FieldChangeDiff{
+				Field: p.Op, Label: p.Label, OldValue: p.OldValue, NewValue: p.NewValue,
+			})
 		}
 	}
 	if fc.NewStatus.Valid {

@@ -392,8 +392,8 @@ export default function ProjectTasksPage({
     const res = await client.DELETE("/projects/{projectId}/edges/{edgeId}", {
       params: { path: { projectId, edgeId } },
     });
-    if (res.response.ok) {
-      message.success("已解除该输入关系");
+    if (res.data) {
+      message.success(structureMessage(res.data, "已解除该输入关系"));
       load();
     } else {
       message.error(res.error?.message ?? "解除失败");
@@ -1126,6 +1126,16 @@ export default function ProjectTasksPage({
   );
 }
 
+// 结构变更（输入、输入源、输出、接收方）属关键字段：已入池任务要经所属 KR 负责人审批（AC-23）。
+// 回包里带着待审批的结构变更单，就说明这次没有立即生效。
+function structureMessage(task: Task | undefined, applied: string): string {
+  const fc = task?.fieldChange;
+  if (fc && fc.state === "pending" && fc.changeType === "structure") {
+    return "已提交，待所属 KR 负责人审批后生效";
+  }
+  return applied;
+}
+
 type KrOption = { id: number; objectiveId: number; code: string; description: string; ownerId?: number | null };
 
 type TaskRow = {
@@ -1618,7 +1628,7 @@ function TaskDrawer({
       body: { name: newDeliverableName.trim() },
     });
     if (res.data) {
-      message.success("交付物项已新增");
+      message.success(structureMessage(res.data, "交付物项已新增"));
       setNewDeliverableName("");
       setRefreshTick((n) => n + 1);
     } else {
@@ -2780,7 +2790,9 @@ function ConfigureInputModal({
       });
       setSaving(false);
       if (res.data) {
-        message.success(`已为 ${providerIds.length} 名对接人建立输入请求；入池后对接人会收到通知`);
+        message.success(
+          structureMessage(res.data, `已为 ${providerIds.length} 名对接人建立输入请求；入池后对接人会收到通知`),
+        );
         onSaved();
       } else {
         setError(res.error?.message ?? "保存失败");
@@ -2806,7 +2818,9 @@ function ConfigureInputModal({
     });
     setSaving(false);
     if (res.data) {
-      message.success(`已建立 ${sourceTaskIds.length} 条「来源任务 → 本任务」的交付物边`);
+      message.success(
+        structureMessage(res.data, `已建立 ${sourceTaskIds.length} 条「来源任务 → 本任务」的交付物边`),
+      );
       onSaved();
     } else {
       setError(res.error?.message ?? "保存失败");
@@ -3085,7 +3099,7 @@ function ReceiversModal({
     });
     setSaving(false);
     if (res.data) {
-      message.success("接收方配置已保存");
+      message.success(structureMessage(res.data, "接收方配置已保存"));
       onSaved();
     } else {
       setError(res.error?.message ?? "保存失败");

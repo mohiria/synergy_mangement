@@ -17,6 +17,21 @@ const (
 	ReceiverScopeAll     = "all"
 )
 
+// receiverScopeLabels 接收方范围的中文显示文案（变更单差异行与页面共用）。
+var receiverScopeLabels = map[string]string{
+	ReceiverScopeNone:    "不配置",
+	ReceiverScopeMembers: "指定成员",
+	ReceiverScopeAll:     "所有项目成员",
+}
+
+// ReceiverScopeLabel 接收方范围显示文案（派生字段）；未知取值不回显枚举原文。
+func ReceiverScopeLabel(scope string) string {
+	if label, ok := receiverScopeLabels[scope]; ok {
+		return label
+	}
+	return "不配置"
+}
+
 var (
 	ErrReceiverScopeInvalid = errors.New("接收方范围取值非法")
 	ErrReceiverEmpty        = errors.New("指定成员为接收方时至少选择一人")

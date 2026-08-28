@@ -66,13 +66,13 @@ func (q *Queries) ApplyTaskKeyFields(ctx context.Context, arg ApplyTaskKeyFields
 const createFieldChange = `-- name: CreateFieldChange :one
 INSERT INTO field_change_requests (
     task_id, submitted_by, reason, state, exempt, opinion, decided_by, decided_at,
-    change_type, old_status, new_status,
+    change_type, old_status, new_status, payload,
     old_name, new_name, old_description, new_description,
     old_completion_criteria, new_completion_criteria,
     old_owner_id, new_owner_id, old_end_date, new_end_date
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
-RETURNING id, task_id, submitted_by, reason, state, exempt, opinion, resolved, old_name, new_name, old_description, new_description, old_completion_criteria, new_completion_criteria, old_owner_id, new_owner_id, old_end_date, new_end_date, submitted_at, decided_by, decided_at, change_type, old_status, new_status
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+RETURNING id, task_id, submitted_by, reason, state, exempt, opinion, resolved, old_name, new_name, old_description, new_description, old_completion_criteria, new_completion_criteria, old_owner_id, new_owner_id, old_end_date, new_end_date, submitted_at, decided_by, decided_at, change_type, old_status, new_status, payload
 `
 
 type CreateFieldChangeParams struct {
@@ -87,6 +87,7 @@ type CreateFieldChangeParams struct {
 	ChangeType            string
 	OldStatus             pgtype.Text
 	NewStatus             pgtype.Text
+	Payload               []byte
 	OldName               pgtype.Text
 	NewName               pgtype.Text
 	OldDescription        pgtype.Text
@@ -112,6 +113,7 @@ func (q *Queries) CreateFieldChange(ctx context.Context, arg CreateFieldChangePa
 		arg.ChangeType,
 		arg.OldStatus,
 		arg.NewStatus,
+		arg.Payload,
 		arg.OldName,
 		arg.NewName,
 		arg.OldDescription,
@@ -149,6 +151,7 @@ func (q *Queries) CreateFieldChange(ctx context.Context, arg CreateFieldChangePa
 		&i.ChangeType,
 		&i.OldStatus,
 		&i.NewStatus,
+		&i.Payload,
 	)
 	return i, err
 }
@@ -157,7 +160,7 @@ const decideFieldChange = `-- name: DecideFieldChange :one
 UPDATE field_change_requests
 SET state = $2, opinion = $3, decided_by = $4, decided_at = now()
 WHERE id = $1
-RETURNING id, task_id, submitted_by, reason, state, exempt, opinion, resolved, old_name, new_name, old_description, new_description, old_completion_criteria, new_completion_criteria, old_owner_id, new_owner_id, old_end_date, new_end_date, submitted_at, decided_by, decided_at, change_type, old_status, new_status
+RETURNING id, task_id, submitted_by, reason, state, exempt, opinion, resolved, old_name, new_name, old_description, new_description, old_completion_criteria, new_completion_criteria, old_owner_id, new_owner_id, old_end_date, new_end_date, submitted_at, decided_by, decided_at, change_type, old_status, new_status, payload
 `
 
 type DecideFieldChangeParams struct {
@@ -200,12 +203,13 @@ func (q *Queries) DecideFieldChange(ctx context.Context, arg DecideFieldChangePa
 		&i.ChangeType,
 		&i.OldStatus,
 		&i.NewStatus,
+		&i.Payload,
 	)
 	return i, err
 }
 
 const getFieldChange = `-- name: GetFieldChange :one
-SELECT id, task_id, submitted_by, reason, state, exempt, opinion, resolved, old_name, new_name, old_description, new_description, old_completion_criteria, new_completion_criteria, old_owner_id, new_owner_id, old_end_date, new_end_date, submitted_at, decided_by, decided_at, change_type, old_status, new_status FROM field_change_requests
+SELECT id, task_id, submitted_by, reason, state, exempt, opinion, resolved, old_name, new_name, old_description, new_description, old_completion_criteria, new_completion_criteria, old_owner_id, new_owner_id, old_end_date, new_end_date, submitted_at, decided_by, decided_at, change_type, old_status, new_status, payload FROM field_change_requests
 WHERE id = $1 AND task_id = $2
 `
 
@@ -242,6 +246,7 @@ func (q *Queries) GetFieldChange(ctx context.Context, arg GetFieldChangeParams) 
 		&i.ChangeType,
 		&i.OldStatus,
 		&i.NewStatus,
+		&i.Payload,
 	)
 	return i, err
 }
@@ -260,7 +265,7 @@ func (q *Queries) HasPendingFieldChange(ctx context.Context, taskID int64) (bool
 }
 
 const latestFieldChangesByProject = `-- name: LatestFieldChangesByProject :many
-SELECT DISTINCT ON (fc.task_id) fc.id, fc.task_id, fc.submitted_by, fc.reason, fc.state, fc.exempt, fc.opinion, fc.resolved, fc.old_name, fc.new_name, fc.old_description, fc.new_description, fc.old_completion_criteria, fc.new_completion_criteria, fc.old_owner_id, fc.new_owner_id, fc.old_end_date, fc.new_end_date, fc.submitted_at, fc.decided_by, fc.decided_at, fc.change_type, fc.old_status, fc.new_status,
+SELECT DISTINCT ON (fc.task_id) fc.id, fc.task_id, fc.submitted_by, fc.reason, fc.state, fc.exempt, fc.opinion, fc.resolved, fc.old_name, fc.new_name, fc.old_description, fc.new_description, fc.old_completion_criteria, fc.new_completion_criteria, fc.old_owner_id, fc.new_owner_id, fc.old_end_date, fc.new_end_date, fc.submitted_at, fc.decided_by, fc.decided_at, fc.change_type, fc.old_status, fc.new_status, fc.payload,
     su.display_name AS submitted_by_name,
     du.display_name AS decided_by_name
 FROM field_change_requests fc
@@ -299,6 +304,7 @@ type LatestFieldChangesByProjectRow struct {
 	ChangeType            string
 	OldStatus             pgtype.Text
 	NewStatus             pgtype.Text
+	Payload               []byte
 	SubmittedByName       string
 	DecidedByName         pgtype.Text
 }
@@ -338,6 +344,7 @@ func (q *Queries) LatestFieldChangesByProject(ctx context.Context, projectID int
 			&i.ChangeType,
 			&i.OldStatus,
 			&i.NewStatus,
+			&i.Payload,
 			&i.SubmittedByName,
 			&i.DecidedByName,
 		); err != nil {
@@ -352,7 +359,7 @@ func (q *Queries) LatestFieldChangesByProject(ctx context.Context, projectID int
 }
 
 const listFieldChangesByTask = `-- name: ListFieldChangesByTask :many
-SELECT fc.id, fc.task_id, fc.submitted_by, fc.reason, fc.state, fc.exempt, fc.opinion, fc.resolved, fc.old_name, fc.new_name, fc.old_description, fc.new_description, fc.old_completion_criteria, fc.new_completion_criteria, fc.old_owner_id, fc.new_owner_id, fc.old_end_date, fc.new_end_date, fc.submitted_at, fc.decided_by, fc.decided_at, fc.change_type, fc.old_status, fc.new_status, su.display_name AS submitted_by_name, du.display_name AS decided_by_name
+SELECT fc.id, fc.task_id, fc.submitted_by, fc.reason, fc.state, fc.exempt, fc.opinion, fc.resolved, fc.old_name, fc.new_name, fc.old_description, fc.new_description, fc.old_completion_criteria, fc.new_completion_criteria, fc.old_owner_id, fc.new_owner_id, fc.old_end_date, fc.new_end_date, fc.submitted_at, fc.decided_by, fc.decided_at, fc.change_type, fc.old_status, fc.new_status, fc.payload, su.display_name AS submitted_by_name, du.display_name AS decided_by_name
 FROM field_change_requests fc
 JOIN users su ON su.id = fc.submitted_by
 LEFT JOIN users du ON du.id = fc.decided_by
@@ -385,6 +392,7 @@ type ListFieldChangesByTaskRow struct {
 	ChangeType            string
 	OldStatus             pgtype.Text
 	NewStatus             pgtype.Text
+	Payload               []byte
 	SubmittedByName       string
 	DecidedByName         pgtype.Text
 }
@@ -423,6 +431,7 @@ func (q *Queries) ListFieldChangesByTask(ctx context.Context, taskID int64) ([]L
 			&i.ChangeType,
 			&i.OldStatus,
 			&i.NewStatus,
+			&i.Payload,
 			&i.SubmittedByName,
 			&i.DecidedByName,
 		); err != nil {
@@ -440,7 +449,7 @@ const resolveFieldChange = `-- name: ResolveFieldChange :one
 UPDATE field_change_requests
 SET resolved = TRUE
 WHERE id = $1
-RETURNING id, task_id, submitted_by, reason, state, exempt, opinion, resolved, old_name, new_name, old_description, new_description, old_completion_criteria, new_completion_criteria, old_owner_id, new_owner_id, old_end_date, new_end_date, submitted_at, decided_by, decided_at, change_type, old_status, new_status
+RETURNING id, task_id, submitted_by, reason, state, exempt, opinion, resolved, old_name, new_name, old_description, new_description, old_completion_criteria, new_completion_criteria, old_owner_id, new_owner_id, old_end_date, new_end_date, submitted_at, decided_by, decided_at, change_type, old_status, new_status, payload
 `
 
 func (q *Queries) ResolveFieldChange(ctx context.Context, id int64) (FieldChangeRequest, error) {
@@ -471,6 +480,7 @@ func (q *Queries) ResolveFieldChange(ctx context.Context, id int64) (FieldChange
 		&i.ChangeType,
 		&i.OldStatus,
 		&i.NewStatus,
+		&i.Payload,
 	)
 	return i, err
 }

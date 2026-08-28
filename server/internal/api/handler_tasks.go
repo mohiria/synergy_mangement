@@ -567,6 +567,7 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		fcs = append(fcs, s.fieldChangeView(r.Context(), store.FieldChangeRequest{
 			ID: fc.ID, TaskID: fc.TaskID, SubmittedBy: fc.SubmittedBy, Reason: fc.Reason,
 			State: fc.State, Exempt: fc.Exempt, Opinion: fc.Opinion, Resolved: fc.Resolved,
+			ChangeType: fc.ChangeType, OldStatus: fc.OldStatus, NewStatus: fc.NewStatus, Payload: fc.Payload,
 			OldName: fc.OldName, NewName: fc.NewName,
 			OldDescription: fc.OldDescription, NewDescription: fc.NewDescription,
 			OldCompletionCriteria: fc.OldCompletionCriteria, NewCompletionCriteria: fc.NewCompletionCriteria,
@@ -821,7 +822,7 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 				view := s.fieldChangeView(ctx, store.FieldChangeRequest{
 					ID: fc.ID, TaskID: fc.TaskID, SubmittedBy: fc.SubmittedBy, Reason: fc.Reason,
 					State: fc.State, Exempt: fc.Exempt, Opinion: fc.Opinion, Resolved: fc.Resolved,
-					ChangeType: fc.ChangeType, OldStatus: fc.OldStatus, NewStatus: fc.NewStatus,
+					ChangeType: fc.ChangeType, OldStatus: fc.OldStatus, NewStatus: fc.NewStatus, Payload: fc.Payload,
 					OldName: fc.OldName, NewName: fc.NewName,
 					OldDescription: fc.OldDescription, NewDescription: fc.NewDescription,
 					OldCompletionCriteria: fc.OldCompletionCriteria, NewCompletionCriteria: fc.NewCompletionCriteria,

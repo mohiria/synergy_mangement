@@ -122,6 +122,7 @@ type FieldChangeRequest struct {
 	ChangeType            string
 	OldStatus             pgtype.Text
 	NewStatus             pgtype.Text
+	Payload               []byte
 }
 
 type InputRequest struct {

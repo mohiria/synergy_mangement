@@ -219,6 +219,63 @@ func wantStatus(t *testing.T, resp *http.Response, want int) {
 	}
 }
 
+// 结构变更（输入、输入源、输出、接收方）改走关键字段修改审批后（AC-23），
+// 写入接口统一返回 200 Task；下面三个 helper 承担「受理成功」与「按名字找边」两件事。
+
+// wantStructureAccepted 断言结构变更已受理并回传任务最新状态。
+func wantStructureAccepted(t *testing.T, resp *http.Response) api.Task {
+	t.Helper()
+	wantStatus(t, resp, http.StatusOK)
+	return decodeBody[api.Task](t, resp)
+}
+
+// projectEdges 取项目全部交付物边（写入接口不再直接回传新建的边）。
+func projectEdges(t *testing.T, c *http.Client, base string, projectID int64) []api.DeliverableEdge {
+	t.Helper()
+	resp := doJSON(t, c, http.MethodGet, fmt.Sprintf("%s/projects/%d/edges", base, projectID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	return decodeBody[[]api.DeliverableEdge](t, resp)
+}
+
+// edgeOf 在项目边里按目标任务与边名定位一条边。
+func edgeOf(t *testing.T, c *http.Client, base string, projectID, targetTaskID int64, name string) api.DeliverableEdge {
+	t.Helper()
+	for _, e := range projectEdges(t, c, base, projectID) {
+		if e.TargetTaskId == targetTaskID && e.Name == name {
+			return e
+		}
+	}
+	t.Fatalf("未找到任务 %d 上名为 %q 的交付物边", targetTaskID, name)
+	return api.DeliverableEdge{}
+}
+
+// approveStructureChange 所属 KR 负责人通过任务上那张待审批的变更单。
+func approveStructureChange(t *testing.T, approver *http.Client, base string, projectID, taskID int64, task api.Task) {
+	t.Helper()
+	if task.FieldChange == nil || task.FieldChange.State != api.FieldChangeStatePending {
+		t.Fatalf("任务 %d 上没有待审批变更单: %+v", taskID, task.FieldChange)
+	}
+	resp := doJSON(t, approver, http.MethodPost,
+		fmt.Sprintf("%s/projects/%d/tasks/%d/field-changes/%d/decision", base, projectID, taskID, task.FieldChange.Id),
+		api.FieldChangeDecisionRequest{Decision: api.FieldChangeDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+}
+
+// deliverableOf 在任务详情里按名字定位交付物项。
+func deliverableOf(t *testing.T, c *http.Client, base string, projectID, taskID int64, name string) api.Deliverable {
+	t.Helper()
+	resp := doJSON(t, c, http.MethodGet, fmt.Sprintf("%s/projects/%d/tasks/%d", base, projectID, taskID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	for _, d := range decodeBody[api.TaskDetail](t, resp).Deliverables {
+		if d.Name == name {
+			return d
+		}
+	}
+	t.Fatalf("未找到任务 %d 上名为 %q 的交付物项", taskID, name)
+	return api.Deliverable{}
+}
+
 func TestAuthAndProjectsEndToEnd(t *testing.T) {
 	q, pool := setupDB(t)
 	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
@@ -1546,11 +1603,11 @@ func TestDeliverablesAndFiles(t *testing.T) {
 		t.Fatalf("预期交付物列异常: %+v", tasks[0].DeliverableNames)
 	}
 
-	// 再补一个交付物项（一个任务多项交付物）
+	// 再补一个交付物项（一个任务多项交付物）；bob 是所属 KR 负责人，免审即时生效
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/deliverables", tasksURL, taskID),
 		api.CreateDeliverableRequest{Name: "现场验收记录"})
-	wantStatus(t, resp, http.StatusCreated)
-	second := decodeBody[api.Deliverable](t, resp)
+	wantStructureAccepted(t, resp)
+	second := deliverableOf(t, bob, base, created.Id, taskID, "现场验收记录")
 
 	// 空名称 422
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/deliverables", tasksURL, taskID),
@@ -1814,10 +1871,10 @@ func TestCompletionReviewFlow(t *testing.T) {
 		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/deliverables", tasksURL, taskID),
+	// 输出属关键字段：已入池任务由所属 KR 负责人 bob 加交付物项，免审即时生效（AC-23）
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/deliverables", tasksURL, taskID),
 		api.CreateDeliverableRequest{Name: "验收记录"})
-	wantStatus(t, resp, http.StatusCreated)
-	resp.Body.Close()
+	wantStructureAccepted(t, resp)
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, taskID),
 		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
 	wantStatus(t, resp, http.StatusOK)
@@ -2021,24 +2078,28 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 	detailA := decodeBody[api.TaskDetail](t, resp)
 	dA := detailA.Deliverables[0].Id
 
-	// AC-28：B 的负责人 carol 选择 A 及其交付物建立必要输入边
+	// AC-28：B 的负责人 carol 选择 A 及其交付物建立必要输入边；
+	// 输入与输入源是关键字段（AC-23），已入池任务先进所属 KR 负责人审批，通过后边才建立
 	inputsURL := func(id int64) string { return fmt.Sprintf("%s/%d/inputs", tasksURL, id) }
 	resp = doJSON(t, carol, http.MethodPost, inputsURL(taskB.Id), api.CreateTaskInputRequest{
 		Name: "现场数据包", Necessity: api.Required, EdgeType: api.HardPrerequisite,
 		SourceTaskIds: []int64{taskA.Id}, DeliverableId: &dA,
 	})
-	wantStatus(t, resp, http.StatusCreated)
-	edge := decodeBody[[]api.DeliverableEdge](t, resp)[0]
+	pendingEdge := wantStructureAccepted(t, resp)
+	if len(projectEdges(t, carol, base, created.Id)) != 0 {
+		t.Fatal("待审批期间不应先建边")
+	}
+	approveStructureChange(t, bob, base, created.Id, taskB.Id, pendingEdge)
+	edge := edgeOf(t, carol, base, created.Id, taskB.Id, "现场数据包")
 	if edge.Ready || edge.SourceTaskName == nil || *edge.SourceTaskName != "采集现场数据" {
 		t.Fatalf("新建边应未就绪且含来源信息: %+v", edge)
 	}
 
-	// AC-07：反向再建一条反馈边（双向/循环关系保留真实连线）
+	// AC-07：反向再建一条反馈边（双向/循环关系保留真实连线）；bob 是 KR 负责人，免审即时生效
 	resp = doJSON(t, bob, http.MethodPost, inputsURL(taskA.Id), api.CreateTaskInputRequest{
 		Name: "回归问题清单", Necessity: api.Reference, EdgeType: api.Feedback, SourceTaskIds: []int64{taskB.Id},
 	})
-	wantStatus(t, resp, http.StatusCreated)
-	resp.Body.Close()
+	wantStructureAccepted(t, resp)
 	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/projects/%d/edges", base, created.Id), nil)
 	wantStatus(t, resp, http.StatusOK)
 	if edges := decodeBody[[]api.DeliverableEdge](t, resp); len(edges) != 2 {
@@ -2129,16 +2190,18 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 		t.Fatalf("任务更新时间应随状态推进: %v → %v", taskA.UpdatedAt, detailA.Task.UpdatedAt)
 	}
 
-	// 解除边：A 已完成（终态）目标边不可再配置 → 409/403；改由 B 的负责人解除指向 B 的输入边
+	// 解除边：目标任务 A 已完成（终态）不再接受任何变更单 → 409
 	resp = doJSON(t, bob, http.MethodDelete, fmt.Sprintf("%s/projects/%d/edges/%d", base, created.Id, detailB.Outputs[0].Id), nil)
-	wantStatus(t, resp, http.StatusForbidden)
+	wantStatus(t, resp, http.StatusConflict)
 	resp.Body.Close()
+	// 解除输入源同样是关键字段变更：carol 提交，待审批期间边仍在，bob 通过后才真的解除
 	resp = doJSON(t, carol, http.MethodDelete, fmt.Sprintf("%s/projects/%d/edges/%d", base, created.Id, detailB.Inputs[0].Id), nil)
-	wantStatus(t, resp, http.StatusNoContent)
-	resp.Body.Close()
-	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/projects/%d/edges", base, created.Id), nil)
-	wantStatus(t, resp, http.StatusOK)
-	if edges := decodeBody[[]api.DeliverableEdge](t, resp); len(edges) != 1 {
+	pendingRemove := wantStructureAccepted(t, resp)
+	if len(projectEdges(t, carol, base, created.Id)) != 2 {
+		t.Fatal("待审批期间不应先解除边")
+	}
+	approveStructureChange(t, bob, base, created.Id, taskB.Id, pendingRemove)
+	if edges := projectEdges(t, carol, base, created.Id); len(edges) != 1 {
 		t.Fatalf("解除后边数量异常: %+v", edges)
 	}
 }
@@ -2377,8 +2440,9 @@ func TestMemberInputRequests(t *testing.T) {
 			Name: "接口字段口径", Necessity: api.Required, ProviderIds: []int64{daveUser.ID},
 			ContentNote: "请提供最新接口字段口径说明", ExpectedDate: expected,
 		})
-	wantStatus(t, resp, http.StatusCreated)
-	edge := decodeBody[[]api.DeliverableEdge](t, resp)[0]
+	// 草稿任务的结构变更直接生效，不生成变更单（AC-23）
+	wantStructureAccepted(t, resp)
+	edge := edgeOf(t, carol, base, created.Id, taskID, "接口字段口径")
 	if edge.InputRequest == nil || edge.InputRequest.State != api.InputRequestStatePending || edge.Ready {
 		t.Fatalf("成员输入边异常: %+v", edge)
 	}
@@ -2562,8 +2626,14 @@ func TestMultiSourceInputs(t *testing.T) {
 			Name: "上游材料", Necessity: api.Required, EdgeType: api.HardPrerequisite,
 			SourceTaskIds: []int64{taskA, taskB2},
 		})
-	wantStatus(t, resp, http.StatusCreated)
-	multi := decodeBody[[]api.DeliverableEdge](t, resp)
+	pendingMulti := wantStructureAccepted(t, resp)
+	approveStructureChange(t, bob, base, created.Id, taskC, pendingMulti)
+	multi := []api.DeliverableEdge{}
+	for _, e := range projectEdges(t, carol, base, created.Id) {
+		if e.TargetTaskId == taskC && e.Name == "上游材料" {
+			multi = append(multi, e)
+		}
+	}
 	if len(multi) != 2 || multi[0].Id == multi[1].Id {
 		t.Fatalf("多来源应分别建边: %+v", multi)
 	}
@@ -2605,8 +2675,14 @@ func TestMultiSourceInputs(t *testing.T) {
 			Name: "外部厂商口径", Necessity: api.Required, ProviderIds: []int64{daveUser.ID, erinUser.ID},
 			ContentNote: "请各自提供本方口径说明", ExpectedDate: expected,
 		})
-	wantStatus(t, resp, http.StatusCreated)
-	memberEdges := decodeBody[[]api.DeliverableEdge](t, resp)
+	pendingMembers := wantStructureAccepted(t, resp)
+	approveStructureChange(t, bob, base, created.Id, taskD, pendingMembers)
+	memberEdges := []api.DeliverableEdge{}
+	for _, e := range projectEdges(t, carol, base, created.Id) {
+		if e.TargetTaskId == taskD && e.Name == "外部厂商口径" {
+			memberEdges = append(memberEdges, e)
+		}
+	}
 	if len(memberEdges) != 2 {
 		t.Fatalf("多对接人应分别建边: %+v", memberEdges)
 	}
@@ -2763,8 +2839,9 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 			Name: "现场数据包", Necessity: api.Required, EdgeType: api.HardPrerequisite,
 			SourceTaskIds: []int64{upstream.Id}, DeliverableId: &upstreamDeliverable,
 		})
-	wantStatus(t, resp, http.StatusCreated)
-	edge := decodeBody[[]api.DeliverableEdge](t, resp)[0]
+	pendingInput := wantStructureAccepted(t, resp)
+	approveStructureChange(t, bob, base, created.Id, downstream.Id, pendingInput)
+	edge := edgeOf(t, carol, base, created.Id, downstream.Id, "现场数据包")
 
 	byKind := func(c *http.Client) map[string]api.Blocker {
 		t.Helper()
@@ -3086,8 +3163,8 @@ func TestInterlockAndCriticalPath(t *testing.T) {
 		resp := doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, dst), api.CreateTaskInputRequest{
 			Name: name, Necessity: api.Required, EdgeType: et, SourceTaskIds: []int64{src},
 		})
-		wantStatus(t, resp, http.StatusCreated)
-		return decodeBody[[]api.DeliverableEdge](t, resp)[0]
+		wantStructureAccepted(t, resp)
+		return edgeOf(t, bob, base, created.Id, dst, name)
 	}
 	eAB := mkEdge("A产物", byName["任务A"], byName["任务B"], api.HardPrerequisite)
 	eBC := mkEdge("B产物", byName["任务B"], byName["任务C"], api.HardPrerequisite)
@@ -3327,8 +3404,7 @@ func TestProjectReport(t *testing.T) {
 	// B 挂一条来自 C 的必要输入边：C 未交付 ⇒ B 的必要输入未就绪（§5.1 等待输入）。
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, taskB.Id),
 		api.CreateTaskInputRequest{Name: "上游数据包", Necessity: api.Required, EdgeType: api.HardPrerequisite, SourceTaskIds: []int64{taskC.Id}})
-	wantStatus(t, resp, http.StatusCreated)
-	resp.Body.Close()
+	wantStructureAccepted(t, resp)
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, taskA.Id),
 		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
 	wantStatus(t, resp, http.StatusOK)
@@ -3777,8 +3853,7 @@ func TestUnifiedPermissionsAcrossIdentities(t *testing.T) {
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/member-inputs", tasksURL, taskID),
 		api.CreateMemberInputRequest{Name: "外部厂商接口说明", Necessity: api.Required, ProviderIds: []int64{bobUser.ID},
 			ContentNote: "外部材料由协调人李四收集后代录", ExpectedDate: expected})
-	wantStatus(t, resp, http.StatusCreated)
-	resp.Body.Close()
+	wantStructureAccepted(t, resp)
 }
 
 func TestLoginRateLimit(t *testing.T) {
@@ -4028,17 +4103,24 @@ func TestReceiversAndReceipts(t *testing.T) {
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 
-	// 任务 A 指定 dave 为接收方；任务 B 取「所有项目成员」
+	// 任务 A 指定 dave 为接收方；任务 B 取「所有项目成员」。
+	// 接收方是关键字段（AC-23）：任务已入池，carol 提交后待 KR 负责人 bob 审批，通过后才生效。
 	resp = doJSON(t, carol, http.MethodPut, receiversA, api.SetReceiversRequest{Scope: api.ReceiverScopeMembers, UserIds: &[]int64{daveUser.ID}})
+	pendingReceivers := wantStructureAccepted(t, resp)
+	if pendingReceivers.ReceiverScope != api.ReceiverScopeNone {
+		t.Fatalf("待审批期间接收方不应变更: %+v", pendingReceivers.ReceiverScope)
+	}
+	approveStructureChange(t, bob, base, created.Id, taskA, pendingReceivers)
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskA), nil)
 	wantStatus(t, resp, http.StatusOK)
-	configured := decodeBody[api.Task](t, resp)
+	configured := decodeBody[api.TaskDetail](t, resp).Task
 	if configured.ReceiverScope != api.ReceiverScopeMembers || configured.Receivers == nil || len(*configured.Receivers) != 1 {
 		t.Fatalf("接收方配置未生效: %+v", configured)
 	}
 	resp = doJSON(t, carol, http.MethodPut, fmt.Sprintf("%s/%d/receivers", tasksURL, taskB),
 		api.SetReceiversRequest{Scope: api.ReceiverScopeAll})
-	wantStatus(t, resp, http.StatusOK)
-	resp.Body.Close()
+	pendingReceiversB := wantStructureAccepted(t, resp)
+	approveStructureChange(t, bob, base, created.Id, taskB, pendingReceiversB)
 
 	// 终审通过前没有待接收项
 	myWorkURL := fmt.Sprintf("%s/projects/%d/my-work", base, created.Id)
@@ -4428,6 +4510,95 @@ func TestNonMemberProjectReadBoundary(t *testing.T) {
 	}
 }
 
+// 结构变更被退回后不生效（AC-23、§5.2.B，回归 R1）：输出属关键字段，
+// 已入池任务由任务负责人提交后进所属 KR 负责人审批，退回则交付物项不产生，
+// 且退回未处理期间不接受新的变更单。
+func TestStructureChangeRejected(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	sp := func(v string) *string { return &v }
+
+	alice, bob, carol := newClient(t), newClient(t), newClient(t)
+	for _, l := range []struct {
+		c              *http.Client
+		user, password string
+	}{{alice, "alice", "alice-pass"}, {bob, "bob", "bob-pass"}, {carol, "carol", "carol-pass"}} {
+		resp := doJSON(t, l.c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: l.user, Password: l.password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "结构变更审批", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	for _, uid := range []int64{bobUser.ID, carolUser.ID} {
+		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+		wantStatus(t, resp, http.StatusCreated)
+		resp.Body.Close()
+	}
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	kr1 := decodeBody[[]api.Objective](t, resp)[0].KeyResults[0].Id
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true,
+		Items:           []api.CreateTaskItem{{KeyResultId: kr1, Name: "联调验证", OwnerId: carolUser.ID, StartDate: start, EndDate: end}},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	taskID := decodeBody[[]api.Task](t, resp)[0].Id
+
+	// 任务负责人 carol 新增交付物项 → 待审批，交付物项尚未产生
+	deliverablesURL := fmt.Sprintf("%s/%d/deliverables", tasksURL, taskID)
+	resp = doJSON(t, carol, http.MethodPost, deliverablesURL, api.CreateDeliverableRequest{Name: "联调报告"})
+	pending := wantStructureAccepted(t, resp)
+	if pending.FieldChange == nil || pending.FieldChange.ChangeType != api.Structure {
+		t.Fatalf("未生成结构变更单: %+v", pending.FieldChange)
+	}
+	if len(pending.FieldChange.Changes) != 1 || pending.FieldChange.Changes[0].Label != "预期交付物" {
+		t.Fatalf("结构变更差异行异常: %+v", pending.FieldChange.Changes)
+	}
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if ds := decodeBody[api.TaskDetail](t, resp).Deliverables; len(ds) != 0 {
+		t.Fatalf("待审批期间不应先建交付物项: %+v", ds)
+	}
+	// 互斥：待审批期间不接受第二张单
+	resp = doJSON(t, carol, http.MethodPost, deliverablesURL, api.CreateDeliverableRequest{Name: "另一项"})
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+
+	// KR 负责人退回：交付物项仍不产生
+	resp = doJSON(t, bob, http.MethodPost,
+		fmt.Sprintf("%s/%d/field-changes/%d/decision", tasksURL, taskID, pending.FieldChange.Id),
+		api.FieldChangeDecisionRequest{Decision: api.FieldChangeDecisionRequestDecisionRejected, Opinion: sp("交付物口径未定")})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if ds := decodeBody[api.TaskDetail](t, resp).Deliverables; len(ds) != 0 {
+		t.Fatalf("退回后不应产生交付物项: %+v", ds)
+	}
+
+	// 重新提交并通过：这次才真的建出来
+	resp = doJSON(t, carol, http.MethodPost, deliverablesURL, api.CreateDeliverableRequest{Name: "联调报告"})
+	again := wantStructureAccepted(t, resp)
+	approveStructureChange(t, bob, base, created.Id, taskID, again)
+	if d := deliverableOf(t, carol, base, created.Id, taskID, "联调报告"); d.Name != "联调报告" {
+		t.Fatalf("通过后应建出交付物项: %+v", d)
+	}
+}
+
 // 变更单与取消的双向互斥（AC-57，回归 R3）：未决变更单在时不能发起取消，
 // 取消生效后任务进入终态，既有变更单不得再被处理、也不接受新的审批单。
 func TestFieldChangeOnTerminalTask(t *testing.T) {
@@ -4564,8 +4735,8 @@ func TestDeliverableFileStateUnique(t *testing.T) {
 	wantStatus(t, resp, http.StatusCreated)
 	taskID := decodeBody[[]api.Task](t, resp)[0].Id
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/deliverables", tasksURL, taskID), api.CreateDeliverableRequest{Name: "验收方案"})
-	wantStatus(t, resp, http.StatusCreated)
-	deliverableID := decodeBody[api.Deliverable](t, resp).Id
+	wantStructureAccepted(t, resp)
+	deliverableID := deliverableOf(t, alice, base, created.Id, taskID, "验收方案").Id
 
 	newFile := func(state, key string) error {
 		_, err := q.CreateDeliverableFile(context.Background(), store.CreateDeliverableFileParams{

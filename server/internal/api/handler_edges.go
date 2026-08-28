@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"synergy/server/internal/domain"
 	"synergy/server/internal/store"
@@ -77,10 +77,6 @@ func (s *Server) CreateTaskInput(w http.ResponseWriter, r *http.Request, project
 	if !ok {
 		return
 	}
-	if !domain.CanConfigureInputs(actor, uid, facts) {
-		writeForbidden(w)
-		return
-	}
 	inputs := domain.NewTaskInputs{
 		Name:           strings.TrimSpace(req.Name),
 		EdgeType:       string(req.EdgeType),
@@ -112,64 +108,35 @@ func (s *Server) CreateTaskInput(w http.ResponseWriter, r *http.Request, project
 			return
 		}
 	}
-	tx, err := s.db.Begin(r.Context())
-	if err != nil {
-		writeInternalError(w, r, err)
+	// 输入与输入源是关键字段（§5.2.B）：已入池任务的新增要经所属 KR 负责人审批。
+	outcome, ok := s.routeStructureChange(w, r, taskId, actor, uid, facts)
+	if !ok {
 		return
 	}
-	defer func() { _ = tx.Rollback(r.Context()) }()
-	qtx := s.q.WithTx(tx)
-	createdIDs := make([]int64, 0, len(inputs.SourceTaskIDs))
+	sourceNames := make([]string, 0, len(inputs.SourceTaskIDs))
 	for _, sourceID := range inputs.SourceTaskIDs {
-		created, err := qtx.CreateEdge(r.Context(), store.CreateEdgeParams{
-			TargetTaskID: taskId,
-			SourceTaskID: pgtype.Int8{Int64: sourceID, Valid: true},
-			DeliverableID: func() pgtype.Int8 {
-				if req.DeliverableId == nil {
-					return pgtype.Int8{}
-				}
-				return pgtype.Int8{Int64: *req.DeliverableId, Valid: true}
-			}(),
-			Name:         inputs.Name,
-			EdgeType:     inputs.EdgeType,
-			Necessity:    inputs.Necessity,
-			ExpectedDate: toPgDate(req.ExpectedDate),
-			CreatedBy:    uid,
-		})
-		if err != nil {
-			writeInternalError(w, r, err)
-			return
+		if src, err := s.q.GetTaskInProject(r.Context(), store.GetTaskInProjectParams{ID: sourceID, ProjectID: projectId}); err == nil {
+			sourceNames = append(sourceNames, src.Name)
 		}
-		createdIDs = append(createdIDs, created.ID)
 	}
-	if err := tx.Commit(r.Context()); err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	s.writeCreatedEdges(w, r, projectId, uid, actor, createdIDs)
-}
-
-// writeCreatedEdges 按新建顺序回写各条交付物边视图（AC-53 多来源一次返回多条）。
-func (s *Server) writeCreatedEdges(w http.ResponseWriter, r *http.Request, projectID, userID int64, actor domain.Actor, createdIDs []int64) {
-	views, err := s.edgeViews(r.Context(), projectID, userID, actor)
+	raw, err := json.Marshal(req)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
-	byID := make(map[int64]DeliverableEdge, len(views))
-	for _, v := range views {
-		byID[v.Id] = v
+	payload := structurePayload{
+		Op:       domain.StructureAddTaskInput,
+		Label:    domain.StructureFieldLabel(domain.StructureAddTaskInput),
+		OldValue: "—",
+		NewValue: fmt.Sprintf("新增「%s」，来源任务：%s", inputs.Name, strings.Join(sourceNames, "、")),
+		Request:  raw,
 	}
-	out := make([]DeliverableEdge, 0, len(createdIDs))
-	for _, id := range createdIDs {
-		v, ok := byID[id]
-		if !ok {
-			writeInternalError(w, r, err)
-			return
-		}
-		out = append(out, v)
+	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
+	if !s.commitStructureChange(w, r, projectId, taskId, uid, outcome, payload, payload.NewValue) {
+		return
 	}
-	writeJSON(w, http.StatusCreated, out)
+	s.recordBlockerChanges(r.Context(), projectId, blockersBefore)
+	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 
 func (s *Server) RemoveEdge(w http.ResponseWriter, r *http.Request, projectId int64, edgeId int64) {
@@ -188,16 +155,36 @@ func (s *Server) RemoveEdge(w http.ResponseWriter, r *http.Request, projectId in
 		}
 		return
 	}
-	facts := domain.TaskFacts{Status: edge.TargetStatus, CreatorID: edge.TargetCreatedBy, OwnerID: edge.TargetOwnerID}
-	if !domain.CanConfigureInputs(actor, uid, facts) {
-		writeForbidden(w)
+	facts := domain.TaskFacts{
+		Status: edge.TargetStatus, CreatorID: edge.TargetCreatedBy, OwnerID: edge.TargetOwnerID,
+		KrOwnerID: fromPgInt8(edge.TargetKrOwnerID),
+	}
+	// 解除输入源同样是关键字段变更（§5.5：已入池任务更换来源任务或对接人仍执行审批）。
+	outcome, ok := s.routeStructureChange(w, r, edge.TargetTaskID, actor, uid, facts)
+	if !ok {
 		return
 	}
-	if _, err := s.q.DeleteEdge(r.Context(), edgeId); err != nil {
+	raw, err := json.Marshal(struct {
+		EdgeID int64 `json:"edgeId"`
+	}{EdgeID: edgeId})
+	if err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	payload := structurePayload{
+		Op:       domain.StructureRemoveEdge,
+		Label:    domain.StructureFieldLabel(domain.StructureRemoveEdge),
+		OldValue: edge.Name,
+		NewValue: "解除该输入关系",
+		Request:  raw,
+	}
+	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
+	if !s.commitStructureChange(w, r, projectId, edge.TargetTaskID, uid, outcome, payload,
+		fmt.Sprintf("解除输入「%s」", edge.Name)) {
+		return
+	}
+	s.recordBlockerChanges(r.Context(), projectId, blockersBefore)
+	s.writeTask(w, r, projectId, edge.TargetTaskID, uid, actor)
 }
 
 func (s *Server) ListEdges(w http.ResponseWriter, r *http.Request, projectId int64) {

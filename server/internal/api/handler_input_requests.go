@@ -30,12 +30,8 @@ func (s *Server) CreateMemberInput(w http.ResponseWriter, r *http.Request, proje
 	}
 	uid := currentUser(r).ID
 	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
-	task, facts, ok := s.fetchTask(w, r, projectId, taskId)
+	_, facts, ok := s.fetchTask(w, r, projectId, taskId)
 	if !ok {
-		return
-	}
-	if !domain.CanConfigureInputs(actor, uid, facts) {
-		writeForbidden(w)
 		return
 	}
 	members, err := s.q.ListProjectMembers(r.Context(), projectId)
@@ -58,60 +54,38 @@ func (s *Server) CreateMemberInput(w http.ResponseWriter, r *http.Request, proje
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_member_input", Message: err.Error()})
 		return
 	}
-	// 草稿与待入池审批阶段不提前打扰对接人（§7.3）。
-	pooled := facts.Status != domain.TaskDraft && facts.Status != domain.TaskPendingPoolReview
-	tx, err := s.db.Begin(r.Context())
+	// 输入源是关键字段（§5.2.B、§5.5）：已入池任务指定对接人要经所属 KR 负责人审批，
+	// 审批通过后才建边、生成输入请求并发通知。
+	outcome, ok := s.routeStructureChange(w, r, taskId, actor, uid, facts)
+	if !ok {
+		return
+	}
+	providerNames := make([]string, 0, len(input.ProviderIDs))
+	for _, m := range members {
+		for _, id := range input.ProviderIDs {
+			if m.UserID == id {
+				providerNames = append(providerNames, m.DisplayName)
+			}
+		}
+	}
+	raw, err := json.Marshal(req)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
-	defer func() { _ = tx.Rollback(r.Context()) }()
-	qtx := s.q.WithTx(tx)
-	createdIDs := make([]int64, 0, len(input.ProviderIDs))
-	for _, providerID := range input.ProviderIDs {
-		edge, err := qtx.CreateEdge(r.Context(), store.CreateEdgeParams{
-			TargetTaskID: taskId,
-			SourceUserID: pgtype.Int8{Int64: providerID, Valid: true},
-			Name:         input.Name,
-			EdgeType:     domain.EdgeInformation,
-			Necessity:    input.Necessity,
-			ExpectedDate: pgtype.Date{Time: req.ExpectedDate.Time, Valid: true},
-			CreatedBy:    uid,
-		})
-		if err != nil {
-			writeInternalError(w, r, err)
-			return
-		}
-		notified := pgtype.Timestamptz{}
-		if pooled {
-			notified = pgtype.Timestamptz{Time: s.now(), Valid: true}
-		}
-		if _, err := qtx.CreateInputRequest(r.Context(), store.CreateInputRequestParams{
-			EdgeID: edge.ID, ProviderID: providerID, ContentNote: input.ContentNote, NotifiedAt: notified,
-		}); err != nil {
-			writeInternalError(w, r, err)
-			return
-		}
-		if pooled {
-			// AC-29：带上下文的站内通知，每名对接人各发一条。
-			if _, err := qtx.CreateNotification(r.Context(), store.CreateNotificationParams{
-				UserID:    providerID,
-				Kind:      domain.NotifyInputRequest,
-				Content:   fmt.Sprintf("请你为任务「%s」提供输入「%s」：%s", task.Name, input.Name, input.ContentNote),
-				ProjectID: pgtype.Int8{Int64: projectId, Valid: true},
-				TaskID:    pgtype.Int8{Int64: taskId, Valid: true},
-			}); err != nil {
-				writeInternalError(w, r, err)
-				return
-			}
-		}
-		createdIDs = append(createdIDs, edge.ID)
+	payload := structurePayload{
+		Op:       domain.StructureAddMemberInput,
+		Label:    domain.StructureFieldLabel(domain.StructureAddMemberInput),
+		OldValue: "—",
+		NewValue: fmt.Sprintf("新增「%s」，对接人：%s", input.Name, strings.Join(providerNames, "、")),
+		Request:  raw,
 	}
-	if err := tx.Commit(r.Context()); err != nil {
-		writeInternalError(w, r, err)
+	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
+	if !s.commitStructureChange(w, r, projectId, taskId, uid, outcome, payload, payload.NewValue) {
 		return
 	}
-	s.writeCreatedEdges(w, r, projectId, uid, actor, createdIDs)
+	s.recordBlockerChanges(r.Context(), projectId, blockersBefore)
+	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 
 func (s *Server) AcceptInputRequest(w http.ResponseWriter, r *http.Request, projectId int64, requestId int64) {

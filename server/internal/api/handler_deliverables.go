@@ -35,25 +35,32 @@ func (s *Server) CreateDeliverable(w http.ResponseWriter, r *http.Request, proje
 	if !ok {
 		return
 	}
-	if !domain.CanManageDeliverables(actor, uid, facts) {
-		if facts.Status == domain.TaskCompleted || facts.Status == domain.TaskCancelled {
-			writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: "任务已终止，不能再配置交付物"})
-			return
-		}
-		writeForbidden(w)
-		return
-	}
 	name := strings.TrimSpace(req.Name)
 	if err := domain.ValidateDeliverableName(name); err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_deliverable", Message: err.Error()})
 		return
 	}
-	d, err := s.q.CreateDeliverable(r.Context(), store.CreateDeliverableParams{TaskID: taskId, Name: name, CreatedBy: uid})
+	// 输出是关键字段（§5.2.B）：已入池任务新增交付物项要经所属 KR 负责人审批。
+	outcome, ok := s.routeStructureChange(w, r, taskId, actor, uid, facts)
+	if !ok {
+		return
+	}
+	raw, err := json.Marshal(CreateDeliverableRequest{Name: name})
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, Deliverable{Id: d.ID, TaskId: d.TaskID, Name: d.Name})
+	payload := structurePayload{
+		Op:       domain.StructureAddDeliverable,
+		Label:    domain.StructureFieldLabel(domain.StructureAddDeliverable),
+		OldValue: "—",
+		NewValue: "新增交付物项「" + name + "」",
+		Request:  raw,
+	}
+	if !s.commitStructureChange(w, r, projectId, taskId, uid, outcome, payload, payload.NewValue) {
+		return
+	}
+	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 
 func (s *Server) UploadCandidate(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64, deliverableId int64) {
