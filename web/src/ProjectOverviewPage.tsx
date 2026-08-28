@@ -179,11 +179,7 @@ export default function ProjectOverviewPage({
                       <span className="kr-code">{code}</span>
                       <span className="kr-title-cell">
                         <span>{k.description}</span>
-                        {k.riskNote && (
-                          <small>
-                            {k.riskLevel === "high_risk" ? "风险因素" : "卡点"}：{k.riskNote}
-                          </small>
-                        )}
+                        {k.riskNote && <small>{k.riskNote}</small>}
                       </span>
                       <span className={`status-pill risk-${k.riskLevel}`}>
                         {RISK_LABEL[k.riskLevel]}

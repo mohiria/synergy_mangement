@@ -198,20 +198,6 @@ func TestMyWorkWaitingApprovalCopy(t *testing.T) {
 	}
 }
 
-// AC-05：KR 风险一行原因——有开放卡点时取首个卡点事实，否则风险等级非正常时给通用说明。
-func TestKrRiskNote(t *testing.T) {
-	if got := KrRiskNote("normal", nil); got != "" {
-		t.Fatalf("正常且无卡点不应有原因: %q", got)
-	}
-	if got := KrRiskNote("warning", nil); got != "存在待处理的风险因素" {
-		t.Fatalf("预警无卡点应给通用说明: %q", got)
-	}
-	notes := []string{"缺 现场数据包：上游未交付"}
-	if got := KrRiskNote("normal", notes); got != "缺 现场数据包：上游未交付" {
-		t.Fatalf("有卡点应取首个卡点事实: %q", got)
-	}
-}
-
 // AC-19：报告时间范围解析。
 func TestReportRangeFrom(t *testing.T) {
 	now := time.Date(2026, 9, 10, 15, 30, 0, 0, time.UTC)

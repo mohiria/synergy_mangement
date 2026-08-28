@@ -136,7 +136,7 @@ func (q *Queries) DecidePoolReview(ctx context.Context, arg DecidePoolReviewPara
 }
 
 const getKeyResultInProject = `-- name: GetKeyResultInProject :one
-SELECT k.id, k.objective_id, k.description, k.metric, k.owner_id, k.start_date, k.end_date, k.risk_level, k.sort_order, k.created_at, o.project_id
+SELECT k.id, k.objective_id, k.description, k.metric, k.owner_id, k.start_date, k.end_date, k.sort_order, k.created_at, o.project_id
 FROM key_results k
 JOIN objectives o ON o.id = k.objective_id
 WHERE k.id = $1 AND o.project_id = $2
@@ -155,7 +155,6 @@ type GetKeyResultInProjectRow struct {
 	OwnerID     pgtype.Int8
 	StartDate   pgtype.Date
 	EndDate     pgtype.Date
-	RiskLevel   string
 	SortOrder   int32
 	CreatedAt   pgtype.Timestamptz
 	ProjectID   int64
@@ -173,7 +172,6 @@ func (q *Queries) GetKeyResultInProject(ctx context.Context, arg GetKeyResultInP
 		&i.OwnerID,
 		&i.StartDate,
 		&i.EndDate,
-		&i.RiskLevel,
 		&i.SortOrder,
 		&i.CreatedAt,
 		&i.ProjectID,

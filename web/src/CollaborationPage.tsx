@@ -689,14 +689,11 @@ export default function CollaborationPage({
     </aside>
   );
 
-  // CR-21 KR 节点三态：高风险或存在结构化卡点归红态，预警归橙态，其余灰态；
-  // 两个都是 API 派生事实（riskLevel、openBlockerCount），这里只做视觉映射，不重算规则。
-  const krVisualState = (krId: number): "normal" | "warning" | "high_risk" => {
-    const k = krById.get(krId);
-    if (!k) return "normal";
-    if (k.riskLevel === "high_risk" || (k.openBlockerCount ?? 0) > 0) return "high_risk";
-    return k.riskLevel === "warning" ? "warning" : "normal";
-  };
+  // CR-21 KR 节点三态：高风险归红态，预警归橙态，其余灰态。
+  // riskLevel 本身已由后端读时派生（卡点等级、超期、临期取最大值），前端不再叠加卡点数
+  // 重算——否则预警级卡点会被画成红色描边，与文字标签自相矛盾。
+  const krVisualState = (krId: number): "normal" | "warning" | "high_risk" =>
+    krById.get(krId)?.riskLevel ?? "normal";
 
   // AC-08 新口径：KR 节点只显示编号与名称、风险状态和非零卡点数；
   // CR-21：预警／高风险再叠一个「!」标记，不只靠描边颜色区分。

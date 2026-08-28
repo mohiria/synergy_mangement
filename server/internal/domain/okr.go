@@ -21,9 +21,6 @@ var (
 	ErrKrPeriodInverted      = errors.New("KR 截止日期不能早于开始日期")
 )
 
-// DefaultKrRiskLevel 新建 KR 的初始风险等级（词汇表：风险等级；创建弹窗不提供设置入口）。
-const DefaultKrRiskLevel = "normal"
-
 // NewKeyResult 待创建的 KR 输入（词汇表：KR）。
 type NewKeyResult struct {
 	Description string

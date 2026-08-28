@@ -2758,6 +2758,24 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 		t.Fatalf("任务超期应为高风险: %+v", got[overdueKey])
 	}
 
+	// R5／U3：KR 风险等级是读时派生值，真实路径（任务超期）就能产生高风险，
+	// 且总览（objectives）与报告读同一份派生结果，原因行与等级同源。
+	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	derivedKr := decodeBody[[]api.Objective](t, resp)[0].KeyResults[0]
+	if derivedKr.RiskLevel != api.HighRisk {
+		t.Fatalf("KR 下有超期任务时应派生高风险: %+v", derivedKr)
+	}
+	if derivedKr.RiskNote == nil || !strings.Contains(*derivedKr.RiskNote, "任务超期") {
+		t.Fatalf("高风险 KR 的原因行应来自抬高等级的那条卡点: %+v", derivedKr.RiskNote)
+	}
+	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/report?range=all", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	reportKrs := decodeBody[api.Report](t, resp).KrProgress
+	if len(reportKrs) != 1 || reportKrs[0].RiskLevel != derivedKr.RiskLevel {
+		t.Fatalf("报告的 KR 风险等级应与总览同源: %+v", reportKrs)
+	}
+
 	// 任务列表按派生结果给出卡点计数（下游两条：上游未就绪 + 超期）。
 	resp = doJSON(t, carol, http.MethodGet, tasksURL, nil)
 	wantStatus(t, resp, http.StatusOK)

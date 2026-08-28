@@ -145,7 +145,6 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 				OwnerID:     toPgInt8(k.OwnerId),
 				StartDate:   toPgDate(k.StartDate),
 				EndDate:     toPgDate(k.EndDate),
-				RiskLevel:   domain.DefaultKrRiskLevel,
 			})
 			if err != nil {
 				writeInternalError(w, r, err)

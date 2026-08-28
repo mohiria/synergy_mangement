@@ -144,7 +144,6 @@ type KeyResult struct {
 	OwnerID     pgtype.Int8
 	StartDate   pgtype.Date
 	EndDate     pgtype.Date
-	RiskLevel   string
 	SortOrder   int32
 	CreatedAt   pgtype.Timestamptz
 }

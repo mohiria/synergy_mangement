@@ -12,9 +12,9 @@ import (
 )
 
 const createKeyResult = `-- name: CreateKeyResult :one
-INSERT INTO key_results (objective_id, description, metric, owner_id, start_date, end_date, risk_level, sort_order)
-VALUES ($1, $2, $3, $4, $5, $6, $7, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM key_results WHERE objective_id = $1))
-RETURNING id, objective_id, description, metric, owner_id, start_date, end_date, risk_level, sort_order, created_at
+INSERT INTO key_results (objective_id, description, metric, owner_id, start_date, end_date, sort_order)
+VALUES ($1, $2, $3, $4, $5, $6, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM key_results WHERE objective_id = $1))
+RETURNING id, objective_id, description, metric, owner_id, start_date, end_date, sort_order, created_at
 `
 
 type CreateKeyResultParams struct {
@@ -24,7 +24,6 @@ type CreateKeyResultParams struct {
 	OwnerID     pgtype.Int8
 	StartDate   pgtype.Date
 	EndDate     pgtype.Date
-	RiskLevel   string
 }
 
 func (q *Queries) CreateKeyResult(ctx context.Context, arg CreateKeyResultParams) (KeyResult, error) {
@@ -35,7 +34,6 @@ func (q *Queries) CreateKeyResult(ctx context.Context, arg CreateKeyResultParams
 		arg.OwnerID,
 		arg.StartDate,
 		arg.EndDate,
-		arg.RiskLevel,
 	)
 	var i KeyResult
 	err := row.Scan(
@@ -46,7 +44,6 @@ func (q *Queries) CreateKeyResult(ctx context.Context, arg CreateKeyResultParams
 		&i.OwnerID,
 		&i.StartDate,
 		&i.EndDate,
-		&i.RiskLevel,
 		&i.SortOrder,
 		&i.CreatedAt,
 	)
@@ -105,7 +102,7 @@ func (q *Queries) GetObjective(ctx context.Context, arg GetObjectiveParams) (Obj
 }
 
 const listKeyResultsByProject = `-- name: ListKeyResultsByProject :many
-SELECT kr.id, kr.objective_id, kr.description, kr.metric, kr.owner_id, kr.start_date, kr.end_date, kr.risk_level, kr.sort_order, kr.created_at, u.display_name AS owner_name
+SELECT kr.id, kr.objective_id, kr.description, kr.metric, kr.owner_id, kr.start_date, kr.end_date, kr.sort_order, kr.created_at, u.display_name AS owner_name
 FROM key_results kr
 JOIN objectives o ON o.id = kr.objective_id
 LEFT JOIN users u ON u.id = kr.owner_id
@@ -121,7 +118,6 @@ type ListKeyResultsByProjectRow struct {
 	OwnerID     pgtype.Int8
 	StartDate   pgtype.Date
 	EndDate     pgtype.Date
-	RiskLevel   string
 	SortOrder   int32
 	CreatedAt   pgtype.Timestamptz
 	OwnerName   pgtype.Text
@@ -145,7 +141,6 @@ func (q *Queries) ListKeyResultsByProject(ctx context.Context, projectID int64) 
 			&i.OwnerID,
 			&i.StartDate,
 			&i.EndDate,
-			&i.RiskLevel,
 			&i.SortOrder,
 			&i.CreatedAt,
 			&i.OwnerName,

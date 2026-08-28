@@ -23,6 +23,6 @@ VALUES ($1, $2, $3, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM objectives WHE
 RETURNING *;
 
 -- name: CreateKeyResult :one
-INSERT INTO key_results (objective_id, description, metric, owner_id, start_date, end_date, risk_level, sort_order)
-VALUES ($1, $2, $3, $4, $5, $6, $7, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM key_results WHERE objective_id = $1))
+INSERT INTO key_results (objective_id, description, metric, owner_id, start_date, end_date, sort_order)
+VALUES ($1, $2, $3, $4, $5, $6, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM key_results WHERE objective_id = $1))
 RETURNING *;

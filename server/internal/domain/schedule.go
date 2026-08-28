@@ -36,3 +36,13 @@ func Started(start *time.Time, now time.Time) bool {
 	}
 	return !now.Before(dayStart(*start))
 }
+
+// DueSoon 判定是否临期：未超期，且距截止日不足 days 个自然日（项目时区）。
+// days 取项目规则设置的「临期阈值」（默认 3 天，AC-60）。
+func DueSoon(due *time.Time, now time.Time, days int) bool {
+	if due == nil || days <= 0 || Overdue(due, now) {
+		return false
+	}
+	last := dayStart(now.In(ProjectLocation)).AddDate(0, 0, days-1)
+	return !dayStart(*due).After(last)
+}

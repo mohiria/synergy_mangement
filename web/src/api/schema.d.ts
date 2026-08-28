@@ -1097,7 +1097,7 @@ export interface components {
             role: components["schemas"]["MemberRole"];
         };
         /**
-         * @description 风险等级（正常／预警／高风险），见词汇表「风险等级」；不由任务生命周期状态自动推导
+         * @description 风险等级（正常／预警／高风险），见词汇表「风险等级」；读时派生值，不落库、无写入路径（KR 取「下级任务未解除卡点最高等级、超期、临期」的最大值，PRD §5.7）
          * @enum {string}
          */
         RiskLevel: "normal" | "warning" | "high_risk";
@@ -1130,7 +1130,7 @@ export interface components {
             riskLevel: components["schemas"]["RiskLevel"];
             sortOrder: number;
             progressSummary?: components["schemas"]["ProgressSummary"];
-            /** @description 预警／高风险的一行原因（派生字段；来自 KR 下任务的开放卡点，AC-05） */
+            /** @description 预警／高风险的一行原因（派生字段；与 riskLevel 同源，来自抬高等级的那条卡点或临期／超期事实。正常态不返回，AC-05） */
             riskNote?: string;
             /** @description KR 下任务的派生卡点数量（派生字段；图谱 KR 节点展示，AC-08） */
             openBlockerCount?: number;

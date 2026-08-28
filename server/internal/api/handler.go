@@ -576,7 +576,6 @@ func (s *Server) CreateOkrBatch(w http.ResponseWriter, r *http.Request, projectI
 				OwnerID:     toPgInt8(k.OwnerID),
 				StartDate:   toPgDateFromTime(k.Start),
 				EndDate:     toPgDateFromTime(k.End),
-				RiskLevel:   domain.DefaultKrRiskLevel,
 			})
 			if err != nil {
 				writeInternalError(w, r, err)
@@ -618,27 +617,41 @@ func (s *Server) okrList(ctx context.Context, projectID int64) ([]Objective, err
 			Progress: fromPgInt4(row.Progress),
 		})
 	}
-	// KR 行的一行风险原因（AC-05）：来自 KR 下任务的派生卡点事实。
-	taskRowsForNotes, err := s.q.ListProjectTasks(ctx, projectID)
+	// KR 风险等级与一行原因（AC-05、PRD §5.7）：读时派生，事实来自 KR 下任务的
+	// 卡点与日期，规则在 domain；临期阈值取项目规则设置（AC-60）。
+	taskRows, err := s.q.ListProjectTasks(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
-	krByTask := make(map[int64]int64, len(taskRowsForNotes))
-	for _, t := range taskRowsForNotes {
+	krByTask := make(map[int64]int64, len(taskRows))
+	riskTasksByKr := make(map[int64][]domain.RiskTaskFact)
+	for _, t := range taskRows {
 		krByTask[t.ID] = t.KeyResultID
+		riskTasksByKr[t.KeyResultID] = append(riskTasksByKr[t.KeyResultID], domain.RiskTaskFact{
+			ID:      t.ID,
+			Name:    t.Name,
+			Status:  t.Status,
+			EndDate: pgDateAsTime(t.EndDate),
+		})
 	}
 	blockers, err := s.projectBlockers(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
-	notesByKr := make(map[int64][]string)
+	blockersByKr := make(map[int64][]domain.Blocker)
 	for _, b := range blockers {
 		krID := krByTask[b.TaskID]
-		notesByKr[krID] = append(notesByKr[krID], "缺 "+b.Missing+"："+b.Reason)
+		blockersByKr[krID] = append(blockersByKr[krID], b)
 	}
+	settings, err := s.projectSettings(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	now := s.now()
 	byObjective := make(map[int64][]KeyResult, len(objectives))
 	for _, k := range krs {
 		summary := domain.ProgressCoverage(factsByKr[k.ID])
+		risk := domain.DeriveKrRisk(now, settings.DueSoonDays, riskTasksByKr[k.ID], blockersByKr[k.ID])
 		byObjective[k.ObjectiveID] = append(byObjective[k.ObjectiveID], KeyResult{
 			Id:          k.ID,
 			ObjectiveId: k.ObjectiveID,
@@ -648,16 +661,16 @@ func (s *Server) okrList(ctx context.Context, projectID int64) ([]Objective, err
 			OwnerName:   fromPgText(k.OwnerName),
 			StartDate:   fromPgDate(k.StartDate),
 			EndDate:     fromPgDate(k.EndDate),
-			RiskLevel:   RiskLevel(k.RiskLevel),
+			RiskLevel:   RiskLevel(risk.Level),
 			SortOrder:   int(k.SortOrder),
 			ProgressSummary: &ProgressSummary{
 				TotalTasks:      summary.TotalTasks,
 				FilledTasks:     summary.FilledTasks,
 				AverageProgress: summary.AverageProgress,
 			},
-			RiskNote: optString(domain.KrRiskNote(k.RiskLevel, notesByKr[k.ID])),
+			RiskNote: optString(risk.Note),
 			OpenBlockerCount: func() *int {
-				n := len(notesByKr[k.ID])
+				n := len(blockersByKr[k.ID])
 				if n == 0 {
 					return nil
 				}
@@ -843,6 +856,15 @@ func toPgDate(d *openapi_types.Date) pgtype.Date {
 		return pgtype.Date{}
 	}
 	return pgtype.Date{Time: d.Time, Valid: true}
+}
+
+// pgDateAsTime 把库里的 DATE 转成 domain 判定用的时刻指针（日期部分即可，时区判定在 domain）。
+func pgDateAsTime(d pgtype.Date) *time.Time {
+	if !d.Valid {
+		return nil
+	}
+	t := d.Time
+	return &t
 }
 
 func fromPgDate(d pgtype.Date) *openapi_types.Date {
