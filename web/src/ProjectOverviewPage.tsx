@@ -195,10 +195,10 @@ export default function ProjectOverviewPage({
                           {fmtDate(k.endDate)} · 量化指标：{k.metric ?? "待补充"}
                           {k.progressSummary && k.progressSummary.totalTasks > 0 && (
                             <>
-                              　·　{k.progressSummary.filledTasks}／{k.progressSummary.totalTasks}
-                              个任务已填写进度
                               {k.progressSummary.averageProgress != null &&
-                                `，平均 ${k.progressSummary.averageProgress}%`}
+                                `　·　平均 ${k.progressSummary.averageProgress}%`}
+                              　·　其中 {k.progressSummary.filledTasks}／
+                              {k.progressSummary.totalTasks} 个任务由负责人填写，未填按 0 计入
                             </>
                           )}
                         </div>

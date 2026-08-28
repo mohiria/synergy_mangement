@@ -1188,12 +1188,12 @@ func TestTaskStatusAndProgress(t *testing.T) {
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 
-	// KR 覆盖度：2 个入池任务、1 个已填，平均 45
+	// KR 汇总（AC-63）：2 个入池任务、1 个已填 45、1 个未填按 0 计入 → 平均 23
 	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id), nil)
 	wantStatus(t, resp, http.StatusOK)
 	okr = decodeBody[[]api.Objective](t, resp)
 	summary := okr[0].KeyResults[0].ProgressSummary
-	if summary == nil || summary.TotalTasks != 2 || summary.FilledTasks != 1 || summary.AverageProgress == nil || *summary.AverageProgress != 45 {
+	if summary == nil || summary.TotalTasks != 2 || summary.FilledTasks != 1 || summary.AverageProgress == nil || *summary.AverageProgress != 23 {
 		t.Fatalf("KR 覆盖度异常: %+v", summary)
 	}
 
@@ -1246,7 +1246,9 @@ func TestTaskStatusAndProgress(t *testing.T) {
 	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id), nil)
 	wantStatus(t, resp, http.StatusOK)
 	okr = decodeBody[[]api.Objective](t, resp)
-	if s2 := okr[0].KeyResults[0].ProgressSummary; s2 == nil || s2.TotalTasks != 1 || s2.FilledTasks != 0 || s2.AverageProgress != nil {
+	// AC-63：已取消整体剔除，剩下的一个任务未填进度按 0 计入
+	if s2 := okr[0].KeyResults[0].ProgressSummary; s2 == nil || s2.TotalTasks != 1 || s2.FilledTasks != 0 ||
+		s2.AverageProgress == nil || *s2.AverageProgress != 0 {
 		t.Fatalf("取消后覆盖度异常: %+v", okr[0].KeyResults[0].ProgressSummary)
 	}
 
@@ -1981,6 +1983,17 @@ func TestCompletionReviewFlow(t *testing.T) {
 	if done.Status != api.TaskStatusCompleted || done.CurrentStage != "已闭环" {
 		t.Fatalf("终审通过后任务应完成: %+v", done)
 	}
+	// AC-63：完成即 100% 并锁定编辑
+	if done.Progress == nil || *done.Progress != 100 {
+		t.Fatalf("终审通过后进度应置 100: %+v", done.Progress)
+	}
+	if done.CanUpdateProgress {
+		t.Fatal("已完成任务不应再显示进度编辑入口")
+	}
+	resp = doJSON(t, carol, http.MethodPut, fmt.Sprintf("%s/%d/progress", tasksURL, taskID),
+		api.UpdateTaskProgressRequest{Progress: func(v int) *int { return &v }(60)})
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
 	resp = doJSON(t, alice, http.MethodGet, detailURL, nil)
 	wantStatus(t, resp, http.StatusOK)
 	detail = decodeBody[api.TaskDetail](t, resp)

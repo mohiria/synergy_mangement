@@ -514,9 +514,9 @@ export default function ProjectTasksPage({
           </span>
           {kr.progressSummary && kr.progressSummary.totalTasks > 0 && (
             <span className="muted" style={{ fontWeight: 400 }}>
-              {kr.progressSummary.filledTasks}／{kr.progressSummary.totalTasks} 个任务已填写进度
               {kr.progressSummary.averageProgress != null &&
-                `，平均 ${kr.progressSummary.averageProgress}%`}
+                `平均 ${kr.progressSummary.averageProgress}%　·　`}
+              其中 {kr.progressSummary.filledTasks}／{kr.progressSummary.totalTasks} 个任务由负责人填写，未填按 0 计入
             </span>
           )}
         </div>

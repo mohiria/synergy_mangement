@@ -174,7 +174,7 @@ export default function ReportsPage({
                         </span>
                       </td>
                       <td>
-                        {k.filledTasks}／{k.totalTasks} 已填进度
+                        {k.filledTasks}／{k.totalTasks} 由负责人填写
                         {k.averageProgress != null && `，平均 ${k.averageProgress}%`}
                       </td>
                       <td>{k.completedInRange} 项</td>

@@ -414,6 +414,11 @@ func (s *Server) UpdateTaskProgress(w http.ResponseWriter, r *http.Request, proj
 		return
 	}
 	if !domain.CanUpdateProgress(actor, uid, facts) {
+		if facts.Status == domain.TaskCompleted {
+			// AC-63：完成终审通过后进度锁定为 100%，不再接受写入。
+			writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: "任务已完成，进度锁定为 100%"})
+			return
+		}
 		if facts.Status != domain.TaskInProgress {
 			writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: "仅进行中的任务可以更新进度"})
 			return
@@ -782,7 +787,7 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 			Status:              TaskStatus(t.Status),
 			Description:         optString(t.Description),
 			CompletionCriteria:  optString(t.CompletionCriteria),
-			Progress:            fromPgInt4(t.Progress),
+			Progress:            domain.DisplayProgress(t.Status, fromPgInt4(t.Progress)),
 			CancelReason:        optString(t.CancelReason),
 			CanStart:            domain.CanStartTask(actor, userID, facts),
 			CanUpdateProgress:   domain.CanUpdateProgress(actor, userID, facts),

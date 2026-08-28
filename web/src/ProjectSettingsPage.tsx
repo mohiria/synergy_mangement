@@ -234,8 +234,8 @@ export default function ProjectSettingsPage({
             </div>
           </div>
           {error && <Alert type="error" message={error} style={{ marginBottom: 16 }} />}
-          {/* settings-layout：左侧分节导航、右侧内容卡。原型另有进度权重、导入记录与
-              操作审计三节，本版没有对应数据模型，故不列入导航。 */}
+          {/* settings-layout：左侧分节导航、右侧内容卡。原型的「进度权重」一节已随
+              AC-63 裁决取消（KR 汇总固定任务等权）；导入记录与操作审计另见 #64／#68。 */}
           <div className="settings-layout">
             <aside className="settings-nav">
               <button

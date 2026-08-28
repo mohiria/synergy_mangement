@@ -228,6 +228,16 @@ func (s *Server) DecideCompletion(w http.ResponseWriter, r *http.Request, projec
 		writeInternalError(w, r, err)
 		return
 	}
+	if approve {
+		// AC-63：完成终审通过时进度置 100 并锁定——任务只有一个进度事实。
+		done := domain.CompletedProgress()
+		if _, err := qtx.UpdateTaskProgress(r.Context(), store.UpdateTaskProgressParams{
+			ID: taskId, Progress: toPgInt4(&done),
+		}); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+	}
 	// MW-09：终审通过后为每位接收方生成待接收项（「所有项目成员」按当时成员逐人生成）。
 	if approve {
 		if err := generateReceipts(r.Context(), qtx, projectId, taskId, task.ReceiverScope); err != nil {

@@ -55,6 +55,30 @@ func TestStartTask(t *testing.T) {
 	}
 }
 
+// AC-63：完成终审通过时进度置 100 并锁定编辑；已完成任务不再接受进度写入。
+func TestProgressLockedAfterCompletion(t *testing.T) {
+	completed := TaskFacts{Status: TaskCompleted, OwnerID: 5, CreatorID: 5, KrOwnerID: i64(7)}
+	if CanUpdateProgress(Actor{Role: RoleMember}, 5, completed) {
+		t.Fatal("已完成任务的进度不应可编辑")
+	}
+	if CanUpdateProgress(Actor{Role: RoleAdmin}, 9, completed) {
+		t.Fatal("管理员也不应改已完成任务的进度")
+	}
+	if got := CompletedProgress(); got != 100 {
+		t.Fatalf("完成即 100，got %d", got)
+	}
+	// 显示进度同源：已完成一律显示 100，未填显示未填（页面不把 0 说成负责人填的值）。
+	if got := DisplayProgress(TaskCompleted, nil); got == nil || *got != 100 {
+		t.Fatalf("已完成任务应显示 100，got %v", got)
+	}
+	if got := DisplayProgress(TaskInProgress, nil); got != nil {
+		t.Fatalf("未填进度不应虚构，got %v", *got)
+	}
+	if got := DisplayProgress(TaskInProgress, ip(40)); got == nil || *got != 40 {
+		t.Fatalf("已填进度应原样显示，got %v", got)
+	}
+}
+
 // §5.1／AC-57：取消原因必填。
 func TestValidateCancelReason(t *testing.T) {
 	if err := ValidateCancelReason("需求变更不再执行"); err != nil {
@@ -104,21 +128,30 @@ func TestProgressCoverage(t *testing.T) {
 		{"草稿与待审批不计入", []TaskProgressFact{
 			{Status: TaskDraft}, {Status: TaskPendingPoolReview, Progress: ip(50)},
 		}, 0, 0, nil},
+		// AC-63：已取消整体剔除，既不进分子也不进分母。
 		{"已取消不计入", []TaskProgressFact{
 			{Status: TaskCancelled, Progress: ip(80)}, {Status: TaskNotStarted},
-		}, 1, 0, nil},
-		{"未填任务不虚构百分比", []TaskProgressFact{
+		}, 1, 0, ip(0)},
+		// AC-63：未填按 0 计入分子与分母，覆盖度只数真实填写。
+		{"未填按 0 计入", []TaskProgressFact{
 			{Status: TaskInProgress}, {Status: TaskNotStarted},
-		}, 2, 0, nil},
-		{"等权平均且四舍五入", []TaskProgressFact{
+		}, 2, 0, ip(0)},
+		{"未填拉低平均值", []TaskProgressFact{
 			{Status: TaskInProgress, Progress: ip(30)},
 			{Status: TaskInProgress, Progress: ip(45)},
 			{Status: TaskNotStarted},
-		}, 3, 2, ip(38)},
-		{"完成态计入覆盖度", []TaskProgressFact{
-			{Status: TaskCompleted, Progress: ip(100)},
+		}, 3, 2, ip(25)},
+		// AC-63：已完成即 100，不看库里存了什么。
+		{"已完成一律按 100", []TaskProgressFact{
+			{Status: TaskCompleted, Progress: ip(60)},
 			{Status: TaskPendingFinalReview, Progress: ip(90)},
 		}, 2, 2, ip(95)},
+		{"四种任务混合", []TaskProgressFact{
+			{Status: TaskCompleted, Progress: ip(60)},
+			{Status: TaskInProgress, Progress: ip(40)},
+			{Status: TaskNotStarted},
+			{Status: TaskCancelled, Progress: ip(100)},
+		}, 3, 2, ip(47)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

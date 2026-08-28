@@ -51,7 +51,7 @@ func ValidateCancelReason(reason string) error {
 }
 
 // CanUpdateProgress 判定能否更新进度：负责人填写真实情况（§5.6），管理员／项目负责人可全局纠错；
-// 仅执行中状态可改（未开始不产生进度，完成态由终审定论）。
+// 仅执行中状态可改——未开始不产生进度，已完成由终审定论并锁定为 100（AC-63）。
 func CanUpdateProgress(a Actor, userID int64, t TaskFacts) bool {
 	if !CanWriteProject(a) || t.Status != TaskInProgress {
 		return false
@@ -59,8 +59,10 @@ func CanUpdateProgress(a Actor, userID int64, t TaskFacts) bool {
 	return userID == t.OwnerID || CanEditProject(a)
 }
 
-// ProgressCoverage 计算 KR 层进度数据覆盖度：只统计已入池且未取消的任务，
-// 平均值任务等权、只算已填任务、四舍五入；不为未填任务虚构百分比（AC-12）。
+// ProgressCoverage 计算 KR 层进度汇总与数据覆盖度（AC-12、AC-63、§5.6）：
+// 统计范围是已入池且未取消的任务，已取消整体剔除（不进分子也不进分母）；
+// 分母为该范围内全部任务、任务等权，未填按 0 计入，已完成一律按 100；
+// FilledTasks 只数真实填写，用来说明这个平均值里有多少来自负责人填的值。
 func ProgressCoverage(tasks []TaskProgressFact) ProgressSummaryFacts {
 	out := ProgressSummaryFacts{}
 	sum := 0
@@ -70,13 +72,19 @@ func ProgressCoverage(tasks []TaskProgressFact) ProgressSummaryFacts {
 			continue
 		}
 		out.TotalTasks++
+		if t.Status == TaskCompleted {
+			// 完成即 100：任务只有一个进度事实，不看库里存了什么。
+			sum += CompletedProgress()
+			out.FilledTasks++
+			continue
+		}
 		if t.Progress != nil {
 			out.FilledTasks++
 			sum += *t.Progress
 		}
 	}
-	if out.FilledTasks > 0 {
-		avg := (sum + out.FilledTasks/2) / out.FilledTasks
+	if out.TotalTasks > 0 {
+		avg := (sum + out.TotalTasks/2) / out.TotalTasks
 		out.AverageProgress = &avg
 	}
 	return out
@@ -97,4 +105,17 @@ func CanStartTask(a Actor, userID int64, t TaskFacts) bool {
 func CanCancelTask(a Actor, userID int64, t TaskFacts, hasPendingChange bool) bool {
 	_, err := CancelRoute(a, userID, t, hasPendingChange)
 	return err == nil
+}
+
+// CompletedProgress 完成终审通过时写入并锁定的进度（AC-63：完成即 100%）。
+func CompletedProgress() int { return 100 }
+
+// DisplayProgress 页面展示用的进度（AC-63、§5.6）：已完成一律 100；
+// 其余状态原样返回负责人填的值，未填就是未填——不把汇总里的 0 显示成负责人填的值。
+func DisplayProgress(status string, stored *int) *int {
+	if status == TaskCompleted {
+		v := CompletedProgress()
+		return &v
+	}
+	return stored
 }
