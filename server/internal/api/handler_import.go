@@ -34,7 +34,7 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 	}
 	members, err := s.q.ListProjectMembers(r.Context(), projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	memberSet := make(map[int64]bool, len(members))
@@ -97,7 +97,7 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 				writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_objective", Message: "所属 O 不存在"})
 				return
 			}
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 	}
@@ -105,7 +105,7 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 	// 整批一个事务：O → KR → 任务草稿（含预期交付物项）。
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
@@ -125,7 +125,7 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 			}
 			o, err := qtx.CreateObjective(r.Context(), store.CreateObjectiveParams{ProjectID: projectId, Title: title, Description: desc})
 			if err != nil {
-				writeInternalError(w)
+				writeInternalError(w, r, err)
 				return
 			}
 			objectiveID = o.ID
@@ -148,7 +148,7 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 				RiskLevel:   domain.DefaultKrRiskLevel,
 			})
 			if err != nil {
-				writeInternalError(w)
+				writeInternalError(w, r, err)
 				return
 			}
 			if k.Tasks == nil {
@@ -165,13 +165,13 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 					CreatedBy:   uid,
 				})
 				if err != nil {
-					writeInternalError(w)
+					writeInternalError(w, r, err)
 					return
 				}
 				if tk.ExpectedDeliverable != nil {
 					if dn := strings.TrimSpace(*tk.ExpectedDeliverable); dn != "" {
 						if _, err := qtx.CreateDeliverable(r.Context(), store.CreateDeliverableParams{TaskID: task.ID, Name: dn, CreatedBy: uid}); err != nil {
-							writeInternalError(w)
+							writeInternalError(w, r, err)
 							return
 						}
 					}
@@ -180,17 +180,17 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	objectives, err := s.okrList(r.Context(), projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	tasks, err := s.taskList(r.Context(), projectId, uid, actor)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, ImportResult{Objectives: objectives, Tasks: tasks})
@@ -234,28 +234,28 @@ func (s *Server) BatchSubmitPool(w http.ResponseWriter, r *http.Request, project
 	}
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
 	qtx := s.q.WithTx(tx)
 	for _, tg := range targets {
 		if _, err := qtx.UpdateTaskStatus(r.Context(), store.UpdateTaskStatusParams{ID: tg.id, Status: domain.TaskPendingPoolReview}); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 		if _, err := qtx.CreatePoolReview(r.Context(), store.CreatePoolReviewParams{TaskID: tg.id, SubmittedBy: uid, Status: domain.PoolReviewPending}); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	resp, err := s.taskList(r.Context(), projectId, uid, actor)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -288,14 +288,14 @@ func (s *Server) BatchDecidePool(w http.ResponseWriter, r *http.Request, project
 	// 规则与写入同事务：逐个锁任务行后再重读事实，整批要么一起生效要么一起回滚（R2）。
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
 	qtx := s.q.WithTx(tx)
 	targets := []target{}
 	for _, id := range req.TaskIds {
-		task, facts, ok := lockTaskFacts(r.Context(), w, qtx, projectId, id)
+		task, facts, ok := lockTaskFacts(r, w, qtx, projectId, id)
 		if !ok {
 			return
 		}
@@ -310,7 +310,7 @@ func (s *Server) BatchDecidePool(w http.ResponseWriter, r *http.Request, project
 		}
 		review, err := qtx.GetLatestPoolReview(r.Context(), id)
 		if err != nil || review.Status != domain.PoolReviewPending {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 		targets = append(targets, target{taskID: id, reviewID: review.ID, newStatus: newStatus})
@@ -323,16 +323,16 @@ func (s *Server) BatchDecidePool(w http.ResponseWriter, r *http.Request, project
 		if _, err := qtx.DecidePoolReview(r.Context(), store.DecidePoolReviewParams{
 			ID: tg.reviewID, Status: reviewStatus, Opinion: opinion, DecidedBy: pgtype.Int8{Int64: uid, Valid: true},
 		}); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 		if _, err := qtx.UpdateTaskStatus(r.Context(), store.UpdateTaskStatusParams{ID: tg.taskID, Status: tg.newStatus}); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	// 入池通过的任务补发输入请求通知（与单条路径一致）。
@@ -345,7 +345,7 @@ func (s *Server) BatchDecidePool(w http.ResponseWriter, r *http.Request, project
 	}
 	resp, err := s.taskList(r.Context(), projectId, uid, actor)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)

@@ -24,7 +24,7 @@ func (s *Server) ListTasks(w http.ResponseWriter, r *http.Request, projectId int
 	uid := currentUser(r).ID
 	resp, err := s.taskList(r.Context(), projectId, uid, projectActor(uid, proj.OwnerID, proj.MyRole))
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -48,7 +48,7 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 	}
 	members, err := s.q.ListProjectMembers(r.Context(), projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	memberSet := make(map[int64]bool, len(members))
@@ -68,7 +68,7 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 				writeJSON(w, http.StatusNotFound, Error{Code: "invite_not_found", Message: "邀请不存在"})
 				return
 			}
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 		itemKrIDs := make([]int64, 0, len(req.Items))
@@ -96,7 +96,7 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 				writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_key_result", Message: "所属 KR 不存在"})
 				return
 			}
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 		krOwners[i] = fromPgInt8(kr.OwnerID)
@@ -121,7 +121,7 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 	// 整批一个事务：全部成功或全部失败。
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
@@ -142,7 +142,7 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 			CreatedBy:   uid,
 		})
 		if err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 		created = append(created, createdTask{id: task.ID, exempt: exempt, submitted: req.SubmitForReview})
@@ -166,14 +166,14 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 			})
 		}
 		if err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 		// 预期交付物（原型创建弹窗列）：随任务建立对应交付物项。
 		if item.ExpectedDeliverable != nil {
 			if dn := strings.TrimSpace(*item.ExpectedDeliverable); dn != "" {
 				if _, err := qtx.CreateDeliverable(r.Context(), store.CreateDeliverableParams{TaskID: task.ID, Name: dn, CreatedBy: uid}); err != nil {
-					writeInternalError(w)
+					writeInternalError(w, r, err)
 					return
 				}
 			}
@@ -182,12 +182,12 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 	if req.TaskInviteId != nil {
 		// 邀请随本批提交一并完成（词汇表：受邀人通过该邀请提交关联任务的入池申请后结束）。
 		if _, err := qtx.UpdateTaskInviteState(r.Context(), store.UpdateTaskInviteStateParams{ID: invite.ID, State: domain.TaskInviteCompleted}); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	// 新建任务的入池留痕：免审记「入池审批通过」并带免审原因，提交待审记「提交入池审批」。
@@ -202,7 +202,7 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 	}
 	resp, err := s.taskList(r.Context(), projectId, uid, actor)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, resp)
@@ -241,13 +241,13 @@ func (s *Server) SubmitTaskPoolReview(w http.ResponseWriter, r *http.Request, pr
 	}
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
 	qtx := s.q.WithTx(tx)
 	if _, err := qtx.UpdateTaskStatus(r.Context(), store.UpdateTaskStatusParams{ID: taskId, Status: domain.TaskPendingPoolReview}); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	if _, err := qtx.CreatePoolReview(r.Context(), store.CreatePoolReviewParams{
@@ -255,11 +255,11 @@ func (s *Server) SubmitTaskPoolReview(w http.ResponseWriter, r *http.Request, pr
 		SubmittedBy: uid,
 		Status:      domain.PoolReviewPending,
 	}); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	s.actionActivity(r.Context(), taskId, domain.ActivityPoolSubmitted, uid, "")
@@ -288,12 +288,12 @@ func (s *Server) DecideTaskPoolReview(w http.ResponseWriter, r *http.Request, pr
 	// 规则与写入同事务：先锁任务行再重读事实，避免并发决策各自基于过期状态写库（R2）。
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
 	qtx := s.q.WithTx(tx)
-	task, facts, ok := lockTaskFacts(r.Context(), w, qtx, projectId, taskId)
+	task, facts, ok := lockTaskFacts(r, w, qtx, projectId, taskId)
 	if !ok {
 		return
 	}
@@ -308,7 +308,7 @@ func (s *Server) DecideTaskPoolReview(w http.ResponseWriter, r *http.Request, pr
 	}
 	review, err := qtx.GetLatestPoolReview(r.Context(), taskId)
 	if err != nil || review.Status != domain.PoolReviewPending {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	reviewStatus := domain.PoolReviewApproved
@@ -321,15 +321,15 @@ func (s *Server) DecideTaskPoolReview(w http.ResponseWriter, r *http.Request, pr
 		Opinion:   opinion,
 		DecidedBy: pgtype.Int8{Int64: uid, Valid: true},
 	}); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	if _, err := qtx.UpdateTaskStatus(r.Context(), store.UpdateTaskStatusParams{ID: taskId, Status: newStatus}); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	// 退回类动态带上一句话理由（MW-18）。
@@ -373,7 +373,7 @@ func (s *Server) UpdateTaskStatus(w http.ResponseWriter, r *http.Request, projec
 			return
 		}
 		if _, err := s.q.UpdateTaskStatus(r.Context(), store.UpdateTaskStatusParams{ID: taskId, Status: newStatus}); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 	case UpdateTaskStatusRequestStatusCancelled:
@@ -396,7 +396,7 @@ func (s *Server) UpdateTaskStatus(w http.ResponseWriter, r *http.Request, projec
 		if _, err := s.q.UpdateTaskStatusWithReason(r.Context(), store.UpdateTaskStatusWithReasonParams{
 			ID: taskId, Status: domain.TaskCancelled, CancelReason: reason,
 		}); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 	default:
@@ -436,7 +436,7 @@ func (s *Server) UpdateTaskProgress(w http.ResponseWriter, r *http.Request, proj
 		return
 	}
 	if _, err := s.q.UpdateTaskProgress(r.Context(), store.UpdateTaskProgressParams{ID: taskId, Progress: toPgInt4(req.Progress)}); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	s.writeTask(w, r, projectId, taskId, uid, actor)
@@ -471,53 +471,53 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 	}
 	kr, err := s.q.GetKeyResultInProject(r.Context(), store.GetKeyResultInProjectParams{ID: task.KeyResultID, ProjectID: projectId})
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	obj, err := s.q.GetObjective(r.Context(), store.GetObjectiveParams{ID: kr.ObjectiveID, ProjectID: projectId})
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	reviews, err := s.q.ListPoolReviewsByTask(r.Context(), taskId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	changeRows, err := s.q.ListFieldChangesByTask(r.Context(), taskId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	deliverables, err := s.deliverableList(r.Context(), taskId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	discussions, err := s.discussionList(r.Context(), taskId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	activities, err := s.activityList(r.Context(), taskId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	factsForReviews := domain.TaskFacts{Status: task.Status, CreatorID: task.CreatedBy, OwnerID: task.OwnerID, KrOwnerID: fromPgInt8(task.KrOwnerID)}
 	completions, err := s.completionReviewList(r.Context(), taskId, factsForReviews, uid)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	allEdges, err := s.edgeViews(r.Context(), projectId, uid, actor)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	reviewerRows, err := s.q.ListTaskReviewers(r.Context(), taskId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	reviewerViews := make([]ReviewerInfo, 0, len(reviewerRows))
@@ -526,7 +526,7 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 	}
 	allBlockers, err := s.projectBlockers(r.Context(), projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	taskBlockers := []Blocker{}
@@ -546,7 +546,7 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 	}
 	list, err := s.taskList(r.Context(), projectId, uid, actor)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	var item *Task
@@ -556,7 +556,7 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		}
 	}
 	if item == nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	// 审批显示文案需要所属 KR 负责人姓名（AC-04）。
@@ -630,7 +630,7 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 	}
 	receipts, err := s.receiptList(r.Context(), taskId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, TaskDetail{
@@ -660,7 +660,7 @@ func (s *Server) fetchTask(w http.ResponseWriter, r *http.Request, projectID, ta
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, Error{Code: "task_not_found", Message: "任务不存在"})
 		} else {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 		}
 		return store.GetTaskInProjectRow{}, domain.TaskFacts{}, false
 	}
@@ -675,13 +675,13 @@ func (s *Server) fetchTask(w http.ResponseWriter, r *http.Request, projectID, ta
 
 // lockTaskFacts 在事务内对任务行加写锁并重读事实：三道审批的决策必须在锁内重跑规则，
 // 否则并发决策会各自基于过期状态写库（或签通过与退回同时发生即可产出「已完成但无当前交付物」）。
-func lockTaskFacts(ctx context.Context, w http.ResponseWriter, qtx *store.Queries, projectID, taskID int64) (store.LockTaskInProjectRow, domain.TaskFacts, bool) {
-	task, err := qtx.LockTaskInProject(ctx, store.LockTaskInProjectParams{ID: taskID, ProjectID: projectID})
+func lockTaskFacts(r *http.Request, w http.ResponseWriter, qtx *store.Queries, projectID, taskID int64) (store.LockTaskInProjectRow, domain.TaskFacts, bool) {
+	task, err := qtx.LockTaskInProject(r.Context(), store.LockTaskInProjectParams{ID: taskID, ProjectID: projectID})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, Error{Code: "task_not_found", Message: "任务不存在"})
 		} else {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 		}
 		return store.LockTaskInProjectRow{}, domain.TaskFacts{}, false
 	}
@@ -880,7 +880,7 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 func (s *Server) writeTask(w http.ResponseWriter, r *http.Request, projectID, taskID, userID int64, actor domain.Actor) {
 	list, err := s.taskList(r.Context(), projectID, userID, actor)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	for _, t := range list {
@@ -889,7 +889,7 @@ func (s *Server) writeTask(w http.ResponseWriter, r *http.Request, projectID, ta
 			return
 		}
 	}
-	writeInternalError(w)
+	writeInternalError(w, r, err)
 }
 
 func toPoolReview(pr store.LatestPoolReviewsByProjectRow, krOwnerName string) *PoolReview {

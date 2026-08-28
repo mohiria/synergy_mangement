@@ -23,12 +23,12 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 	// 交付物边与输入请求：上游事实、未就绪标记、对接人视角。
 	edgeRows, err := s.q.ListEdgesByProject(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	requestRows, err := s.q.ListInputRequestsByProject(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	unreadyNoteByTask := unreadyRequiredInputs(edgeRows, requestRows)
@@ -37,22 +37,22 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 	// 任务事实（含显示状态与退回注记）。
 	taskRows, err := s.q.ListProjectTasks(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	poolRows, err := s.q.LatestPoolReviewsByProject(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	changeRows, err := s.q.LatestFieldChangesByProject(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	completionRows, err := s.q.LatestCompletionReviewsByProject(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	for _, t := range taskRows {
@@ -149,7 +149,7 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 		if cr.State == domain.CompletionIntermediate {
 			rvs, err := s.q.ListReviewReviewers(ctx, cr.ID)
 			if err != nil {
-				writeInternalError(w)
+				writeInternalError(w, r, err)
 				return
 			}
 			for _, rv := range rvs {
@@ -212,12 +212,12 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 	// 邀请与卡点。
 	inviteRows, err := s.q.ListProjectTaskInvites(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	krRows, err := s.q.ListKeyResultsByProject(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	krDescByID := map[int64]string{}
@@ -233,7 +233,7 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 	// 待接收项与接收记录（MW-09）：分组只按「本人且未确认」筛选，名单在终审通过时已落库。
 	receiptRows, err := s.q.ListReceiptsByProject(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	for _, rc := range receiptRows {
@@ -252,7 +252,7 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 	}
 	blockers, err := s.projectBlockers(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	facts.Blockers = blockers

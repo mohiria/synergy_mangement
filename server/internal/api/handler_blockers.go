@@ -27,7 +27,7 @@ func (s *Server) ListBlockers(w http.ResponseWriter, r *http.Request, projectId 
 	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
 	blockers, err := s.projectBlockers(r.Context(), projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, blockerViews(blockers, actor, uid))
@@ -49,7 +49,7 @@ func (s *Server) CreateReminder(w http.ResponseWriter, r *http.Request, projectI
 	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
 	targets, err := s.projectRemindTargets(r.Context(), projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	key := strings.TrimSpace(req.TargetKey)
@@ -80,7 +80,7 @@ func (s *Server) CreateReminder(w http.ResponseWriter, r *http.Request, projectI
 		}
 	case errors.Is(err, pgx.ErrNoRows):
 	default:
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	now := s.now()
@@ -91,7 +91,7 @@ func (s *Server) CreateReminder(w http.ResponseWriter, r *http.Request, projectI
 	content := domain.RemindContent(*target)
 	for _, ownerID := range target.ActionOwnerIDs {
 		if _, err := s.q.CreateNotification(r.Context(), blockerRemindNotification(ownerID, projectId, target.TaskID, content)); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 	}
@@ -99,7 +99,7 @@ func (s *Server) CreateReminder(w http.ResponseWriter, r *http.Request, projectI
 		TaskID: target.TaskID, SenderID: uid, TargetKey: key,
 		RemindDate: pgtype.Date{Time: now, Valid: true},
 	}); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

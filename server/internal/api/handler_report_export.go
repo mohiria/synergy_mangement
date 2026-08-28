@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -38,7 +39,7 @@ func (s *Server) ExportReport(w http.ResponseWriter, r *http.Request, projectId 
 	}
 	html, err := renderReportHTML(proj, report)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 
@@ -67,11 +68,11 @@ func (s *Server) ExportReport(w http.ResponseWriter, r *http.Request, projectId 
 	mw := multipart.NewWriter(&body)
 	part, err := mw.CreateFormFile("files", "index.html")
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	if _, err := part.Write([]byte(html)); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	for k, v := range fields {
@@ -81,20 +82,23 @@ func (s *Server) ExportReport(w http.ResponseWriter, r *http.Request, projectId 
 
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, gotenbergURL()+endpoint, &body)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, Error{Code: "render_unavailable", Message: "渲染服务不可用：" + err.Error()})
+		// 原因只进日志：错误串里带的是内部服务地址，不能回给用户。
+		log.Printf("[export] request_id=%s 渲染服务不可达: %v", requestIDFrom(r.Context()), err)
+		writeJSON(w, http.StatusBadGateway, Error{Code: "render_unavailable", Message: "渲染服务暂时不可用，请稍后重试"})
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 500))
-		writeJSON(w, http.StatusBadGateway, Error{Code: "render_failed", Message: "渲染失败：" + string(msg)})
+		log.Printf("[export] request_id=%s 渲染失败 status=%d body=%s", requestIDFrom(r.Context()), resp.StatusCode, string(msg))
+		writeJSON(w, http.StatusBadGateway, Error{Code: "render_failed", Message: "报告渲染失败，请稍后重试"})
 		return
 	}
 	filename := fmt.Sprintf("%s-报告", proj.Name)

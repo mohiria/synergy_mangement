@@ -40,7 +40,7 @@ func (s *Server) CreateMemberInput(w http.ResponseWriter, r *http.Request, proje
 	}
 	members, err := s.q.ListProjectMembers(r.Context(), projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	roleByID := make(map[int64]string, len(members))
@@ -62,7 +62,7 @@ func (s *Server) CreateMemberInput(w http.ResponseWriter, r *http.Request, proje
 	pooled := facts.Status != domain.TaskDraft && facts.Status != domain.TaskPendingPoolReview
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
@@ -79,7 +79,7 @@ func (s *Server) CreateMemberInput(w http.ResponseWriter, r *http.Request, proje
 			CreatedBy:    uid,
 		})
 		if err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 		notified := pgtype.Timestamptz{}
@@ -89,7 +89,7 @@ func (s *Server) CreateMemberInput(w http.ResponseWriter, r *http.Request, proje
 		if _, err := qtx.CreateInputRequest(r.Context(), store.CreateInputRequestParams{
 			EdgeID: edge.ID, ProviderID: providerID, ContentNote: input.ContentNote, NotifiedAt: notified,
 		}); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 		if pooled {
@@ -101,14 +101,14 @@ func (s *Server) CreateMemberInput(w http.ResponseWriter, r *http.Request, proje
 				ProjectID: pgtype.Int8{Int64: projectId, Valid: true},
 				TaskID:    pgtype.Int8{Int64: taskId, Valid: true},
 			}); err != nil {
-				writeInternalError(w)
+				writeInternalError(w, r, err)
 				return
 			}
 		}
 		createdIDs = append(createdIDs, edge.ID)
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	s.writeCreatedEdges(w, r, projectId, uid, actor, createdIDs)
@@ -124,7 +124,7 @@ func (s *Server) AcceptInputRequest(w http.ResponseWriter, r *http.Request, proj
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, Error{Code: "request_not_found", Message: "输入请求不存在"})
 		} else {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 		}
 		return
 	}
@@ -138,7 +138,7 @@ func (s *Server) AcceptInputRequest(w http.ResponseWriter, r *http.Request, proj
 	}
 	updated, err := s.q.AcceptInputRequest(r.Context(), requestId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, s.inputRequestView(updated, ir.ProviderName, uid))
@@ -159,7 +159,7 @@ func (s *Server) ProvideInput(w http.ResponseWriter, r *http.Request, projectId 
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, Error{Code: "request_not_found", Message: "输入请求不存在"})
 		} else {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 		}
 		return
 	}
@@ -192,7 +192,7 @@ func (s *Server) ProvideInput(w http.ResponseWriter, r *http.Request, projectId 
 		objectKey = fmt.Sprintf("input-requests/%d/%d-%s", requestId, s.now().UnixNano(), sanitizeObjectName(fileName))
 		uploadURL, err = s.files.PresignPut(r.Context(), objectKey, presignExpiry)
 		if err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 	}
@@ -200,7 +200,7 @@ func (s *Server) ProvideInput(w http.ResponseWriter, r *http.Request, projectId 
 		ID: requestId, ProvidedText: text, FileName: fileName, ObjectKey: objectKey,
 	})
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	resp := ProvideInputResponse{Request: s.inputRequestView(updated, ir.ProviderName, uid)}
@@ -221,7 +221,7 @@ func (s *Server) GetInputRequestFileUrl(w http.ResponseWriter, r *http.Request, 
 	}
 	url, err := s.files.PresignGet(r.Context(), ir.ObjectKey, ir.FileName, presignExpiry)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, DownloadUrlResponse{Url: url})

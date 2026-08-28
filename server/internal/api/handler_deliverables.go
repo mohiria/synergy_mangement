@@ -50,7 +50,7 @@ func (s *Server) CreateDeliverable(w http.ResponseWriter, r *http.Request, proje
 	}
 	d, err := s.q.CreateDeliverable(r.Context(), store.CreateDeliverableParams{TaskID: taskId, Name: name, CreatedBy: uid})
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, Deliverable{Id: d.ID, TaskId: d.TaskID, Name: d.Name})
@@ -73,7 +73,7 @@ func (s *Server) UploadCandidate(w http.ResponseWriter, r *http.Request, project
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, Error{Code: "deliverable_not_found", Message: "交付物不存在"})
 		} else {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 		}
 		return
 	}
@@ -104,7 +104,7 @@ func (s *Server) UploadCandidate(w http.ResponseWriter, r *http.Request, project
 	// 删旧候选与建新候选必须同事务：中途失败会让旧候选永久消失且无新记录顶替（D1）。
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
@@ -115,12 +115,12 @@ func (s *Server) UploadCandidate(w http.ResponseWriter, r *http.Request, project
 	switch {
 	case err == nil:
 		if _, err := qtx.DeleteDeliverableFile(r.Context(), old.ID); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 		oldKey = old.ObjectKey
 	case !errors.Is(err, pgx.ErrNoRows):
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	f, err := qtx.CreateDeliverableFile(r.Context(), store.CreateDeliverableFileParams{
@@ -133,11 +133,11 @@ func (s *Server) UploadCandidate(w http.ResponseWriter, r *http.Request, project
 		UploadedBy:    uid,
 	})
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	if oldKey != "" {
@@ -145,7 +145,7 @@ func (s *Server) UploadCandidate(w http.ResponseWriter, r *http.Request, project
 	}
 	uploadURL, err := s.files.PresignPut(r.Context(), key, presignExpiry)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	user := currentUser(r)
@@ -164,13 +164,13 @@ func (s *Server) GetFileDownloadUrl(w http.ResponseWriter, r *http.Request, proj
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, Error{Code: "file_not_found", Message: "文件不存在"})
 		} else {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 		}
 		return
 	}
 	url, err := s.files.PresignGet(r.Context(), f.ObjectKey, f.FileName, presignExpiry)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, DownloadUrlResponse{Url: url})

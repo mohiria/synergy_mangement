@@ -23,7 +23,7 @@ func (s *Server) ListTaskInvites(w http.ResponseWriter, r *http.Request, project
 	uid := currentUser(r).ID
 	resp, err := s.taskInviteList(r.Context(), projectId, uid, projectActor(uid, proj.OwnerID, proj.MyRole))
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -47,7 +47,7 @@ func (s *Server) CreateTaskInvites(w http.ResponseWriter, r *http.Request, proje
 			writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_key_result", Message: "所属 KR 不存在"})
 			return
 		}
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	if !domain.CanInviteForKr(actor, uid, fromPgInt8(kr.OwnerID)) {
@@ -56,7 +56,7 @@ func (s *Server) CreateTaskInvites(w http.ResponseWriter, r *http.Request, proje
 	}
 	members, err := s.q.ListProjectMembers(r.Context(), projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	roleByID := make(map[int64]string, len(members))
@@ -82,7 +82,7 @@ func (s *Server) CreateTaskInvites(w http.ResponseWriter, r *http.Request, proje
 	}
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
@@ -94,17 +94,17 @@ func (s *Server) CreateTaskInvites(w http.ResponseWriter, r *http.Request, proje
 			InviteeID:   inviteeID,
 			Note:        note,
 		}); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	resp, err := s.taskInviteList(r.Context(), projectId, uid, actor)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, resp)
@@ -122,7 +122,7 @@ func (s *Server) RevokeTaskInvite(w http.ResponseWriter, r *http.Request, projec
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, Error{Code: "invite_not_found", Message: "邀请不存在"})
 		} else {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 		}
 		return
 	}
@@ -135,12 +135,12 @@ func (s *Server) RevokeTaskInvite(w http.ResponseWriter, r *http.Request, projec
 		return
 	}
 	if _, err := s.q.UpdateTaskInviteState(r.Context(), store.UpdateTaskInviteStateParams{ID: inviteId, State: domain.TaskInviteRevoked}); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	list, err := s.taskInviteList(r.Context(), projectId, uid, actor)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	for _, item := range list {
@@ -149,7 +149,7 @@ func (s *Server) RevokeTaskInvite(w http.ResponseWriter, r *http.Request, projec
 			return
 		}
 	}
-	writeInternalError(w)
+	writeInternalError(w, r, err)
 }
 
 // taskInviteList 组装项目内全部邀请及派生动作标志。

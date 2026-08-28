@@ -100,7 +100,7 @@ func (s *Server) CreateTaskInput(w http.ResponseWriter, r *http.Request, project
 				writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_source_task", Message: "来源任务不存在"})
 				return
 			}
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 	}
@@ -114,7 +114,7 @@ func (s *Server) CreateTaskInput(w http.ResponseWriter, r *http.Request, project
 	}
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
@@ -137,13 +137,13 @@ func (s *Server) CreateTaskInput(w http.ResponseWriter, r *http.Request, project
 			CreatedBy:    uid,
 		})
 		if err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 		createdIDs = append(createdIDs, created.ID)
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	s.writeCreatedEdges(w, r, projectId, uid, actor, createdIDs)
@@ -153,7 +153,7 @@ func (s *Server) CreateTaskInput(w http.ResponseWriter, r *http.Request, project
 func (s *Server) writeCreatedEdges(w http.ResponseWriter, r *http.Request, projectID, userID int64, actor domain.Actor, createdIDs []int64) {
 	views, err := s.edgeViews(r.Context(), projectID, userID, actor)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	byID := make(map[int64]DeliverableEdge, len(views))
@@ -164,7 +164,7 @@ func (s *Server) writeCreatedEdges(w http.ResponseWriter, r *http.Request, proje
 	for _, id := range createdIDs {
 		v, ok := byID[id]
 		if !ok {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 		out = append(out, v)
@@ -184,7 +184,7 @@ func (s *Server) RemoveEdge(w http.ResponseWriter, r *http.Request, projectId in
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, Error{Code: "edge_not_found", Message: "交付物边不存在"})
 		} else {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 		}
 		return
 	}
@@ -194,7 +194,7 @@ func (s *Server) RemoveEdge(w http.ResponseWriter, r *http.Request, projectId in
 		return
 	}
 	if _, err := s.q.DeleteEdge(r.Context(), edgeId); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -208,7 +208,7 @@ func (s *Server) ListEdges(w http.ResponseWriter, r *http.Request, projectId int
 	uid := currentUser(r).ID
 	views, err := s.edgeViews(r.Context(), projectId, uid, projectActor(uid, proj.OwnerID, proj.MyRole))
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, views)

@@ -38,7 +38,7 @@ func (s *Server) SetTaskReceivers(w http.ResponseWriter, r *http.Request, projec
 	}
 	members, err := s.q.ListProjectMembers(r.Context(), projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	isMember := make(map[int64]bool, len(members))
@@ -65,27 +65,27 @@ func (s *Server) SetTaskReceivers(w http.ResponseWriter, r *http.Request, projec
 	}
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
 	qtx := s.q.WithTx(tx)
 	if _, err := qtx.SetTaskReceiverScope(r.Context(), store.SetTaskReceiverScopeParams{ID: taskId, ReceiverScope: scope}); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	if _, err := qtx.ClearTaskReceivers(r.Context(), taskId); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	for _, id := range ids {
 		if err := qtx.SetTaskReceiver(r.Context(), store.SetTaskReceiverParams{TaskID: taskId, UserID: id}); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	s.writeTask(w, r, projectId, taskId, uid, actor)
@@ -107,7 +107,7 @@ func (s *Server) ConfirmTaskReceipt(w http.ResponseWriter, r *http.Request, proj
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, Error{Code: "receipt_not_found", Message: "没有属于本人的待接收项"})
 		} else {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 		}
 		return
 	}
@@ -126,7 +126,7 @@ func (s *Server) ConfirmTaskReceipt(w http.ResponseWriter, r *http.Request, proj
 		return
 	}
 	if _, err := s.q.ConfirmTaskReceipt(r.Context(), row.ID); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	s.actionActivity(r.Context(), taskId, domain.ActivityReceiptConfirmed, uid, row.DisplayName)

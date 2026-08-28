@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -27,27 +28,27 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 	ctx := r.Context()
 	objectives, err := s.q.ListObjectives(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	krs, err := s.q.ListKeyResultsByProject(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	deliverables, err := s.q.ListDeliverablesByProject(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	files, err := s.q.ListDeliverableFilesByProject(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	reviewCounts, err := s.q.CompletionReviewCountsByProject(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	countByTask := map[int64]int{}
@@ -57,7 +58,7 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 	// 任务状态显示文案（AC-04）：入池与终审取所属 KR 负责人，或签取审核组姓名。
 	taskRows, err := s.q.ListProjectTasks(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	krOwnerNameByTask := map[int64]string{}
@@ -66,7 +67,7 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 	}
 	reviewerRows, err := s.q.IntermediateReviewerNamesByProject(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	reviewerNamesByTask := map[int64][]string{}
@@ -150,7 +151,7 @@ func (s *Server) ListPackages(w http.ResponseWriter, r *http.Request, projectId 
 	}
 	resp, err := s.packageList(r.Context(), projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -174,7 +175,7 @@ func (s *Server) CreatePackage(w http.ResponseWriter, r *http.Request, projectId
 	// 勾选项必须属于本项目且有已生效当前内容。
 	deliverables, err := s.q.ListDeliverablesByProject(r.Context(), projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	inProject := map[int64]bool{}
@@ -183,7 +184,7 @@ func (s *Server) CreatePackage(w http.ResponseWriter, r *http.Request, projectId
 	}
 	files, err := s.q.ListDeliverableFilesByProject(r.Context(), projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	hasCurrent := map[int64]bool{}
@@ -201,29 +202,29 @@ func (s *Server) CreatePackage(w http.ResponseWriter, r *http.Request, projectId
 	}
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
 	qtx := s.q.WithTx(tx)
 	pkg, err := qtx.CreatePackage(r.Context(), store.CreatePackageParams{ProjectID: projectId, Name: name, CreatedBy: uid})
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	for _, id := range req.DeliverableIds {
 		if err := qtx.CreatePackageItem(r.Context(), store.CreatePackageItemParams{PackageID: pkg.ID, DeliverableID: id}); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	list, err := s.packageList(r.Context(), projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	for _, p := range list {
@@ -232,7 +233,7 @@ func (s *Server) CreatePackage(w http.ResponseWriter, r *http.Request, projectId
 			return
 		}
 	}
-	writeInternalError(w)
+	writeInternalError(w, r, err)
 }
 
 // DownloadPackage 整包下载：目录解析为当前内容并流式打包（不复制旧文件，AC-18）。
@@ -245,15 +246,43 @@ func (s *Server) DownloadPackage(w http.ResponseWriter, r *http.Request, project
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, Error{Code: "package_not_found", Message: "成果包不存在"})
 		} else {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 		}
 		return
 	}
 	items, err := s.q.ListPackageItems(r.Context(), packageId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
+	// 先把全部对象取出来：响应头一旦写出就无法再改状态码，缺文件时不能伪装成功（E1）。
+	objects := make(map[int64]io.ReadCloser, len(items))
+	defer func() {
+		for _, obj := range objects {
+			_ = obj.Close()
+		}
+	}()
+	var missing []string
+	for _, item := range items {
+		if !item.FileID.Valid || item.ObjectKey.String == "" {
+			continue
+		}
+		obj, err := s.files.Get(r.Context(), item.ObjectKey.String)
+		if err != nil {
+			log.Printf("[package] request_id=%s 取对象失败 key=%s: %v", requestIDFrom(r.Context()), item.ObjectKey.String, err)
+			missing = append(missing, fmt.Sprintf("%s / %s", item.TaskName, item.DeliverableName))
+			continue
+		}
+		objects[item.FileID.Int64] = obj
+	}
+	if len(missing) > 0 {
+		writeJSON(w, http.StatusBadGateway, Error{
+			Code:    "package_incomplete",
+			Message: "以下当前内容暂不可读取，成果包未生成：" + strings.Join(missing, "、"),
+		})
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename*=UTF-8''%s.zip", url.PathEscape(pkg.Name)))
 	zw := zip.NewWriter(w)
@@ -270,21 +299,18 @@ func (s *Server) DownloadPackage(w http.ResponseWriter, r *http.Request, project
 		_, _ = io.WriteString(manifest, line+"\n")
 	}
 	for _, item := range items {
-		if !item.FileID.Valid || item.ObjectKey.String == "" {
-			continue
-		}
-		obj, err := s.files.Get(r.Context(), item.ObjectKey.String)
-		if err != nil {
-			// 文件服务不可用或对象缺失：以占位说明入包，不中断整包。
-			entry, _ := zw.Create(fmt.Sprintf("%s-%s.不可用.txt", item.TaskName, item.DeliverableName))
-			_, _ = io.WriteString(entry, "当前内容暂不可读取："+err.Error())
+		obj, ok := objects[item.FileID.Int64]
+		if !ok {
 			continue
 		}
 		entry, err := zw.Create(fmt.Sprintf("%s/%s", sanitizeObjectName(item.TaskName), sanitizeObjectName(item.FileName.String)))
-		if err == nil {
-			_, _ = io.Copy(entry, obj)
+		if err != nil {
+			log.Printf("[package] request_id=%s 写入包内条目失败: %v", requestIDFrom(r.Context()), err)
+			continue
 		}
-		_ = obj.Close()
+		if _, err := io.Copy(entry, obj); err != nil {
+			log.Printf("[package] request_id=%s 拷贝对象失败: %v", requestIDFrom(r.Context()), err)
+		}
 	}
 }
 

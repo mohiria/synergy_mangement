@@ -2,9 +2,13 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,7 +52,7 @@ func NewHandlerFromServer(s *Server, baseURL string) http.Handler {
 	return HandlerWithOptions(s, StdHTTPServerOptions{
 		BaseURL:     baseURL,
 		BaseRouter:  http.NewServeMux(),
-		Middlewares: []MiddlewareFunc{s.sessionMiddleware, requestValidator()},
+		Middlewares: []MiddlewareFunc{requestIDMiddleware, s.sessionMiddleware, requestValidator()},
 	})
 }
 
@@ -78,6 +82,32 @@ func requestValidator() MiddlewareFunc {
 	})
 }
 
+// requestIDMiddleware 给每个请求分配 id，回写响应头并放进 context：500 日志与客户端看到的
+// 响应可以互相对上，是本地部署下唯一的排障线索。
+func requestIDMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimSpace(r.Header.Get("X-Request-Id"))
+		if id == "" {
+			var buf [12]byte
+			if _, err := rand.Read(buf[:]); err != nil {
+				id = strconv.FormatInt(time.Now().UnixNano(), 36)
+			} else {
+				id = hex.EncodeToString(buf[:])
+			}
+		}
+		w.Header().Set("X-Request-Id", id)
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxRequestID, id)))
+	})
+}
+
+// requestIDFrom 取当前请求 id；无中间件时返回 "-"。
+func requestIDFrom(ctx context.Context) string {
+	if id, ok := ctx.Value(ctxRequestID).(string); ok && id != "" {
+		return id
+	}
+	return "-"
+}
+
 const sessionCookieName = "session"
 
 type ctxKey int
@@ -85,6 +115,7 @@ type ctxKey int
 const (
 	ctxUser ctxKey = iota
 	ctxToken
+	ctxRequestID
 )
 
 // 无需会话即可访问的路径（按路由后缀匹配，其余一律要求有效会话）。
@@ -160,7 +191,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	s.throttle.RecordSuccess(req.Username)
 	token, err := domain.NewSessionToken()
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	err = s.q.CreateSession(r.Context(), store.CreateSessionParams{
@@ -169,7 +200,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt: pgtype.Timestamptz{Time: now.Add(domain.SessionTTL), Valid: true},
 	})
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	setSessionCookie(w, token)
@@ -179,7 +210,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 func (s *Server) Logout(w http.ResponseWriter, r *http.Request) {
 	token, _ := r.Context().Value(ctxToken).(string)
 	if err := s.q.DeleteSession(r.Context(), token); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	clearSessionCookie(w)
@@ -194,7 +225,7 @@ func (s *Server) ListProjects(w http.ResponseWriter, r *http.Request) {
 	uid := currentUser(r).ID
 	rows, err := s.q.ListProjects(r.Context(), uid)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	resp := make([]Project, 0, len(rows))
@@ -242,7 +273,7 @@ func (s *Server) CreateProject(w http.ResponseWriter, r *http.Request) {
 		Role:             domain.RoleAdmin, // 创建人自动成为项目管理员成员（bootstrap）
 	})
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	actor := domain.Actor{IsOwner: owner.ID == uid, Role: domain.RoleAdmin}
@@ -298,7 +329,7 @@ func (s *Server) UpdateProject(w http.ResponseWriter, r *http.Request, projectId
 			writeJSON(w, http.StatusNotFound, Error{Code: "not_found", Message: "项目不存在"})
 			return
 		}
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	// 派生字段按更新后的负责人重新判定（负责人可能已易主）。
@@ -311,7 +342,7 @@ func (s *Server) ListProjectMembers(w http.ResponseWriter, r *http.Request, proj
 	}
 	rows, err := s.q.ListProjectMembers(r.Context(), projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	resp := make([]ProjectMember, 0, len(rows))
@@ -360,7 +391,7 @@ func (s *Server) AddProjectMember(w http.ResponseWriter, r *http.Request, projec
 			writeJSON(w, http.StatusConflict, Error{Code: "already_member", Message: "该用户已是项目成员"})
 			return
 		}
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, ProjectMember{
@@ -399,12 +430,12 @@ func (s *Server) UpdateProjectMemberRole(w http.ResponseWriter, r *http.Request,
 			writeJSON(w, http.StatusNotFound, Error{Code: "member_not_found", Message: "该用户不是项目成员"})
 			return
 		}
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	user, err := s.q.GetUserByID(r.Context(), m.UserID)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, ProjectMember{
@@ -429,7 +460,7 @@ func (s *Server) RemoveProjectMember(w http.ResponseWriter, r *http.Request, pro
 		UserID:    userId,
 	})
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	if n == 0 {
@@ -464,7 +495,7 @@ func (s *Server) ListObjectives(w http.ResponseWriter, r *http.Request, projectI
 	}
 	resp, err := s.okrList(r.Context(), projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -486,7 +517,7 @@ func (s *Server) CreateOkrBatch(w http.ResponseWriter, r *http.Request, projectI
 	}
 	members, err := s.q.ListProjectMembers(r.Context(), projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	memberSet := make(map[int64]bool, len(members))
@@ -507,14 +538,14 @@ func (s *Server) CreateOkrBatch(w http.ResponseWriter, r *http.Request, projectI
 				writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_objective", Message: "所属 O 不存在"})
 				return
 			}
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 	}
 	// 整批一个事务：全部成功或全部失败（契约 createOkrBatch）。
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
@@ -530,7 +561,7 @@ func (s *Server) CreateOkrBatch(w http.ResponseWriter, r *http.Request, projectI
 				Description: item.Description,
 			})
 			if err != nil {
-				writeInternalError(w)
+				writeInternalError(w, r, err)
 				return
 			}
 			objectiveID = o.ID
@@ -546,18 +577,18 @@ func (s *Server) CreateOkrBatch(w http.ResponseWriter, r *http.Request, projectI
 				RiskLevel:   domain.DefaultKrRiskLevel,
 			})
 			if err != nil {
-				writeInternalError(w)
+				writeInternalError(w, r, err)
 				return
 			}
 		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	resp, err := s.okrList(r.Context(), projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, resp)
@@ -689,7 +720,7 @@ func (s *Server) fetchProject(w http.ResponseWriter, r *http.Request, projectID 
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, Error{Code: "not_found", Message: "项目不存在"})
 		} else {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 		}
 		return store.GetProjectRow{}, false
 	}
@@ -708,7 +739,7 @@ func projectActor(userID, ownerID int64, myRole pgtype.Text) domain.Actor {
 func (s *Server) ListUsers(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.q.ListUsers(r.Context())
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	resp := make([]UserSummary, 0, len(rows))
@@ -862,6 +893,13 @@ func writeForbidden(w http.ResponseWriter) {
 	writeJSON(w, http.StatusForbidden, Error{Code: "forbidden", Message: "无权执行该动作"})
 }
 
-func writeInternalError(w http.ResponseWriter) {
+// writeInternalError 统一记录 500 的真实原因（带 requestID、方法与路径）后，只向客户端回通用文案。
+// 内网单机部署没有 APM 兜底，不记日志等于生产故障不可诊断。
+func writeInternalError(w http.ResponseWriter, r *http.Request, errs ...error) {
+	var cause error
+	if len(errs) > 0 {
+		cause = errs[0]
+	}
+	log.Printf("[500] request_id=%s %s %s: %v", requestIDFrom(r.Context()), r.Method, r.URL.Path, cause)
 	writeJSON(w, http.StatusInternalServerError, Error{Code: "internal_error", Message: "服务器内部错误"})
 }

@@ -3141,21 +3141,28 @@ func TestArtifactsAndPackages(t *testing.T) {
 		t.Fatalf("成果包目录异常: %+v", pkg)
 	}
 
-	// 整包下载（zip；MinIO 已上传时校验内容类型与非空体）
+	// 整包下载（zip）。对象不可读时必须整体失败：以前会把错误文本塞进包里再回 200（E1）。
 	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d/download", pkgURL, pkg.Id), nil)
-	wantStatus(t, resp, http.StatusOK)
-	if ct := resp.Header.Get("Content-Type"); ct != "application/zip" {
-		t.Fatalf("下载内容类型异常: %q", ct)
-	}
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if len(body) == 0 {
-		t.Fatalf("zip 内容为空")
-	}
-	if minioUp && !bytes.Contains(body, []byte("acceptance-doc-bytes")) {
-		// zip 默认 Deflate 会压缩内容，改校验 zip 目录含文件名即可。
-		if !bytes.Contains(body, []byte(".docx")) {
-			t.Fatalf("zip 未包含当前内容条目")
+	if !minioUp {
+		wantStatus(t, resp, http.StatusBadGateway)
+		if e := decodeBody[api.Error](t, resp); e.Code != "package_incomplete" {
+			t.Fatalf("对象不可读时 code = %q, want package_incomplete", e.Code)
+		}
+	} else {
+		wantStatus(t, resp, http.StatusOK)
+		if ct := resp.Header.Get("Content-Type"); ct != "application/zip" {
+			t.Fatalf("下载内容类型异常: %q", ct)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if len(body) == 0 {
+			t.Fatalf("zip 内容为空")
+		}
+		if !bytes.Contains(body, []byte("acceptance-doc-bytes")) {
+			// zip 默认 Deflate 会压缩内容，改校验 zip 目录含文件名即可。
+			if !bytes.Contains(body, []byte(".docx")) {
+				t.Fatalf("zip 未包含当前内容条目")
+			}
 		}
 	}
 }

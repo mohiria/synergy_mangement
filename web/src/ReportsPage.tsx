@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Alert, Button, Spin } from "antd";
+import { Alert, Button, Spin, message } from "antd";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import ProjectShell from "./ProjectShell";
@@ -39,6 +39,7 @@ export default function ReportsPage({
   const [project, setProject] = useState<Project | null>(null);
   const [report, setReport] = useState<Report | null>(null);
   const [range, setRange] = useState<ReportRange>("week");
+  const [exporting, setExporting] = useState<"image" | "pdf" | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
@@ -67,6 +68,36 @@ export default function ReportsPage({
   useEffect(() => {
     load();
   }, [load]);
+
+  // 导出先取回响应再决定去向：失败时后端回 502 JSON，直接 window.open 只会开出一个空白页。
+  const exportReport = async (format: "image" | "pdf") => {
+    setExporting(format);
+    try {
+      const res = await fetch(
+        `/api/v1/projects/${projectId}/report/export?range=${range}&format=${format}`,
+        { credentials: "same-origin" },
+      );
+      if (!res.ok) {
+        let text = "导出失败，请稍后重试";
+        try {
+          const body = (await res.json()) as { message?: string };
+          if (body.message) text = body.message;
+        } catch {
+          // 非 JSON 响应时保留通用文案
+        }
+        message.error(text);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch {
+      message.error("导出失败，请检查网络后重试");
+    } finally {
+      setExporting(null);
+    }
+  };
 
   return (
     <ProjectShell
@@ -100,26 +131,10 @@ export default function ReportsPage({
                   {RANGE_LABEL[r]}
                 </Button>
               ))}
-              <Button
-                size="small"
-                onClick={() =>
-                  window.open(
-                    `/api/v1/projects/${projectId}/report/export?range=${range}&format=image`,
-                    "_blank",
-                  )
-                }
-              >
+              <Button size="small" loading={exporting === "image"} onClick={() => exportReport("image")}>
                 导出长图
               </Button>
-              <Button
-                size="small"
-                onClick={() =>
-                  window.open(
-                    `/api/v1/projects/${projectId}/report/export?range=${range}&format=pdf`,
-                    "_blank",
-                  )
-                }
-              >
+              <Button size="small" loading={exporting === "pdf"} onClick={() => exportReport("pdf")}>
                 导出 PDF
               </Button>
             </div>

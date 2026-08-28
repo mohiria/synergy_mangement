@@ -37,7 +37,7 @@ func (s *Server) SubmitFieldChange(w http.ResponseWriter, r *http.Request, proje
 	}
 	hasPending, err := s.q.HasPendingFieldChange(r.Context(), taskId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	outcome, err := domain.FieldChangeRoute(actor, uid, facts, hasPending)
@@ -48,7 +48,7 @@ func (s *Server) SubmitFieldChange(w http.ResponseWriter, r *http.Request, proje
 		case errors.Is(err, domain.ErrChangePendingExists), errors.Is(err, domain.ErrChangeNotAllowed):
 			writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: err.Error()})
 		default:
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 		}
 		return
 	}
@@ -59,7 +59,7 @@ func (s *Server) SubmitFieldChange(w http.ResponseWriter, r *http.Request, proje
 	}
 	members, err := s.q.ListProjectMembers(r.Context(), projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	memberSet := make(map[int64]bool, len(members))
@@ -74,7 +74,7 @@ func (s *Server) SubmitFieldChange(w http.ResponseWriter, r *http.Request, proje
 	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
@@ -83,34 +83,34 @@ func (s *Server) SubmitFieldChange(w http.ResponseWriter, r *http.Request, proje
 	case domain.FieldChangeDirect:
 		// 草稿完善：不生成变更单。
 		if _, err := qtx.ApplyTaskKeyFields(r.Context(), applyParams(taskId, changes)); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 	case domain.FieldChangeExempt:
 		if _, err := qtx.CreateFieldChange(r.Context(), createFieldChangeParams(task, uid, reason, changes,
 			domain.FieldChangeApprovedState, true, domain.FieldChangeExemptOpinion,
 			pgtype.Int8{Int64: uid, Valid: true}, pgtype.Timestamptz{Time: s.now(), Valid: true})); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 		if _, err := qtx.ApplyTaskKeyFields(r.Context(), applyParams(taskId, changes)); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 	case domain.FieldChangePending:
 		// 重新提交时清除本人此前的退回待处理事项。
 		if _, err := qtx.ResolveRejectedFieldChanges(r.Context(), store.ResolveRejectedFieldChangesParams{TaskID: taskId, SubmittedBy: uid}); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 		if _, err := qtx.CreateFieldChange(r.Context(), createFieldChangeParams(task, uid, reason, changes,
 			domain.FieldChangePendingState, false, "", pgtype.Int8{}, pgtype.Timestamptz{})); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	// 草稿完善不生成变更单，也就没有可留痕的审批事实；免审直接记「生效」。
@@ -146,12 +146,12 @@ func (s *Server) DecideFieldChange(w http.ResponseWriter, r *http.Request, proje
 	// 规则与写入同事务：先锁任务行再重读事实与变更单，避免变更被批准到已终止的任务上（R2／R3）。
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
 	qtx := s.q.WithTx(tx)
-	_, facts, ok := lockTaskFacts(r.Context(), w, qtx, projectId, taskId)
+	_, facts, ok := lockTaskFacts(r, w, qtx, projectId, taskId)
 	if !ok {
 		return
 	}
@@ -160,7 +160,7 @@ func (s *Server) DecideFieldChange(w http.ResponseWriter, r *http.Request, proje
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, Error{Code: "change_not_found", Message: "变更单不存在"})
 		} else {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 		}
 		return
 	}
@@ -181,7 +181,7 @@ func (s *Server) DecideFieldChange(w http.ResponseWriter, r *http.Request, proje
 	if _, err := qtx.DecideFieldChange(r.Context(), store.DecideFieldChangeParams{
 		ID: changeId, State: newState, Opinion: opinion, DecidedBy: pgtype.Int8{Int64: uid, Valid: true},
 	}); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	if approve {
@@ -194,12 +194,12 @@ func (s *Server) DecideFieldChange(w http.ResponseWriter, r *http.Request, proje
 			OwnerID:            fc.NewOwnerID,
 			EndDate:            fc.NewEndDate,
 		}); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	if approve {
@@ -226,7 +226,7 @@ func (s *Server) AbandonFieldChange(w http.ResponseWriter, r *http.Request, proj
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, Error{Code: "change_not_found", Message: "变更单不存在"})
 		} else {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 		}
 		return
 	}
@@ -239,7 +239,7 @@ func (s *Server) AbandonFieldChange(w http.ResponseWriter, r *http.Request, proj
 		return
 	}
 	if _, err := s.q.ResolveFieldChange(r.Context(), changeId); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	s.actionActivity(r.Context(), taskId, domain.ActivityFieldChangeAbandoned, uid, "")
