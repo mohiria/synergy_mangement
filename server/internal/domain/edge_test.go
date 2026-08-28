@@ -62,7 +62,8 @@ func TestEdgeReady(t *testing.T) {
 	}
 }
 
-// §4.4.7／§5.1：必要输入未就绪时页面显示「等待输入」；参考输入不影响；执行外状态不改写。
+// §4.4.7／§5.1、AC-58：「等待输入」只在未开始阶段叠加，任务一进入进行中即消失；
+// 参考输入不影响；执行外状态不改写。
 func TestDeriveDisplayStatus(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -71,7 +72,7 @@ func TestDeriveDisplayStatus(t *testing.T) {
 		want     string
 	}{
 		{"未开始且必要输入未到", TaskNotStarted, true, TaskWaitingInput},
-		{"进行中且必要输入未到", TaskInProgress, true, TaskWaitingInput},
+		{"进行中不再叠加等待输入", TaskInProgress, true, TaskInProgress},
 		{"进行中输入已就绪", TaskInProgress, false, TaskInProgress},
 		{"草稿不改写", TaskDraft, true, TaskDraft},
 		{"待终审不改写", TaskPendingFinalReview, true, TaskPendingFinalReview},

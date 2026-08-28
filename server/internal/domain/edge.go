@@ -78,10 +78,11 @@ func EdgeReady(hasCurrent, hasCandidate bool) bool {
 	return hasCurrent
 }
 
-// DeriveDisplayStatus 页面主状态派生（§5.1 等待输入）：执行前后台状态存真实值，
-// 未开始／进行中且必要输入未就绪时汇总显示「等待输入」。
+// DeriveDisplayStatus 页面主状态派生（§5.1、§4.4.7 等待输入；AC-58）：后台状态存真实值，
+// 「等待输入」只在未开始上叠加——任务一旦进入进行中就不再叠加，下游凭部分提交、
+// 中间版本或线下交付先行开工，必要输入未就绪在任何阶段都不阻断动作。
 func DeriveDisplayStatus(stored string, hasUnmetRequiredInput bool) string {
-	if hasUnmetRequiredInput && (stored == TaskNotStarted || stored == TaskInProgress) {
+	if hasUnmetRequiredInput && stored == TaskNotStarted {
 		return TaskWaitingInput
 	}
 	return stored

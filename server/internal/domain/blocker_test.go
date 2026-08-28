@@ -51,14 +51,21 @@ func TestDeriveBlockersEntryAndExit(t *testing.T) {
 	}{
 		{"干净项目无卡点", func(*BlockerFacts) {}, ""},
 
-		// —— 上游未就绪：必要输入未就绪且已到开始时间 ——
-		{"必要输入未就绪且已开始", func(f *BlockerFacts) {
+		// —— 上游未就绪：必要输入未就绪、已到开始时间且任务尚未开始（AC-58）——
+		{"未开始且必要输入未就绪", func(f *BlockerFacts) {
+			f.Tasks[0].Status = TaskNotStarted
 			f.Inputs[0].Ready = false
 			f.Inputs[0].SourceTaskID = ptr64(2)
 			f.Inputs[0].SourceTaskName = "地质勘察"
 			f.Inputs[0].SourceOwnerID = 6
 			f.Inputs[0].SourceOwnerName = "孙六"
 		}, "upstream_unready:edge:100"},
+		{"任务开始后卡点自动解除", func(f *BlockerFacts) {
+			f.Tasks[0].Status = TaskInProgress
+			f.Inputs[0].Ready = false
+			f.Inputs[0].SourceTaskID = ptr64(2)
+			f.Inputs[0].SourceTaskName = "地质勘察"
+		}, ""},
 		{"未到开始时间不算卡点", func(f *BlockerFacts) {
 			f.Inputs[0].Ready = false
 			f.Inputs[0].SourceTaskID = ptr64(2)
@@ -66,11 +73,13 @@ func TestDeriveBlockersEntryAndExit(t *testing.T) {
 			f.Tasks[0].StartDate = blockerDay(2)
 		}, ""},
 		{"参考输入未就绪只提示不成卡点", func(f *BlockerFacts) {
+			f.Tasks[0].Status = TaskNotStarted
 			f.Inputs[0].Ready = false
 			f.Inputs[0].Necessity = NecessityReference
 			f.Inputs[0].SourceTaskID = ptr64(2)
 		}, ""},
 		{"输入就绪后自动解除", func(f *BlockerFacts) {
+			f.Tasks[0].Status = TaskNotStarted
 			f.Inputs[0].Ready = true
 			f.Inputs[0].SourceTaskID = ptr64(2)
 		}, ""},
@@ -166,6 +175,7 @@ func TestDeriveBlockersActionOwners(t *testing.T) {
 		names []string
 	}{
 		{"上游未就绪指向上游任务负责人", func(f *BlockerFacts) {
+			f.Tasks[0].Status = TaskNotStarted
 			f.Inputs[0].Ready = false
 			f.Inputs[0].SourceTaskID = ptr64(2)
 			f.Inputs[0].SourceTaskName = "地质勘察"
@@ -173,6 +183,7 @@ func TestDeriveBlockersActionOwners(t *testing.T) {
 			f.Inputs[0].SourceOwnerName = "孙六"
 		}, "upstream_unready:edge:100", []string{"孙六"}},
 		{"来源为指定成员时指向对接人", func(f *BlockerFacts) {
+			f.Tasks[0].Status = TaskNotStarted
 			f.Inputs[0].Ready = false
 			f.Inputs[0].ProviderID = 9
 			f.Inputs[0].ProviderName = "吴九"
@@ -228,10 +239,12 @@ func TestDeriveBlockersLevel(t *testing.T) {
 	}{
 		{"任务超期为高风险", func(f *BlockerFacts) { f.Tasks[0].EndDate = blockerDay(-1) }, "task_overdue:1", "high_risk"},
 		{"上游未就绪且任务未超期为预警", func(f *BlockerFacts) {
+			f.Tasks[0].Status = TaskNotStarted
 			f.Inputs[0].Ready = false
 			f.Inputs[0].SourceTaskID = ptr64(2)
 		}, "upstream_unready:edge:100", "warning"},
 		{"上游未就绪且任务已超期为高风险", func(f *BlockerFacts) {
+			f.Tasks[0].Status = TaskNotStarted
 			f.Inputs[0].Ready = false
 			f.Inputs[0].SourceTaskID = ptr64(2)
 			f.Tasks[0].EndDate = blockerDay(-1)
