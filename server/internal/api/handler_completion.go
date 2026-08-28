@@ -185,7 +185,13 @@ func (s *Server) DecideCompletion(w http.ResponseWriter, r *http.Request, projec
 		}
 		if approve {
 			// AC-39：候选分别覆盖对应当前内容；被覆盖旧文件永久删除、不可恢复。
-			if old, err := qtx.GetCurrentFile(r.Context(), item.DeliverableID); err == nil {
+			// 只有「确实没有当前内容」才跳过删除：把连接中断一类错误也当作没有，会留下两行 current（D1）。
+			old, err := qtx.GetCurrentFile(r.Context(), item.DeliverableID)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				writeInternalError(w)
+				return
+			}
+			if err == nil {
 				if _, err := qtx.DeleteDeliverableFile(r.Context(), old.ID); err != nil {
 					writeInternalError(w)
 					return
@@ -198,7 +204,12 @@ func (s *Server) DecideCompletion(w http.ResponseWriter, r *http.Request, projec
 			}
 		} else {
 			// AC-40：退回删除本次候选文件，原当前交付物保持不变。
-			if f, err := qtx.GetCandidateFile(r.Context(), item.DeliverableID); err == nil && f.ID == item.FileID.Int64 {
+			f, err := qtx.GetCandidateFile(r.Context(), item.DeliverableID)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				writeInternalError(w)
+				return
+			}
+			if err == nil && f.ID == item.FileID.Int64 {
 				if _, err := qtx.DeleteDeliverableFile(r.Context(), f.ID); err != nil {
 					writeInternalError(w)
 					return
@@ -285,7 +296,12 @@ func (s *Server) decideIntermediate(w http.ResponseWriter, r *http.Request, tx p
 			if !item.FileID.Valid {
 				continue
 			}
-			if f, err := qtx.GetCandidateFile(r.Context(), item.DeliverableID); err == nil && f.ID == item.FileID.Int64 {
+			f, err := qtx.GetCandidateFile(r.Context(), item.DeliverableID)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				writeInternalError(w)
+				return
+			}
+			if err == nil && f.ID == item.FileID.Int64 {
 				if _, err := qtx.DeleteDeliverableFile(r.Context(), f.ID); err != nil {
 					writeInternalError(w)
 					return

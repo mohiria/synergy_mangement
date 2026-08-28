@@ -92,14 +92,6 @@ func (s *Server) UploadCandidate(w http.ResponseWriter, r *http.Request, project
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_file", Message: err.Error()})
 		return
 	}
-	// 重复登记覆盖旧候选（不留历史版本，§5.3）。
-	if old, err := s.q.GetCandidateFile(r.Context(), deliverableId); err == nil {
-		if _, err := s.q.DeleteDeliverableFile(r.Context(), old.ID); err != nil {
-			writeInternalError(w)
-			return
-		}
-		_ = s.files.Remove(r.Context(), old.ObjectKey)
-	}
 	key := fmt.Sprintf("deliverables/%d/%d-%s", deliverableId, s.now().UnixNano(), sanitizeObjectName(fileName))
 	fileType := ""
 	if req.FileType != nil {
@@ -109,7 +101,29 @@ func (s *Server) UploadCandidate(w http.ResponseWriter, r *http.Request, project
 	if req.FileSize != nil {
 		size = *req.FileSize
 	}
-	f, err := s.q.CreateDeliverableFile(r.Context(), store.CreateDeliverableFileParams{
+	// 删旧候选与建新候选必须同事务：中途失败会让旧候选永久消失且无新记录顶替（D1）。
+	tx, err := s.db.Begin(r.Context())
+	if err != nil {
+		writeInternalError(w)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	qtx := s.q.WithTx(tx)
+	// 重复登记覆盖旧候选（不留历史版本，§5.3）；对象删除延后到提交之后。
+	oldKey := ""
+	old, err := qtx.GetCandidateFile(r.Context(), deliverableId)
+	switch {
+	case err == nil:
+		if _, err := qtx.DeleteDeliverableFile(r.Context(), old.ID); err != nil {
+			writeInternalError(w)
+			return
+		}
+		oldKey = old.ObjectKey
+	case !errors.Is(err, pgx.ErrNoRows):
+		writeInternalError(w)
+		return
+	}
+	f, err := qtx.CreateDeliverableFile(r.Context(), store.CreateDeliverableFileParams{
 		DeliverableID: deliverableId,
 		State:         domain.DeliverableCandidate,
 		FileName:      fileName,
@@ -121,6 +135,13 @@ func (s *Server) UploadCandidate(w http.ResponseWriter, r *http.Request, project
 	if err != nil {
 		writeInternalError(w)
 		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeInternalError(w)
+		return
+	}
+	if oldKey != "" {
+		_ = s.files.Remove(r.Context(), oldKey)
 	}
 	uploadURL, err := s.files.PresignPut(r.Context(), key, presignExpiry)
 	if err != nil {

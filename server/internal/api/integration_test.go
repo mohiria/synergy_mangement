@@ -4423,3 +4423,54 @@ func TestFieldChangeOnTerminalTask(t *testing.T) {
 		t.Fatalf("终态任务仍下发 canDecide=true: %+v", after.Task.FieldChange)
 	}
 }
+
+// 交付物内容同态唯一（回归 D1）：库层偏唯一索引兜底，应用层删旧建新失败也不会留下两行同态记录。
+func TestDeliverableFileStateUnique(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	alice := newClient(t)
+	resp := doJSON(t, alice, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: "alice", Password: "alice-pass"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	sp := func(s string) *string { return &s }
+
+	resp = doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "唯一内容", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &aliceUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	kr1 := decodeBody[[]api.Objective](t, resp)[0].KeyResults[0].Id
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		Items: []api.CreateTaskItem{{KeyResultId: kr1, Name: "产出方案", OwnerId: aliceUser.ID, StartDate: start, EndDate: end}},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	taskID := decodeBody[[]api.Task](t, resp)[0].Id
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/deliverables", tasksURL, taskID), api.CreateDeliverableRequest{Name: "验收方案"})
+	wantStatus(t, resp, http.StatusCreated)
+	deliverableID := decodeBody[api.Deliverable](t, resp).Id
+
+	newFile := func(state, key string) error {
+		_, err := q.CreateDeliverableFile(context.Background(), store.CreateDeliverableFileParams{
+			DeliverableID: deliverableID, State: state, FileName: "a.pdf", ObjectKey: key, UploadedBy: aliceUser.ID,
+		})
+		return err
+	}
+	for _, state := range []string{"candidate", "current"} {
+		if err := newFile(state, state+"-1"); err != nil {
+			t.Fatalf("首份 %s 应可写入: %v", state, err)
+		}
+		if err := newFile(state, state+"-2"); err == nil {
+			t.Fatalf("同一交付物项写入第二份 %s 应被库层拒绝", state)
+		}
+	}
+}
