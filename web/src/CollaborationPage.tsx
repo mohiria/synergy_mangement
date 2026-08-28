@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Alert, AutoComplete, Button, Select, Spin, Switch } from "antd";
+import { Alert, AutoComplete, Button, Input, Select, Spin, Switch } from "antd";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
+import Icon from "./icons";
 import ProjectShell from "./ProjectShell";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
@@ -723,7 +724,7 @@ export default function CollaborationPage({
   };
 
   return (
-    <ProjectShell user={user} project={project} projectId={projectId} pageLabel="协作关系" onLogout={onLogout}>
+    <ProjectShell user={user} project={project} projectId={projectId} pageLabel="协作关系" pageWidth="wide" onLogout={onLogout}>
       {notFound ? (
         <Alert type="error" message="项目不存在" description={<Link to="/">返回项目列表</Link>} />
       ) : loading || !project ? (
@@ -753,7 +754,6 @@ export default function CollaborationPage({
             <div className="toolbar-group">
               <AutoComplete
                 style={{ width: 240 }}
-                placeholder="搜索 O / KR / 任务 / 成员 / 关系"
                 value={searchText}
                 onChange={setSearchText}
                 options={searchOptions}
@@ -764,7 +764,9 @@ export default function CollaborationPage({
                 filterOption={(input, option) =>
                   String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())
                 }
-              />
+              >
+                <Input prefix={<Icon name="search" size={15} />} placeholder="搜索 O / KR / 任务 / 成员 / 关系" />
+              </AutoComplete>
               <Select
                 size="small"
                 style={{ width: 150 }}
@@ -801,14 +803,15 @@ export default function CollaborationPage({
                 显示已完成 <Switch size="small" checked={showCompleted} onChange={setShowCompleted} />
               </span>
             </div>
-            <Button.Group>
-              <Button type={viewMode === "graph" ? "primary" : "default"} onClick={() => setViewMode("graph")}>
+            {/* 基线 §10：控制栏右侧「图谱／列表」是 segment（h36 灰底），不是实心蓝底按钮。 */}
+            <div className="segment" role="group" aria-label="视图切换">
+              <button type="button" aria-pressed={viewMode === "graph"} onClick={() => setViewMode("graph")}>
                 图谱
-              </Button>
-              <Button type={viewMode === "list" ? "primary" : "default"} onClick={() => setViewMode("list")}>
+              </button>
+              <button type="button" aria-pressed={viewMode === "list"} onClick={() => setViewMode("list")}>
                 列表
-              </Button>
-            </Button.Group>
+              </button>
+            </div>
           </div>
           {viewMode === "list" ? (
             <>
@@ -816,11 +819,12 @@ export default function CollaborationPage({
                 <div className="toolbar-group">
                   <AutoComplete
                     style={{ width: 240 }}
-                    placeholder="搜索关系、任务或成员"
                     value={listSearch}
                     onChange={setListSearch}
                     options={[]}
-                  />
+                  >
+                    <Input prefix={<Icon name="search" size={15} />} placeholder="搜索关系、任务或成员" />
+                  </AutoComplete>
                   <Select
                     size="small"
                     style={{ width: 140 }}

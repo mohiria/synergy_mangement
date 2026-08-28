@@ -17,6 +17,7 @@ import {
 import type { Dayjs } from "dayjs";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
+import Icon from "./icons";
 import ProjectShell from "./ProjectShell";
 import TreeTransfer from "./TreeTransfer";
 import type { TreeTransferItem } from "./TreeTransfer";
@@ -722,6 +723,7 @@ export default function ProjectTasksPage({
             <div className="toolbar-group">
               <Input
                 allowClear
+                prefix={<Icon name="search" size={15} />}
                 style={{ width: 240 }}
                 placeholder="搜索任务、编号或负责人"
                 value={search}
@@ -1251,7 +1253,7 @@ function CreateTaskModal({
       onCancel={onClose}
       okText="提交入池审批"
       cancelText="取消"
-      destroyOnClose
+      destroyOnHidden
     >
       {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
       {invite && (
@@ -1268,7 +1270,7 @@ function CreateTaskModal({
           <span>所属 KR</span>
           <span>任务名称</span>
           <span>负责人</span>
-          <span>开始 / 截止</span>
+          <span>任务周期</span>
           <span>预期交付物</span>
           <span />
         </div>
@@ -1421,7 +1423,7 @@ function InviteOwnersModal({
       onCancel={onClose}
       okText="发送邀请"
       cancelText="取消"
-      destroyOnClose
+      destroyOnHidden
     >
       {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
       <div style={{ display: "grid", gap: 12 }}>
@@ -2061,7 +2063,7 @@ function TaskDrawer({
       {blockers.length > 0 && (
         <section className="drawer-section" data-focus="blockers">
           <h3>
-            结构化卡点{" "}
+            当前卡点{" "}
             <span className="section-count">{blockers.length} 个（系统派生，条件消失即自动解除）</span>
           </h3>
           {blockers.map((b) => (
@@ -2410,7 +2412,8 @@ function TaskDrawer({
     <Drawer
       open={!!task}
       onClose={onClose}
-      width={720}
+      // 基线 §7：任务详情抽屉宽 min(740px, 100vw)。
+      width="min(740px, 100vw)"
       title={
         <div>
           {code} · {task.name}
@@ -2576,7 +2579,7 @@ function FieldChangeModal({
       onCancel={onClose}
       okText={isDraft ? "保存" : "提交变更审批"}
       cancelText="取消"
-      destroyOnClose
+      destroyOnHidden
     >
       {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
       <div style={{ display: "grid", gap: 12 }}>
@@ -2821,7 +2824,7 @@ function ConfigureInputModal({
       onCancel={onClose}
       okText="建立输入关系"
       cancelText="取消"
-      destroyOnClose
+      destroyOnHidden
     >
       {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
       <div style={{ display: "grid", gap: 12 }}>
@@ -3013,7 +3016,7 @@ function ReviewersModal({
       onCancel={onClose}
       okText="保存配置"
       cancelText="取消"
-      destroyOnClose
+      destroyOnHidden
     >
       {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
       <Select
@@ -3099,7 +3102,7 @@ function ReceiversModal({
       onCancel={onClose}
       okText="保存配置"
       cancelText="取消"
-      destroyOnClose
+      destroyOnHidden
     >
       {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
       <Select

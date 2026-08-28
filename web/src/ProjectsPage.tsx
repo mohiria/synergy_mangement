@@ -6,6 +6,7 @@ import { client } from "./api/client";
 import type { components } from "./api/schema";
 import DateRangeField from "./DateRangeField";
 import Icon from "./icons";
+import NotificationBell from "./NotificationBell";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
@@ -161,6 +162,8 @@ export default function ProjectsPage({
           <div className="breadcrumbs">
             <b>项目列表</b>
           </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <NotificationBell />
           <Popover
             trigger="click"
             placement="bottomRight"
@@ -188,6 +191,7 @@ export default function ProjectsPage({
               <Icon name="down" size={15} />
             </button>
           </Popover>
+          </div>
         </header>
         <main className="page">
           <div className="page-head">
@@ -203,6 +207,7 @@ export default function ProjectsPage({
             <div className="toolbar-group">
               <Input
                 allowClear
+                prefix={<Icon name="search" size={15} />}
                 style={{ width: 240 }}
                 placeholder="搜索项目、负责人或阶段"
                 value={search}
@@ -321,7 +326,7 @@ export default function ProjectsPage({
         }}
         okText={editing ? "保存" : "创建"}
         cancelText="取消"
-        destroyOnClose
+        destroyOnHidden
       >
         {saveError && <Alert type="error" message={saveError} style={{ marginBottom: 16 }} />}
         <Form form={form} layout="vertical" onFinish={save} requiredMark={false}>

@@ -239,7 +239,7 @@ export default function ImportModal({
         onClose();
       }}
       footer={null}
-      destroyOnClose
+      destroyOnHidden
     >
       <Steps
         size="small"

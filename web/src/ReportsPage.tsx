@@ -121,16 +121,19 @@ export default function ReportsPage({
           </div>
           <div className="toolbar report-toolbar">
             <div className="toolbar-group">
-              {(Object.keys(RANGE_LABEL) as ReportRange[]).map((r) => (
-                <Button
-                  key={r}
-                  size="small"
-                  type={range === r ? "primary" : "default"}
-                  onClick={() => setRange(r)}
-                >
-                  {RANGE_LABEL[r]}
-                </Button>
-              ))}
+              {/* 时间范围用基线 §6 的 segment（h36 灰底、激活项白底），不是实心蓝底按钮。 */}
+              <div className="segment" role="group" aria-label="报告时间范围">
+                {(Object.keys(RANGE_LABEL) as ReportRange[]).map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    aria-pressed={range === r}
+                    onClick={() => setRange(r)}
+                  >
+                    {RANGE_LABEL[r]}
+                  </button>
+                ))}
+              </div>
               <Button size="small" loading={exporting === "image"} onClick={() => exportReport("image")}>
                 导出长图
               </Button>

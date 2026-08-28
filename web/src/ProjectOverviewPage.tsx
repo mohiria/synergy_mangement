@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, Spin } from "antd";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
+import Icon from "./icons";
 import ProjectShell from "./ProjectShell";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
@@ -187,7 +188,9 @@ export default function ProjectOverviewPage({
                       <span className={`status-pill risk-${k.riskLevel}`}>
                         {RISK_LABEL[k.riskLevel]}
                       </span>
-                      <span className="muted">{isOpen ? "▾" : "▸"}</span>
+                      <span className="muted" aria-hidden>
+                        <Icon name={isOpen ? "down" : "chevron"} size={15} />
+                      </span>
                     </button>
                     {isOpen && (
                       <div className="kr-tasks">
@@ -245,7 +248,7 @@ export default function ProjectOverviewPage({
                                 navigate(`/projects/${projectId}/tasks?task=${t.id}&tab=overview`)
                               }
                             >
-                              ›
+                              <Icon name="chevron" size={15} />
                             </button>
                           </div>
                         ))}

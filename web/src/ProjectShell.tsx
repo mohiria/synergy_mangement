@@ -1,16 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Badge, Button, Input, Popover } from "antd";
+import { Button, Input, Popover } from "antd";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import Icon from "./icons";
+import NotificationBell from "./NotificationBell";
 import type { IconName } from "./icons";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
 type ProjectStatus = components["schemas"]["ProjectStatus"];
-type Notification = components["schemas"]["Notification"];
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
   not_started: "未开始",
@@ -57,6 +57,7 @@ function ProjectMenu({
           size="small"
           allowClear
           autoFocus
+          prefix={<Icon name="search" size={15} />}
           placeholder="搜索项目"
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
@@ -96,6 +97,7 @@ export default function ProjectShell({
   project,
   projectId,
   pageLabel,
+  pageWidth,
   onLogout,
   children,
 }: {
@@ -103,6 +105,8 @@ export default function ProjectShell({
   project: Project | null;
   projectId: number;
   pageLabel: string;
+  // 内容区最大宽度分档（基线 §5）：默认 1480，我的工作 1240，图谱 1680。
+  pageWidth?: "narrow" | "wide";
   onLogout: () => void;
   children: ReactNode;
 }) {
@@ -125,68 +129,6 @@ export default function ProjectShell({
     navigate(to);
   };
 
-  // 站内通知：铃铛 + 未读角标，点击条目直达对应任务讨论（AC-36）。
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const loadNotifications = useCallback(async () => {
-    const res = await client.GET("/notifications");
-    if (res.data) setNotifications(res.data);
-  }, []);
-  useEffect(() => {
-    loadNotifications();
-  }, [loadNotifications, pathname]);
-  const unread = notifications.filter((n) => !n.readAt).length;
-
-  const openNotification = async (n: Notification) => {
-    if (n.projectId && n.taskId) {
-      navigate(`/projects/${n.projectId}/tasks?task=${n.taskId}&tab=discussion`);
-    }
-  };
-
-  const markAllRead = async () => {
-    await client.POST("/notifications/read-all");
-    loadNotifications();
-  };
-
-  const notificationPanel = (
-    <div style={{ width: 320, maxHeight: 360, overflow: "auto" }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 6,
-        }}
-      >
-        <b style={{ fontSize: 14 }}>站内通知</b>
-        <Button type="link" size="small" disabled={unread === 0} onClick={markAllRead}>
-          全部已读
-        </Button>
-      </div>
-      {notifications.length === 0 && (
-        <div className="muted" style={{ padding: "18px 0", textAlign: "center", fontSize: 12 }}>
-          暂无通知
-        </div>
-      )}
-      {notifications.map((n) => (
-        <div
-          key={n.id}
-          onClick={() => openNotification(n)}
-          style={{
-            padding: "8px 6px",
-            borderBottom: "1px solid var(--line)",
-            cursor: n.taskId ? "pointer" : "default",
-            opacity: n.readAt ? 0.6 : 1,
-            fontSize: 14,
-          }}
-        >
-          {n.content}
-          <div className="muted" style={{ fontSize: 12 }}>
-            {n.createdAt.slice(0, 16).replace("T", " ")}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
 
   const settingsPath = `/projects/${projectId}/settings`;
   return (
@@ -254,13 +196,7 @@ export default function ProjectShell({
             <b>{pageLabel}</b>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <Popover content={notificationPanel} trigger="click" placement="bottomRight">
-              <Badge count={unread} size="small" offset={[-2, 2]}>
-                <button className="icon-btn" type="button" aria-label="站内通知">
-                  <Icon name="bell" />
-                </button>
-              </Badge>
-            </Popover>
+            <NotificationBell />
             <Popover
               trigger="click"
               placement="bottomRight"
@@ -290,7 +226,7 @@ export default function ProjectShell({
             </Popover>
           </div>
         </header>
-        <main className="page">{children}</main>
+        <main className={`page${pageWidth ? ` page-${pageWidth}` : ""}`}>{children}</main>
       </section>
     </div>
   );

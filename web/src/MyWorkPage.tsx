@@ -194,6 +194,7 @@ export default function MyWorkPage({
       project={project}
       projectId={projectId}
       pageLabel="我的工作"
+      pageWidth="narrow"
       onLogout={onLogout}
     >
       {notFound ? (

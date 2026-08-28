@@ -376,7 +376,7 @@ function OkrBatchModal({
       onCancel={onClose}
       okText="保存 O / KR"
       cancelText="取消"
-      destroyOnClose
+      destroyOnHidden
     >
       {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
       <div className="notice">O、KR 仍由线下确定；这里仅用于一次性连续录入结构和负责人。</div>

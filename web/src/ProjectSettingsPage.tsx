@@ -286,7 +286,7 @@ export default function ProjectSettingsPage({
             onOk={add}
             onCancel={() => setInviteOpen(false)}
             width={480}
-            destroyOnClose
+            destroyOnHidden
           >
             <div className="form-stack">
               <label>
