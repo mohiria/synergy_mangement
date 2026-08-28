@@ -15,3 +15,6 @@ UPDATE sessions SET expires_at = $2 WHERE token = $1;
 
 -- name: DeleteSession :exec
 DELETE FROM sessions WHERE token = $1;
+
+-- name: DeleteExpiredSessions :execrows
+DELETE FROM sessions WHERE expires_at <= now();

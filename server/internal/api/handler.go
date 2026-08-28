@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -178,17 +179,18 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := s.now()
-	if !s.throttle.Allow(req.Username, now) {
+	ip := clientIP(r)
+	if !s.throttle.Allow(req.Username, ip, now) {
 		writeJSON(w, http.StatusTooManyRequests, Error{Code: "rate_limited", Message: "登录失败次数过多，请稍后再试"})
 		return
 	}
 	user, err := s.q.GetUserByUsername(r.Context(), req.Username)
 	if err != nil || !domain.VerifyPassword(user.PasswordHash, req.Password) {
-		s.throttle.RecordFailure(req.Username, now)
+		s.throttle.RecordFailure(req.Username, ip, now)
 		writeJSON(w, http.StatusUnauthorized, Error{Code: "invalid_credentials", Message: "用户名或口令错误"})
 		return
 	}
-	s.throttle.RecordSuccess(req.Username)
+	s.throttle.RecordSuccess(req.Username, ip)
 	token, err := domain.NewSessionToken()
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -902,4 +904,21 @@ func writeInternalError(w http.ResponseWriter, r *http.Request, errs ...error) {
 	}
 	log.Printf("[500] request_id=%s %s %s: %v", requestIDFrom(r.Context()), r.Method, r.URL.Path, cause)
 	writeJSON(w, http.StatusInternalServerError, Error{Code: "internal_error", Message: "服务器内部错误"})
+}
+
+// clientIP 取请求的真实来源 IP，用于登录限速按 (用户名, IP) 计数。
+// 部署形态是 Caddy 反代 app（web/Caddyfile），RemoteAddr 恒为 Caddy 的容器地址，
+// 必须读 X-Forwarded-For。客户端可以自带伪造的 XFF，Caddy 只把真实对端追加在尾部，
+// 因此取最右一段；开发直连没有 XFF，回落到 RemoteAddr。
+func clientIP(r *http.Request) string {
+	parts := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+	for i := len(parts) - 1; i >= 0; i-- {
+		if ip := strings.TrimSpace(parts[i]); ip != "" {
+			return ip
+		}
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
 }

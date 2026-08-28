@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	openapi_types "github.com/oapi-codegen/runtime/types"
@@ -4510,5 +4511,81 @@ func TestDeliverableFileStateUnique(t *testing.T) {
 		if err := newFile(state, state+"-2"); err == nil {
 			t.Fatalf("同一交付物项写入第二份 %s 应被库层拒绝", state)
 		}
+	}
+}
+
+// S3：登录限速按 (用户名, 来源 IP) 计数。攻击者从自己的 IP 打满某账号的失败额度后，
+// 该账号的真实用户从别的 IP 仍能正常登录。
+func TestLoginThrottleIsolatesSourceIP(t *testing.T) {
+	q, pool := setupDB(t)
+	seedUser(t, q, "alice", "张三", "alice-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	loginFrom := func(ip, password string) *http.Response {
+		t.Helper()
+		var buf bytes.Buffer
+		if err := json.NewEncoder(&buf).Encode(api.LoginRequest{Username: "alice", Password: password}); err != nil {
+			t.Fatalf("encode: %v", err)
+		}
+		req, err := http.NewRequest(http.MethodPost, base+"/auth/login", &buf)
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		// Caddy 反代把真实对端追加在 XFF 尾部；前缀模拟客户端自带的伪造值。
+		req.Header.Set("X-Forwarded-For", "1.2.3.4, "+ip)
+		resp, err := newClient(t).Do(req)
+		if err != nil {
+			t.Fatalf("login: %v", err)
+		}
+		return resp
+	}
+
+	const attacker, victim = "10.0.0.66", "10.0.0.7"
+	for i := 0; i < domain.MaxLoginFailures; i++ {
+		resp := loginFrom(attacker, "wrong")
+		wantStatus(t, resp, http.StatusUnauthorized)
+		resp.Body.Close()
+	}
+	resp := loginFrom(attacker, "wrong")
+	wantStatus(t, resp, http.StatusTooManyRequests)
+	resp.Body.Close()
+
+	resp = loginFrom(victim, "alice-pass")
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+}
+
+// 过期会话有清理路径：登出与滑动续期都不删过期行，靠每小时 ticker 的 SweepAuthState 收口。
+func TestDeleteExpiredSessions(t *testing.T) {
+	q, _ := setupDB(t)
+	ctx := context.Background()
+	alice := seedUser(t, q, "alice", "张三", "alice-pass")
+
+	mustSession := func(token string, expiresAt time.Time) {
+		t.Helper()
+		if err := q.CreateSession(ctx, store.CreateSessionParams{
+			Token: token, UserID: alice.ID,
+			ExpiresAt: pgtype.Timestamptz{Time: expiresAt, Valid: true},
+		}); err != nil {
+			t.Fatalf("create session %s: %v", token, err)
+		}
+	}
+	now := time.Now()
+	mustSession("expired", now.Add(-time.Hour))
+	mustSession("live", now.Add(domain.SessionTTL))
+
+	n, err := q.DeleteExpiredSessions(ctx)
+	if err != nil {
+		t.Fatalf("DeleteExpiredSessions: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("清理条数 = %d, want 1", n)
+	}
+	if _, err := q.GetSession(ctx, "live"); err != nil {
+		t.Fatalf("未过期会话不应被清理: %v", err)
 	}
 }

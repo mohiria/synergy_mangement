@@ -68,6 +68,15 @@ func (s *Server) SweepStaleUploads(ctx context.Context) {
 	}
 }
 
+// SweepAuthState 清理认证侧的过期残留（S3）：登录失败计数只活在锁定窗口内，
+// 留着只会让 map 随随机用户名无限膨胀；过期会话行同理，登出与滑动续期都不会删它们。
+func (s *Server) SweepAuthState(ctx context.Context) {
+	s.throttle.Sweep(s.now())
+	if _, err := s.q.DeleteExpiredSessions(ctx); err != nil {
+		log.Printf("auth sweep: 清理过期会话失败: %v", err)
+	}
+}
+
 // StartBlockerActivityTicker 启动进程内单 ticker（ADR 0001：无外部定时设施）。
 // 启动时立即扫一次——进程停机期间出现的时间型卡点因此不会漏记。返回的函数停止并等待退出。
 func (s *Server) StartBlockerActivityTicker(ctx context.Context, interval time.Duration) func() {
@@ -79,6 +88,7 @@ func (s *Server) StartBlockerActivityTicker(ctx context.Context, interval time.D
 		defer ticker.Stop()
 		s.SweepBlockerActivities(ctx)
 		s.SweepStaleUploads(ctx)
+		s.SweepAuthState(ctx)
 		for {
 			select {
 			case <-ctx.Done():
@@ -86,6 +96,7 @@ func (s *Server) StartBlockerActivityTicker(ctx context.Context, interval time.D
 			case <-ticker.C:
 				s.SweepBlockerActivities(ctx)
 				s.SweepStaleUploads(ctx)
+				s.SweepAuthState(ctx)
 			}
 		}
 	}()

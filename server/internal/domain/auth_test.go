@@ -43,6 +43,7 @@ func TestLoginThrottle(t *testing.T) {
 		at     time.Duration
 		want   bool // 仅 action == "allow" 时断言
 	}
+	const ip = "10.0.0.1"
 	tests := []struct {
 		name  string
 		user  string
@@ -85,11 +86,11 @@ func TestLoginThrottle(t *testing.T) {
 				at := base.Add(s.at)
 				switch s.action {
 				case "fail":
-					th.RecordFailure(tt.user, at)
+					th.RecordFailure(tt.user, ip, at)
 				case "success":
-					th.RecordSuccess(tt.user)
+					th.RecordSuccess(tt.user, ip)
 				case "allow":
-					if got := th.Allow(tt.user, at); got != s.want {
+					if got := th.Allow(tt.user, ip, at); got != s.want {
 						t.Fatalf("step %d: Allow = %v, want %v", i, got, s.want)
 					}
 				}
@@ -102,13 +103,62 @@ func TestThrottleIsolatedPerUser(t *testing.T) {
 	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
 	th := NewLoginThrottle()
 	for i := 0; i < MaxLoginFailures; i++ {
-		th.RecordFailure("locked", now)
+		th.RecordFailure("locked", "10.0.0.1", now)
 	}
-	if th.Allow("locked", now) {
+	if th.Allow("locked", "10.0.0.1", now) {
 		t.Fatal("locked 用户应被拒绝")
 	}
-	if !th.Allow("other", now) {
+	if !th.Allow("other", "10.0.0.1", now) {
 		t.Fatal("其他用户不应受影响")
+	}
+}
+
+// S3：限速按 (用户名, 来源 IP) 计数——攻击者打满自己那格，锁不住同一账号的真实用户。
+func TestThrottleIsolatedPerIP(t *testing.T) {
+	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	th := NewLoginThrottle()
+	for i := 0; i < MaxLoginFailures; i++ {
+		th.RecordFailure("victim", "10.0.0.66", now)
+	}
+	if th.Allow("victim", "10.0.0.66", now) {
+		t.Fatal("攻击来源 IP 应被拒绝")
+	}
+	if !th.Allow("victim", "10.0.0.7", now) {
+		t.Fatal("同一账号的其他来源 IP 不应被连坐")
+	}
+}
+
+// 登录成功只清自己这格，不替其他来源 IP 解锁。
+func TestThrottleSuccessClearsOwnKeyOnly(t *testing.T) {
+	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	th := NewLoginThrottle()
+	for i := 0; i < MaxLoginFailures; i++ {
+		th.RecordFailure("u", "10.0.0.66", now)
+	}
+	th.RecordSuccess("u", "10.0.0.7")
+	if th.Allow("u", "10.0.0.66", now) {
+		t.Fatal("另一来源 IP 的成功登录不应替攻击来源解锁")
+	}
+}
+
+// 失败记录有清理路径：海量随机用户名不再让 map 无限膨胀。
+func TestThrottleSweep(t *testing.T) {
+	base := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	th := NewLoginThrottle()
+	th.RecordFailure("stale", "10.0.0.1", base)
+	th.RecordFailure("fresh", "10.0.0.2", base.Add(LoginLockWindow))
+
+	if got := th.Sweep(base.Add(LoginLockWindow + time.Second)); got != 1 {
+		t.Fatalf("Sweep 清理条数 = %d, want 1", got)
+	}
+	if n := th.Size(); n != 1 {
+		t.Fatalf("清理后剩余 = %d, want 1", n)
+	}
+	if got := th.Sweep(base.Add(3 * LoginLockWindow)); got != 1 {
+		t.Fatalf("再次 Sweep 清理条数 = %d, want 1", got)
+	}
+	if n := th.Size(); n != 0 {
+		t.Fatalf("清理后剩余 = %d, want 0", n)
 	}
 }
 
