@@ -110,7 +110,7 @@ func CanSubmitPoolReview(a Actor, userID int64, t TaskFacts) bool {
 
 // DecidePoolReview 处理入池审批：仅所属 KR 负责人可处理（§3.3 管理员不可替代），
 // 通过后任务进入未开始，退回后回到草稿（PRD §5.2.A）。
-func DecidePoolReview(t TaskFacts, actorID int64, approve bool) (string, error) {
+func DecidePoolReview(t TaskFacts, actorID int64, approve bool, opinion string) (string, error) {
 	if t.Status != TaskPendingPoolReview {
 		return "", ErrPoolReviewNotPending
 	}
@@ -120,11 +120,15 @@ func DecidePoolReview(t TaskFacts, actorID int64, approve bool) (string, error) 
 	if approve {
 		return TaskNotStarted, nil
 	}
+	// MW-18：退回必须写清理由，与完成审核同口径。
+	if strings.TrimSpace(opinion) == "" {
+		return "", ErrRejectOpinionRequired
+	}
 	return TaskDraft, nil
 }
 
 // CanDecidePoolReview 判定当前用户能否处理该任务的入池审批（派生动作标志）。
 func CanDecidePoolReview(userID int64, t TaskFacts) bool {
-	_, err := DecidePoolReview(t, userID, true)
+	_, err := DecidePoolReview(t, userID, true, "")
 	return err == nil
 }

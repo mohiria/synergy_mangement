@@ -145,18 +145,22 @@ func TestDecidePoolReview(t *testing.T) {
 		t          TaskFacts
 		actor      int64
 		approve    bool
+		opinion    string
 		wantStatus string
 		wantErr    error
 	}{
-		{"KR 负责人通过后进入未开始", pending, 7, true, TaskNotStarted, nil},
-		{"KR 负责人退回后回到草稿", pending, 7, false, TaskDraft, nil},
-		{"非 KR 负责人（含管理员）不可处理", pending, 9, true, "", ErrNotKrOwner},
-		{"任务创建人不可自审", pending, 3, true, "", ErrNotKrOwner},
-		{"非待审批状态不可处理", TaskFacts{Status: TaskDraft, KrOwnerID: i64(7)}, 7, true, "", ErrPoolReviewNotPending},
+		{"KR 负责人通过后进入未开始", pending, 7, true, "", TaskNotStarted, nil},
+		{"KR 负责人带理由退回后回到草稿", pending, 7, false, "范围与 KR 不匹配", TaskDraft, nil},
+		{"非 KR 负责人（含管理员）不可处理", pending, 9, true, "", "", ErrNotKrOwner},
+		{"任务创建人不可自审", pending, 3, true, "", "", ErrNotKrOwner},
+		{"非待审批状态不可处理", TaskFacts{Status: TaskDraft, KrOwnerID: i64(7)}, 7, true, "", "", ErrPoolReviewNotPending},
+		// MW-18：退回必须带理由，与完成审核同口径；否则任务回到草稿后不在任何分组里。
+		{"退回不填理由被拒", pending, 7, false, "", "", ErrRejectOpinionRequired},
+		{"退回理由只有空白被拒", pending, 7, false, "   ", "", ErrRejectOpinionRequired},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			status, err := DecidePoolReview(tc.t, tc.actor, tc.approve)
+			status, err := DecidePoolReview(tc.t, tc.actor, tc.approve, tc.opinion)
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("DecidePoolReview() err = %v, want %v", err, tc.wantErr)
 			}

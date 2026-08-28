@@ -85,21 +85,28 @@ func TestFieldChangeRoute(t *testing.T) {
 func TestDecideFieldChangeRule(t *testing.T) {
 	krOwner := i64(7)
 	inProgress := TaskFacts{Status: TaskInProgress, KrOwnerID: krOwner}
-	if err := DecideFieldChangeRule("pending", inProgress, 7); err != nil {
+	// MW-18：变更单退回同样必须写清理由。
+	if err := DecideFieldChangeRule("pending", inProgress, 7, false, ""); !errors.Is(err, ErrRejectOpinionRequired) {
+		t.Fatalf("退回不填理由应被拒: %v", err)
+	}
+	if err := DecideFieldChangeRule("pending", inProgress, 7, false, "口径不符"); err != nil {
+		t.Fatalf("带理由退回应通过: %v", err)
+	}
+	if err := DecideFieldChangeRule("pending", inProgress, 7, true, ""); err != nil {
 		t.Fatalf("KR 负责人应可处理: %v", err)
 	}
-	if err := DecideFieldChangeRule("pending", inProgress, 9); !errors.Is(err, ErrNotKrOwner) {
+	if err := DecideFieldChangeRule("pending", inProgress, 9, true, ""); !errors.Is(err, ErrNotKrOwner) {
 		t.Fatalf("非 KR 负责人应被拒: %v", err)
 	}
-	if err := DecideFieldChangeRule("approved", inProgress, 7); !errors.Is(err, ErrChangeNotPending) {
+	if err := DecideFieldChangeRule("approved", inProgress, 7, true, ""); !errors.Is(err, ErrChangeNotPending) {
 		t.Fatalf("已处理变更单应冲突: %v", err)
 	}
-	if err := DecideFieldChangeRule("pending", TaskFacts{Status: TaskInProgress}, 7); !errors.Is(err, ErrNotKrOwner) {
+	if err := DecideFieldChangeRule("pending", TaskFacts{Status: TaskInProgress}, 7, true, ""); !errors.Is(err, ErrNotKrOwner) {
 		t.Fatalf("KR 无负责人时应被拒: %v", err)
 	}
 	// 终态任务的未决变更单不得再被批准：批准会改写已完成／已取消任务的名称、负责人与截止时间。
 	for _, status := range []string{TaskCompleted, TaskCancelled} {
-		if err := DecideFieldChangeRule("pending", TaskFacts{Status: status, KrOwnerID: krOwner}, 7); !errors.Is(err, ErrChangeTaskTerminal) {
+		if err := DecideFieldChangeRule("pending", TaskFacts{Status: status, KrOwnerID: krOwner}, 7, true, ""); !errors.Is(err, ErrChangeTaskTerminal) {
 			t.Fatalf("任务状态 %s 时应拒绝处理变更单: %v", status, err)
 		}
 	}

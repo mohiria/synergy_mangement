@@ -60,10 +60,12 @@ func TestMyWorkDropsCancelledTaskItems(t *testing.T) {
 // MW-15／模块 PRD §7.1：五组共用固定排序——超期最前，其次今天到期，再按截止／期望时间升序；
 // 无时间字段的事项按已等待时长降序；同一紧急层级内被阻塞（上游未就绪）的任务沉一档。
 func TestMyWorkSorting(t *testing.T) {
-	now := time.Date(2026, 8, 26, 10, 0, 0, 0, time.UTC)
+	// 时刻取项目时区的工作日中段；日期型字段按「当天零点」构造，与 pgx 扫 DATE 的形态一致，
+	// 这样「今天到期」这一层级才真的被断言覆盖（回归 R7：此前 due 带时分秒，掩盖了时区差）。
+	now := time.Date(2026, 8, 26, 10, 0, 0, 0, ProjectLocation)
 	me := int64(1)
 	day := func(d int) *time.Time {
-		v := now.AddDate(0, 0, d)
+		v := time.Date(2026, 8, 26+d, 0, 0, 0, 0, time.UTC)
 		return &v
 	}
 	task := func(id int64, name string, endDelta int, unready string) WorkTaskFact {
@@ -86,6 +88,13 @@ func TestMyWorkSorting(t *testing.T) {
 	got := make([]string, 0, len(g.Pending))
 	for _, it := range g.Pending {
 		got = append(got, it.TaskName)
+	}
+	// 只有真正过了截止日的才算超期：截止日当天仍有一整天工期（回归 R7）。
+	// 仅看排序结果无法区分——今天到期的两条即便被误判为超期，位次也不变。
+	for _, it := range g.Pending {
+		if want := it.TaskName == "已超期"; it.Overdue != want {
+			t.Fatalf("任务「%s」Overdue = %v, want %v", it.TaskName, it.Overdue, want)
+		}
 	}
 	want := []string{"已超期", "今天到期", "今天到期但被阻塞", "明天到期", "三天后到期"}
 	if len(got) != len(want) {

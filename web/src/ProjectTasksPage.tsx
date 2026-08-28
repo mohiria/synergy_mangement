@@ -1022,22 +1022,22 @@ export default function ProjectTasksPage({
         open={!!fcReject}
         okText="确认退回"
         cancelText="取消"
-        okButtonProps={{ danger: true }}
         onCancel={() => setFcReject(null)}
+        okButtonProps={{ danger: true, disabled: !fcRejectOpinion.trim() }}
         onOk={async () => {
           if (fcReject) {
-            await decideFieldChange(fcReject.task, fcReject.changeId, "rejected", fcRejectOpinion.trim() || undefined);
+            await decideFieldChange(fcReject.task, fcReject.changeId, "rejected", fcRejectOpinion.trim());
           }
           setFcReject(null);
         }}
       >
         <p className="muted" style={{ marginTop: 0 }}>
-          退回后拟议值作废，旧值保持不变；提交人会看到退回待处理事项。
+          退回后拟议值作废，旧值保持不变；提交人会看到退回待处理事项。退回意见必填。
         </p>
         <Input.TextArea
           rows={3}
           maxLength={500}
-          placeholder="审批意见（选填）"
+          placeholder="退回意见（必填）"
           value={fcRejectOpinion}
           onChange={(e) => setFcRejectOpinion(e.target.value)}
         />
@@ -1047,22 +1047,22 @@ export default function ProjectTasksPage({
         open={!!rejectTask}
         okText="确认退回"
         cancelText="取消"
-        okButtonProps={{ danger: true }}
         onCancel={() => setRejectTask(null)}
+        okButtonProps={{ danger: true, disabled: !rejectOpinion.trim() }}
         onOk={async () => {
           if (rejectTask) {
-            await decidePool(rejectTask, "rejected", rejectOpinion.trim() || undefined);
+            await decidePool(rejectTask, "rejected", rejectOpinion.trim());
           }
           setRejectTask(null);
         }}
       >
         <p className="muted" style={{ marginTop: 0 }}>
-          退回后任务回到草稿，提交人可修改后重新提交。
+          退回后任务回到草稿，提交人可在「待我处理」看到退回理由并修改后重新提交。退回意见必填。
         </p>
         <Input.TextArea
           rows={3}
           maxLength={500}
-          placeholder="退回意见（选填）"
+          placeholder="退回意见（必填）"
           value={rejectOpinion}
           onChange={(e) => setRejectOpinion(e.target.value)}
         />

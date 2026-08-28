@@ -164,11 +164,13 @@ func (s *Server) DecideFieldChange(w http.ResponseWriter, r *http.Request, proje
 		}
 		return
 	}
-	if err := domain.DecideFieldChangeRule(fc.State, facts, uid); err != nil {
+	if err := domain.DecideFieldChangeRule(fc.State, facts, uid, approve, opinion); err != nil {
 		if errors.Is(err, domain.ErrChangeNotPending) {
 			writeJSON(w, http.StatusConflict, Error{Code: "change_state_conflict", Message: err.Error()})
 		} else if errors.Is(err, domain.ErrChangeTaskTerminal) {
 			writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: err.Error()})
+		} else if errors.Is(err, domain.ErrRejectOpinionRequired) {
+			writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "opinion_required", Message: err.Error()})
 		} else {
 			writeJSON(w, http.StatusForbidden, Error{Code: "forbidden", Message: err.Error()})
 		}
@@ -351,7 +353,7 @@ func (s *Server) fieldChangeView(ctx context.Context, fc store.FieldChangeReques
 		}
 		diffs = append(diffs, FieldChangeDiff{Field: "endDate", Label: "截止时间", OldValue: old, NewValue: fc.NewEndDate.Time.Format("2006-01-02")})
 	}
-	canDecide := domain.DecideFieldChangeRule(fc.State, facts, userID) == nil
+	canDecide := domain.DecideFieldChangeRule(fc.State, facts, userID, true, "") == nil
 	canAbandon := domain.CanAbandonFieldChange(actor, userID, fc.SubmittedBy, fc.State, fc.Resolved)
 	// AC-04：待审批显示「待{所属 KR 负责人姓名}审批」。
 	krOwnerName := ""

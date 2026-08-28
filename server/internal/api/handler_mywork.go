@@ -104,7 +104,8 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 			}
 			facts.PoolReviews = append(facts.PoolReviews, fact)
 		case domain.PoolReviewRejected:
-			if tf, ok := taskFactByID[pr.TaskID]; ok && tf.DisplayStatus == domain.TaskDraft && pr.Opinion != "" {
+			// 入组只看「草稿 + 存在退回审批单」；意见是展示字段，不参与归类（MW-05）。
+			if tf, ok := taskFactByID[pr.TaskID]; ok && tf.DisplayStatus == domain.TaskDraft {
 				op := pr.Opinion
 				tf.PoolRejected = &op
 			}

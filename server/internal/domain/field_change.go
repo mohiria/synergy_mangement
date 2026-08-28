@@ -108,7 +108,7 @@ func FieldChangeRoute(a Actor, userID int64, t TaskFacts, hasPending bool) (Fiel
 
 // DecideFieldChangeRule 变更单处理规则：仅所属 KR 负责人、仅待审批状态（管理员不可替代，§3.3）；
 // 任务已进入终态时变更单不得再被处理。
-func DecideFieldChangeRule(state string, t TaskFacts, actorID int64) error {
+func DecideFieldChangeRule(state string, t TaskFacts, actorID int64, approve bool, opinion string) error {
 	if state != FieldChangePendingState {
 		return ErrChangeNotPending
 	}
@@ -117,6 +117,10 @@ func DecideFieldChangeRule(state string, t TaskFacts, actorID int64) error {
 	}
 	if t.KrOwnerID == nil || *t.KrOwnerID != actorID {
 		return ErrNotKrOwner
+	}
+	// MW-18：退回必须写清理由，与入池审批、完成审核同口径。
+	if !approve && strings.TrimSpace(opinion) == "" {
+		return ErrRejectOpinionRequired
 	}
 	return nil
 }

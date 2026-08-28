@@ -139,14 +139,14 @@ func DeriveBlockers(f BlockerFacts) []Blocker {
 		if in.Ready || in.Necessity != NecessityRequired {
 			continue
 		}
-		if t.StartDate == nil || f.Now.Before(*t.StartDate) {
+		if !Started(t.StartDate, f.Now) {
 			continue // 未到开始时间的输入缺失只是风险信号（模块 PRD §8.7）
 		}
 		b := Blocker{
 			Key:        fmt.Sprintf("%s:edge:%d", BlockerUpstreamUnready, in.EdgeID),
 			Kind:       BlockerUpstreamUnready,
 			Missing:    in.InputName,
-			Level:      blockerLevel(t.EndDate != nil && f.Now.After(*t.EndDate)),
+			Level:      blockerLevel(Overdue(t.EndDate, f.Now)),
 			Since:      *t.StartDate,
 			OccurredAt: *t.StartDate,
 		}
@@ -168,7 +168,7 @@ func DeriveBlockers(f BlockerFacts) []Blocker {
 
 	// —— 任务超期 ——
 	for _, t := range f.Tasks {
-		if !blockerTaskInExecution(t.Status) || t.EndDate == nil || !f.Now.After(*t.EndDate) {
+		if !blockerTaskInExecution(t.Status) || !Overdue(t.EndDate, f.Now) {
 			continue
 		}
 		add(t, Blocker{

@@ -299,11 +299,14 @@ func (s *Server) BatchDecidePool(w http.ResponseWriter, r *http.Request, project
 		if !ok {
 			return
 		}
-		newStatus, err := domain.DecidePoolReview(facts, uid, approve)
+		newStatus, err := domain.DecidePoolReview(facts, uid, approve, opinion)
 		if err != nil {
-			if errors.Is(err, domain.ErrPoolReviewNotPending) {
+			switch {
+			case errors.Is(err, domain.ErrPoolReviewNotPending):
 				writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: task.Name + "：" + err.Error()})
-			} else {
+			case errors.Is(err, domain.ErrRejectOpinionRequired):
+				writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "opinion_required", Message: err.Error()})
+			default:
 				writeJSON(w, http.StatusForbidden, Error{Code: "forbidden", Message: task.Name + "：" + err.Error()})
 			}
 			return

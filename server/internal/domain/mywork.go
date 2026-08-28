@@ -246,7 +246,7 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		}
 		if ir.ProviderID == me && ir.Notified && (ir.State == InputRequestPending || ir.State == InputRequestAccepted) {
 			days, _ := waitingDays(ir.CreatedAt)
-			overdue := ir.Expected != nil && f.Now.After(*ir.Expected)
+			overdue := Overdue(ir.Expected, f.Now)
 			g.Pending = append(g.Pending, WorkItem{
 				Kind: "input_request", Title: "[输入请求] " + ir.InputName + " → " + ir.TaskName,
 				TaskID: tid(ir.TaskID), TaskName: ir.TaskName, RefID: tid(ir.ID),
@@ -269,7 +269,7 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 			item := WorkItem{
 				Kind: "task", Title: tk.Name, TaskID: tid(tk.ID), TaskName: tk.Name,
 				Due: tk.EndDate, UnreadyNote: tk.UnreadyNote, DrawerTab: "overview",
-				Overdue: tk.EndDate != nil && f.Now.After(*tk.EndDate),
+				Overdue: Overdue(tk.EndDate, f.Now),
 			}
 			// 被退回事项回到提交人的待我处理，卡片带「已退回：理由」（补充规则 3）。
 			switch {
@@ -321,7 +321,7 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		}
 		if ir.TaskOwnerID == me && ir.ProviderID != me && (ir.State == InputRequestPending || ir.State == InputRequestAccepted) {
 			days, _ := waitingDays(ir.CreatedAt)
-			overdue := ir.Expected != nil && f.Now.After(*ir.Expected)
+			overdue := Overdue(ir.Expected, f.Now)
 			item := WorkItem{
 				Kind: "waiting_input_request", Title: "[输入请求] " + ir.InputName + " → " + ir.TaskName,
 				TaskID: tid(ir.TaskID), TaskName: ir.TaskName, RefID: tid(ir.ID),
@@ -469,9 +469,7 @@ func workUrgency(now time.Time, it WorkItem) int {
 	if it.Due == nil {
 		return workUrgencyUndated
 	}
-	y1, m1, d1 := it.Due.Date()
-	y2, m2, d2 := now.Date()
-	if y1 == y2 && m1 == m2 && d1 == d2 {
+	if DueToday(it.Due, now) {
 		return workUrgencyToday
 	}
 	return workUrgencyDated
