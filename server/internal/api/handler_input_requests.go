@@ -228,8 +228,8 @@ func (s *Server) GetInputRequestFileUrl(w http.ResponseWriter, r *http.Request, 
 }
 
 // notifyPendingInputRequests 入池审批通过后补发对接人通知（AC-29；§7.3 首次入池通过后发送）。
-func (s *Server) notifyPendingInputRequests(r *http.Request, projectID int64, task store.GetTaskInProjectRow) {
-	rows, err := s.q.ListUnnotifiedInputRequestsByTask(r.Context(), task.ID)
+func (s *Server) notifyPendingInputRequests(r *http.Request, projectID, taskID int64, taskName string) {
+	rows, err := s.q.ListUnnotifiedInputRequestsByTask(r.Context(), taskID)
 	if err != nil {
 		return
 	}
@@ -237,9 +237,9 @@ func (s *Server) notifyPendingInputRequests(r *http.Request, projectID int64, ta
 		_, err := s.q.CreateNotification(r.Context(), store.CreateNotificationParams{
 			UserID:    ir.ProviderID,
 			Kind:      domain.NotifyInputRequest,
-			Content:   fmt.Sprintf("请你为任务「%s」提供输入「%s」：%s", task.Name, ir.EdgeName, ir.ContentNote),
+			Content:   fmt.Sprintf("请你为任务「%s」提供输入「%s」：%s", taskName, ir.EdgeName, ir.ContentNote),
 			ProjectID: pgtype.Int8{Int64: projectID, Valid: true},
-			TaskID:    pgtype.Int8{Int64: task.ID, Valid: true},
+			TaskID:    pgtype.Int8{Int64: taskID, Valid: true},
 		})
 		if err == nil {
 			_ = s.q.MarkInputRequestNotified(r.Context(), ir.ID)

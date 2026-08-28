@@ -279,12 +279,24 @@ func (s *Server) DecideTaskPoolReview(w http.ResponseWriter, r *http.Request, pr
 	}
 	uid := currentUser(r).ID
 	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
-	task, facts, ok := s.fetchTask(w, r, projectId, taskId)
+	approve := req.Decision == PoolReviewDecisionRequestDecisionApproved
+	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
+	opinion := ""
+	if req.Opinion != nil {
+		opinion = strings.TrimSpace(*req.Opinion)
+	}
+	// 规则与写入同事务：先锁任务行再重读事实，避免并发决策各自基于过期状态写库（R2）。
+	tx, err := s.db.Begin(r.Context())
+	if err != nil {
+		writeInternalError(w)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	qtx := s.q.WithTx(tx)
+	task, facts, ok := lockTaskFacts(r.Context(), w, qtx, projectId, taskId)
 	if !ok {
 		return
 	}
-	approve := req.Decision == PoolReviewDecisionRequestDecisionApproved
-	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
 	newStatus, err := domain.DecidePoolReview(facts, uid, approve)
 	if err != nil {
 		if errors.Is(err, domain.ErrPoolReviewNotPending) {
@@ -294,26 +306,15 @@ func (s *Server) DecideTaskPoolReview(w http.ResponseWriter, r *http.Request, pr
 		writeJSON(w, http.StatusForbidden, Error{Code: "forbidden", Message: err.Error()})
 		return
 	}
-	review, err := s.q.GetLatestPoolReview(r.Context(), taskId)
+	review, err := qtx.GetLatestPoolReview(r.Context(), taskId)
 	if err != nil || review.Status != domain.PoolReviewPending {
 		writeInternalError(w)
 		return
-	}
-	opinion := ""
-	if req.Opinion != nil {
-		opinion = strings.TrimSpace(*req.Opinion)
 	}
 	reviewStatus := domain.PoolReviewApproved
 	if !approve {
 		reviewStatus = domain.PoolReviewRejected
 	}
-	tx, err := s.db.Begin(r.Context())
-	if err != nil {
-		writeInternalError(w)
-		return
-	}
-	defer func() { _ = tx.Rollback(r.Context()) }()
-	qtx := s.q.WithTx(tx)
 	if _, err := qtx.DecidePoolReview(r.Context(), store.DecidePoolReviewParams{
 		ID:        review.ID,
 		Status:    reviewStatus,
@@ -335,7 +336,7 @@ func (s *Server) DecideTaskPoolReview(w http.ResponseWriter, r *http.Request, pr
 	if approve {
 		s.actionActivity(r.Context(), taskId, domain.ActivityPoolApproved, uid, opinion)
 		// AC-29：首次入池通过后补发指定成员的输入请求通知。
-		s.notifyPendingInputRequests(r, projectId, task)
+		s.notifyPendingInputRequests(r, projectId, task.ID, task.Name)
 	} else {
 		s.actionActivity(r.Context(), taskId, domain.ActivityPoolRejected, uid, opinion)
 	}
@@ -662,6 +663,27 @@ func (s *Server) fetchTask(w http.ResponseWriter, r *http.Request, projectID, ta
 			writeInternalError(w)
 		}
 		return store.GetTaskInProjectRow{}, domain.TaskFacts{}, false
+	}
+	facts := domain.TaskFacts{
+		Status:    task.Status,
+		CreatorID: task.CreatedBy,
+		OwnerID:   task.OwnerID,
+		KrOwnerID: fromPgInt8(task.KrOwnerID),
+	}
+	return task, facts, true
+}
+
+// lockTaskFacts 在事务内对任务行加写锁并重读事实：三道审批的决策必须在锁内重跑规则，
+// 否则并发决策会各自基于过期状态写库（或签通过与退回同时发生即可产出「已完成但无当前交付物」）。
+func lockTaskFacts(ctx context.Context, w http.ResponseWriter, qtx *store.Queries, projectID, taskID int64) (store.LockTaskInProjectRow, domain.TaskFacts, bool) {
+	task, err := qtx.LockTaskInProject(ctx, store.LockTaskInProjectParams{ID: taskID, ProjectID: projectID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, Error{Code: "task_not_found", Message: "任务不存在"})
+		} else {
+			writeInternalError(w)
+		}
+		return store.LockTaskInProjectRow{}, domain.TaskFacts{}, false
 	}
 	facts := domain.TaskFacts{
 		Status:    task.Status,

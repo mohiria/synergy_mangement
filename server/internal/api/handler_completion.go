@@ -119,11 +119,26 @@ func (s *Server) DecideCompletion(w http.ResponseWriter, r *http.Request, projec
 	}
 	uid := currentUser(r).ID
 	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
-	task, facts, ok := s.fetchTask(w, r, projectId, taskId)
+	opinion := ""
+	if req.Opinion != nil {
+		opinion = strings.TrimSpace(*req.Opinion)
+	}
+	approve := req.Decision == CompletionDecisionRequestDecisionApproved
+	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
+
+	// 规则与写入放在同一个事务里，先锁任务行再重读事实与审批单（R2：或签与终审的写-写竞态）。
+	tx, err := s.db.Begin(r.Context())
+	if err != nil {
+		writeInternalError(w)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	qtx := s.q.WithTx(tx)
+	task, facts, ok := lockTaskFacts(r.Context(), w, qtx, projectId, taskId)
 	if !ok {
 		return
 	}
-	review, err := s.q.GetCompletionReview(r.Context(), store.GetCompletionReviewParams{ID: reviewId, TaskID: taskId})
+	review, err := qtx.GetCompletionReview(r.Context(), store.GetCompletionReviewParams{ID: reviewId, TaskID: taskId})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, Error{Code: "review_not_found", Message: "完成申请不存在"})
@@ -132,15 +147,9 @@ func (s *Server) DecideCompletion(w http.ResponseWriter, r *http.Request, projec
 		}
 		return
 	}
-	opinion := ""
-	if req.Opinion != nil {
-		opinion = strings.TrimSpace(*req.Opinion)
-	}
-	approve := req.Decision == CompletionDecisionRequestDecisionApproved
-	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
 	// 中间或签阶段（AC-14/24/37）：仅或签组成员可处理。
 	if review.State == domain.CompletionIntermediate {
-		s.decideIntermediate(w, r, projectId, taskId, review, facts, uid, actor, approve, opinion)
+		s.decideIntermediate(w, r, tx, qtx, projectId, taskId, review, facts, uid, actor, approve, opinion, blockersBefore)
 		return
 	}
 	if review.State != domain.CompletionPendingFinal {
@@ -159,7 +168,7 @@ func (s *Server) DecideCompletion(w http.ResponseWriter, r *http.Request, projec
 		}
 		return
 	}
-	items, err := s.q.ListCompletionReviewItems(r.Context(), reviewId)
+	items, err := qtx.ListCompletionReviewItems(r.Context(), reviewId)
 	if err != nil {
 		writeInternalError(w)
 		return
@@ -170,13 +179,6 @@ func (s *Server) DecideCompletion(w http.ResponseWriter, r *http.Request, projec
 	}
 	// 收集需要从 MinIO 删除的对象（事务提交后再删，避免误删）。
 	var removeKeys []string
-	tx, err := s.db.Begin(r.Context())
-	if err != nil {
-		writeInternalError(w)
-		return
-	}
-	defer func() { _ = tx.Rollback(r.Context()) }()
-	qtx := s.q.WithTx(tx)
 	for _, item := range items {
 		if !item.FileID.Valid {
 			continue
@@ -239,10 +241,11 @@ func (s *Server) DecideCompletion(w http.ResponseWriter, r *http.Request, projec
 }
 
 // decideIntermediate 或签处理：任一人通过→待 KR 终审（留痕）；任一人退回→整体退回并删除候选。
-func (s *Server) decideIntermediate(w http.ResponseWriter, r *http.Request, projectId, taskId int64,
-	review store.CompletionReview, facts domain.TaskFacts, uid int64, actor domain.Actor, approve bool, opinion string,
+func (s *Server) decideIntermediate(w http.ResponseWriter, r *http.Request, tx pgx.Tx, qtx *store.Queries,
+	projectId, taskId int64, review store.CompletionReview, facts domain.TaskFacts, uid int64, actor domain.Actor,
+	approve bool, opinion string, blockersBefore []domain.Blocker,
 ) {
-	reviewerRows, err := s.q.ListReviewReviewers(r.Context(), review.ID)
+	reviewerRows, err := qtx.ListReviewReviewers(r.Context(), review.ID)
 	if err != nil {
 		writeInternalError(w)
 		return
@@ -263,14 +266,6 @@ func (s *Server) decideIntermediate(w http.ResponseWriter, r *http.Request, proj
 		}
 		return
 	}
-	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
-	tx, err := s.db.Begin(r.Context())
-	if err != nil {
-		writeInternalError(w)
-		return
-	}
-	defer func() { _ = tx.Rollback(r.Context()) }()
-	qtx := s.q.WithTx(tx)
 	var removeKeys []string
 	if approve {
 		if _, err := qtx.RecordIntermediateApproval(r.Context(), store.RecordIntermediateApprovalParams{

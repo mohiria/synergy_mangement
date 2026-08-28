@@ -492,6 +492,67 @@ func (q *Queries) ListTaskProgressByProject(ctx context.Context, projectID int64
 	return items, nil
 }
 
+const lockTaskInProject = `-- name: LockTaskInProject :one
+SELECT t.id, t.key_result_id, t.name, t.owner_id, t.start_date, t.end_date, t.status, t.created_by, t.created_at, t.progress, t.cancel_reason, t.description, t.completion_criteria, t.updated_at, t.receiver_scope, k.owner_id AS kr_owner_id, o.project_id
+FROM tasks t
+JOIN key_results k ON k.id = t.key_result_id
+JOIN objectives o ON o.id = k.objective_id
+WHERE t.id = $1 AND o.project_id = $2
+FOR UPDATE OF t
+`
+
+type LockTaskInProjectParams struct {
+	ID        int64
+	ProjectID int64
+}
+
+type LockTaskInProjectRow struct {
+	ID                 int64
+	KeyResultID        int64
+	Name               string
+	OwnerID            int64
+	StartDate          pgtype.Date
+	EndDate            pgtype.Date
+	Status             string
+	CreatedBy          int64
+	CreatedAt          pgtype.Timestamptz
+	Progress           pgtype.Int4
+	CancelReason       string
+	Description        string
+	CompletionCriteria string
+	UpdatedAt          pgtype.Timestamptz
+	ReceiverScope      string
+	KrOwnerID          pgtype.Int8
+	ProjectID          int64
+}
+
+// 与 GetTaskInProject 同形，但对任务行加写锁：三道审批的决策必须在锁内重读状态、重跑规则，
+// 否则并发决策（如或签一人通过、一人退回）会各自基于过期事实写库。
+func (q *Queries) LockTaskInProject(ctx context.Context, arg LockTaskInProjectParams) (LockTaskInProjectRow, error) {
+	row := q.db.QueryRow(ctx, lockTaskInProject, arg.ID, arg.ProjectID)
+	var i LockTaskInProjectRow
+	err := row.Scan(
+		&i.ID,
+		&i.KeyResultID,
+		&i.Name,
+		&i.OwnerID,
+		&i.StartDate,
+		&i.EndDate,
+		&i.Status,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.Progress,
+		&i.CancelReason,
+		&i.Description,
+		&i.CompletionCriteria,
+		&i.UpdatedAt,
+		&i.ReceiverScope,
+		&i.KrOwnerID,
+		&i.ProjectID,
+	)
+	return i, err
+}
+
 const updateTaskProgress = `-- name: UpdateTaskProgress :one
 UPDATE tasks
 SET progress = $2, updated_at = now()

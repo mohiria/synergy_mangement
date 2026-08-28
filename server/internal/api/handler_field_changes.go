@@ -136,11 +136,26 @@ func (s *Server) DecideFieldChange(w http.ResponseWriter, r *http.Request, proje
 	}
 	uid := currentUser(r).ID
 	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
-	_, facts, ok := s.fetchTask(w, r, projectId, taskId)
+	opinion := ""
+	if req.Opinion != nil {
+		opinion = strings.TrimSpace(*req.Opinion)
+	}
+	approve := req.Decision == FieldChangeDecisionRequestDecisionApproved
+	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
+
+	// 规则与写入同事务：先锁任务行再重读事实与变更单，避免变更被批准到已终止的任务上（R2／R3）。
+	tx, err := s.db.Begin(r.Context())
+	if err != nil {
+		writeInternalError(w)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	qtx := s.q.WithTx(tx)
+	_, facts, ok := lockTaskFacts(r.Context(), w, qtx, projectId, taskId)
 	if !ok {
 		return
 	}
-	fc, err := s.q.GetFieldChange(r.Context(), store.GetFieldChangeParams{ID: changeId, TaskID: taskId})
+	fc, err := qtx.GetFieldChange(r.Context(), store.GetFieldChangeParams{ID: changeId, TaskID: taskId})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, Error{Code: "change_not_found", Message: "变更单不存在"})
@@ -149,31 +164,20 @@ func (s *Server) DecideFieldChange(w http.ResponseWriter, r *http.Request, proje
 		}
 		return
 	}
-	if err := domain.DecideFieldChangeRule(fc.State, facts.KrOwnerID, uid); err != nil {
+	if err := domain.DecideFieldChangeRule(fc.State, facts, uid); err != nil {
 		if errors.Is(err, domain.ErrChangeNotPending) {
 			writeJSON(w, http.StatusConflict, Error{Code: "change_state_conflict", Message: err.Error()})
+		} else if errors.Is(err, domain.ErrChangeTaskTerminal) {
+			writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: err.Error()})
 		} else {
 			writeJSON(w, http.StatusForbidden, Error{Code: "forbidden", Message: err.Error()})
 		}
 		return
 	}
-	opinion := ""
-	if req.Opinion != nil {
-		opinion = strings.TrimSpace(*req.Opinion)
-	}
-	approve := req.Decision == FieldChangeDecisionRequestDecisionApproved
-	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
 	newState := domain.FieldChangeRejectedState
 	if approve {
 		newState = domain.FieldChangeApprovedState
 	}
-	tx, err := s.db.Begin(r.Context())
-	if err != nil {
-		writeInternalError(w)
-		return
-	}
-	defer func() { _ = tx.Rollback(r.Context()) }()
-	qtx := s.q.WithTx(tx)
 	if _, err := qtx.DecideFieldChange(r.Context(), store.DecideFieldChangeParams{
 		ID: changeId, State: newState, Opinion: opinion, DecidedBy: pgtype.Int8{Int64: uid, Valid: true},
 	}); err != nil {
@@ -347,7 +351,7 @@ func (s *Server) fieldChangeView(ctx context.Context, fc store.FieldChangeReques
 		}
 		diffs = append(diffs, FieldChangeDiff{Field: "endDate", Label: "截止时间", OldValue: old, NewValue: fc.NewEndDate.Time.Format("2006-01-02")})
 	}
-	canDecide := domain.DecideFieldChangeRule(fc.State, facts.KrOwnerID, userID) == nil
+	canDecide := domain.DecideFieldChangeRule(fc.State, facts, userID) == nil
 	canAbandon := domain.CanAbandonFieldChange(actor, userID, fc.SubmittedBy, fc.State, fc.Resolved)
 	// AC-04：待审批显示「待{所属 KR 负责人姓名}审批」。
 	krOwnerName := ""

@@ -285,14 +285,20 @@ func (s *Server) BatchDecidePool(w http.ResponseWriter, r *http.Request, project
 		reviewID  int64
 		newStatus string
 	}
+	// 规则与写入同事务：逐个锁任务行后再重读事实，整批要么一起生效要么一起回滚（R2）。
+	tx, err := s.db.Begin(r.Context())
+	if err != nil {
+		writeInternalError(w)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	qtx := s.q.WithTx(tx)
 	targets := []target{}
 	for _, id := range req.TaskIds {
-		task, err := s.q.GetTaskInProject(r.Context(), store.GetTaskInProjectParams{ID: id, ProjectID: projectId})
-		if err != nil {
-			writeJSON(w, http.StatusNotFound, Error{Code: "task_not_found", Message: "任务不存在"})
+		task, facts, ok := lockTaskFacts(r.Context(), w, qtx, projectId, id)
+		if !ok {
 			return
 		}
-		facts := domain.TaskFacts{Status: task.Status, CreatorID: task.CreatedBy, OwnerID: task.OwnerID, KrOwnerID: fromPgInt8(task.KrOwnerID)}
 		newStatus, err := domain.DecidePoolReview(facts, uid, approve)
 		if err != nil {
 			if errors.Is(err, domain.ErrPoolReviewNotPending) {
@@ -302,7 +308,7 @@ func (s *Server) BatchDecidePool(w http.ResponseWriter, r *http.Request, project
 			}
 			return
 		}
-		review, err := s.q.GetLatestPoolReview(r.Context(), id)
+		review, err := qtx.GetLatestPoolReview(r.Context(), id)
 		if err != nil || review.Status != domain.PoolReviewPending {
 			writeInternalError(w)
 			return
@@ -313,13 +319,6 @@ func (s *Server) BatchDecidePool(w http.ResponseWriter, r *http.Request, project
 	if approve {
 		reviewStatus = domain.PoolReviewApproved
 	}
-	tx, err := s.db.Begin(r.Context())
-	if err != nil {
-		writeInternalError(w)
-		return
-	}
-	defer func() { _ = tx.Rollback(r.Context()) }()
-	qtx := s.q.WithTx(tx)
 	for _, tg := range targets {
 		if _, err := qtx.DecidePoolReview(r.Context(), store.DecidePoolReviewParams{
 			ID: tg.reviewID, Status: reviewStatus, Opinion: opinion, DecidedBy: pgtype.Int8{Int64: uid, Valid: true},
@@ -340,7 +339,7 @@ func (s *Server) BatchDecidePool(w http.ResponseWriter, r *http.Request, project
 	if approve {
 		for _, id := range req.TaskIds {
 			if task, err := s.q.GetTaskInProject(r.Context(), store.GetTaskInProjectParams{ID: id, ProjectID: projectId}); err == nil {
-				s.notifyPendingInputRequests(r, projectId, task)
+				s.notifyPendingInputRequests(r, projectId, task.ID, task.Name)
 			}
 		}
 	}

@@ -4334,3 +4334,92 @@ func TestNonMemberProjectReadBoundary(t *testing.T) {
 		resp.Body.Close()
 	}
 }
+
+// 变更单与任务终态的收口（回归 R3）：任务被取消后，未决变更单不得再被批准回写终态任务。
+func TestFieldChangeOnTerminalTask(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, bob, carol := newClient(t), newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(bob, "bob", "bob-pass")
+	login(carol, "carol", "carol-pass")
+	sp := func(s string) *string { return &s }
+
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "终态收口", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	for _, uid := range []int64{bobUser.ID, carolUser.ID} {
+		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+		wantStatus(t, resp, http.StatusCreated)
+		resp.Body.Close()
+	}
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	kr1 := decodeBody[[]api.Objective](t, resp)[0].KeyResults[0].Id
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+
+	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true,
+		Items:           []api.CreateTaskItem{{KeyResultId: kr1, Name: "联调验证", OwnerId: carolUser.ID, StartDate: start, EndDate: end}},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	taskID := decodeBody[[]api.Task](t, resp)[0].Id
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, taskID),
+		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	// carol 提交关键字段变更 → 待 KR 负责人审批
+	newEnd := openapiDate(t, "2026-10-15")
+	change := api.SubmitFieldChangeRequest{Reason: sp("联调窗口顺延")}
+	change.Changes.EndDate = &newEnd
+	change.Changes.Name = sp("被改写的名称")
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/field-changes", tasksURL, taskID), change)
+	wantStatus(t, resp, http.StatusOK)
+	pending := decodeBody[api.Task](t, resp)
+	changeID := pending.FieldChange.Id
+
+	// 变更单未决期间任务被取消
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, taskID),
+		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusCancelled, Reason: sp("需求取消")})
+	wantStatus(t, resp, http.StatusOK)
+	cancelled := decodeBody[api.Task](t, resp)
+	if cancelled.Status != api.TaskStatusCancelled {
+		t.Fatalf("任务应为已取消: %+v", cancelled.Status)
+	}
+
+	// KR 负责人此时批准变更单：必须 409，且终态任务的字段不被改写
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/field-changes/%d/decision", tasksURL, taskID, changeID),
+		api.FieldChangeDecisionRequest{Decision: api.FieldChangeDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	after := decodeBody[api.TaskDetail](t, resp)
+	if after.Task.Name != "联调验证" || after.Task.EndDate.Time.Format("2006-01-02") != "2026-09-30" {
+		t.Fatalf("终态任务字段被变更单改写: name=%q end=%v", after.Task.Name, after.Task.EndDate)
+	}
+	// 详情侧也不应再下发可决策标志
+	if after.Task.FieldChange != nil && after.Task.FieldChange.CanDecide != nil && *after.Task.FieldChange.CanDecide {
+		t.Fatalf("终态任务仍下发 canDecide=true: %+v", after.Task.FieldChange)
+	}
+}

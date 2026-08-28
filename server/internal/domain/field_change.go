@@ -24,6 +24,7 @@ var (
 	ErrChangeNotAllowed     = errors.New("任务当前状态不允许修改关键字段")
 	ErrChangePendingExists  = errors.New("已有待审批的关键字段修改，处理后才能再次提交")
 	ErrChangeNotPending     = errors.New("变更单不在待审批状态")
+	ErrChangeTaskTerminal   = errors.New("任务已终止，变更单不能再处理")
 )
 
 // KeyFieldChanges 拟议的关键字段值（nil 表示未修改）。
@@ -105,12 +106,16 @@ func FieldChangeRoute(a Actor, userID int64, t TaskFacts, hasPending bool) (Fiel
 	}
 }
 
-// DecideFieldChangeRule 变更单处理规则：仅所属 KR 负责人、仅待审批状态（管理员不可替代，§3.3）。
-func DecideFieldChangeRule(state string, krOwnerID *int64, actorID int64) error {
+// DecideFieldChangeRule 变更单处理规则：仅所属 KR 负责人、仅待审批状态（管理员不可替代，§3.3）；
+// 任务已进入终态时变更单不得再被处理。
+func DecideFieldChangeRule(state string, t TaskFacts, actorID int64) error {
 	if state != FieldChangePendingState {
 		return ErrChangeNotPending
 	}
-	if krOwnerID == nil || *krOwnerID != actorID {
+	if t.Status == TaskCompleted || t.Status == TaskCancelled {
+		return ErrChangeTaskTerminal
+	}
+	if t.KrOwnerID == nil || *t.KrOwnerID != actorID {
 		return ErrNotKrOwner
 	}
 	return nil

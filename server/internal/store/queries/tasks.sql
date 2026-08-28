@@ -11,6 +11,16 @@ JOIN key_results k ON k.id = t.key_result_id
 JOIN objectives o ON o.id = k.objective_id
 WHERE t.id = $1 AND o.project_id = $2;
 
+-- name: LockTaskInProject :one
+-- 与 GetTaskInProject 同形，但对任务行加写锁：三道审批的决策必须在锁内重读状态、重跑规则，
+-- 否则并发决策（如或签一人通过、一人退回）会各自基于过期事实写库。
+SELECT t.*, k.owner_id AS kr_owner_id, o.project_id
+FROM tasks t
+JOIN key_results k ON k.id = t.key_result_id
+JOIN objectives o ON o.id = k.objective_id
+WHERE t.id = $1 AND o.project_id = $2
+FOR UPDATE OF t;
+
 -- name: ListProjectTasks :many
 -- 项目全部任务，含负责人／创建人／KR 负责人姓名（派生动作标志与待行动人在 domain 判定）。
 SELECT t.*, u.display_name AS owner_name, cu.display_name AS creator_name,
