@@ -4589,3 +4589,158 @@ func TestDeleteExpiredSessions(t *testing.T) {
 		t.Fatalf("未过期会话不应被清理: %v", err)
 	}
 }
+
+// AC-60 项目规则设置：三项阈值按项目生效、仅项目管理员可改；
+// 审批超时阈值改小后，「审批超时」卡点与我的工作审批件的超期标红按新值同源判定（R12）。
+func TestProjectSettingsThresholds(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, bob, carol := newClient(t), newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(bob, "bob", "bob-pass")
+	login(carol, "carol", "carol-pass")
+	sp := func(s string) *string { return &s }
+
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "规则试点", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	for _, m := range []struct {
+		id   int64
+		role api.MemberRole
+	}{{bobUser.ID, api.Member}, {carolUser.ID, api.Member}} {
+		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+			api.AddProjectMemberRequest{UserId: m.id, Role: m.role})
+		wantStatus(t, resp, http.StatusCreated)
+		resp.Body.Close()
+	}
+	settingsURL := fmt.Sprintf("%s/projects/%d/settings", base, created.Id)
+
+	// 默认值：审批超时 3 天、临期 3 天、提醒每天 1 次；canEdit 只对项目管理员为真
+	resp = doJSON(t, alice, http.MethodGet, settingsURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	got := decodeBody[api.ProjectSettings](t, resp)
+	if got.ApprovalTimeoutDays != 3 || got.DueSoonDays != 3 || got.RemindDailyLimit != 1 || !got.CanEdit {
+		t.Fatalf("默认规则设置异常: %+v", got)
+	}
+	resp = doJSON(t, bob, http.MethodGet, settingsURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	if g := decodeBody[api.ProjectSettings](t, resp); g.CanEdit {
+		t.Fatalf("普通成员不应可改规则设置: %+v", g)
+	}
+
+	// 普通成员改不动；取值越界 422
+	resp = doJSON(t, bob, http.MethodPut, settingsURL, api.UpdateProjectSettingsRequest{
+		ApprovalTimeoutDays: 1, DueSoonDays: 3, RemindDailyLimit: 1,
+	})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	// 越界取值由契约校验挡在 handler 之前（domain.ValidateProjectSettings 为同口径兜底）
+	resp = doJSON(t, alice, http.MethodPut, settingsURL, api.UpdateProjectSettingsRequest{
+		ApprovalTimeoutDays: 0, DueSoonDays: 3, RemindDailyLimit: 1,
+	})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	if e := decodeBody[api.Error](t, resp); e.Code != "invalid_request" {
+		t.Fatalf("code = %q, want invalid_request", e.Code)
+	}
+
+	// 建一个停在入池审批的任务，并把提交时间往前拨 2 天
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("按时推进"), KeyResults: &[]api.CreateKeyResultInput{{Description: "入池及时审批", OwnerId: &bobUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	kr1 := decodeBody[[]api.Objective](t, resp)[0].KeyResults[0].Id
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/projects/%d/tasks", base, created.Id),
+		api.CreateTaskBatchRequest{
+			SubmitForReview: true,
+			Items: []api.CreateTaskItem{{
+				KeyResultId: kr1, Name: "等审批的任务", OwnerId: carolUser.ID,
+				StartDate: openapiDate(t, "2026-09-01"), EndDate: openapiDate(t, "2026-09-30"),
+			}},
+		})
+	wantStatus(t, resp, http.StatusCreated)
+	task := decodeBody[[]api.Task](t, resp)[0]
+	if _, err := pool.Exec(context.Background(),
+		"UPDATE pool_reviews SET submitted_at = now() - interval '2 days' WHERE task_id = $1", task.Id); err != nil {
+		t.Fatalf("回拨提交时间失败: %v", err)
+	}
+
+	blockersURL := fmt.Sprintf("%s/projects/%d/blockers", base, created.Id)
+	myWorkURL := fmt.Sprintf("%s/projects/%d/my-work", base, created.Id)
+	approvalTimeouts := func() []api.Blocker {
+		t.Helper()
+		r := doJSON(t, bob, http.MethodGet, blockersURL, nil)
+		wantStatus(t, r, http.StatusOK)
+		out := []api.Blocker{}
+		for _, b := range decodeBody[[]api.Blocker](t, r) {
+			if b.Kind == api.ApprovalTimeout {
+				out = append(out, b)
+			}
+		}
+		return out
+	}
+	approvalOverdue := func() bool {
+		t.Helper()
+		r := doJSON(t, bob, http.MethodGet, myWorkURL, nil)
+		wantStatus(t, r, http.StatusOK)
+		items := decodeBody[api.MyWork](t, r).Approvals
+		if len(items) != 1 {
+			t.Fatalf("待我审批应有 1 条: %+v", items)
+		}
+		return items[0].Overdue != nil && *items[0].Overdue
+	}
+
+	// 默认 3 天：等待 2 天既不成卡点也不标红
+	if got := approvalTimeouts(); len(got) != 0 {
+		t.Fatalf("未达默认阈值不应有审批超时卡点: %+v", got)
+	}
+	if approvalOverdue() {
+		t.Fatal("未达默认阈值的审批件不应标红")
+	}
+
+	// 阈值改为 1 天：同一份事实立刻成卡点并标红，两处同源
+	resp = doJSON(t, alice, http.MethodPut, settingsURL, api.UpdateProjectSettingsRequest{
+		ApprovalTimeoutDays: 1, DueSoonDays: 2, RemindDailyLimit: 2,
+	})
+	wantStatus(t, resp, http.StatusOK)
+	if g := decodeBody[api.ProjectSettings](t, resp); g.ApprovalTimeoutDays != 1 || g.DueSoonDays != 2 || g.RemindDailyLimit != 2 {
+		t.Fatalf("规则设置未落库: %+v", g)
+	}
+	timeouts := approvalTimeouts()
+	if len(timeouts) != 1 || timeouts[0].TaskId != task.Id {
+		t.Fatalf("阈值改为 1 天后应派生审批超时卡点: %+v", timeouts)
+	}
+	if !strings.Contains(timeouts[0].Reason, "超过阈值 1 天") {
+		t.Fatalf("卡点原因应按新阈值出文案: %q", timeouts[0].Reason)
+	}
+	if !approvalOverdue() {
+		t.Fatal("阈值改为 1 天后我的工作审批件应标红")
+	}
+
+	// 提醒冷却上限改为 2：同一发起人对同一被提醒人的同一任务当天可发两次，第三次被拒
+	remindURL := fmt.Sprintf("%s/projects/%d/reminders", base, created.Id)
+	key := timeouts[0].Key
+	for i := 0; i < 2; i++ {
+		resp = doJSON(t, carol, http.MethodPost, remindURL, api.RemindRequest{TargetKey: key})
+		wantStatus(t, resp, http.StatusNoContent)
+		resp.Body.Close()
+	}
+	resp = doJSON(t, carol, http.MethodPost, remindURL, api.RemindRequest{TargetKey: key})
+	wantStatus(t, resp, http.StatusConflict)
+	if e := decodeBody[api.Error](t, resp); e.Code != "remind_cooldown" {
+		t.Fatalf("code = %q, want remind_cooldown", e.Code)
+	}
+}

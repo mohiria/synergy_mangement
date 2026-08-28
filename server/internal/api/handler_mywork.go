@@ -18,7 +18,11 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 	if !ok {
 		return
 	}
-	facts := domain.MyWorkFacts{UserID: uid, Actor: projectActor(uid, proj.OwnerID, proj.MyRole), Now: s.now()}
+	// 审批件超期标红的阈值取项目规则设置，与「审批超时」卡点同源（R12、AC-60）。
+	facts := domain.MyWorkFacts{
+		UserID: uid, Actor: projectActor(uid, proj.OwnerID, proj.MyRole), Now: s.now(),
+		ApprovalTimeoutDays: projectSettingsOf(proj).ApprovalTimeoutDays,
+	}
 
 	// 交付物边与输入请求：上游事实、未就绪标记、对接人视角。
 	edgeRows, err := s.q.ListEdgesByProject(ctx, projectId)
@@ -178,12 +182,14 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 			ProviderID: ir.ProviderID, State: ir.State, ContentNote: ir.ContentNote,
 			Notified: ir.NotifiedAt.Valid,
 		}
+		// 必要性取所在交付物边：参考输入不进任何分组、不计入徽标（模块 PRD §4.2 规则 8）。
 		if ir.CreatedAt.Valid {
 			fact.CreatedAt = ir.CreatedAt.Time
 		}
 		if idx, ok := edgeByID[ir.EdgeID]; ok {
 			e := edgeRows[idx]
 			fact.InputName = e.Name
+			fact.Necessity = e.Necessity
 			if e.ExpectedDate.Valid {
 				exp := e.ExpectedDate.Time
 				fact.Expected = &exp

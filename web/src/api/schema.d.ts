@@ -108,6 +108,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        /** 项目规则设置（审批超时阈值、临期阈值、一键提醒冷却） */
+        get: operations["getProjectSettings"];
+        /** 修改项目规则设置（仅项目管理员） */
+        put: operations["updateProjectSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/members": {
         parameters: {
             query?: never;
@@ -2071,6 +2091,22 @@ export interface components {
             /** @description 当前用户能否管理本项目成员和权限（派生字段，同上） */
             canManageMembers: boolean;
         };
+        /** @description 项目规则设置（主 PRD §7.9；AC-60）。按项目生效，均有默认值，仅项目管理员可改。 */
+        ProjectSettings: {
+            /** @description 审批超时阈值 N（天），三道审批共用；审批件在当前环节等待达到 N×24 小时即超时。默认 3 */
+            approvalTimeoutDays: number;
+            /** @description 临期阈值（天），指距任务截止日期的天数，用于风险等级的预警判定。默认 3 */
+            dueSoonDays: number;
+            /** @description 一键提醒冷却，同一发起人对同一被提醒人的同一任务每天可提醒次数。默认 1 */
+            remindDailyLimit: number;
+            /** @description 当前用户能否修改本项目的规则设置（派生字段，仅项目管理员为 true） */
+            canEdit: boolean;
+        };
+        UpdateProjectSettingsRequest: {
+            approvalTimeoutDays: number;
+            dueSoonDays: number;
+            remindDailyLimit: number;
+        };
         CreateProjectRequest: {
             name: string;
             /** Format: int64 */
@@ -2334,6 +2370,60 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Project"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    getProjectSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 规则设置 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateProjectSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateProjectSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description 修改成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectSettings"];
                 };
             };
             401: components["responses"]["Unauthorized"];

@@ -163,12 +163,13 @@ INSERT INTO artifact_package_items (package_id, deliverable_id) VALUES
     (3, 22), (3, 23), (3, 24), (3, 35),
     (4, 42), (4, 43), (4, 44), (4, 45), (4, 46), (4, 47), (4, 48), (4, 49);
 
--- ── 一键提醒留痕（同一人对同一任务每天一次）──────────────────────────────────
-INSERT INTO remind_logs (id, task_id, sender_id, target_key, remind_date, created_at)
+-- ── 一键提醒留痕（冷却按发起人、被提醒人、任务三元组计次）────────────────────
+-- recipient_id 与 05_collab.sql 的 blocker_remind 通知一一对应。
+INSERT INTO remind_logs (id, task_id, sender_id, recipient_id, target_key, remind_date, created_at)
 OVERRIDING SYSTEM VALUE VALUES
-(1, 6,  2,  'task_overdue:6',                    current_date - 1, now() - interval '1 day'  + interval '2 hours'),
-(2, 22, 11, 'task_overdue:22',                   current_date,     now() - interval '5 hours'),
-(3, 29, 12, 'upstream_unready:edge:21',          current_date - 1, now() - interval '1 day'  + interval '4 hours'),
-(4, 23, 9,  'approval_timeout:pool_review:24',   current_date,     now() - interval '3 hours'),
-(5, 14, 2,  'approval_timeout:final_review:24',  current_date - 2, now() - interval '2 days' + interval '3 hours'),
-(6, 9,  4,  'wait:input_request:1',              current_date - 1, now() - interval '1 day'  + interval '6 hours');
+(1, 6,  2,  4,  'task_overdue:6',                    current_date - 1, now() - interval '1 day'  + interval '2 hours'),
+(2, 22, 11, 9,  'task_overdue:22',                   current_date,     now() - interval '5 hours'),
+(3, 29, 12, 4,  'upstream_unready:edge:21',          current_date - 1, now() - interval '1 day'  + interval '4 hours'),
+(4, 23, 9,  11, 'approval_timeout:pool_review:24',   current_date,     now() - interval '3 hours'),
+(5, 14, 2,  2,  'approval_timeout:final_review:24',  current_date - 2, now() - interval '2 days' + interval '3 hours'),
+(6, 9,  4,  9,  'wait:input_request:1',              current_date - 1, now() - interval '1 day'  + interval '6 hours');

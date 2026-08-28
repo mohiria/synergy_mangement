@@ -17,7 +17,7 @@ func baseBlockerFacts() BlockerFacts {
 	kr7 := int64(7)
 	return BlockerFacts{
 		Now:                 blockerNow,
-		ApprovalTimeoutDays: ApprovalTimeoutDays,
+		ApprovalTimeoutDays: DefaultApprovalTimeoutDays,
 		Tasks: []BlockerTaskFact{{
 			ID: 1, Name: "现场调研", Status: TaskInProgress,
 			OwnerID: 5, OwnerName: "王五",

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Alert, Button, Dropdown, Modal, Select, Spin } from "antd";
+import { Alert, Button, Dropdown, InputNumber, Modal, Select, Spin } from "antd";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import ProjectShell from "./ProjectShell";
@@ -11,6 +11,7 @@ type Project = components["schemas"]["Project"];
 type ProjectMember = components["schemas"]["ProjectMember"];
 type MemberRole = components["schemas"]["MemberRole"];
 type UserSummary = components["schemas"]["UserSummary"];
+type ProjectSettings = components["schemas"]["ProjectSettings"];
 
 const ROLE_LABEL: Record<MemberRole, string> = {
   admin: "项目管理员",
@@ -31,6 +32,42 @@ const RESPONSIBILITY_NOTES: [string, string][] = [
   ["只读成员", "查看完整上下文，不可修改"],
 ];
 
+// 规则设置三项（主 PRD §7.9、我的工作 PRD §8.8；AC-60）：均有默认值，仅项目管理员可改。
+// 阈值只在此处配置，卡点派生与我的工作读同一份值，前端不复算任何判定。
+const RULE_FIELDS: {
+  key: keyof Omit<ProjectSettings, "canEdit">;
+  label: string;
+  suffix: string;
+  min: number;
+  max: number;
+  note: string;
+}[] = [
+  {
+    key: "approvalTimeoutDays",
+    label: "审批超时阈值",
+    suffix: "天",
+    min: 1,
+    max: 30,
+    note: "审批件在当前审批环节等待达到该天数即超时，三道审批共用；进入新环节重新计时。",
+  },
+  {
+    key: "dueSoonDays",
+    label: "临期阈值",
+    suffix: "天",
+    min: 1,
+    max: 30,
+    note: "距任务截止日期不足该天数即计入风险等级的「预警」判定。",
+  },
+  {
+    key: "remindDailyLimit",
+    label: "一键提醒冷却",
+    suffix: "次／天",
+    min: 1,
+    max: 20,
+    note: "同一发起人对同一被提醒人的同一任务每天可提醒的次数；换一个被提醒人不受影响。",
+  },
+];
+
 // 项目设置 → 成员管理（#29；PRD §7.9 将成员与权限归入项目设置）。
 // 视觉按原型 renderSettings：card-head + member-grid 成员卡一种形态；
 // 管理动作按 canManageMembers 派生字段显隐，前端不复算规则。
@@ -44,7 +81,7 @@ export default function ProjectSettingsPage({
   const { projectId: projectIdParam } = useParams();
   const projectId = Number(projectIdParam);
 
-  const [tab, setTab] = useState<"members" | "permissions">("members");
+  const [tab, setTab] = useState<"members" | "permissions" | "rules">("members");
   const [project, setProject] = useState<Project | null>(null);
   const [members, setMembers] = useState<ProjectMember[]>([]);
   const [users, setUsers] = useState<UserSummary[]>([]);
@@ -55,12 +92,16 @@ export default function ProjectSettingsPage({
   const [addUserId, setAddUserId] = useState<number | undefined>();
   const [addRole, setAddRole] = useState<MemberRole>("member");
   const [saving, setSaving] = useState(false);
+  const [settings, setSettings] = useState<ProjectSettings | null>(null);
+  const [rules, setRules] = useState<ProjectSettings | null>(null);
+  const [savingRules, setSavingRules] = useState(false);
 
   const load = useCallback(async () => {
-    const [projectRes, membersRes, usersRes] = await Promise.all([
+    const [projectRes, membersRes, usersRes, settingsRes] = await Promise.all([
       client.GET("/projects/{projectId}", { params: { path: { projectId } } }),
       client.GET("/projects/{projectId}/members", { params: { path: { projectId } } }),
       client.GET("/users"),
+      client.GET("/projects/{projectId}/settings", { params: { path: { projectId } } }),
     ]);
     if (projectRes.response.status === 401) {
       onLogout();
@@ -74,6 +115,8 @@ export default function ProjectSettingsPage({
     setProject(projectRes.data);
     setMembers(membersRes.data ?? []);
     setUsers(usersRes.data ?? []);
+    setSettings(settingsRes.data ?? null);
+    setRules(settingsRes.data ?? null);
     setLoading(false);
   }, [projectId, onLogout]);
 
@@ -133,6 +176,32 @@ export default function ProjectSettingsPage({
     }
   };
 
+  const saveRules = async () => {
+    if (!rules) return;
+    setSavingRules(true);
+    setError(null);
+    const res = await client.PUT("/projects/{projectId}/settings", {
+      params: { path: { projectId } },
+      body: {
+        approvalTimeoutDays: rules.approvalTimeoutDays,
+        dueSoonDays: rules.dueSoonDays,
+        remindDailyLimit: rules.remindDailyLimit,
+      },
+    });
+    setSavingRules(false);
+    if (res.data) {
+      setSettings(res.data);
+      setRules(res.data);
+    } else {
+      setError(res.error?.message ?? "保存规则设置失败");
+    }
+  };
+
+  const rulesDirty =
+    !!rules &&
+    !!settings &&
+    RULE_FIELDS.some((f) => rules[f.key] !== settings[f.key]);
+
   const candidateOptions = users
     .filter((u) => !members.some((m) => m.userId === u.id))
     .map((u) => ({ value: u.id, label: `${u.displayName}（${u.username}）` }));
@@ -165,8 +234,8 @@ export default function ProjectSettingsPage({
             </div>
           </div>
           {error && <Alert type="error" message={error} style={{ marginBottom: 16 }} />}
-          {/* settings-layout：左侧分节导航、右侧内容卡。原型另有进度权重、提醒规则、
-              导入记录与操作审计四节，本版没有对应数据模型，故不列入导航。 */}
+          {/* settings-layout：左侧分节导航、右侧内容卡。原型另有进度权重、导入记录与
+              操作审计三节，本版没有对应数据模型，故不列入导航。 */}
           <div className="settings-layout">
             <aside className="settings-nav">
               <button
@@ -183,9 +252,65 @@ export default function ProjectSettingsPage({
               >
                 系统权限
               </button>
+              <button
+                type="button"
+                className={tab === "rules" ? "active" : ""}
+                onClick={() => setTab("rules")}
+              >
+                规则设置
+              </button>
             </aside>
             <section className="settings-panel">
-              {tab === "permissions" ? (
+              {tab === "rules" ? (
+                <>
+                  <div className="settings-panel-head">
+                    <div>
+                      <h2>规则设置</h2>
+                      <span className="muted">
+                        按项目生效，均有默认值；卡点派生、我的工作与一键提醒读同一份值。
+                        {settings && !settings.canEdit && "（你没有配置权限，以下为只读展示）"}
+                      </span>
+                    </div>
+                    {settings?.canEdit && (
+                      <Button
+                        size="small"
+                        type="primary"
+                        loading={savingRules}
+                        disabled={!rulesDirty}
+                        onClick={saveRules}
+                      >
+                        保存
+                      </Button>
+                    )}
+                  </div>
+                  <div className="settings-panel-body">
+                    {rules &&
+                      RULE_FIELDS.map((f) => (
+                        <div key={f.key} className="property">
+                          <label>
+                            {f.label}
+                            <span className="muted" style={{ display: "block" }}>
+                              {f.note}
+                            </span>
+                          </label>
+                          <InputNumber
+                            min={f.min}
+                            max={f.max}
+                            precision={0}
+                            value={rules[f.key]}
+                            disabled={!settings?.canEdit}
+                            onChange={(v) =>
+                              setRules({ ...rules, [f.key]: v ?? settings?.[f.key] ?? f.min })
+                            }
+                            addonAfter={f.suffix}
+                            style={{ width: 160, flex: "none" }}
+                            aria-label={f.label}
+                          />
+                        </div>
+                      ))}
+                  </div>
+                </>
+              ) : tab === "permissions" ? (
                 <>
                   <div className="settings-panel-head">
                     <div>

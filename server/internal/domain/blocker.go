@@ -69,7 +69,7 @@ type BlockerApprovalFact struct {
 // BlockerFacts 派生卡点的全部输入事实。
 type BlockerFacts struct {
 	Now                 time.Time
-	ApprovalTimeoutDays int // 项目级审批超时阈值 N，非正数时取默认值
+	ApprovalTimeoutDays int // 项目级审批超时阈值 N（规则设置，AC-60），非正数时取默认值
 	Tasks               []BlockerTaskFact
 	Inputs              []BlockerInputFact
 	Approvals           []BlockerApprovalFact
@@ -112,7 +112,7 @@ var approvalStageLabels = map[string]string{
 func DeriveBlockers(f BlockerFacts) []Blocker {
 	n := f.ApprovalTimeoutDays
 	if n <= 0 {
-		n = ApprovalTimeoutDays
+		n = DefaultApprovalTimeoutDays
 	}
 	taskByID := make(map[int64]BlockerTaskFact, len(f.Tasks))
 	for _, t := range f.Tasks {

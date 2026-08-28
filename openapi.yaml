@@ -183,6 +183,55 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /projects/{projectId}/settings:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    get:
+      operationId: getProjectSettings
+      tags: [projects]
+      summary: 项目规则设置（审批超时阈值、临期阈值、一键提醒冷却）
+      responses:
+        "200":
+          description: 规则设置
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectSettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      operationId: updateProjectSettings
+      tags: [projects]
+      summary: 修改项目规则设置（仅项目管理员）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProjectSettingsRequest"
+      responses:
+        "200":
+          description: 修改成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectSettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
   /projects/{projectId}/members:
     parameters:
       - name: projectId
@@ -3766,6 +3815,39 @@ components:
         canManageMembers:
           type: boolean
           description: 当前用户能否管理本项目成员和权限（派生字段，同上）
+    ProjectSettings:
+      type: object
+      description: 项目规则设置（主 PRD §7.9；AC-60）。按项目生效，均有默认值，仅项目管理员可改。
+      required: [approvalTimeoutDays, dueSoonDays, remindDailyLimit, canEdit]
+      properties:
+        approvalTimeoutDays:
+          type: integer
+          description: 审批超时阈值 N（天），三道审批共用；审批件在当前环节等待达到 N×24 小时即超时。默认 3
+        dueSoonDays:
+          type: integer
+          description: 临期阈值（天），指距任务截止日期的天数，用于风险等级的预警判定。默认 3
+        remindDailyLimit:
+          type: integer
+          description: 一键提醒冷却，同一发起人对同一被提醒人的同一任务每天可提醒次数。默认 1
+        canEdit:
+          type: boolean
+          description: 当前用户能否修改本项目的规则设置（派生字段，仅项目管理员为 true）
+    UpdateProjectSettingsRequest:
+      type: object
+      required: [approvalTimeoutDays, dueSoonDays, remindDailyLimit]
+      properties:
+        approvalTimeoutDays:
+          type: integer
+          minimum: 1
+          maximum: 30
+        dueSoonDays:
+          type: integer
+          minimum: 1
+          maximum: 30
+        remindDailyLimit:
+          type: integer
+          minimum: 1
+          maximum: 20
     CreateProjectRequest:
       type: object
       required: [name, ownerId]

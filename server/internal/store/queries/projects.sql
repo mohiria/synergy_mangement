@@ -38,6 +38,20 @@ SET name = $2,
 WHERE id = $1
 RETURNING *;
 
+-- name: GetProjectSettings :one
+-- 规则设置读路径：卡点派生、我的工作与提醒冷却共用同一份值，故与项目读权限分开取。
+SELECT approval_timeout_days, due_soon_days, remind_daily_limit
+FROM projects WHERE id = $1;
+
+-- name: UpdateProjectSettings :one
+-- 项目规则设置（主 PRD §7.9；AC-60）：审批超时阈值、临期阈值与一键提醒每日次数上限。
+UPDATE projects
+SET approval_timeout_days = $2,
+    due_soon_days         = $3,
+    remind_daily_limit    = $4
+WHERE id = $1
+RETURNING *;
+
 -- name: ListActiveProjectIDs :many
 -- 活跃项目（每小时 ticker 的扫描范围）：已完成与已归档项目不再补记卡点动态。
 SELECT id FROM projects

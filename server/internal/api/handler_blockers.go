@@ -3,12 +3,9 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
-	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"synergy/server/internal/domain"
@@ -69,38 +66,41 @@ func (s *Server) CreateReminder(w http.ResponseWriter, r *http.Request, projectI
 		writeForbidden(w)
 		return
 	}
-	// MW-13 冷却：同一人对同一任务每天 1 次。
-	var lastAt *time.Time
-	last, err := s.q.GetLastRemind(r.Context(), store.GetLastRemindParams{TaskID: target.TaskID, SenderID: uid})
-	switch {
-	case err == nil:
-		if last.CreatedAt.Valid {
-			at := last.CreatedAt.Time
-			lastAt = &at
-		}
-	case errors.Is(err, pgx.ErrNoRows):
-	default:
-		writeInternalError(w, r, err)
-		return
-	}
+	// MW-13、AC-60 冷却：按（发起人、被提醒人、任务）三元组计当天次数，上限取项目规则设置；
+	// 换一个被提醒人不受影响，故逐个待行动人判定，全部用满才算被冷却挡下。
 	now := s.now()
-	if !domain.RemindAllowed(lastAt, now) {
+	limit := projectSettingsOf(proj).RemindDailyLimit
+	day := pgtype.Date{Time: now, Valid: true}
+	recipients := make([]int64, 0, len(target.ActionOwnerIDs))
+	for _, ownerID := range target.ActionOwnerIDs {
+		sent, err := s.q.CountRemindsToday(r.Context(), store.CountRemindsTodayParams{
+			TaskID: target.TaskID, SenderID: uid, RecipientID: ownerID, RemindDate: day,
+		})
+		if err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		if domain.RemindAllowed(int(sent), limit) {
+			recipients = append(recipients, ownerID)
+		}
+	}
+	if len(recipients) == 0 {
 		writeJSON(w, http.StatusConflict, Error{Code: "remind_cooldown", Message: domain.ErrRemindCooldown.Error()})
 		return
 	}
 	content := domain.RemindContent(*target)
-	for _, ownerID := range target.ActionOwnerIDs {
+	for _, ownerID := range recipients {
 		if _, err := s.q.CreateNotification(r.Context(), blockerRemindNotification(ownerID, projectId, target.TaskID, content)); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
-	}
-	if _, err := s.q.CreateRemindLog(r.Context(), store.CreateRemindLogParams{
-		TaskID: target.TaskID, SenderID: uid, TargetKey: key,
-		RemindDate: pgtype.Date{Time: now, Valid: true},
-	}); err != nil {
-		writeInternalError(w, r, err)
-		return
+		if _, err := s.q.CreateRemindLog(r.Context(), store.CreateRemindLogParams{
+			TaskID: target.TaskID, SenderID: uid, RecipientID: ownerID, TargetKey: key,
+			RemindDate: day,
+		}); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -181,7 +181,11 @@ func (s *Server) projectBlockerFacts(ctx context.Context, projectID int64) (doma
 		return domain.BlockerFacts{}, err
 	}
 
-	facts := domain.BlockerFacts{Now: s.now()}
+	settings, err := s.projectSettings(ctx, projectID)
+	if err != nil {
+		return domain.BlockerFacts{}, err
+	}
+	facts := domain.BlockerFacts{Now: s.now(), ApprovalTimeoutDays: settings.ApprovalTimeoutDays}
 	krOwnerNameByTask := make(map[int64]string, len(taskRows))
 	for _, t := range taskRows {
 		krOwnerNameByTask[t.ID] = t.KrOwnerName.String

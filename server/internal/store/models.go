@@ -182,15 +182,18 @@ type PoolReview struct {
 }
 
 type Project struct {
-	ID               int64
-	Name             string
-	CreatedBy        int64
-	CreatedAt        pgtype.Timestamptz
-	OwnerID          int64
-	Status           string
-	Stage            pgtype.Text
-	PlannedStartDate pgtype.Date
-	PlannedEndDate   pgtype.Date
+	ID                  int64
+	Name                string
+	CreatedBy           int64
+	CreatedAt           pgtype.Timestamptz
+	OwnerID             int64
+	Status              string
+	Stage               pgtype.Text
+	PlannedStartDate    pgtype.Date
+	PlannedEndDate      pgtype.Date
+	ApprovalTimeoutDays int32
+	DueSoonDays         int32
+	RemindDailyLimit    int32
 }
 
 type ProjectMember struct {
@@ -201,12 +204,13 @@ type ProjectMember struct {
 }
 
 type RemindLog struct {
-	ID         int64
-	TaskID     int64
-	SenderID   int64
-	TargetKey  string
-	RemindDate pgtype.Date
-	CreatedAt  pgtype.Timestamptz
+	ID          int64
+	TaskID      int64
+	SenderID    int64
+	TargetKey   string
+	RemindDate  pgtype.Date
+	CreatedAt   pgtype.Timestamptz
+	RecipientID int64
 }
 
 type Session struct {

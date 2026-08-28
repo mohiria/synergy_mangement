@@ -55,11 +55,11 @@ func TestMyWorkGrouping(t *testing.T) {
 		},
 		InputRequests: []WorkInputRequestFact{
 			// 我是对接人、待接收、已通知 → 待我处理
-			{ID: 41, TaskID: 30, TaskName: "下游任务", InputName: "接口口径", ProviderID: me, TaskOwnerID: 9, State: InputRequestPending, Notified: true, CreatedAt: old},
+			{ID: 41, TaskID: 30, TaskName: "下游任务", InputName: "接口口径", Necessity: NecessityRequired, ProviderID: me, TaskOwnerID: 9, State: InputRequestPending, Notified: true, CreatedAt: old},
 			// 我是对接人但未通知（任务未入池）→ 不出现
-			{ID: 42, TaskID: 31, TaskName: "草稿下游", InputName: "评审意见", ProviderID: me, TaskOwnerID: 9, State: InputRequestPending, Notified: false, CreatedAt: recent},
+			{ID: 42, TaskID: 31, TaskName: "草稿下游", InputName: "评审意见", Necessity: NecessityRequired, ProviderID: me, TaskOwnerID: 9, State: InputRequestPending, Notified: false, CreatedAt: recent},
 			// 我任务上我发起的请求（对接人他人）→ 等待他人
-			{ID: 43, TaskID: 2, TaskName: "被卡任务", InputName: "现场数据包", ProviderID: 9, TaskOwnerID: me, State: InputRequestAccepted, Notified: true, CreatedAt: recent},
+			{ID: 43, TaskID: 2, TaskName: "被卡任务", InputName: "现场数据包", Necessity: NecessityRequired, ProviderID: 9, TaskOwnerID: me, State: InputRequestAccepted, Notified: true, CreatedAt: recent},
 		},
 		Invites: []WorkInviteFact{
 			// 我被邀请且待处理 → 待我处理

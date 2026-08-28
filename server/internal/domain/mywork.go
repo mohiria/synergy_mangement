@@ -8,9 +8,6 @@ import (
 // 我的工作五分组（词汇表「我的工作事项」；AC-16；模块 PRD §3～5）。
 // 本文件只做纯派生：输入为项目事实切片，输出为五组卡片事实。
 
-// ApprovalTimeoutDays 审批超时阈值 N（默认 3；模块 PRD §5.4）。
-const ApprovalTimeoutDays = 3
-
 type WorkTaskFact struct {
 	ID                  int64
 	Name                string
@@ -58,6 +55,7 @@ type WorkInputRequestFact struct {
 	TaskName    string
 	InputName   string
 	ContentNote string
+	Necessity   string
 	ProviderID  int64
 	TaskOwnerID int64
 	State       string
@@ -90,9 +88,12 @@ type WorkUpstreamFact struct {
 }
 
 type MyWorkFacts struct {
-	UserID        int64
-	Actor         Actor
-	Now           time.Time
+	UserID int64
+	Actor  Actor
+	Now    time.Time
+	// ApprovalTimeoutDays 审批超时阈值 N，取项目规则设置（AC-60）；非正数时回落默认值。
+	// 与「审批超时」卡点同源，见 BlockerFacts.ApprovalTimeoutDays。
+	ApprovalTimeoutDays int
 	Tasks         []WorkTaskFact
 	PoolReviews   []WorkApprovalFact
 	FieldChanges  []WorkApprovalFact
@@ -122,6 +123,13 @@ type WorkItem struct {
 	ActionLabel    string
 	CanRemind      bool
 }
+
+// 上游等待项的阶段文案（MW-14、模块 PRD §4.2 规则 6）：
+// 来源任务已取消时与「尚未交付」分开出文案，提醒该来源的负责人已无意义。
+const (
+	WorkStageUpstreamWaiting   = "等待上游交付"
+	WorkStageUpstreamCancelled = "上游已取消"
+)
 
 // 卡片动作文案（模块 PRD §5.3；AC-55 只用文字按钮）。
 const (
@@ -174,9 +182,13 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		item.CanRemind = CanRemind(f.Actor, me, target)
 	}
 
+	timeoutDays := f.ApprovalTimeoutDays
+	if timeoutDays <= 0 {
+		timeoutDays = DefaultApprovalTimeoutDays
+	}
 	waitingDays := func(since time.Time) (*int, bool) {
 		d := int(f.Now.Sub(since).Hours() / 24)
-		return &d, d >= ApprovalTimeoutDays
+		return &d, d >= timeoutDays
 	}
 	tid := func(v int64) *int64 { return &v }
 
@@ -244,6 +256,9 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		if terminal[ir.TaskID] {
 			continue
 		}
+		if ir.Necessity != NecessityRequired {
+			continue // 参考输入不生成本页事项、不计数（模块 PRD §4.2 规则 8）
+		}
 		if ir.ProviderID == me && ir.Notified && (ir.State == InputRequestPending || ir.State == InputRequestAccepted) {
 			days, _ := waitingDays(ir.CreatedAt)
 			overdue := Overdue(ir.Expected, f.Now)
@@ -303,21 +318,33 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 
 	// —— 等待他人（Q5：停在他人队列；及我任务的上游）——
 	for _, up := range f.Upstreams {
+		if terminal[up.TargetTaskID] {
+			continue // MW-14：下游任务进终态后本人不再等待任何上游
+		}
 		if up.TargetOwnerID == me && !up.Ready && up.Necessity == NecessityRequired && up.SourceTaskID != nil {
 			item := WorkItem{
 				Kind: "upstream", Title: "[上游任务] " + up.SourceName + " → " + up.InputName,
 				TaskID: up.SourceTaskID, TaskName: up.SourceName,
-				RefID: tid(up.EdgeID), Stage: "等待上游交付", DrawerTab: "overview",
+				RefID: tid(up.EdgeID), Stage: WorkStageUpstreamWaiting, DrawerTab: "overview",
 			}
-			// 提醒目标针对被卡住的下游任务（与「上游未就绪」卡点同口径），待行动人是上游任务负责人。
-			setWaitRemind(&item, UpstreamWaitFact(up.EdgeID, up.TargetTaskID, up.InputName,
-				up.SourceName, up.SourceOwnerID, up.SourceOwnerName))
+			if src, ok := taskByID[*up.SourceTaskID]; ok && src.DisplayStatus == TaskCancelled {
+				// 来源已取消：输入仍未就绪，但催上游负责人交付已无意义，只留卡片说明该改指来源
+				// （模块 PRD §4.2 规则 6）。
+				item.Stage = WorkStageUpstreamCancelled
+			} else {
+				// 提醒目标针对被卡住的下游任务（与「上游未就绪」卡点同口径），待行动人是上游任务负责人。
+				setWaitRemind(&item, UpstreamWaitFact(up.EdgeID, up.TargetTaskID, up.InputName,
+					up.SourceName, up.SourceOwnerID, up.SourceOwnerName))
+			}
 			g.Waiting = append(g.Waiting, item)
 		}
 	}
 	for _, ir := range f.InputRequests {
 		if terminal[ir.TaskID] {
 			continue
+		}
+		if ir.Necessity != NecessityRequired {
+			continue // 与待我处理、提醒目标同口径
 		}
 		if ir.TaskOwnerID == me && ir.ProviderID != me && (ir.State == InputRequestPending || ir.State == InputRequestAccepted) {
 			days, _ := waitingDays(ir.CreatedAt)

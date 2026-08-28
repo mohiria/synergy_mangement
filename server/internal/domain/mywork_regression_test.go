@@ -24,9 +24,9 @@ func TestMyWorkDropsCancelledTaskItems(t *testing.T) {
 			{ID: 91, TaskID: 11, TaskName: "在办任务", SubmittedBy: other, KrOwnerID: &me, KrOwnerName: "我", SubmittedAt: now.AddDate(0, 0, -1), TaskEnd: &end},
 		},
 		InputRequests: []WorkInputRequestFact{
-			{ID: 80, TaskID: 10, TaskName: "已取消任务", InputName: "接口清单", ProviderID: me, TaskOwnerID: other,
+			{ID: 80, TaskID: 10, TaskName: "已取消任务", InputName: "接口清单", Necessity: NecessityRequired, ProviderID: me, TaskOwnerID: other,
 				State: InputRequestPending, CreatedAt: now.AddDate(0, 0, -1), Notified: true},
-			{ID: 81, TaskID: 11, TaskName: "在办任务", InputName: "现场数据", ProviderID: me, TaskOwnerID: other,
+			{ID: 81, TaskID: 11, TaskName: "在办任务", InputName: "现场数据", Necessity: NecessityRequired, ProviderID: me, TaskOwnerID: other,
 				State: InputRequestPending, CreatedAt: now.AddDate(0, 0, -1), Notified: true},
 		},
 	}
