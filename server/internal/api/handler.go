@@ -399,6 +399,7 @@ func (s *Server) ListProjectMembers(w http.ResponseWriter, r *http.Request, proj
 			Username:    m.Username,
 			DisplayName: m.DisplayName,
 			Role:        MemberRole(m.Role),
+			RoleLabel:   optString(domain.MemberRoleLabel(m.Role)),
 		})
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -446,6 +447,7 @@ func (s *Server) AddProjectMember(w http.ResponseWriter, r *http.Request, projec
 		Username:    user.Username,
 		DisplayName: user.DisplayName,
 		Role:        MemberRole(m.Role),
+		RoleLabel:   optString(domain.MemberRoleLabel(m.Role)),
 	})
 }
 
@@ -490,6 +492,7 @@ func (s *Server) UpdateProjectMemberRole(w http.ResponseWriter, r *http.Request,
 		Username:    user.Username,
 		DisplayName: user.DisplayName,
 		Role:        MemberRole(m.Role),
+		RoleLabel:   optString(domain.MemberRoleLabel(m.Role)),
 	})
 }
 
@@ -753,16 +756,18 @@ func (s *Server) okrList(ctx context.Context, projectID int64, actor domain.Acto
 		summary := domain.ProgressCoverage(factsByKr[k.ID])
 		risk := domain.DeriveKrRisk(now, settings.DueSoonDays, riskTasksByKr[k.ID], blockersByKr[k.ID])
 		byObjective[k.ObjectiveID] = append(byObjective[k.ObjectiveID], KeyResult{
-			Id:          k.ID,
-			ObjectiveId: k.ObjectiveID,
-			Description: k.Description,
-			Metric:      optString(k.Metric),
-			OwnerId:     fromPgInt8(k.OwnerID),
-			OwnerName:   fromPgText(k.OwnerName),
-			StartDate:   fromPgDate(k.StartDate),
-			EndDate:     fromPgDate(k.EndDate),
-			RiskLevel:   RiskLevel(risk.Level),
-			SortOrder:   int(k.SortOrder),
+			Id:             k.ID,
+			ObjectiveId:    k.ObjectiveID,
+			Code:           domain.KeyResultCode(int(k.ObjectiveCodeSeq), int(k.CodeSeq)),
+			RiskLevelLabel: domain.RiskLevelLabel(risk.Level),
+			Description:    k.Description,
+			Metric:         optString(k.Metric),
+			OwnerId:        fromPgInt8(k.OwnerID),
+			OwnerName:      fromPgText(k.OwnerName),
+			StartDate:      fromPgDate(k.StartDate),
+			EndDate:        fromPgDate(k.EndDate),
+			RiskLevel:      RiskLevel(risk.Level),
+			SortOrder:      int(k.SortOrder),
 			ProgressSummary: &ProgressSummary{
 				TotalTasks:      summary.TotalTasks,
 				FilledTasks:     summary.FilledTasks,
@@ -790,6 +795,7 @@ func (s *Server) okrList(ctx context.Context, projectID int64, actor domain.Acto
 		resp = append(resp, Objective{
 			Id:          o.ID,
 			ProjectId:   o.ProjectID,
+			Code:        domain.ObjectiveCode(int(o.CodeSeq)),
 			Title:       o.Title,
 			Description: optString(o.Description),
 			SortOrder:   int(o.SortOrder),
@@ -901,6 +907,7 @@ func toProject(p store.Project, ownerName string, actor domain.Actor) Project {
 		OwnerId:          p.OwnerID,
 		OwnerName:        ownerName,
 		Status:           ProjectStatus(p.Status),
+		StatusLabel:      optString(domain.ProjectStatusLabel(p.Status)),
 		Stage:            fromPgText(p.Stage),
 		PlannedStartDate: fromPgDate(p.PlannedStartDate),
 		PlannedEndDate:   fromPgDate(p.PlannedEndDate),

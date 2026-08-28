@@ -36,14 +36,8 @@ type TaskDetail = components["schemas"]["TaskDetail"];
 type EdgeType = components["schemas"]["EdgeType"];
 type TaskRelation = components["schemas"]["TaskRelation"];
 type MemberRole = components["schemas"]["MemberRole"];
-type RiskLevel = components["schemas"]["RiskLevel"];
 
 // 风险等级词表（与 OKR、总览、图谱、报告各页一致）；卡点类型名一律消费 API 的 kindLabel。
-const RISK_LABEL: Record<RiskLevel, string> = {
-  normal: "正常",
-  warning: "预警",
-  high_risk: "高风险",
-};
 
 // 状态筛选下拉的选项词表（需要枚举全集，非行级显示；文案对齐原型 taskStatusOptions）。
 // 行级状态显示一律消费 API 派生的 statusLabel（AC-04），不在前端推导。
@@ -72,6 +66,8 @@ const STATUS_CLASS: Record<TaskStatus, string> = {
 
 const fmtDate = (d?: string | null) => (d ? d.slice(5).replace("-", ".") : "—");
 
+// 候选项文案：新建输入时要列出全部关系类型，此时还没有边可取派生字段，只能在前端枚举。
+// 已存在边的显示文案一律取后端的 edgeTypeLabel（F1）。
 const EDGE_TYPE_LABEL: Record<EdgeType, string> = {
   hard_prerequisite: "硬前置交付",
   information: "信息输入",
@@ -178,17 +174,10 @@ export default function ProjectTasksPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusTaskId, loading]);
 
-  // KR 展示编号沿全项目顺序派生（与 OKR 页一致），任务编号按 id 顺序派生 T1…。
-  const krList = useMemo(() => {
-    let seq = 0;
-    return objectives.flatMap((o) =>
-      o.keyResults.map((k) => ({ ...k, code: `KR${++seq}` })),
-    );
-  }, [objectives]);
-  const taskCode = useMemo(() => {
-    const sorted = [...tasks].sort((a, b) => a.id - b.id);
-    return new Map(sorted.map((t, i) => [t.id, `T${i + 1}`]));
-  }, [tasks]);
+  // O／KR／任务编号都是持久字段（AC-64），前端只取不算。
+  const krList = useMemo(() => objectives.flatMap((o) => o.keyResults.map((k) => ({ ...k }))), [objectives]);
+  // 编号是持久字段（AC-64）：跨页一致、增删任务后不位移，前端只取不算。
+  const taskCode = useMemo(() => new Map(tasks.map((t) => [t.id, t.code])), [tasks]);
 
   const filtered = tasks.filter((t) => {
     if (krFilter !== "all" && t.keyResultId !== krFilter) return false;
@@ -1714,12 +1703,8 @@ function TaskDrawer({
   const deliverables = detail?.deliverables ?? [];
   const currentFiles = deliverables.filter((d) => d.current);
   const candidateCount = deliverables.filter((d) => d.candidate).length;
-  const pendingReviews =
-    (detail?.poolReviews ?? []).filter((r) => r.status === "pending").length +
-    (detail?.fieldChanges ?? []).filter((fc) => fc.state === "pending").length +
-    (detail?.completionReviews ?? []).filter(
-      (cr) => cr.state === "pending_final" || cr.state === "intermediate_review",
-    ).length;
+  // 未决审批计数由后端派生（F1），前端不再把三类审批单各自过滤后相加。
+  const pendingReviews = detail?.task.pendingReviewCount ?? 0;
 
   // 摘要一组关系（AC-41）：对方任务编号与名称、所属 KR、关系类型、负责人、状态与就绪；
   // 组为空时不渲染该分组（词汇表「协作关系摘要」）。
@@ -1741,7 +1726,7 @@ function TaskDrawer({
                 {taskCode.get(rel.taskId) ?? ""} · {rel.taskName}
               </b>
               <small>
-                {rel.krDescription} · {EDGE_TYPE_LABEL[rel.edgeType]} · 负责人 {rel.ownerName} ·{" "}
+                {rel.krDescription} · {rel.edgeTypeLabel ?? ""} · 负责人 {rel.ownerName} ·{" "}
                 {rel.taskStatusLabel}
               </small>
             </span>
@@ -1885,7 +1870,7 @@ function TaskDrawer({
                       : `已有任务 · ${e.sourceTaskName ?? "—"}` +
                         (e.deliverableName ? ` · ${e.deliverableName}` : "") +
                         (e.sourceOwnerName ? ` · 提供人 ${e.sourceOwnerName}` : "")) +
-                      ` · ${EDGE_TYPE_LABEL[e.edgeType]}`}
+                      ` · ${e.edgeTypeLabel ?? ""}`}
                   </small>
                   {e.inputRequest?.state === "provided" && (
                     <small>
@@ -2086,7 +2071,7 @@ function TaskDrawer({
                 <b>
                   {b.kindLabel}:缺 {b.missing}
                   <span className={`status-pill risk-${b.level}`} style={{ marginLeft: 8 }}>
-                    {RISK_LABEL[b.level]}
+                    {b.levelLabel}
                   </span>
                 </b>
                 <small>

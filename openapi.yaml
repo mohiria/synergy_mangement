@@ -2303,6 +2303,9 @@ components:
           type: string
         role:
           $ref: "#/components/schemas/MemberRole"
+        roleLabel:
+          type: string
+          description: 成员角色显示文案（派生字段；前端不按枚举拼文案）
     AddProjectMemberRequest:
       type: object
       required: [userId, role]
@@ -2324,7 +2327,7 @@ components:
       enum: [normal, warning, high_risk]
     KeyResult:
       type: object
-      required: [id, objectiveId, description, riskLevel, sortOrder]
+      required: [id, objectiveId, code, description, riskLevel, riskLevelLabel, sortOrder]
       properties:
         id:
           type: integer
@@ -2332,6 +2335,12 @@ components:
         objectiveId:
           type: integer
           format: int64
+        code:
+          type: string
+          description: KR 展示编号，形如 KR1.1（AC-64；创建时分配并持久保存）
+        riskLevelLabel:
+          type: string
+          description: 风险等级显示文案（派生字段；与 statusLabel／kindLabel 同惯例，前端不按枚举拼文案）
         description:
           type: string
           description: KR 描述
@@ -2432,11 +2441,14 @@ components:
           description: 省略或 null 表示清除进度，回到只展示状态
     Objective:
       type: object
-      required: [id, projectId, title, sortOrder, keyResults]
+      required: [id, projectId, code, title, sortOrder, keyResults]
       properties:
         id:
           type: integer
           format: int64
+        code:
+          type: string
+          description: O 展示编号，自然数形如 O1（AC-64；创建时分配并持久保存，删除同级对象后不重排）
         projectId:
           type: integer
           format: int64
@@ -2604,6 +2616,7 @@ components:
         [
           id,
           keyResultId,
+          code,
           name,
           ownerId,
           ownerName,
@@ -2628,6 +2641,9 @@ components:
         keyResultId:
           type: integer
           format: int64
+        code:
+          type: string
+          description: 任务展示编号，形如 1.1.1（AC-64；创建时分配并持久保存，删除同级任务后不重排）
         name:
           type: string
         ownerId:
@@ -2697,6 +2713,9 @@ components:
         canProposeFieldChange:
           type: boolean
           description: 当前用户能否编辑任务／提交关键字段修改（派生字段）
+        pendingReviewCount:
+          type: integer
+          description: 本任务上未决审批单条数（派生字段；入池、关键字段变更／取消、完成申请合计，前端不再自行相加）
         canManageDeliverables:
           type: boolean
           description: 当前用户能否配置任务交付物项（派生字段；负责人／创建人／可编辑项目者，非终态）
@@ -2933,6 +2952,9 @@ components:
           description: 对方任务所属 KR 描述（派生字段）
         edgeType:
           $ref: "#/components/schemas/EdgeType"
+        edgeTypeLabel:
+          type: string
+          description: 关系类型显示文案（派生字段；前端不按枚举拼文案）
         ownerName:
           type: string
           description: 对方任务负责人姓名（派生字段）
@@ -3234,6 +3256,9 @@ components:
           description: 输入／交付物名称
         edgeType:
           $ref: "#/components/schemas/EdgeType"
+        edgeTypeLabel:
+          type: string
+          description: 交付物边类型显示文案（派生字段；前端不按枚举拼文案）
         necessity:
           $ref: "#/components/schemas/Necessity"
         sourceTaskId:
@@ -3767,6 +3792,9 @@ components:
         level:
           $ref: "#/components/schemas/RiskLevel"
           description: 按事实严重度派生的预警或高风险（结构化卡点不使用 normal）
+        levelLabel:
+          type: string
+          description: 风险等级显示文案（派生字段；前端不按枚举拼文案）
         since:
           type: string
           format: date-time
@@ -4108,6 +4136,9 @@ components:
           description: 项目负责人姓名（派生字段，前端直接展示）
         status:
           $ref: "#/components/schemas/ProjectStatus"
+        statusLabel:
+          type: string
+          description: 项目状态显示文案（派生字段；前端不按枚举拼文案）
         stage:
           type: string
           description: 业务里程碑标签，自由文本，选填

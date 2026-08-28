@@ -13,6 +13,8 @@ type MemberRole = components["schemas"]["MemberRole"];
 type UserSummary = components["schemas"]["UserSummary"];
 type ProjectSettings = components["schemas"]["ProjectSettings"];
 
+// 候选项文案：角色下拉要列出全部取值，此时没有对应成员可取派生字段，只能在前端枚举。
+// 已有成员的角色显示一律取后端的 roleLabel（F1）。
 const ROLE_LABEL: Record<MemberRole, string> = {
   admin: "项目管理员",
   member: "普通成员",
@@ -353,7 +355,7 @@ export default function ProjectSettingsPage({
                           <div className="member-card-text">
                             <b>{m.displayName}</b>
                             <span>
-                              {ROLE_LABEL[m.role]} · {m.username}
+                              {m.roleLabel ?? ""} · {m.username}
                             </span>
                           </div>
                           {canManage && (

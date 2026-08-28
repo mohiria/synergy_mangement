@@ -280,7 +280,7 @@ const setTaskReceiverScope = `-- name: SetTaskReceiverScope :one
 UPDATE tasks
 SET receiver_scope = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, key_result_id, name, owner_id, start_date, end_date, status, created_by, created_at, progress, cancel_reason, description, completion_criteria, updated_at, receiver_scope
+RETURNING id, key_result_id, name, owner_id, start_date, end_date, status, created_by, created_at, progress, cancel_reason, description, completion_criteria, updated_at, receiver_scope, code_seq
 `
 
 type SetTaskReceiverScopeParams struct {
@@ -307,6 +307,7 @@ func (q *Queries) SetTaskReceiverScope(ctx context.Context, arg SetTaskReceiverS
 		&i.CompletionCriteria,
 		&i.UpdatedAt,
 		&i.ReceiverScope,
+		&i.CodeSeq,
 	)
 	return i, err
 }

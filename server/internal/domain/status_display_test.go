@@ -146,3 +146,29 @@ func TestStageLabel(t *testing.T) {
 		})
 	}
 }
+
+// F1：四组枚举文案统一由 domain 派生，未知取值退化为安全默认，不回显枚举原文。
+func TestEnumLabels(t *testing.T) {
+	cases := []struct {
+		got  string
+		want string
+	}{
+		{RiskLevelLabel(RiskNormal), "正常"},
+		{RiskLevelLabel(RiskWarning), "预警"},
+		{RiskLevelLabel(RiskHighRisk), "高风险"},
+		{RiskLevelLabel("unknown"), "正常"},
+		{EdgeTypeLabel(EdgeHardPrerequisite), "硬前置交付"},
+		{EdgeTypeLabel(EdgeFeedback), "迭代／反馈"},
+		{EdgeTypeLabel("unknown"), "协作关系"},
+		{ProjectStatusLabel("in_progress"), "进行中"},
+		{ProjectStatusLabel("archived"), "已归档"},
+		{ProjectStatusLabel("unknown"), "未开始"},
+		{MemberRoleLabel(RoleAdmin), "项目管理员"},
+		{MemberRoleLabel(RoleViewer), "只读成员"},
+	}
+	for _, tc := range cases {
+		if tc.got != tc.want {
+			t.Fatalf("label = %q, want %q", tc.got, tc.want)
+		}
+	}
+}

@@ -10,14 +10,7 @@ import type { IconName } from "./icons";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
-type ProjectStatus = components["schemas"]["ProjectStatus"];
 
-const STATUS_LABEL: Record<ProjectStatus, string> = {
-  not_started: "未开始",
-  in_progress: "进行中",
-  completed: "已完成",
-  archived: "已归档",
-};
 
 // 项目内页面共用壳层：浅色侧边栏 + 顶栏（原型 index.html 结构）。
 // 侧边栏自上而下：brand → project-switch（项目切换）→ main-nav → sidebar-foot（项目设置）。
@@ -75,7 +68,7 @@ function ProjectMenu({
             <span className="project-menu-text">
               <b>{p.name}</b>
               <small>
-                {STATUS_LABEL[p.status]}
+                {p.statusLabel}
                 {p.stage ? " · " + p.stage : ""}
               </small>
             </span>
@@ -161,7 +154,7 @@ export default function ProjectShell({
             <span className={"project-dot " + (project?.status ?? "not_started")} />
             <span className="project-switch-text">
               <b>{project?.name ?? "…"}</b>
-              <small>{project?.stage || (project ? STATUS_LABEL[project.status] : "加载中")}</small>
+              <small>{project?.stage || project?.statusLabel || "加载中"}</small>
             </span>
             <Icon name="down" size={15} />
           </button>

@@ -1176,6 +1176,8 @@ export interface components {
             username: string;
             displayName: string;
             role: components["schemas"]["MemberRole"];
+            /** @description 成员角色显示文案（派生字段；前端不按枚举拼文案） */
+            roleLabel?: string;
         };
         AddProjectMemberRequest: {
             /** Format: int64 */
@@ -1195,6 +1197,10 @@ export interface components {
             id: number;
             /** Format: int64 */
             objectiveId: number;
+            /** @description KR 展示编号，形如 KR1.1（AC-64；创建时分配并持久保存） */
+            code: string;
+            /** @description 风险等级显示文案（派生字段；与 statusLabel／kindLabel 同惯例，前端不按枚举拼文案） */
+            riskLevelLabel: string;
             /** @description KR 描述 */
             description: string;
             /** @description 量化指标，选填 */
@@ -1266,6 +1272,8 @@ export interface components {
         Objective: {
             /** Format: int64 */
             id: number;
+            /** @description O 展示编号，自然数形如 O1（AC-64；创建时分配并持久保存，删除同级对象后不重排） */
+            code: string;
             /** Format: int64 */
             projectId: number;
             /** @description O 标题 */
@@ -1365,6 +1373,8 @@ export interface components {
             id: number;
             /** Format: int64 */
             keyResultId: number;
+            /** @description 任务展示编号，形如 1.1.1（AC-64；创建时分配并持久保存，删除同级任务后不重排） */
+            code: string;
             name: string;
             /**
              * Format: int64
@@ -1414,6 +1424,8 @@ export interface components {
             deliverableNames?: string[];
             /** @description 当前用户能否编辑任务／提交关键字段修改（派生字段） */
             canProposeFieldChange: boolean;
+            /** @description 本任务上未决审批单条数（派生字段；入池、关键字段变更／取消、完成申请合计，前端不再自行相加） */
+            pendingReviewCount?: number;
             /** @description 当前用户能否配置任务交付物项（派生字段；负责人／创建人／可编辑项目者，非终态） */
             canManageDeliverables?: boolean;
             /** @description 当前用户能否提交完成申请（派生字段；负责人，进行中且有候选内容） */
@@ -1528,6 +1540,8 @@ export interface components {
             /** @description 对方任务所属 KR 描述（派生字段） */
             krDescription: string;
             edgeType: components["schemas"]["EdgeType"];
+            /** @description 关系类型显示文案（派生字段；前端不按枚举拼文案） */
+            edgeTypeLabel?: string;
             /** @description 对方任务负责人姓名（派生字段） */
             ownerName: string;
             /** @description 对方任务状态显示文案（AC-04；派生字段） */
@@ -1715,6 +1729,8 @@ export interface components {
             /** @description 输入／交付物名称 */
             name: string;
             edgeType: components["schemas"]["EdgeType"];
+            /** @description 交付物边类型显示文案（派生字段；前端不按枚举拼文案） */
+            edgeTypeLabel?: string;
             necessity: components["schemas"]["Necessity"];
             /**
              * Format: int64
@@ -2012,6 +2028,8 @@ export interface components {
             actionOwnerNames: string[];
             /** @description 按事实严重度派生的预警或高风险（结构化卡点不使用 normal） */
             level: components["schemas"]["RiskLevel"];
+            /** @description 风险等级显示文案（派生字段；前端不按枚举拼文案） */
+            levelLabel?: string;
             /**
              * Format: date-time
              * @description 卡点产生时间（触发事实成立的时点）
@@ -2227,6 +2245,8 @@ export interface components {
             /** @description 项目负责人姓名（派生字段，前端直接展示） */
             ownerName: string;
             status: components["schemas"]["ProjectStatus"];
+            /** @description 项目状态显示文案（派生字段；前端不按枚举拼文案） */
+            statusLabel?: string;
             /** @description 业务里程碑标签，自由文本，选填 */
             stage?: string;
             /** Format: date */

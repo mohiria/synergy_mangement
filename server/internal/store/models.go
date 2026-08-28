@@ -150,6 +150,7 @@ type KeyResult struct {
 	EndDate     pgtype.Date
 	SortOrder   int32
 	CreatedAt   pgtype.Timestamptz
+	CodeSeq     int32
 }
 
 type Notification struct {
@@ -170,6 +171,7 @@ type Objective struct {
 	Description string
 	SortOrder   int32
 	CreatedAt   pgtype.Timestamptz
+	CodeSeq     int32
 }
 
 type PoolReview struct {
@@ -239,6 +241,7 @@ type Task struct {
 	CompletionCriteria string
 	UpdatedAt          pgtype.Timestamptz
 	ReceiverScope      string
+	CodeSeq            int32
 }
 
 type TaskActivity struct {

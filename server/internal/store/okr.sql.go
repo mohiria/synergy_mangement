@@ -76,9 +76,11 @@ func (q *Queries) CountTasksByKeyResultInProject(ctx context.Context, projectID 
 }
 
 const createKeyResult = `-- name: CreateKeyResult :one
-INSERT INTO key_results (objective_id, description, metric, owner_id, start_date, end_date, sort_order)
-VALUES ($1, $2, $3, $4, $5, $6, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM key_results WHERE objective_id = $1))
-RETURNING id, objective_id, description, metric, owner_id, start_date, end_date, sort_order, created_at
+INSERT INTO key_results (objective_id, description, metric, owner_id, start_date, end_date, sort_order, code_seq)
+VALUES ($1, $2, $3, $4, $5, $6,
+    (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM key_results WHERE objective_id = $1),
+    (SELECT COALESCE(MAX(code_seq), 0) + 1 FROM key_results WHERE objective_id = $1))
+RETURNING id, objective_id, description, metric, owner_id, start_date, end_date, sort_order, created_at, code_seq
 `
 
 type CreateKeyResultParams struct {
@@ -110,14 +112,17 @@ func (q *Queries) CreateKeyResult(ctx context.Context, arg CreateKeyResultParams
 		&i.EndDate,
 		&i.SortOrder,
 		&i.CreatedAt,
+		&i.CodeSeq,
 	)
 	return i, err
 }
 
 const createObjective = `-- name: CreateObjective :one
-INSERT INTO objectives (project_id, title, description, sort_order)
-VALUES ($1, $2, $3, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM objectives WHERE project_id = $1))
-RETURNING id, project_id, title, description, sort_order, created_at
+INSERT INTO objectives (project_id, title, description, sort_order, code_seq)
+VALUES ($1, $2, $3,
+    (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM objectives WHERE project_id = $1),
+    (SELECT COALESCE(MAX(code_seq), 0) + 1 FROM objectives WHERE project_id = $1))
+RETURNING id, project_id, title, description, sort_order, created_at, code_seq
 `
 
 type CreateObjectiveParams struct {
@@ -126,7 +131,8 @@ type CreateObjectiveParams struct {
 	Description string
 }
 
-// 排序追加到项目末尾；批量创建在同一事务内串行执行，MAX+1 不会互相踩踏。
+// 排序与编号序号都追加到项目末尾；批量创建在同一事务内串行执行，MAX+1 不会互相踩踏。
+// code_seq 取历史最大值加一，不复用被删 O 的序号（AC-64）。
 func (q *Queries) CreateObjective(ctx context.Context, arg CreateObjectiveParams) (Objective, error) {
 	row := q.db.QueryRow(ctx, createObjective, arg.ProjectID, arg.Title, arg.Description)
 	var i Objective
@@ -137,6 +143,7 @@ func (q *Queries) CreateObjective(ctx context.Context, arg CreateObjectiveParams
 		&i.Description,
 		&i.SortOrder,
 		&i.CreatedAt,
+		&i.CodeSeq,
 	)
 	return i, err
 }
@@ -171,7 +178,7 @@ func (q *Queries) DeleteObjective(ctx context.Context, arg DeleteObjectiveParams
 }
 
 const getObjective = `-- name: GetObjective :one
-SELECT id, project_id, title, description, sort_order, created_at FROM objectives
+SELECT id, project_id, title, description, sort_order, created_at, code_seq FROM objectives
 WHERE id = $1 AND project_id = $2
 `
 
@@ -190,6 +197,7 @@ func (q *Queries) GetObjective(ctx context.Context, arg GetObjectiveParams) (Obj
 		&i.Description,
 		&i.SortOrder,
 		&i.CreatedAt,
+		&i.CodeSeq,
 	)
 	return i, err
 }
@@ -231,7 +239,7 @@ func (q *Queries) ListInputProviderDutiesOf(ctx context.Context, arg ListInputPr
 }
 
 const listKeyResultsByProject = `-- name: ListKeyResultsByProject :many
-SELECT kr.id, kr.objective_id, kr.description, kr.metric, kr.owner_id, kr.start_date, kr.end_date, kr.sort_order, kr.created_at, u.display_name AS owner_name
+SELECT kr.id, kr.objective_id, kr.description, kr.metric, kr.owner_id, kr.start_date, kr.end_date, kr.sort_order, kr.created_at, kr.code_seq, u.display_name AS owner_name, o.code_seq AS objective_code_seq
 FROM key_results kr
 JOIN objectives o ON o.id = kr.objective_id
 LEFT JOIN users u ON u.id = kr.owner_id
@@ -240,16 +248,18 @@ ORDER BY kr.sort_order, kr.id
 `
 
 type ListKeyResultsByProjectRow struct {
-	ID          int64
-	ObjectiveID int64
-	Description string
-	Metric      string
-	OwnerID     pgtype.Int8
-	StartDate   pgtype.Date
-	EndDate     pgtype.Date
-	SortOrder   int32
-	CreatedAt   pgtype.Timestamptz
-	OwnerName   pgtype.Text
+	ID               int64
+	ObjectiveID      int64
+	Description      string
+	Metric           string
+	OwnerID          pgtype.Int8
+	StartDate        pgtype.Date
+	EndDate          pgtype.Date
+	SortOrder        int32
+	CreatedAt        pgtype.Timestamptz
+	CodeSeq          int32
+	OwnerName        pgtype.Text
+	ObjectiveCodeSeq int32
 }
 
 // owner_name：KR 负责人姓名（派生字段，前端直接展示；未指定负责人时为 NULL）。
@@ -272,7 +282,9 @@ func (q *Queries) ListKeyResultsByProject(ctx context.Context, projectID int64) 
 			&i.EndDate,
 			&i.SortOrder,
 			&i.CreatedAt,
+			&i.CodeSeq,
 			&i.OwnerName,
+			&i.ObjectiveCodeSeq,
 		); err != nil {
 			return nil, err
 		}
@@ -322,7 +334,7 @@ func (q *Queries) ListKeyResultsOwnedBy(ctx context.Context, arg ListKeyResultsO
 }
 
 const listObjectives = `-- name: ListObjectives :many
-SELECT id, project_id, title, description, sort_order, created_at FROM objectives
+SELECT id, project_id, title, description, sort_order, created_at, code_seq FROM objectives
 WHERE project_id = $1
 ORDER BY sort_order, id
 `
@@ -343,6 +355,7 @@ func (q *Queries) ListObjectives(ctx context.Context, projectID int64) ([]Object
 			&i.Description,
 			&i.SortOrder,
 			&i.CreatedAt,
+			&i.CodeSeq,
 		); err != nil {
 			return nil, err
 		}
@@ -468,7 +481,7 @@ SET description = COALESCE($1, description),
     start_date = COALESCE($4, start_date),
     end_date = COALESCE($5, end_date)
 WHERE id = $6
-RETURNING id, objective_id, description, metric, owner_id, start_date, end_date, sort_order, created_at
+RETURNING id, objective_id, description, metric, owner_id, start_date, end_date, sort_order, created_at, code_seq
 `
 
 type UpdateKeyResultParams struct {
@@ -500,6 +513,7 @@ func (q *Queries) UpdateKeyResult(ctx context.Context, arg UpdateKeyResultParams
 		&i.EndDate,
 		&i.SortOrder,
 		&i.CreatedAt,
+		&i.CodeSeq,
 	)
 	return i, err
 }
@@ -509,7 +523,7 @@ UPDATE objectives
 SET title = COALESCE($1, title),
     description = COALESCE($2, description)
 WHERE id = $3 AND project_id = $4
-RETURNING id, project_id, title, description, sort_order, created_at
+RETURNING id, project_id, title, description, sort_order, created_at, code_seq
 `
 
 type UpdateObjectiveParams struct {
@@ -535,6 +549,7 @@ func (q *Queries) UpdateObjective(ctx context.Context, arg UpdateObjectiveParams
 		&i.Description,
 		&i.SortOrder,
 		&i.CreatedAt,
+		&i.CodeSeq,
 	)
 	return i, err
 }

@@ -13,14 +13,8 @@ type Project = components["schemas"]["Project"];
 type Objective = components["schemas"]["Objective"];
 type KeyResult = components["schemas"]["KeyResult"];
 type ProjectMember = components["schemas"]["ProjectMember"];
-type RiskLevel = components["schemas"]["RiskLevel"];
 type CreateOkrBatchItem = components["schemas"]["CreateOkrBatchItem"];
 
-const RISK_LABEL: Record<RiskLevel, string> = {
-  normal: "正常",
-  warning: "预警",
-  high_risk: "高风险",
-};
 
 // 周期展示沿用原型的紧凑格式（08.20—09.18）。
 const fmtDate = (d?: string | null) => (d ? d.slice(5).replace("-", ".") : "…");
@@ -71,28 +65,26 @@ export default function ProjectOkrPage({
     load();
   }, [load]);
 
-  // 展示编号按列表顺序派生（O1…、KR 全局连续），仅用于界面呈现。
-  let krSeq = 0;
-  const rows = objectives.flatMap((o, oIndex) => [
+  // 编号是持久字段（AC-64），直接消费 code，不再按数组下标现算。
+  const rows = objectives.flatMap((o) => [
     <tr
       key={`o-${o.id}`}
       className={`table-group${o.canEdit ? " row-clickable" : ""}`}
       onClick={o.canEdit ? () => setEditing({ kind: "O", o }) : undefined}
     >
       <td colSpan={7}>
-        O{oIndex + 1}　{o.title}
+        {o.code}　{o.title}
         {o.description && <span className="muted">　{o.description}</span>}
       </td>
     </tr>,
     ...o.keyResults.map((k: KeyResult) => {
-      krSeq += 1;
       return (
         <tr
           key={`kr-${k.id}`}
           className={k.canEdit ? "row-clickable" : undefined}
           onClick={k.canEdit ? () => setEditing({ kind: "KR", k }) : undefined}
         >
-          <td className="mono">KR{krSeq}</td>
+          <td className="mono">{k.code}</td>
           <td>{k.description}</td>
           <td>
             {k.ownerName ? (
@@ -115,7 +107,7 @@ export default function ProjectOkrPage({
           </td>
           <td>{k.metric ?? <span className="muted">待补充量化指标</span>}</td>
           <td>
-            <span className={`status-pill risk-${k.riskLevel}`}>{RISK_LABEL[k.riskLevel]}</span>
+            <span className={`status-pill risk-${k.riskLevel}`}>{k.riskLevelLabel}</span>
           </td>
           <td>{k.taskCount ? `${k.taskCount} 项` : <span className="muted">—</span>}</td>
         </tr>

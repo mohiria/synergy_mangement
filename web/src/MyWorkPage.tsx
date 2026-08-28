@@ -94,17 +94,13 @@ export default function MyWorkPage({
     load();
   }, [load]);
 
-  // KR 展示编号沿全项目顺序派生，任务编号按 id 顺序派生 T1…（与 OKR、全部任务各页一致）。
+  // 编号是持久字段（AC-64）：跨页一致、增删任务后不位移，前端只取不算。
   const krCode = useMemo(() => {
-    let seq = 0;
     const m = new Map<number, string>();
-    objectives.forEach((o) => o.keyResults.forEach((k) => m.set(k.id, `KR${++seq}`)));
+    objectives.forEach((o) => o.keyResults.forEach((k) => m.set(k.id, k.code)));
     return m;
   }, [objectives]);
-  const taskCode = useMemo(() => {
-    const sorted = [...tasks].sort((a, b) => a.id - b.id);
-    return new Map(sorted.map((t, i) => [t.id, `T${i + 1}`]));
-  }, [tasks]);
+  const taskCode = useMemo(() => new Map(tasks.map((t) => [t.id, t.code])), [tasks]);
   const taskById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
 
   // 卡片只负责定位：一律打开任务详情抽屉，并带上来源分组供抽屉落位（模块 PRD §6.2）。

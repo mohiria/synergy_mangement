@@ -13,13 +13,7 @@ type Task = components["schemas"]["Task"];
 type TaskDetail = components["schemas"]["TaskDetail"];
 type DeliverableEdge = components["schemas"]["DeliverableEdge"];
 type Blocker = components["schemas"]["Blocker"];
-type RiskLevel = components["schemas"]["RiskLevel"];
 
-const RISK_LABEL: Record<RiskLevel, string> = {
-  normal: "正常",
-  warning: "预警",
-  high_risk: "高风险",
-};
 
 // 箭头按边色分档：SVG marker 不继承所属 path 的 stroke（context-stroke 支持面不稳），
 // 只能一色一个 marker。取值与 edgeStroke 保持一致。
@@ -35,12 +29,6 @@ const ARROW_COLORS: Record<string, string> = {
 const GRAPH_FIRST_BATCH = 200;
 const GRAPH_BATCH_STEP = 100;
 
-const EDGE_TYPE_LABEL: Record<string, string> = {
-  hard_prerequisite: "硬前置交付",
-  information: "信息输入",
-  handover: "正式成果接收",
-  feedback: "迭代／反馈",
-};
 
 // 层级固定为：层级树 → O → KR 任务关系层 → 任务聚焦层 → 全局展开（AC-27、CR-05／CR-06）。
 // focus 是「逐层展开」层：从一个任务出发，把展开过的节点各自的 1-hop 邻居并进画布，
@@ -188,12 +176,11 @@ export default function CollaborationPage({
     };
   }, [projectId, selectedTask]);
 
-  const krList = useMemo(() => {
-    let seq = 0;
-    return objectives.flatMap((o) =>
-      o.keyResults.map((k) => ({ ...k, code: `KR${++seq}`, objectiveId: o.id })),
-    );
-  }, [objectives]);
+  // 编号是持久字段（AC-64），直接用 KR 自带的 code。
+  const krList = useMemo(
+    () => objectives.flatMap((o) => o.keyResults.map((k) => ({ ...k, objectiveId: o.id }))),
+    [objectives],
+  );
   const krById = useMemo(() => new Map(krList.map((k) => [k.id, k])), [krList]);
   const taskById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
 
@@ -734,7 +721,7 @@ export default function CollaborationPage({
         </button>
       </div>
       <div className="graph-inspector-body">
-        <div>关系类型：{EDGE_TYPE_LABEL[selectedEdgeObj.edgeType]}</div>
+        <div>关系类型：{selectedEdgeObj.edgeTypeLabel}</div>
         <div>必要性：{selectedEdgeObj.necessity === "required" ? "必要" : "参考"}</div>
         <div>
           提供方：
@@ -896,7 +883,7 @@ export default function CollaborationPage({
           {k.code} {k.description}
         </b>
         <small>
-          {RISK_LABEL[k.riskLevel]}
+          {k.riskLevelLabel}
           {blockers > 0 ? ` · ${blockers} 个卡点` : ""}
         </small>
       </>
@@ -1053,7 +1040,7 @@ export default function CollaborationPage({
                       <tr key={e.id}>
                         <td>{e.sourceTaskName ?? e.inputRequest?.providerName ?? "—"}</td>
                         <td>{e.name}</td>
-                        <td>{EDGE_TYPE_LABEL[e.edgeType]}</td>
+                        <td>{e.edgeTypeLabel}</td>
                         <td>{e.necessity === "required" ? "必要" : "参考"}</td>
                         <td>
                           {e.currentFileName ?? <span className="muted">暂无</span>}
@@ -1113,7 +1100,7 @@ export default function CollaborationPage({
                   .map((k) => (
                     <button key={`rk-${k.id}`} type="button" className="risk-queue-item" onClick={() => enter({ kind: "kr", krId: k.id })}>
                       <b>
-                        {k.code} · {RISK_LABEL[k.riskLevel]}
+                        {k.code} · {k.riskLevelLabel}
                       </b>
                       <small>{k.riskNote ?? k.description}</small>
                     </button>
@@ -1133,7 +1120,7 @@ export default function CollaborationPage({
                       }}
                     >
                       <b>
-                        {b.kindLabel} · {RISK_LABEL[b.level]}
+                        {b.kindLabel} · {b.levelLabel ?? ""}
                       </b>
                       <small>
                         {taskById.get(b.taskId)?.name ?? ""}：缺 {b.missing}

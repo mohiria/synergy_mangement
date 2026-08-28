@@ -256,14 +256,15 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 		facts.Status = domain.TaskInProgress
 		canRemove := domain.CanConfigureInputs(actor, userID, facts)
 		item := DeliverableEdge{
-			Id:           e.ID,
-			Name:         e.Name,
-			EdgeType:     EdgeType(e.EdgeType),
-			Necessity:    Necessity(e.Necessity),
-			TargetTaskId: e.TargetTaskID,
-			Ready:        domain.EdgeReady(hasCurrent, e.HasCandidate),
-			HasCandidate: e.HasCandidate,
-			CanRemove:    &canRemove,
+			Id:            e.ID,
+			Name:          e.Name,
+			EdgeType:      EdgeType(e.EdgeType),
+			EdgeTypeLabel: optString(domain.EdgeTypeLabel(e.EdgeType)),
+			Necessity:     Necessity(e.Necessity),
+			TargetTaskId:  e.TargetTaskID,
+			Ready:         domain.EdgeReady(hasCurrent, e.HasCandidate),
+			HasCandidate:  e.HasCandidate,
+			CanRemove:     &canRemove,
 		}
 		item.TargetTaskName = optString(e.TargetTaskName)
 		item.SourceTaskId = fromPgInt8(e.SourceTaskID)

@@ -320,6 +320,7 @@ func blockerView(b domain.Blocker, actor domain.Actor, userID int64) Blocker {
 		ActionOwnerIds:   append([]int64{}, b.ActionOwnerIDs...),
 		ActionOwnerNames: append([]string{}, b.ActionOwnerNames...),
 		Level:            RiskLevel(b.Level),
+		LevelLabel:       optString(domain.RiskLevelLabel(b.Level)),
 		Since:            b.Since,
 		CanRemind:        &canRemind,
 	}

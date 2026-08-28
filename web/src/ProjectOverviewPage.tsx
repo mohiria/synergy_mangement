@@ -15,11 +15,6 @@ type RiskLevel = components["schemas"]["RiskLevel"];
 type DeliverableEdge = components["schemas"]["DeliverableEdge"];
 type Blocker = components["schemas"]["Blocker"];
 
-const RISK_LABEL: Record<RiskLevel, string> = {
-  normal: "正常",
-  warning: "预警",
-  high_risk: "高风险",
-};
 const STATUS_CLASS: Record<TaskStatus, string> = {
   draft: "",
   pending_pool_review: "warning",
@@ -87,10 +82,8 @@ export default function ProjectOverviewPage({
     load();
   }, [load]);
 
-  const taskCode = useMemo(() => {
-    const sorted = [...tasks].sort((a, b) => a.id - b.id);
-    return new Map(sorted.map((t, i) => [t.id, `T${i + 1}`]));
-  }, [tasks]);
+  // 编号是持久字段（AC-64），直接取 task.code，不再按数组下标现算。
+  const taskCode = useMemo(() => new Map(tasks.map((t) => [t.id, t.code])), [tasks]);
 
   const toggle = (krId: number) =>
     setExpanded((prev) => {
@@ -115,8 +108,7 @@ export default function ProjectOverviewPage({
   const krOfTask = useMemo(() => new Map(tasks.map((t) => [t.id, t.keyResultId])), [tasks]);
   const krCode = useMemo(() => {
     const m = new Map<number, string>();
-    let n = 0;
-    objectives.forEach((o) => o.keyResults.forEach((k) => m.set(k.id, `KR${++n}`)));
+    objectives.forEach((o) => o.keyResults.forEach((k) => m.set(k.id, k.code)));
     return m;
   }, [objectives]);
   const krLabel = useMemo(() => {
@@ -124,8 +116,6 @@ export default function ProjectOverviewPage({
     objectives.forEach((o) => o.keyResults.forEach((k) => m.set(k.id, k.description)));
     return m;
   }, [objectives]);
-
-  let krSeq = 0;
 
   return (
     <ProjectShell
@@ -183,10 +173,10 @@ export default function ProjectOverviewPage({
             </dl>
           </section>
           {objectives.length === 0 && <div className="empty">暂无 O／KR，请先在 OKR 管理中录入</div>}
-          {objectives.map((o, oIndex) => (
+          {objectives.map((o) => (
             <section key={o.id} className="objective">
               <div className="objective-head">
-                <span className="objective-code">O{oIndex + 1}</span>
+                <span className="objective-code">{o.code}</span>
                 <div>
                   <h2>{o.title}</h2>
                   <p>{o.description ?? ""}</p>
@@ -194,8 +184,7 @@ export default function ProjectOverviewPage({
                 <span className="objective-count">{o.keyResults.length} 个 KR</span>
               </div>
               {o.keyResults.map((k) => {
-                krSeq += 1;
-                const code = `KR${krSeq}`;
+                const code = k.code;
                 const isOpen = expanded.has(k.id);
                 const krTasks = tasks.filter((t) => t.keyResultId === k.id);
                 return (
@@ -208,7 +197,7 @@ export default function ProjectOverviewPage({
                         {k.riskNote && <small>{k.riskNote}</small>}
                       </span>
                       <span className={`status-pill risk-${k.riskLevel}`}>
-                        {RISK_LABEL[k.riskLevel]}
+                        {k.riskLevelLabel}
                       </span>
                       <span className="muted" aria-hidden>
                         <Icon name={isOpen ? "down" : "chevron"} size={15} />

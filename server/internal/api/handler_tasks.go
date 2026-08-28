@@ -613,6 +613,7 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 				TaskName:        other.Name,
 				KrDescription:   krDescByID[other.KeyResultId],
 				EdgeType:        EdgeType(ref.EdgeType),
+				EdgeTypeLabel:   optString(domain.EdgeTypeLabel(ref.EdgeType)),
 				OwnerName:       other.OwnerName,
 				TaskStatusLabel: other.StatusLabel,
 				Ready:           ref.Ready,
@@ -663,6 +664,24 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		writeInternalError(w, r, err)
 		return
 	}
+	// F1：未决审批计数由后端派生，前端不再把三类审批单各自过滤后相加。
+	pendingCount := 0
+	for _, pr := range prs {
+		if pr.Status == PoolReviewStatusPending {
+			pendingCount++
+		}
+	}
+	for _, fc := range fcs {
+		if fc.State == FieldChangeStatePending {
+			pendingCount++
+		}
+	}
+	for _, cr := range completions {
+		if cr.State == CompletionReviewStateIntermediateReview || cr.State == CompletionReviewStatePendingFinal {
+			pendingCount++
+		}
+	}
+	item.PendingReviewCount = &pendingCount
 	writeJSON(w, http.StatusOK, TaskDetail{
 		Task:              *item,
 		ObjectiveTitle:    obj.Title,
@@ -817,6 +836,7 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 		item := Task{
 			Id:                  t.ID,
 			KeyResultId:         t.KeyResultID,
+			Code:                domain.TaskCode(int(t.ObjectiveCodeSeq), int(t.KrCodeSeq), int(t.CodeSeq)),
 			Name:                t.Name,
 			OwnerId:             t.OwnerID,
 			OwnerName:           t.OwnerName,

@@ -1,6 +1,9 @@
 -- name: CreateTask :one
-INSERT INTO tasks (key_result_id, name, owner_id, start_date, end_date, status, created_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+-- code_seq 取所属 KR 下历史最大值加一，不复用被删任务的序号（AC-64）；
+-- 批量创建在同一事务内串行执行，MAX+1 不会互相踩踏。
+INSERT INTO tasks (key_result_id, name, owner_id, start_date, end_date, status, created_by, code_seq)
+VALUES ($1, $2, $3, $4, $5, $6, $7,
+    (SELECT COALESCE(MAX(code_seq), 0) + 1 FROM tasks WHERE key_result_id = $1))
 RETURNING *;
 
 -- name: GetTaskInProject :one
@@ -24,7 +27,8 @@ FOR UPDATE OF t;
 -- name: ListProjectTasks :many
 -- 项目全部任务，含负责人／创建人／KR 负责人姓名（派生动作标志与待行动人在 domain 判定）。
 SELECT t.*, u.display_name AS owner_name, cu.display_name AS creator_name,
-    k.owner_id AS kr_owner_id, ku.display_name AS kr_owner_name
+    k.owner_id AS kr_owner_id, ku.display_name AS kr_owner_name,
+    k.code_seq AS kr_code_seq, o.code_seq AS objective_code_seq
 FROM tasks t
 JOIN key_results k ON k.id = t.key_result_id
 JOIN objectives o ON o.id = k.objective_id

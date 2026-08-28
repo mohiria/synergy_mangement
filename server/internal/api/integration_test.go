@@ -5069,6 +5069,98 @@ func TestDeleteExpiredSessions(t *testing.T) {
 	}
 }
 
+// AC-64 编号稳定：O 编号为自然数、KR 形如 KR1.1、任务形如 1.1.1；
+// 编号创建时分配并持久保存，删除 O2 后 O3 编号不变、新建的 O 也不复用 2。
+func TestEntityCodesStable(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	sp := func(v string) *string { return &v }
+
+	alice := newClient(t)
+	resp := doJSON(t, alice, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: "alice", Password: "alice-pass"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	resp = doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "编号稳定", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	objectivesURL := fmt.Sprintf("%s/projects/%d/objectives", base, created.Id)
+
+	resp = doJSON(t, alice, http.MethodPost, objectivesURL, api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+		{Title: sp("O 一"), KeyResults: &[]api.CreateKeyResultInput{
+			{Description: "KR 一一", OwnerId: &aliceUser.ID},
+			{Description: "KR 一二", OwnerId: &aliceUser.ID},
+		}},
+		{Title: sp("O 二")},
+		{Title: sp("O 三")},
+	}})
+	wantStatus(t, resp, http.StatusCreated)
+	okr := decodeBody[[]api.Objective](t, resp)
+	codeOf := func(list []api.Objective, title string) string {
+		for _, o := range list {
+			if o.Title == title {
+				return o.Code
+			}
+		}
+		return ""
+	}
+	if codeOf(okr, "O 一") != "O1" || codeOf(okr, "O 二") != "O2" || codeOf(okr, "O 三") != "O3" {
+		t.Fatalf("O 编号异常: %+v", okr)
+	}
+	if okr[0].KeyResults[0].Code != "KR1.1" || okr[0].KeyResults[1].Code != "KR1.2" {
+		t.Fatalf("KR 编号异常: %+v", okr[0].KeyResults)
+	}
+
+	// 任务编号形如 1.1.1，同 KR 内递增
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+	kr11 := okr[0].KeyResults[0].Id
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr11, Name: "任务甲", OwnerId: aliceUser.ID, StartDate: start, EndDate: end},
+			{KeyResultId: kr11, Name: "任务乙", OwnerId: aliceUser.ID, StartDate: start, EndDate: end},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	byName := map[string]string{}
+	var firstTaskID int64
+	for _, tk := range decodeBody[[]api.Task](t, resp) {
+		byName[tk.Name] = tk.Code
+		if tk.Name == "任务甲" {
+			firstTaskID = tk.Id
+		}
+	}
+	if byName["任务甲"] != "1.1.1" || byName["任务乙"] != "1.1.2" {
+		t.Fatalf("任务编号异常: %+v", byName)
+	}
+	_ = firstTaskID
+
+	// 删除 O2：O3 编号不变，新建的 O 取 O4 而不是复用 2
+	var o2 int64
+	for _, o := range okr {
+		if o.Title == "O 二" {
+			o2 = o.Id
+		}
+	}
+	resp = doJSON(t, alice, http.MethodDelete, fmt.Sprintf("%s/%d", objectivesURL, o2), nil)
+	wantStatus(t, resp, http.StatusNoContent)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPost, objectivesURL,
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{{Title: sp("O 四")}}})
+	wantStatus(t, resp, http.StatusCreated)
+	after := decodeBody[[]api.Objective](t, resp)
+	if codeOf(after, "O 一") != "O1" || codeOf(after, "O 三") != "O3" {
+		t.Fatalf("删除 O2 后其余 O 编号应保持不变: %+v", after)
+	}
+	if codeOf(after, "O 四") != "O4" {
+		t.Fatalf("新建 O 不应复用被删的编号: %+v", after)
+	}
+}
+
 // S3：改口令后本人其余会话立即失效，当前会话保留；新口令生效、旧口令失效。
 func TestChangePasswordRevokesOtherSessions(t *testing.T) {
 	q, pool := setupDB(t)

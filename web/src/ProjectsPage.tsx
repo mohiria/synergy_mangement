@@ -13,6 +13,8 @@ type Project = components["schemas"]["Project"];
 type ProjectStatus = components["schemas"]["ProjectStatus"];
 type UserSummary = components["schemas"]["UserSummary"];
 
+// 候选项文案：下拉里要列出全部状态，此时还没有对应实体可取派生字案，只能在前端枚举。
+// 已存在实体的显示文案一律取后端的 statusLabel（F1）。
 const STATUS_LABEL: Record<ProjectStatus, string> = {
   not_started: "未开始",
   in_progress: "进行中",
@@ -264,8 +266,9 @@ export default function ProjectsPage({
                   title: "状态",
                   dataIndex: "status",
                   width: 110,
-                  render: (v: ProjectStatus) => (
-                    <span className={`status-pill ${v}`}>{STATUS_LABEL[v]}</span>
+                  // 显示文案取后端派生字段；本页保留的 STATUS_LABEL 只用于筛选与新建的候选项。
+                  render: (v: ProjectStatus, row: Project) => (
+                    <span className={`status-pill ${v}`}>{row.statusLabel}</span>
                   ),
                 },
                 {
