@@ -1204,11 +1204,22 @@ export interface components {
             /** @description 当前用户能否删除本 KR（派生字段；仅项目管理员且 KR 下无任务，AC-65） */
             canDelete?: boolean;
         };
-        /** @description KR 层进度数据覆盖度（词汇表「进度数据覆盖度」）；只统计已入池且未取消的任务，平均值任务等权 */
+        /** @description 一条受影响的 O／KR（系统推导，协作关系 PRD §8.1） */
+        ImpactedTarget: {
+            /** Format: int64 */
+            keyResultId: number;
+            krDescription: string;
+            /** Format: int64 */
+            objectiveId: number;
+            objectiveTitle: string;
+        };
+        /** @description KR 层进度汇总与数据覆盖度（词汇表「进度数据覆盖度」；AC-63）：统计已入池且未取消的任务， 已取消整体剔除；平均值任务等权、未填按 0 计入、已完成按 100 */
         ProgressSummary: {
+            /** @description 参与汇总的任务数（已入池且未取消），即平均值的分母 */
             totalTasks: number;
+            /** @description 其中由负责人真实填写进度的任务数（已完成计入），说明平均值里有多少来自真实填写 */
             filledTasks: number;
-            /** @description 已填写任务的等权平均（四舍五入）；无已填任务时不返回 */
+            /** @description 任务等权平均（四舍五入）；未填按 0、已完成按 100 计入。没有参与汇总的任务时不返回 */
             averageProgress?: number;
         };
         UpdateTaskStatusRequest: {
@@ -1360,14 +1371,14 @@ export interface components {
              */
             pendingActorId?: number;
             pendingActorName?: string;
-            /** @description 可选进度百分比（词汇表「任务进度」）；未填写时不返回，前端只展示状态 */
+            /** @description 可选进度百分比（词汇表「任务进度」）；已完成任务一律 100 且不可编辑，未填写时不返回、前端只展示状态（AC-63） */
             progress?: number;
             /** @description 取消原因（已取消任务保留，PRD §5.1） */
             cancelReason?: string;
             poolReview?: components["schemas"]["PoolReview"];
             /** @description 当前用户能否开始执行本任务（派生字段；负责人／可编辑项目者，未开始或等待输入时） */
             canStart: boolean;
-            /** @description 当前用户能否更新本任务进度（派生字段；负责人／可编辑项目者，执行中状态） */
+            /** @description 当前用户能否更新本任务进度（派生字段；负责人／可编辑项目者，仅进行中；完成后锁定为 100，AC-63） */
             canUpdateProgress: boolean;
             /** @description 当前用户能否发起取消申请（派生字段；任务负责人／项目管理员，非终态且任务上没有未决审批单，AC-57） */
             canCancel: boolean;
@@ -1450,6 +1461,8 @@ export interface components {
             inputs: components["schemas"]["DeliverableEdge"][];
             /** @description 从本任务出发的交付物边（直接下游） */
             outputs: components["schemas"]["DeliverableEdge"][];
+            /** @description 受影响 O／KR（系统推导；协作关系 PRD §8.1）：从本任务出发沿下游硬前置交付物边传递闭包， 收集途经任务所属的 KR 及其 O。反馈、参考输入与普通双向协作不计入；不含本任务所属 KR */
+            impactedTargets: components["schemas"]["ImpactedTarget"][];
             /** @description 协作关系摘要——直接上游分组（词汇表；派生字段，无关系时为空数组，前端按空组隐藏） */
             upstream: components["schemas"]["TaskRelation"][];
             /** @description 协作关系摘要——直接下游分组（词汇表；派生字段，无关系时为空数组，前端按空组隐藏） */

@@ -2341,6 +2341,21 @@ components:
         canDelete:
           type: boolean
           description: 当前用户能否删除本 KR（派生字段；仅项目管理员且 KR 下无任务，AC-65）
+    ImpactedTarget:
+      type: object
+      description: 一条受影响的 O／KR（系统推导，协作关系 PRD §8.1）
+      required: [keyResultId, krDescription, objectiveId, objectiveTitle]
+      properties:
+        keyResultId:
+          type: integer
+          format: int64
+        krDescription:
+          type: string
+        objectiveId:
+          type: integer
+          format: int64
+        objectiveTitle:
+          type: string
     ProgressSummary:
       type: object
       description: >-
@@ -2734,6 +2749,7 @@ components:
           krDescription,
           poolReviews,
           fieldChanges,
+          impactedTargets,
           deliverables,
           discussions,
           completionReviews,
@@ -2800,6 +2816,13 @@ components:
           description: 从本任务出发的交付物边（直接下游）
           items:
             $ref: "#/components/schemas/DeliverableEdge"
+        impactedTargets:
+          type: array
+          description: >-
+            受影响 O／KR（系统推导；协作关系 PRD §8.1）：从本任务出发沿下游硬前置交付物边传递闭包，
+            收集途经任务所属的 KR 及其 O。反馈、参考输入与普通双向协作不计入；不含本任务所属 KR
+          items:
+            $ref: "#/components/schemas/ImpactedTarget"
         upstream:
           type: array
           description: 协作关系摘要——直接上游分组（词汇表；派生字段，无关系时为空数组，前端按空组隐藏）

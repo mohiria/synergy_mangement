@@ -620,6 +620,44 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		}
 		return out
 	}
+	// 受影响 O／KR（协作关系 PRD §8.1）：只沿下游硬前置边推导，规则在 domain。
+	objectiveRows, err := s.q.ListObjectives(r.Context(), projectId)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	objectiveTitleByID := make(map[int64]string, len(objectiveRows))
+	for _, o := range objectiveRows {
+		objectiveTitleByID[o.ID] = o.Title
+	}
+	krOwnerObjective := map[int64]int64{}
+	if krRows, err := s.q.ListKeyResultsByProject(r.Context(), projectId); err == nil {
+		for _, k := range krRows {
+			krOwnerObjective[k.ID] = k.ObjectiveID
+		}
+	}
+	impactFacts := make(map[int64]domain.ImpactTaskFact, len(list))
+	for i := range list {
+		t := list[i]
+		objID := krOwnerObjective[t.KeyResultId]
+		impactFacts[t.Id] = domain.ImpactTaskFact{
+			TaskID: t.Id, KeyResultID: t.KeyResultId, KrDescription: krDescByID[t.KeyResultId],
+			ObjectiveID: objID, ObjectiveTitle: objectiveTitleByID[objID],
+		}
+	}
+	impactEdges := make([]domain.ImpactEdgeFact, 0, len(allEdges))
+	for _, e := range allEdges {
+		impactEdges = append(impactEdges, domain.ImpactEdgeFact{
+			SourceTaskID: e.SourceTaskId, TargetTaskID: e.TargetTaskId, EdgeType: string(e.EdgeType),
+		})
+	}
+	impacted := make([]ImpactedTarget, 0)
+	for _, it := range domain.ImpactedObjectives(taskId, impactFacts, impactEdges) {
+		impacted = append(impacted, ImpactedTarget{
+			KeyResultId: it.KeyResultID, KrDescription: it.KrDescription,
+			ObjectiveId: it.ObjectiveID, ObjectiveTitle: it.ObjectiveTitle,
+		})
+	}
 	receipts, err := s.receiptList(r.Context(), taskId)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -638,6 +676,7 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		Blockers:          taskBlockers,
 		Inputs:            inputs,
 		Outputs:           outputs,
+		ImpactedTargets:   impacted,
 		Upstream:          relationViews(upRefs),
 		Downstream:        relationViews(downRefs),
 		Activities:        activities,

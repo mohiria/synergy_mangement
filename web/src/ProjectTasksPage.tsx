@@ -1700,7 +1700,9 @@ function TaskDrawer({
   const discussions = detail?.discussions ?? [];
   const upstream = detail?.upstream ?? [];
   const downstream = detail?.downstream ?? [];
-  const relationCount = upstream.length + downstream.length;
+  // 受影响 O／KR 是系统沿下游硬前置边推导出来的，不是直接关系，单独计数与展示（CR PRD §8.1）。
+  const impactedTargets = detail?.impactedTargets ?? [];
+  const relationCount = upstream.length + downstream.length + impactedTargets.length;
   const requiredInputs = inputs.filter((e) => e.necessity === "required");
   const referenceInputs = inputs.filter((e) => e.necessity === "reference");
   // 上游未就绪卡点按边寻址（Blocker.key 形如 upstream_unready:edge:17），供任务输入行取缺失原因。
@@ -2126,6 +2128,34 @@ function TaskDrawer({
           </>
         )}
       </section>
+      {/* 受影响 O／KR（CR PRD §8.1）：与页头的「所属 O／KR」是两回事——
+          这里只沿下游硬前置边推导，反馈、参考输入与普通双向协作不计入，故标明「系统推导」。 */}
+      {impactedTargets.length > 0 && (
+        <section className="drawer-section" data-focus="impacted">
+          <h3>
+            受影响 O／KR <span className="section-count">系统推导 · {impactedTargets.length} 项</span>
+          </h3>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
+            沿下游硬前置交付物边推导；反馈、参考输入与普通双向协作不计入。
+          </div>
+          {impactedTargets.map((it) => (
+            <button
+              key={`impacted-${it.keyResultId}`}
+              type="button"
+              className="fact-card fact-card-link"
+              onClick={() => actions.openInGraph(task.id)}
+            >
+              <span>
+                <b>{it.krDescription}</b>
+                <small>所属 O：{it.objectiveTitle}</small>
+              </span>
+              <span className="muted" style={{ fontSize: 12 }}>
+                展开影响路径 →
+              </span>
+            </button>
+          ))}
+        </section>
+      )}
     </div>
   );
 

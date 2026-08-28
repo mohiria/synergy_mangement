@@ -2198,6 +2198,17 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 		detailB.Downstream[0].EdgeType != api.Feedback {
 		t.Fatalf("B 的直接下游分组异常: %+v", detailB.Downstream)
 	}
+	// CR PRD §8.1：受影响 O／KR 只沿下游硬前置边推导——
+	// A 硬前置指向 B，所以 A 的详情里有 B 所属 KR；B 只有一条指向 A 的反馈边，不产生受影响目标。
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskA.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	detailA2 := decodeBody[api.TaskDetail](t, resp)
+	if len(detailA2.ImpactedTargets) != 1 || detailA2.ImpactedTargets[0].KrDescription != "现场回归通过" {
+		t.Fatalf("A 的受影响 O／KR 异常: %+v", detailA2.ImpactedTargets)
+	}
+	if len(detailB.ImpactedTargets) != 0 {
+		t.Fatalf("反馈边不应产生受影响目标: %+v", detailB.ImpactedTargets)
+	}
 	// AC-50：任务详情页头的更新时间随任务写入推进
 	if !detailA.Task.UpdatedAt.After(taskA.UpdatedAt) {
 		t.Fatalf("任务更新时间应随状态推进: %v → %v", taskA.UpdatedAt, detailA.Task.UpdatedAt)
