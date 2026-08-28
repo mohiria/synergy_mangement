@@ -186,9 +186,18 @@ func (s *Server) DecideFieldChange(w http.ResponseWriter, r *http.Request, proje
 		writeInternalError(w, r, err)
 		return
 	}
+	isCancel := fc.ChangeType == domain.FieldChangeTypeCancel
 	if approve {
-		// AC-23：通过后拟议值成为当前值。
-		if _, err := qtx.ApplyTaskKeyFields(r.Context(), store.ApplyTaskKeyFieldsParams{
+		if isCancel {
+			// AC-57：取消单通过后任务进入已取消并保留原因。
+			if _, err := qtx.UpdateTaskStatusWithReason(r.Context(), store.UpdateTaskStatusWithReasonParams{
+				ID: taskId, Status: domain.TaskCancelled, CancelReason: fc.Reason,
+			}); err != nil {
+				writeInternalError(w, r, err)
+				return
+			}
+		} else if _, err := qtx.ApplyTaskKeyFields(r.Context(), store.ApplyTaskKeyFieldsParams{
+			// AC-23：通过后拟议值成为当前值。
 			ID:                 taskId,
 			Name:               fc.NewName,
 			Description:        fc.NewDescription,
@@ -204,9 +213,14 @@ func (s *Server) DecideFieldChange(w http.ResponseWriter, r *http.Request, proje
 		writeInternalError(w, r, err)
 		return
 	}
-	if approve {
+	switch {
+	case isCancel && approve:
+		s.actionActivity(r.Context(), taskId, domain.ActivityCancelApproved, uid, opinion)
+	case isCancel:
+		s.actionActivity(r.Context(), taskId, domain.ActivityCancelRejected, uid, opinion)
+	case approve:
 		s.actionActivity(r.Context(), taskId, domain.ActivityFieldChangeApproved, uid, opinion)
-	} else {
+	default:
 		s.actionActivity(r.Context(), taskId, domain.ActivityFieldChangeRejected, uid, opinion)
 	}
 	s.recordBlockerChanges(r.Context(), projectId, blockersBefore)
@@ -290,6 +304,7 @@ func createFieldChangeParams(task store.GetTaskInProjectRow, uid int64, reason s
 	p := store.CreateFieldChangeParams{
 		TaskID: task.ID, SubmittedBy: uid, Reason: reason, State: state,
 		Exempt: exempt, Opinion: opinion, DecidedBy: decidedBy, DecidedAt: decidedAt,
+		ChangeType:            domain.FieldChangeTypeKeyFields,
 		NewName:               toPgTextPtr(c.Name),
 		NewDescription:        toPgTextPtr(c.Description),
 		NewCompletionCriteria: toPgTextPtr(c.CompletionCriteria),
@@ -340,6 +355,13 @@ func (s *Server) fieldChangeView(ctx context.Context, fc store.FieldChangeReques
 			diffs = append(diffs, FieldChangeDiff{Field: field, Label: label, OldValue: oldV.String, NewValue: newV.String})
 		}
 	}
+	if fc.NewStatus.Valid {
+		diffs = append(diffs, FieldChangeDiff{
+			Field: "status", Label: "任务状态",
+			OldValue: domain.StatusLabel(fc.OldStatus.String, "", nil),
+			NewValue: domain.StatusLabel(fc.NewStatus.String, "", nil),
+		})
+	}
 	addText("name", "任务名称", fc.OldName, fc.NewName)
 	addText("description", "任务说明", fc.OldDescription, fc.NewDescription)
 	addText("completionCriteria", "完成标准", fc.OldCompletionCriteria, fc.NewCompletionCriteria)
@@ -360,8 +382,13 @@ func (s *Server) fieldChangeView(ctx context.Context, fc store.FieldChangeReques
 	if facts.KrOwnerID != nil {
 		krOwnerName = nameOf(pgtype.Int8{Int64: *facts.KrOwnerID, Valid: true})
 	}
+	changeType := FieldChangeType(fc.ChangeType)
+	if changeType == "" {
+		changeType = FieldChangeType(domain.FieldChangeTypeKeyFields)
+	}
 	out := FieldChange{
 		Id:              fc.ID,
+		ChangeType:      changeType,
 		State:           FieldChangeState(fc.State),
 		StateLabel:      domain.FieldChangeStateLabel(fc.State, fc.Exempt, krOwnerName),
 		Reason:          fc.Reason,

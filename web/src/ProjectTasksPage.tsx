@@ -473,12 +473,13 @@ export default function ProjectTasksPage({
   };
 
   const doCancelTask = async (task: Task, reason: string) => {
-    const res = await client.POST("/projects/{projectId}/tasks/{taskId}/update-status", {
+    const res = await client.POST("/projects/{projectId}/tasks/{taskId}/cancellation", {
       params: { path: { projectId, taskId: task.id } },
-      body: { status: "cancelled", reason },
+      body: { reason },
     });
     if (res.data) {
-      message.success("任务已取消");
+      // AC-57：除 KR 负责人本人负责 KR 下免审外，取消要经所属 KR 负责人审批。
+      message.success(res.data.status === "cancelled" ? "任务已取消" : "取消申请已提交，待所属 KR 负责人审批");
       load();
     } else {
       message.error(res.error?.message ?? "操作失败");
@@ -570,13 +571,14 @@ export default function ProjectTasksPage({
           )}
           {t.fieldChange?.state === "pending" && (
             <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-              变更审批中：
+              {t.fieldChange.changeType === "cancel" ? "取消审批中：" : "变更审批中："}
               {t.fieldChange.changes.map((c) => `${c.label} ${c.oldValue || "—"}→${c.newValue}`).join("；")}
             </div>
           )}
           {t.fieldChange?.state === "rejected" && !t.fieldChange.resolved && (
             <div style={{ fontSize: 12, marginTop: 2, color: "var(--red)" }}>
-              变更已退回{t.fieldChange.opinion ? `：${t.fieldChange.opinion}` : ""}
+              {t.fieldChange.changeType === "cancel" ? "取消申请已退回" : "变更已退回"}
+              {t.fieldChange.opinion ? `：${t.fieldChange.opinion}` : ""}
             </div>
           )}
         </td>
@@ -629,7 +631,7 @@ export default function ProjectTasksPage({
                   setCancelReason("");
                 }}
               >
-                取消
+                申请取消
               </Button>
             )}
             {t.canSubmitPoolReview && (
@@ -1096,9 +1098,9 @@ export default function ProjectTasksPage({
         />
       </Modal>
       <Modal
-        title="取消任务"
+        title="申请取消任务"
         open={!!cancelTask}
-        okText="确认取消任务"
+        okText="提交取消申请"
         cancelText="返回"
         okButtonProps={{ danger: true, disabled: !cancelReason.trim() }}
         onCancel={() => setCancelTask(null)}
@@ -1110,7 +1112,7 @@ export default function ProjectTasksPage({
         }}
       >
         <p className="muted" style={{ marginTop: 0 }}>
-          任务不再执行并保留原因；已取消任务不计入 KR 进度覆盖度。
+          取消须经所属 KR 负责人审批（KR 负责人在本人负责 KR 下免审即时生效）；已取消任务不计入 KR 进度汇总。
         </p>
         <Input.TextArea
           rows={3}
@@ -2306,7 +2308,7 @@ function TaskDrawer({
         <article key={`fc-${fc.id}`} className={`audit-card ${fc.state === "pending" ? "pending" : ""}`}>
           <div className="audit-card-head">
             <div>
-              <b>关键字段修改</b>{" "}
+              <b>{fc.changeType === "cancel" ? "任务取消申请" : "关键字段修改"}</b>{" "}
               <span
                 className={`status-pill ${
                   fc.state === "pending" ? "warning" : fc.state === "approved" ? "completed" : "danger"
@@ -2328,7 +2330,9 @@ function TaskDrawer({
             ))}
             {fc.reason && (
               <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                修改原因:{fc.reason}；审批完成前旧值继续生效。
+                {fc.changeType === "cancel"
+                  ? `取消原因:${fc.reason}；审批通过前任务照常执行。`
+                  : `修改原因:${fc.reason}；审批完成前旧值继续生效。`}
               </div>
             )}
           </div>
@@ -2436,7 +2440,7 @@ function TaskDrawer({
           {task.canUpdateProgress && (
             <Button onClick={() => actions.openProgress(task)}>更新进度</Button>
           )}
-          {task.canCancel && <Button onClick={() => actions.openCancel(task)}>取消任务</Button>}
+          {task.canCancel && <Button onClick={() => actions.openCancel(task)}>申请取消</Button>}
           {task.canSubmitPoolReview && (
             <Button type="primary" onClick={() => actions.submitPool(task)}>
               提交入池审批

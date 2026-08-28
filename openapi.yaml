@@ -569,7 +569,7 @@ paths:
     post:
       operationId: updateTaskStatus
       tags: [tasks]
-      summary: 手工流转任务状态：开始执行或取消（AC-12；完成走三道审批，不在此端点）
+      summary: 手工流转任务状态：开始执行（AC-12；完成走三道审批、取消走取消申请，均不在此端点）
       requestBody:
         required: true
         content:
@@ -621,6 +621,48 @@ paths:
       responses:
         "200":
           description: 已更新，返回任务最新状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /projects/{projectId}/tasks/{taskId}/cancellation:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: taskId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    post:
+      operationId: requestTaskCancellation
+      tags: [tasks]
+      summary: 发起任务取消申请（AC-57；复用关键字段变更单，进所属 KR 负责人待我审批，KR 负责人本人免审即时生效）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskCancellationRequest"
+      responses:
+        "200":
+          description: 已受理，返回任务最新状态（免审时已为已取消，否则仍为原状态并带待审批取消单）
           content:
             application/json:
               schema:
@@ -2173,12 +2215,17 @@ components:
       properties:
         status:
           type: string
-          enum: [in_progress, cancelled]
-          description: 手工流转目标：开始执行（未开始／等待输入 → 进行中）或取消（非终态 → 已取消，需原因）
+          enum: [in_progress]
+          description: 手工流转目标：开始执行（未开始／等待输入 → 进行中）；取消走 /cancellation（AC-57）
+    TaskCancellationRequest:
+      type: object
+      required: [reason]
+      properties:
         reason:
           type: string
+          minLength: 1
           maxLength: 500
-          description: 取消原因；status 为 cancelled 时必填
+          description: 取消原因，必填（AC-57）
     UpdateTaskProgressRequest:
       type: object
       properties:
@@ -2390,7 +2437,7 @@ components:
           description: 当前用户能否更新本任务进度（派生字段；负责人／可编辑项目者，执行中状态）
         canCancel:
           type: boolean
-          description: 当前用户能否取消本任务（派生字段；负责人／创建人／可编辑项目者，非终态）
+          description: 当前用户能否发起取消申请（派生字段；任务负责人／项目管理员，非终态且任务上没有未决审批单，AC-57）
         fieldChange:
           $ref: "#/components/schemas/FieldChange"
           description: 最近一张需要关注的变更单（待审批＝拟议值标示，或退回未处理＝退回待处理事项）；无则不返回
@@ -2657,14 +2704,20 @@ components:
           type: string
         newValue:
           type: string
+    FieldChangeType:
+      type: string
+      description: 变更类型（PRD §5.2.B）：关键字段修改，或复用同一张变更单的任务取消申请
+      enum: [key_fields, cancel]
     FieldChange:
       type: object
       description: 关键字段变更单（词汇表）；rejected 且 resolved=false 即「退回待处理事项」
-      required: [id, state, stateLabel, reason, resolved, exempt, changes]
+      required: [id, changeType, state, stateLabel, reason, resolved, exempt, changes]
       properties:
         id:
           type: integer
           format: int64
+        changeType:
+          $ref: "#/components/schemas/FieldChangeType"
         state:
           $ref: "#/components/schemas/FieldChangeState"
         stateLabel:

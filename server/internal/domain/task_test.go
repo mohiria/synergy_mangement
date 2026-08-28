@@ -104,7 +104,7 @@ func TestSubmitPoolReview(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := SubmitPoolReview(tc.t); !errors.Is(got, tc.want) {
+			if got := SubmitPoolReview(tc.t, false); !errors.Is(got, tc.want) {
 				t.Fatalf("SubmitPoolReview() = %v, want %v", got, tc.want)
 			}
 		})
@@ -129,7 +129,7 @@ func TestCanSubmitPoolReview(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := CanSubmitPoolReview(tc.actor, tc.user, tc.t); got != tc.want {
+			if got := CanSubmitPoolReview(tc.actor, tc.user, tc.t, false); got != tc.want {
 				t.Fatalf("CanSubmitPoolReview() = %v, want %v", got, tc.want)
 			}
 		})

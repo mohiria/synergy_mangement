@@ -112,7 +112,7 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 			}
 		}
 		if _, exempt := domain.TaskCreationOutcome(uid, krOwners[i]); !exempt && req.SubmitForReview {
-			if err := domain.SubmitPoolReview(domain.TaskFacts{Status: domain.TaskDraft, KrOwnerID: krOwners[i]}); err != nil {
+			if err := domain.SubmitPoolReview(domain.TaskFacts{Status: domain.TaskDraft, KrOwnerID: krOwners[i]}, false); err != nil {
 				writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "kr_owner_missing", Message: err.Error()})
 				return
 			}
@@ -231,12 +231,18 @@ func (s *Server) SubmitTaskPoolReview(w http.ResponseWriter, r *http.Request, pr
 		return
 	}
 	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
-	if err := domain.SubmitPoolReview(facts); err != nil {
-		if errors.Is(err, domain.ErrTaskNotDraft) {
+	hasPending, err := s.q.HasPendingFieldChange(r.Context(), taskId)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if err := domain.SubmitPoolReview(facts, hasPending); err != nil {
+		switch {
+		case errors.Is(err, domain.ErrTaskNotDraft), errors.Is(err, domain.ErrCancelBlocked):
 			writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: err.Error()})
-			return
+		default:
+			writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "kr_owner_missing", Message: err.Error()})
 		}
-		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "kr_owner_missing", Message: err.Error()})
 		return
 	}
 	tx, err := s.db.Begin(r.Context())
@@ -347,7 +353,7 @@ func (s *Server) DecideTaskPoolReview(w http.ResponseWriter, r *http.Request, pr
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 
-// UpdateTaskStatus 手工流转：开始执行或取消（AC-12；完成走三道审批）。
+// UpdateTaskStatus 手工流转：开始执行（AC-12；完成走三道审批，取消走 RequestTaskCancellation）。
 func (s *Server) UpdateTaskStatus(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64) {
 	var req UpdateTaskStatusRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -376,29 +382,6 @@ func (s *Server) UpdateTaskStatus(w http.ResponseWriter, r *http.Request, projec
 			return
 		}
 		if _, err := s.q.UpdateTaskStatus(r.Context(), store.UpdateTaskStatusParams{ID: taskId, Status: newStatus}); err != nil {
-			writeInternalError(w, r, err)
-			return
-		}
-	case UpdateTaskStatusRequestStatusCancelled:
-		if uid != task.OwnerID && uid != task.CreatedBy && !domain.CanEditProject(actor) {
-			writeForbidden(w)
-			return
-		}
-		reason := ""
-		if req.Reason != nil {
-			reason = strings.TrimSpace(*req.Reason)
-		}
-		if err := domain.CancelTask(facts.Status, reason); err != nil {
-			if errors.Is(err, domain.ErrCannotCancel) {
-				writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: err.Error()})
-			} else {
-				writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "cancel_reason_required", Message: err.Error()})
-			}
-			return
-		}
-		if _, err := s.q.UpdateTaskStatusWithReason(r.Context(), store.UpdateTaskStatusWithReasonParams{
-			ID: taskId, Status: domain.TaskCancelled, CancelReason: reason,
-		}); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
@@ -783,6 +766,9 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 	resp := make([]Task, 0, len(rows))
 	for _, t := range rows {
 		facts := domain.TaskFacts{Status: t.Status, CreatorID: t.CreatedBy, OwnerID: t.OwnerID, KrOwnerID: fromPgInt8(t.KrOwnerID)}
+		// 待审批变更单（含取消单）决定编辑、取消与提交入池三处入口是否可用（AC-23、AC-57 互斥）。
+		fc, hasChange := changeByTask[t.ID]
+		hasPending := hasChange && fc.State == domain.FieldChangePendingState
 		item := Task{
 			Id:                  t.ID,
 			KeyResultId:         t.KeyResultID,
@@ -799,8 +785,8 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 			CancelReason:        optString(t.CancelReason),
 			CanStart:            domain.CanStartTask(actor, userID, facts),
 			CanUpdateProgress:   domain.CanUpdateProgress(actor, userID, facts),
-			CanCancel:           domain.CanCancelTask(actor, userID, facts),
-			CanSubmitPoolReview: domain.CanSubmitPoolReview(actor, userID, facts),
+			CanCancel:           domain.CanCancelTask(actor, userID, facts, hasPending),
+			CanSubmitPoolReview: domain.CanSubmitPoolReview(actor, userID, facts, hasPending),
 			CanDecidePoolReview: domain.CanDecidePoolReview(userID, facts),
 		}
 		// 页面主状态汇总：必要输入未到显示「等待输入」（存储态保持真实执行状态）。
@@ -828,15 +814,14 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 			item.PoolReview = toPoolReview(pr, t.KrOwnerName.String)
 		}
 		// 编辑／关键字段修改动作标志与需要关注的变更单（AC-23）。
-		hasPending := false
-		if fc, ok := changeByTask[t.ID]; ok {
-			hasPending = fc.State == domain.FieldChangePendingState
+		if hasChange {
 			// 任务终止后退回待处理事项随之结束（词汇表）。
 			terminal := t.Status == domain.TaskCompleted || t.Status == domain.TaskCancelled
 			if hasPending || !terminal {
 				view := s.fieldChangeView(ctx, store.FieldChangeRequest{
 					ID: fc.ID, TaskID: fc.TaskID, SubmittedBy: fc.SubmittedBy, Reason: fc.Reason,
 					State: fc.State, Exempt: fc.Exempt, Opinion: fc.Opinion, Resolved: fc.Resolved,
+					ChangeType: fc.ChangeType, OldStatus: fc.OldStatus, NewStatus: fc.NewStatus,
 					OldName: fc.OldName, NewName: fc.NewName,
 					OldDescription: fc.OldDescription, NewDescription: fc.NewDescription,
 					OldCompletionCriteria: fc.OldCompletionCriteria, NewCompletionCriteria: fc.NewCompletionCriteria,

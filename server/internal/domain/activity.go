@@ -11,6 +11,9 @@ const (
 	ActivityFieldChangeApproved  = "field_change_approved"
 	ActivityFieldChangeRejected  = "field_change_rejected"
 	ActivityFieldChangeAbandoned = "field_change_abandoned"
+	ActivityCancelRequested      = "cancel_requested"
+	ActivityCancelApproved       = "cancel_approved"
+	ActivityCancelRejected       = "cancel_rejected"
 	ActivityCompletionSubmitted  = "completion_submitted"
 	ActivityCompletionApproved   = "completion_approved"
 	ActivityCompletionRejected   = "completion_rejected"
@@ -27,6 +30,9 @@ var activityKindLabels = map[string]string{
 	ActivityFieldChangeApproved:  "关键字段修改生效",
 	ActivityFieldChangeRejected:  "关键字段修改退回",
 	ActivityFieldChangeAbandoned: "放弃关键字段修改",
+	ActivityCancelRequested:      "发起任务取消申请",
+	ActivityCancelApproved:       "任务取消生效",
+	ActivityCancelRejected:       "任务取消退回",
 	ActivityCompletionSubmitted:  "提交完成申请",
 	ActivityCompletionApproved:   "完成审核通过",
 	ActivityCompletionRejected:   "完成审核退回",

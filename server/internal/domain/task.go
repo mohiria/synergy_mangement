@@ -36,7 +36,7 @@ var (
 	ErrTaskOwnerNotMember   = errors.New("任务负责人必须是项目成员")
 	ErrTaskPeriodInverted   = errors.New("任务截止时间不能早于开始时间")
 	ErrTaskNotDraft         = errors.New("只有草稿任务可以提交入池")
-	ErrKrOwnerMissing       = errors.New("所属 KR 尚未指定负责人，无法提交入池")
+	ErrKrOwnerMissing       = errors.New("所属 KR 尚未指定负责人，无人可审批")
 	ErrNotKrOwner           = errors.New("入池审批只能由所属 KR 负责人处理")
 	ErrPoolReviewNotPending = errors.New("任务不在待入池审批状态")
 )
@@ -89,10 +89,14 @@ func TaskCreationOutcome(creatorID int64, krOwnerID *int64) (string, bool) {
 	return TaskDraft, false
 }
 
-// SubmitPoolReview 校验提交入池：仅草稿可提交，且所属 KR 必须已指定负责人（否则无人可审）。
-func SubmitPoolReview(t TaskFacts) error {
+// SubmitPoolReview 校验提交入池：仅草稿可提交，所属 KR 必须已指定负责人（否则无人可审），
+// 且任务上不能有待审批的取消单（AC-57 双向互斥）。
+func SubmitPoolReview(t TaskFacts, hasPendingChange bool) error {
 	if t.Status != TaskDraft {
 		return ErrTaskNotDraft
+	}
+	if hasPendingChange {
+		return ErrCancelBlocked
 	}
 	if t.KrOwnerID == nil {
 		return ErrKrOwnerMissing
@@ -101,8 +105,8 @@ func SubmitPoolReview(t TaskFacts) error {
 }
 
 // CanSubmitPoolReview 判定当前用户能否提交该任务入池：创建人、任务负责人或可编辑项目者（§3.4）。
-func CanSubmitPoolReview(a Actor, userID int64, t TaskFacts) bool {
-	if SubmitPoolReview(t) != nil {
+func CanSubmitPoolReview(a Actor, userID int64, t TaskFacts, hasPendingChange bool) bool {
+	if SubmitPoolReview(t, hasPendingChange) != nil {
 		return false
 	}
 	return userID == t.CreatorID || userID == t.OwnerID || CanEditProject(a)

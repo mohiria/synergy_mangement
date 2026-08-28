@@ -122,6 +122,7 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 			fact := domain.WorkApprovalFact{
 				ID: fc.ID, TaskID: fc.TaskID, TaskName: name, SubmittedBy: fc.SubmittedBy,
 				KrOwnerID: krOwnerOf(fc.TaskID), KrOwnerName: krOwnerNameByTask[fc.TaskID],
+				ChangeType: fc.ChangeType,
 			}
 			if fc.SubmittedAt.Valid {
 				fact.SubmittedAt = fc.SubmittedAt.Time

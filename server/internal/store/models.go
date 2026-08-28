@@ -119,6 +119,9 @@ type FieldChangeRequest struct {
 	SubmittedAt           pgtype.Timestamptz
 	DecidedBy             pgtype.Int8
 	DecidedAt             pgtype.Timestamptz
+	ChangeType            string
+	OldStatus             pgtype.Text
+	NewStatus             pgtype.Text
 }
 
 type InputRequest struct {

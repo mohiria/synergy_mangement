@@ -32,6 +32,8 @@ type WorkApprovalFact struct {
 	SubmittedAt time.Time
 	TaskEnd     *time.Time
 	Summary     string
+	// ChangeType 变更类型，仅关键字段变更单有意义（AC-57：取消单复用同一张单）。
+	ChangeType string
 }
 
 type WorkCompletionFact struct {
@@ -212,8 +214,13 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		}
 		if fc.KrOwnerID != nil && *fc.KrOwnerID == me {
 			days, overdue := waitingDays(fc.SubmittedAt)
+			// AC-57：取消单复用同一张变更单，卡片前缀区分开，免得审批人看不出这是终止任务。
+			prefix := "[关键字段修改] "
+			if fc.ChangeType == FieldChangeTypeCancel {
+				prefix = "[取消申请] "
+			}
 			g.Approvals = append(g.Approvals, WorkItem{
-				Kind: "field_change", Title: "[关键字段修改] " + fc.TaskName,
+				Kind: "field_change", Title: prefix + fc.TaskName,
 				TaskID: tid(fc.TaskID), TaskName: fc.TaskName, RefID: tid(fc.ID),
 				Due: fc.TaskEnd, WaitingDays: days, Overdue: overdue, DrawerTab: "audit",
 			})

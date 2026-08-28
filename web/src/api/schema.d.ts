@@ -281,7 +281,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 手工流转任务状态：开始执行或取消（AC-12；完成走三道审批，不在此端点） */
+        /** 手工流转任务状态：开始执行（AC-12；完成走三道审批、取消走取消申请，均不在此端点） */
         post: operations["updateTaskStatus"];
         delete?: never;
         options?: never;
@@ -303,6 +303,26 @@ export interface paths {
         /** 更新或清除任务的可选进度百分比（AC-12；系统不产生虚构百分比） */
         put: operations["updateTaskProgress"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/tasks/{taskId}/cancellation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 发起任务取消申请（AC-57；复用关键字段变更单，进所属 KR 负责人待我审批，KR 负责人本人免审即时生效） */
+        post: operations["requestTaskCancellation"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1144,12 +1164,14 @@ export interface components {
         };
         UpdateTaskStatusRequest: {
             /**
-             * @description 手工流转目标：开始执行（未开始／等待输入 → 进行中）或取消（非终态 → 已取消，需原因）
+             * @description 手工流转目标：开始执行（未开始／等待输入 → 进行中）；取消走 /cancellation（AC-57）
              * @enum {string}
              */
-            status: "in_progress" | "cancelled";
-            /** @description 取消原因；status 为 cancelled 时必填 */
-            reason?: string;
+            status: "in_progress";
+        };
+        TaskCancellationRequest: {
+            /** @description 取消原因，必填（AC-57） */
+            reason: string;
         };
         UpdateTaskProgressRequest: {
             /** @description 省略或 null 表示清除进度，回到只展示状态 */
@@ -1265,7 +1287,7 @@ export interface components {
             canStart: boolean;
             /** @description 当前用户能否更新本任务进度（派生字段；负责人／可编辑项目者，执行中状态） */
             canUpdateProgress: boolean;
-            /** @description 当前用户能否取消本任务（派生字段；负责人／创建人／可编辑项目者，非终态） */
+            /** @description 当前用户能否发起取消申请（派生字段；任务负责人／项目管理员，非终态且任务上没有未决审批单，AC-57） */
             canCancel: boolean;
             /** @description 最近一张需要关注的变更单（待审批＝拟议值标示，或退回未处理＝退回待处理事项）；无则不返回 */
             fieldChange?: components["schemas"]["FieldChange"];
@@ -1403,10 +1425,16 @@ export interface components {
             oldValue: string;
             newValue: string;
         };
+        /**
+         * @description 变更类型（PRD §5.2.B）：关键字段修改，或复用同一张变更单的任务取消申请
+         * @enum {string}
+         */
+        FieldChangeType: "key_fields" | "cancel";
         /** @description 关键字段变更单（词汇表）；rejected 且 resolved=false 即「退回待处理事项」 */
         FieldChange: {
             /** Format: int64 */
             id: number;
+            changeType: components["schemas"]["FieldChangeType"];
             state: components["schemas"]["FieldChangeState"];
             /** @description 面向用户的显示文案（AC-04；派生字段）：待审批为“待{所属 KR 负责人姓名}审批”，免审为“免审生效”，其余为“已通过／已退回” */
             stateLabel: string;
@@ -2784,6 +2812,38 @@ export interface operations {
         };
         responses: {
             /** @description 已更新，返回任务最新状态 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Task"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    requestTaskCancellation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskCancellationRequest"];
+            };
+        };
+        responses: {
+            /** @description 已受理，返回任务最新状态（免审时已为已取消，否则仍为原状态并带待审批取消单） */
             200: {
                 headers: {
                     [name: string]: unknown;

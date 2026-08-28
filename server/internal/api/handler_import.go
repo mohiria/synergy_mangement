@@ -221,8 +221,13 @@ func (s *Server) BatchSubmitPool(w http.ResponseWriter, r *http.Request, project
 			writeForbidden(w)
 			return
 		}
-		if err := domain.SubmitPoolReview(facts); err != nil {
-			if errors.Is(err, domain.ErrTaskNotDraft) {
+		hasPending, err := s.q.HasPendingFieldChange(r.Context(), id)
+		if err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		if err := domain.SubmitPoolReview(facts, hasPending); err != nil {
+			if errors.Is(err, domain.ErrTaskNotDraft) || errors.Is(err, domain.ErrCancelBlocked) {
 				writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: task.Name + "：" + err.Error()})
 			} else {
 				writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "kr_owner_missing", Message: task.Name + "：" + err.Error()})

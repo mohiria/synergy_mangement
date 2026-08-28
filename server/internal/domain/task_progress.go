@@ -41,11 +41,9 @@ func StartTask(status string) (string, error) {
 	return TaskInProgress, nil
 }
 
-// CancelTask 取消任务：非终态可取消并保留原因（PRD §5.1「任务不再执行并保留原因」）。
-func CancelTask(status, reason string) error {
-	if status == TaskCompleted || status == TaskCancelled {
-		return ErrCannotCancel
-	}
+// ValidateCancelReason 取消原因必填（PRD §5.1「任务不再执行并保留原因」；AC-57）。
+// 能否取消由 CancelRoute 判定，本函数只管原因。
+func ValidateCancelReason(reason string) error {
 	if strings.TrimSpace(reason) == "" {
 		return ErrCancelReasonRequired
 	}
@@ -92,10 +90,8 @@ func CanStartTask(a Actor, userID int64, t TaskFacts) bool {
 	return userID == t.OwnerID || CanEditProject(a)
 }
 
-// CanCancelTask 判定能否取消（派生动作标志）：负责人／创建人／可编辑项目者，非终态。
-func CanCancelTask(a Actor, userID int64, t TaskFacts) bool {
-	if t.Status == TaskCompleted || t.Status == TaskCancelled {
-		return false
-	}
-	return userID == t.OwnerID || userID == t.CreatorID || CanEditProject(a)
+// CanCancelTask 判定能否发起取消申请（派生动作标志，AC-57）：口径与 CancelRoute 同源。
+func CanCancelTask(a Actor, userID int64, t TaskFacts, hasPendingChange bool) bool {
+	_, err := CancelRoute(a, userID, t, hasPendingChange)
+	return err == nil
 }
