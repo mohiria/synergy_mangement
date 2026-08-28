@@ -590,9 +590,24 @@ export default function CollaborationPage({
           </span>
           {selectedEdgeObj.hasCandidate && <span className="muted">　候选更新审核中</span>}
         </div>
+        {/* 互锁解释与关键路径降级提示（PRD §4.4、AC-10）：等级本身不说明问题出在哪，
+            这里把「为什么算互锁」和「为什么没有关键路径」讲清，否则用户只看到一条红虚线。 */}
         {selectedEdgeObj.interlockRisk && (
-          <div style={{ color: "var(--red)" }}>硬前置循环：互锁风险</div>
+          <div style={{ color: "var(--red)" }}>
+            硬前置循环：互锁风险
+            <div className="muted" style={{ fontSize: 12 }}>
+              两端任务互相把对方的交付当作硬前置，谁都无法先开始；循环内的边暂停参与关键路径计算，
+              需由环内各任务所属 KR 负责人协商拆环。
+            </div>
+          </div>
         )}
+        {selectedEdgeObj.edgeType === "hard_prerequisite" &&
+          !selectedEdgeObj.interlockRisk &&
+          selectedEdgeObj.onCriticalPath == null && (
+            <div className="muted">
+              关键路径未计算：相关任务缺少完整的开始／截止时间，系统只确认硬依赖链，不宣称关键路径。
+            </div>
+          )}
         <div>
           当前交付物：
           {selectedEdgeObj.currentFileName ?? "（暂无已生效内容）"}

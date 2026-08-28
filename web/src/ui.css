@@ -792,3 +792,10 @@ body {
 /* OKR 表：有编辑权限的 O／KR 行整行可点，打开右侧编辑抽屉（PRD §7.2）。 */
 .data-table tbody tr.row-clickable { cursor: pointer; }
 .data-table tbody tr.row-clickable:hover td { background: #f2f5ff; }
+
+/* KR 展开层的「关键输入／输出与直接上下游 KR」「风险依据」两块（PRD §7.1）。 */
+.kr-relation-block {
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line);
+  font-size: var(--type-aux); line-height: 1.9;
+}
+.kr-relation-block b { font-weight: 500; color: var(--muted); }
