@@ -209,6 +209,51 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toCurrentUser(user))
 }
 
+// ChangePassword 修改本人口令（S3）：改完把本人其余会话一并吊销，
+// 只保留当前会话——否则旧口令泄露后已经建立的会话仍然有效，改口令等于没改。
+func (s *Server) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	var req ChangePasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_request", Message: "请求内容无法解析"})
+		return
+	}
+	user := currentUser(r)
+	token, _ := r.Context().Value(ctxToken).(string)
+	if !domain.VerifyPassword(user.PasswordHash, req.CurrentPassword) {
+		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_password", Message: domain.ErrPasswordWrong.Error()})
+		return
+	}
+	if err := domain.ValidatePasswordChange(req.CurrentPassword, req.NewPassword); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_password", Message: err.Error()})
+		return
+	}
+	hash, err := domain.HashPassword(req.NewPassword)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	tx, err := s.db.Begin(r.Context())
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	qtx := s.q.WithTx(tx)
+	if err := qtx.UpdateUserPassword(r.Context(), store.UpdateUserPasswordParams{ID: user.ID, PasswordHash: hash}); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if _, err := qtx.DeleteOtherUserSessions(r.Context(), store.DeleteOtherUserSessionsParams{UserID: user.ID, Token: token}); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) Logout(w http.ResponseWriter, r *http.Request) {
 	token, _ := r.Context().Value(ctxToken).(string)
 	if err := s.q.DeleteSession(r.Context(), token); err != nil {

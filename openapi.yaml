@@ -74,6 +74,25 @@ paths:
         "204":
           description: 已退出
 
+  /auth/change-password:
+    post:
+      operationId: changePassword
+      tags: [auth]
+      summary: 修改本人登录口令（S3）；改完除当前会话外，本人其余会话全部失效
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "204":
+          description: 已修改，其余会话已吊销
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
   /auth/me:
     get:
       operationId: getCurrentUser
@@ -2216,6 +2235,20 @@ components:
         message:
           type: string
           description: 面向用户的错误说明
+    ChangePasswordRequest:
+      type: object
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword:
+          type: string
+          minLength: 1
+          format: password
+        newPassword:
+          type: string
+          minLength: 8
+          maxLength: 128
+          format: password
+          description: 新口令，至少 8 位且不能与当前口令相同
     LoginRequest:
       type: object
       required: [username, password]

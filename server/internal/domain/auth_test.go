@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -192,5 +193,27 @@ func TestNewSessionToken(t *testing.T) {
 	}
 	if a == b {
 		t.Fatal("两次生成的 token 不应相同")
+	}
+}
+
+// S3：改口令的校验规则——当前口令必须正确、新口令至少 8 位且不能与当前口令相同。
+func TestValidatePasswordChange(t *testing.T) {
+	cases := []struct {
+		name    string
+		current string
+		next    string
+		want    error
+	}{
+		{"合法修改", "old-pass-1", "new-pass-2", nil},
+		{"新口令过短", "old-pass-1", "short7x", ErrPasswordTooShort},
+		{"新口令与当前相同", "old-pass-1", "old-pass-1", ErrPasswordUnchanged},
+		{"新口令为空白", "old-pass-1", "        ", ErrPasswordTooShort},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ValidatePasswordChange(tc.current, tc.next); !errors.Is(got, tc.want) {
+				t.Fatalf("ValidatePasswordChange() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

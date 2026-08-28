@@ -3,6 +3,8 @@ package domain
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -107,6 +109,27 @@ func (t *LoginThrottle) Size() int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return len(t.state)
+}
+
+// MinPasswordLength 口令最小长度（S3：内网自用，只挡住明显过短的口令）。
+const MinPasswordLength = 8
+
+var (
+	ErrPasswordTooShort  = errors.New("新口令至少 8 位")
+	ErrPasswordUnchanged = errors.New("新口令不能与当前口令相同")
+	ErrPasswordWrong     = errors.New("当前口令不正确")
+)
+
+// ValidatePasswordChange 校验一次改口令（S3）：新口令至少 8 位且不能与当前口令相同。
+// 当前口令是否正确由调用方比对哈希后判定，规则本身不碰哈希。
+func ValidatePasswordChange(current, next string) error {
+	if len(strings.TrimSpace(next)) < MinPasswordLength {
+		return ErrPasswordTooShort
+	}
+	if next == current {
+		return ErrPasswordUnchanged
+	}
+	return nil
 }
 
 // HashPassword 生成 bcrypt 哈希（ADR-0001）。

@@ -5069,6 +5069,64 @@ func TestDeleteExpiredSessions(t *testing.T) {
 	}
 }
 
+// S3：改口令后本人其余会话立即失效，当前会话保留；新口令生效、旧口令失效。
+func TestChangePasswordRevokesOtherSessions(t *testing.T) {
+	q, pool := setupDB(t)
+	seedUser(t, q, "alice", "张三", "alice-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	// 两个客户端各自登录，模拟同一账号的两个会话
+	first, second := newClient(t), newClient(t)
+	for _, c := range []*http.Client{first, second} {
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login",
+			api.LoginRequest{Username: "alice", Password: "alice-pass"})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+
+	// 当前口令不对、新口令过短、新口令与旧口令相同都要被拒
+	resp := doJSON(t, first, http.MethodPost, base+"/auth/change-password",
+		api.ChangePasswordRequest{CurrentPassword: "wrong-pass", NewPassword: "brand-new-pass"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	resp = doJSON(t, first, http.MethodPost, base+"/auth/change-password",
+		api.ChangePasswordRequest{CurrentPassword: "alice-pass", NewPassword: "short7x"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	resp = doJSON(t, first, http.MethodPost, base+"/auth/change-password",
+		api.ChangePasswordRequest{CurrentPassword: "alice-pass", NewPassword: "alice-pass"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+
+	// 改口令成功
+	resp = doJSON(t, first, http.MethodPost, base+"/auth/change-password",
+		api.ChangePasswordRequest{CurrentPassword: "alice-pass", NewPassword: "brand-new-pass"})
+	wantStatus(t, resp, http.StatusNoContent)
+	resp.Body.Close()
+
+	// 当前会话仍然可用，另一个会话立即失效
+	resp = doJSON(t, first, http.MethodGet, base+"/auth/me", nil)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, second, http.MethodGet, base+"/auth/me", nil)
+	wantStatus(t, resp, http.StatusUnauthorized)
+	resp.Body.Close()
+
+	// 旧口令不再能登录，新口令可以
+	third := newClient(t)
+	resp = doJSON(t, third, http.MethodPost, base+"/auth/login",
+		api.LoginRequest{Username: "alice", Password: "alice-pass"})
+	wantStatus(t, resp, http.StatusUnauthorized)
+	resp.Body.Close()
+	resp = doJSON(t, third, http.MethodPost, base+"/auth/login",
+		api.LoginRequest{Username: "alice", Password: "brand-new-pass"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+}
+
 // AC-60 项目规则设置：三项阈值按项目生效、仅项目管理员可改；
 // 审批超时阈值改小后，「审批超时」卡点与我的工作审批件的超期标红按新值同源判定（R12）。
 func TestProjectSettingsThresholds(t *testing.T) {

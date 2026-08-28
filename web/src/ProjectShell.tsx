@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Button, Input, Popover } from "antd";
+import { Alert, Button, Input, Modal, Popover, message } from "antd";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import Icon from "./icons";
@@ -112,6 +112,8 @@ export default function ProjectShell({
 }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  // 修改口令入口挂在身份浮层里（S3）：改完后端会吊销本人其余会话。
+  const [passwordOpen, setPasswordOpen] = useState(false);
   const logout = async () => {
     await client.POST("/auth/logout");
     onLogout();
@@ -209,6 +211,9 @@ export default function ProjectShell({
                       <small>{user.username}</small>
                     </span>
                   </div>
+                  <Button block style={{ marginBottom: 8 }} onClick={() => setPasswordOpen(true)}>
+                    修改口令
+                  </Button>
                   <Button block onClick={logout}>
                     登出
                   </Button>
@@ -227,7 +232,82 @@ export default function ProjectShell({
           </div>
         </header>
         <main className={`page${pageWidth ? ` page-${pageWidth}` : ""}`}>{children}</main>
+        <ChangePasswordModal open={passwordOpen} onClose={() => setPasswordOpen(false)} />
       </section>
     </div>
+  );
+}
+
+// ChangePasswordModal 修改本人登录口令（S3）：成功后本人其余会话立即失效，当前会话保留。
+function ChangePasswordModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setCurrent("");
+      setNext("");
+      setConfirm("");
+      setError(null);
+    }
+  }, [open]);
+
+  const submit = async () => {
+    if (next !== confirm) {
+      setError("两次输入的新口令不一致");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    const res = await client.POST("/auth/change-password", {
+      body: { currentPassword: current, newPassword: next },
+    });
+    setSaving(false);
+    if (res.response.ok) {
+      message.success("口令已修改，本人其余会话已失效");
+      onClose();
+    } else {
+      setError(res.error?.message ?? "修改失败");
+    }
+  };
+
+  return (
+    <Modal
+      title="修改登录口令"
+      open={open}
+      okText="确认修改"
+      cancelText="取消"
+      confirmLoading={saving}
+      okButtonProps={{ disabled: !current || next.length < 8 || !confirm }}
+      onCancel={onClose}
+      onOk={submit}
+    >
+      {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
+      <p className="muted" style={{ marginTop: 0 }}>
+        新口令至少 8 位；修改成功后除当前浏览器外，本人其余登录会话会立即失效。
+      </p>
+      <Input.Password
+        placeholder="当前口令"
+        value={current}
+        onChange={(e) => setCurrent(e.target.value)}
+        style={{ marginBottom: 8 }}
+      />
+      <Input.Password
+        placeholder="新口令（至少 8 位）"
+        value={next}
+        maxLength={128}
+        onChange={(e) => setNext(e.target.value)}
+        style={{ marginBottom: 8 }}
+      />
+      <Input.Password
+        placeholder="再次输入新口令"
+        value={confirm}
+        maxLength={128}
+        onChange={(e) => setConfirm(e.target.value)}
+      />
+    </Modal>
   );
 }

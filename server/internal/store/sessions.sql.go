@@ -39,6 +39,24 @@ func (q *Queries) DeleteExpiredSessions(ctx context.Context) (int64, error) {
 	return result.RowsAffected(), nil
 }
 
+const deleteOtherUserSessions = `-- name: DeleteOtherUserSessions :execrows
+DELETE FROM sessions WHERE user_id = $1 AND token <> $2
+`
+
+type DeleteOtherUserSessionsParams struct {
+	UserID int64
+	Token  string
+}
+
+// 改口令后吊销本人其余会话（S3）：当前会话保留，免得改完自己被踢出去。
+func (q *Queries) DeleteOtherUserSessions(ctx context.Context, arg DeleteOtherUserSessionsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteOtherUserSessions, arg.UserID, arg.Token)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteSession = `-- name: DeleteSession :exec
 DELETE FROM sessions WHERE token = $1
 `
@@ -94,5 +112,19 @@ type UpdateSessionExpiryParams struct {
 
 func (q *Queries) UpdateSessionExpiry(ctx context.Context, arg UpdateSessionExpiryParams) error {
 	_, err := q.db.Exec(ctx, updateSessionExpiry, arg.Token, arg.ExpiresAt)
+	return err
+}
+
+const updateUserPassword = `-- name: UpdateUserPassword :exec
+UPDATE users SET password_hash = $2 WHERE id = $1
+`
+
+type UpdateUserPasswordParams struct {
+	ID           int64
+	PasswordHash string
+}
+
+func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
+	_, err := q.db.Exec(ctx, updateUserPassword, arg.ID, arg.PasswordHash)
 	return err
 }
