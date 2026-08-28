@@ -142,12 +142,20 @@ func (q *Queries) ListDiscussionsByTask(ctx context.Context, taskID int64) ([]Li
 const listNotificationsByUser = `-- name: ListNotificationsByUser :many
 SELECT id, user_id, kind, content, project_id, task_id, created_at, read_at FROM notifications
 WHERE user_id = $1
+  AND ($2::bigint = 0 OR id < $2::bigint)
 ORDER BY id DESC
-LIMIT 100
+LIMIT $3::int
 `
 
-func (q *Queries) ListNotificationsByUser(ctx context.Context, userID int64) ([]Notification, error) {
-	rows, err := q.db.Query(ctx, listNotificationsByUser, userID)
+type ListNotificationsByUserParams struct {
+	UserID   int64
+	BeforeID int64
+	RowLimit int32
+}
+
+// 分页取通知（P1）：before_id 为 0 表示取最新一页，否则取 id 更小的更早一页。
+func (q *Queries) ListNotificationsByUser(ctx context.Context, arg ListNotificationsByUserParams) ([]Notification, error) {
+	rows, err := q.db.Query(ctx, listNotificationsByUser, arg.UserID, arg.BeforeID, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}

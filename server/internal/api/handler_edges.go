@@ -183,7 +183,7 @@ func (s *Server) RemoveEdge(w http.ResponseWriter, r *http.Request, projectId in
 	s.writeTask(w, r, projectId, edge.TargetTaskID, uid, actor)
 }
 
-func (s *Server) ListEdges(w http.ResponseWriter, r *http.Request, projectId int64) {
+func (s *Server) ListEdges(w http.ResponseWriter, r *http.Request, projectId int64, params ListEdgesParams) {
 	proj, ok := s.fetchProject(w, r, projectId)
 	if !ok {
 		return
@@ -194,7 +194,30 @@ func (s *Server) ListEdges(w http.ResponseWriter, r *http.Request, projectId int
 		writeInternalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, views)
+	if params.KrId == nil {
+		writeJSON(w, http.StatusOK, views)
+		return
+	}
+	// 服务端裁剪（P1）：只留两端任一端落在该 KR 下的边——
+	// 与图谱的 KR 任务关系层同口径，跨 KR 的边照样保留，关系不会被裁断。
+	tasks, err := s.q.ListProjectTasks(r.Context(), projectId)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	inKr := map[int64]bool{}
+	for _, t := range tasks {
+		if t.KeyResultID == *params.KrId {
+			inKr[t.ID] = true
+		}
+	}
+	out := make([]DeliverableEdge, 0, len(views))
+	for _, e := range views {
+		if inKr[e.TargetTaskId] || (e.SourceTaskId != nil && inKr[*e.SourceTaskId]) {
+			out = append(out, e)
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // edgeViews 组装项目全部交付物边（就绪状态与动作标志派生）。

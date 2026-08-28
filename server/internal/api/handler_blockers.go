@@ -147,11 +147,22 @@ func (s *Server) projectRemindTargets(ctx context.Context, projectID int64) ([]d
 
 // projectBlockers 装配四类结构化事实并派生本项目当前全部卡点。
 func (s *Server) projectBlockers(ctx context.Context, projectID int64) ([]domain.Blocker, error) {
+	// P1：同一次请求内、同一次提交之后的重复派生走缓存（见 blocker_cache.go）。
+	cache := blockerCacheFrom(ctx)
+	if cache != nil {
+		if bs, ok := cache.get(projectID); ok {
+			return bs, nil
+		}
+	}
 	facts, err := s.projectBlockerFacts(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
-	return domain.DeriveBlockers(facts), nil
+	bs := domain.DeriveBlockers(facts)
+	if cache != nil {
+		cache.put(projectID, bs)
+	}
+	return bs, nil
 }
 
 // projectBlockerFacts 装配卡点与提醒目标共用的项目结构化事实。

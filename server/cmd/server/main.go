@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -50,8 +51,18 @@ func main() {
 	defer stopSweep()
 	handler := api.NewHandlerFromServer(srv, "/api/v1")
 
+	// 显式设四个超时（E3）：默认的 ListenAndServe 一个都不设，慢连接就能一直占住
+	// 连接与数据库连接。写超时要盖住报告导出这类同步长任务，故单独放宽。
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		WriteTimeout:      180 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 	log.Printf("listening on %s", addr)
-	if err := http.ListenAndServe(addr, handler); err != nil {
+	if err := server.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
 }

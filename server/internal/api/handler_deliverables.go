@@ -149,7 +149,7 @@ func (s *Server) UploadCandidate(w http.ResponseWriter, r *http.Request, project
 		return
 	}
 	if staleKey != "" {
-		_ = s.files.Remove(r.Context(), staleKey)
+		s.removeObject(r.Context(), staleKey)
 	}
 	uploadURL, err := s.files.PresignPut(r.Context(), key, presignExpiry)
 	if err != nil {
@@ -207,7 +207,7 @@ func (s *Server) CommitCandidate(w http.ResponseWriter, r *http.Request, project
 			writeInternalError(w, r, delErr)
 			return
 		}
-		_ = s.files.Remove(r.Context(), pending.ObjectKey)
+		s.removeObject(r.Context(), pending.ObjectKey)
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_file", Message: err.Error()})
 		return
 	}
@@ -242,7 +242,7 @@ func (s *Server) CommitCandidate(w http.ResponseWriter, r *http.Request, project
 		return
 	}
 	if oldKey != "" {
-		_ = s.files.Remove(r.Context(), oldKey)
+		s.removeObject(r.Context(), oldKey)
 	}
 	writeJSON(w, http.StatusOK, toDeliverableFile(f, currentUser(r).DisplayName))
 }

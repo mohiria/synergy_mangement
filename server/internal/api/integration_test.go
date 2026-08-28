@@ -17,9 +17,11 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -145,6 +147,48 @@ func setupDB(t *testing.T) (*store.Queries, *pgxpool.Pool) {
 	}
 	t.Cleanup(pool.Close)
 	return store.New(pool), pool
+}
+
+// queryCounter 数一次请求里实际发出的 SQL 条数（P1 的验收要「附前后计数」）。
+type queryCounter struct {
+	mu sync.Mutex
+	n  int
+}
+
+func (c *queryCounter) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryStartData) context.Context {
+	c.mu.Lock()
+	c.n++
+	c.mu.Unlock()
+	return ctx
+}
+
+func (c *queryCounter) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+func (c *queryCounter) reset() {
+	c.mu.Lock()
+	c.n = 0
+	c.mu.Unlock()
+}
+
+func (c *queryCounter) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.n
+}
+
+// setupCountedDB 与 setupDB 同构，但连接池带查询计数器。
+func setupCountedDB(t *testing.T) (*store.Queries, *pgxpool.Pool, *queryCounter) {
+	t.Helper()
+	q, pool := setupDB(t)
+	cfg := pool.Config().Copy()
+	counter := &queryCounter{}
+	cfg.ConnConfig.Tracer = counter
+	counted, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("counted pool: %v", err)
+	}
+	t.Cleanup(counted.Close)
+	return q, counted, counter
 }
 
 func seedUser(t *testing.T, q *store.Queries, username, display, password string) store.User {
@@ -5067,6 +5111,70 @@ func TestDeleteExpiredSessions(t *testing.T) {
 	if _, err := q.GetSession(ctx, "live"); err != nil {
 		t.Fatalf("未过期会话不应被清理: %v", err)
 	}
+}
+
+// P1：一次任务写请求此前要跑 30+ 条项目级查询——写路径装饰器的写后快照与
+// writeTask → taskList 把同一份卡点算了两遍。记忆化之后重复的那一整套派生消失。
+// 这里数的是真实发出的 SQL 条数，作为回归护栏钉住量级。
+func TestWritePathQueryBudget(t *testing.T) {
+	q, pool, counter := setupCountedDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	sp := func(v string) *string { return &v }
+
+	alice := newClient(t)
+	resp := doJSON(t, alice, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: "alice", Password: "alice-pass"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "查询预算", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &aliceUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	kr1 := decodeBody[[]api.Objective](t, resp)[0].KeyResults[0].Id
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		Items: []api.CreateTaskItem{{KeyResultId: kr1, Name: "联调验证", OwnerId: aliceUser.ID, StartDate: start, EndDate: end}},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	taskID := decodeBody[[]api.Task](t, resp)[0].Id
+
+	// 量一次典型的任务写：开始执行
+	counter.reset()
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, taskID),
+		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	got := counter.count()
+	// 实测：记忆化前 37 条，记忆化后 30 条（省掉的正是写后重复的那一整套卡点派生）。
+	// 预算钉在 32，留一点余量给后续新增的单条查询，但挡住「同一份卡点又算两遍」的回退。
+	const budget = 32
+	if got > budget {
+		t.Fatalf("单次任务写的 SQL 条数 = %d，超出预算 %d（记忆化失效？）", got, budget)
+	}
+	t.Logf("单次任务写实际 SQL 条数 = %d（记忆化前 37）", got)
+
+	// 服务端裁剪：krId 过滤与 includeCompleted
+	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s?krId=%d", tasksURL, kr1), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if n := len(decodeBody[[]api.Task](t, resp)); n != 1 {
+		t.Fatalf("按 KR 裁剪后应只剩本 KR 的任务，got %d", n)
+	}
+	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s?krId=%d", tasksURL, kr1+9999), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if n := len(decodeBody[[]api.Task](t, resp)); n != 0 {
+		t.Fatalf("不存在的 KR 不应返回任务，got %d", n)
+	}
+	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/edges?krId=%d", base, created.Id, kr1), nil)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
 }
 
 // §10.4／R8：写路径装饰器给项目内每一次成功写操作留痕——

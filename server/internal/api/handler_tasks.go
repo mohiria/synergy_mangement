@@ -16,7 +16,7 @@ import (
 
 // 任务与入池审批（AC-04、AC-26）。业务规则在 domain，handler 仅编排。
 
-func (s *Server) ListTasks(w http.ResponseWriter, r *http.Request, projectId int64) {
+func (s *Server) ListTasks(w http.ResponseWriter, r *http.Request, projectId int64, params ListTasksParams) {
 	proj, ok := s.fetchProject(w, r, projectId)
 	if !ok {
 		return
@@ -27,7 +27,22 @@ func (s *Server) ListTasks(w http.ResponseWriter, r *http.Request, projectId int
 		writeInternalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, resp)
+	// 服务端裁剪（P1）：大项目不必整表下发。派生仍按整个项目算——
+	// 卡点、就绪度与风险都依赖跨 KR 的关系，先裁剪会算错。
+	out := make([]Task, 0, len(resp))
+	for _, t := range resp {
+		if params.KrId != nil && t.KeyResultId != *params.KrId {
+			continue
+		}
+		if params.IncludeCompleted != nil && !*params.IncludeCompleted && t.Status == TaskStatusCompleted {
+			continue
+		}
+		out = append(out, t)
+		if params.Limit != nil && len(out) >= *params.Limit {
+			break
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, projectId int64) {

@@ -26,10 +26,12 @@ VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: ListNotificationsByUser :many
+-- 分页取通知（P1）：before_id 为 0 表示取最新一页，否则取 id 更小的更早一页。
 SELECT * FROM notifications
 WHERE user_id = $1
+  AND (sqlc.arg('before_id')::bigint = 0 OR id < sqlc.arg('before_id')::bigint)
 ORDER BY id DESC
-LIMIT 100;
+LIMIT sqlc.arg('row_limit')::int;
 
 -- name: MarkAllNotificationsRead :execrows
 UPDATE notifications

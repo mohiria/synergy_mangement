@@ -247,7 +247,7 @@ func (s *Server) DecideCompletion(w http.ResponseWriter, r *http.Request, projec
 		return
 	}
 	for _, key := range removeKeys {
-		_ = s.files.Remove(r.Context(), key)
+		s.removeObject(r.Context(), key)
 	}
 	if approve {
 		s.actionActivity(r.Context(), taskId, domain.ActivityCompletionApproved, uid, opinion)
@@ -331,7 +331,7 @@ func (s *Server) decideIntermediate(w http.ResponseWriter, r *http.Request, tx p
 		return
 	}
 	for _, key := range removeKeys {
-		_ = s.files.Remove(r.Context(), key)
+		s.removeObject(r.Context(), key)
 	}
 	if approve {
 		s.actionActivity(r.Context(), taskId, domain.ActivityCompletionApproved, uid, opinion)

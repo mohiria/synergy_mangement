@@ -89,7 +89,37 @@ func (s *Server) SweepStaleUploads(ctx context.Context) {
 		if key == "" {
 			continue
 		}
-		_ = s.files.Remove(ctx, key)
+		s.removeObject(ctx, key)
+	}
+}
+
+// pendingDeletionBatch 每轮补偿删除的处理条数上限，避免单次扫描占住 ticker。
+const pendingDeletionBatch = 200
+
+// SweepPendingObjectDeletions 重试此前失败的对象删除（E3）：
+// 删成功就出队，仍失败就累加次数留到下一轮——「永久删除」因此是可验证的最终状态，
+// 而不是一次尽力而为。
+func (s *Server) SweepPendingObjectDeletions(ctx context.Context) {
+	rows, err := s.q.ListPendingObjectDeletions(ctx, pendingDeletionBatch)
+	if err != nil {
+		log.Printf("object deletion sweep: list failed: %v", err)
+		return
+	}
+	for _, row := range rows {
+		if ctx.Err() != nil {
+			return
+		}
+		if err := s.files.Remove(ctx, row.ObjectKey); err != nil {
+			if qerr := s.q.EnqueueObjectDeletion(ctx, store.EnqueueObjectDeletionParams{
+				ObjectKey: row.ObjectKey, LastError: err.Error(),
+			}); qerr != nil {
+				log.Printf("object deletion sweep: requeue failed: key=%s err=%v", row.ObjectKey, qerr)
+			}
+			continue
+		}
+		if err := s.q.DeletePendingObjectDeletion(ctx, row.ObjectKey); err != nil {
+			log.Printf("object deletion sweep: dequeue failed: key=%s err=%v", row.ObjectKey, err)
+		}
 	}
 }
 
@@ -113,6 +143,7 @@ func (s *Server) StartBlockerActivityTicker(ctx context.Context, interval time.D
 		defer ticker.Stop()
 		s.SweepBlockerActivities(ctx)
 		s.SweepStaleUploads(ctx)
+		s.SweepPendingObjectDeletions(ctx)
 		s.SweepAuthState(ctx)
 		for {
 			select {
@@ -121,6 +152,7 @@ func (s *Server) StartBlockerActivityTicker(ctx context.Context, interval time.D
 			case <-ticker.C:
 				s.SweepBlockerActivities(ctx)
 				s.SweepStaleUploads(ctx)
+				s.SweepPendingObjectDeletions(ctx)
 				s.SweepAuthState(ctx)
 			}
 		}

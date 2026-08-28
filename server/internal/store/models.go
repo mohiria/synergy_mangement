@@ -187,6 +187,14 @@ type Objective struct {
 	CodeSeq     int32
 }
 
+type PendingObjectDeletion struct {
+	ObjectKey string
+	Attempts  int32
+	LastError string
+	CreatedAt pgtype.Timestamptz
+	LastTryAt pgtype.Timestamptz
+}
+
 type PoolReview struct {
 	ID          int64
 	TaskID      int64

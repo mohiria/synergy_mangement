@@ -118,8 +118,19 @@ func (s *Server) CreateDiscussion(w http.ResponseWriter, r *http.Request, projec
 	writeInternalError(w, r, err)
 }
 
-func (s *Server) ListNotifications(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.q.ListNotificationsByUser(r.Context(), currentUser(r).ID)
+func (s *Server) ListNotifications(w http.ResponseWriter, r *http.Request, params ListNotificationsParams) {
+	// 分页取（P1）：此前 SQL 硬编码 LIMIT 100，第 100 条之前的消息永久不可达且前端无从知晓。
+	limit := int32(100)
+	if params.Limit != nil {
+		limit = int32(*params.Limit)
+	}
+	beforeID := int64(0)
+	if params.BeforeId != nil {
+		beforeID = *params.BeforeId
+	}
+	rows, err := s.q.ListNotificationsByUser(r.Context(), store.ListNotificationsByUserParams{
+		UserID: currentUser(r).ID, BeforeID: beforeID, RowLimit: limit,
+	})
 	if err != nil {
 		writeInternalError(w, r, err)
 		return

@@ -550,7 +550,26 @@ paths:
     get:
       operationId: listTasks
       tags: [tasks]
-      summary: 项目全部任务（含派生动作标志与最近一次入池审批单）
+      summary: 项目任务（含派生动作标志与最近一次入池审批单）；支持服务端裁剪，避免大项目整表下发
+      parameters:
+        - name: krId
+          in: query
+          description: 只返回该 KR 下的任务（服务端裁剪，P1）
+          schema:
+            type: integer
+            format: int64
+        - name: includeCompleted
+          in: query
+          description: 是否包含已完成任务；缺省为 true（与既有「显示已完成」开关同口径，已取消一律返回）
+          schema:
+            type: boolean
+        - name: limit
+          in: query
+          description: 最多返回条数；缺省不限
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
       responses:
         "200":
           description: 任务列表
@@ -1601,7 +1620,14 @@ paths:
     get:
       operationId: listEdges
       tags: [tasks]
-      summary: 项目全部交付物边（关系数据源；图谱与列表 #18+ 复用）
+      summary: 项目交付物边（关系数据源；图谱与列表复用）；支持服务端裁剪，避免大项目整表下发
+      parameters:
+        - name: krId
+          in: query
+          description: 只返回两端任一端落在该 KR 下的边（服务端裁剪，P1）
+          schema:
+            type: integer
+            format: int64
       responses:
         "200":
           description: 交付物边列表
@@ -1754,7 +1780,21 @@ paths:
     get:
       operationId: listNotifications
       tags: [discussions]
-      summary: 当前用户的站内通知（最新在前）
+      summary: 当前用户的站内通知（最新在前）；分页取更早的消息，避免第 100 条之前永久不可达（P1）
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 100
+        - name: beforeId
+          in: query
+          description: 只返回 id 小于该值的通知（翻到更早一页）
+          schema:
+            type: integer
+            format: int64
       responses:
         "200":
           description: 通知列表

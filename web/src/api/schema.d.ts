@@ -258,7 +258,7 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** 项目全部任务（含派生动作标志与最近一次入池审批单） */
+        /** 项目任务（含派生动作标志与最近一次入池审批单）；支持服务端裁剪，避免大项目整表下发 */
         get: operations["listTasks"];
         put?: never;
         /** 表格式批量创建任务草稿（可选一并提交入池；KR 负责人本人创建免审直接进入未开始，AC-26） */
@@ -783,7 +783,7 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** 项目全部交付物边（关系数据源；图谱与列表 */
+        /** 项目交付物边（关系数据源；图谱与列表复用）；支持服务端裁剪，避免大项目整表下发 */
         get: operations["listEdges"];
         put?: never;
         post?: never;
@@ -877,7 +877,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 当前用户的站内通知（最新在前） */
+        /** 当前用户的站内通知（最新在前）；分页取更早的消息，避免第 100 条之前永久不可达（P1） */
         get: operations["listNotifications"];
         put?: never;
         post?: never;
@@ -2966,7 +2966,14 @@ export interface operations {
     };
     listTasks: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 只返回该 KR 下的任务（服务端裁剪，P1） */
+                krId?: number;
+                /** @description 是否包含已完成任务；缺省为 true（与既有「显示已完成」开关同口径，已取消一律返回） */
+                includeCompleted?: boolean;
+                /** @description 最多返回条数；缺省不限 */
+                limit?: number;
+            };
             header?: never;
             path: {
                 projectId: number;
@@ -3774,7 +3781,10 @@ export interface operations {
     };
     listEdges: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 只返回两端任一端落在该 KR 下的边（服务端裁剪，P1） */
+                krId?: number;
+            };
             header?: never;
             path: {
                 projectId: number;
@@ -3909,7 +3919,11 @@ export interface operations {
     };
     listNotifications: {
         parameters: {
-            query?: never;
+            query?: {
+                limit?: number;
+                /** @description 只返回 id 小于该值的通知（翻到更早一页） */
+                beforeId?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;

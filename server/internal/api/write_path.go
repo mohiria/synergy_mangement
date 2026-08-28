@@ -49,17 +49,22 @@ func (s *Server) writePathMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// 请求内记忆化：写前快照与写后派生看到的是不同事实，中间必须清一次缓存；
+		// 清完之后 handler 自己算的那一份就能被写后比对复用，省掉整套重复派生（P1）。
+		ctx, cache := withBlockerCache(r.Context())
+		r = r.WithContext(ctx)
 		// 写前快照：取不到就按「这次不比对」处理，不影响业务动作。
-		before := s.blockerSnapshot(r.Context(), projectID)
+		before := s.blockerSnapshot(ctx, projectID)
+		cache.reset()
 		rec := &statusRecorder{ResponseWriter: w}
 		next.ServeHTTP(rec, r)
 		if rec.status < 200 || rec.status >= 300 {
 			return
 		}
 		// 请求已经完成，用后台上下文收尾：留痕失败不回滚业务动作，也不该被客户端断连打断。
-		ctx := context.WithoutCancel(r.Context())
-		s.recordAudit(ctx, projectID, r)
-		s.recordBlockerChanges(ctx, projectID, before)
+		after := context.WithoutCancel(r.Context())
+		s.recordAudit(after, projectID, r)
+		s.recordBlockerChanges(after, projectID, before)
 	})
 }
 
@@ -211,4 +216,23 @@ func (s *Server) ListAuditLogs(w http.ResponseWriter, r *http.Request, projectId
 		out = append(out, item)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// removeObject 删除对象存储里的一个对象；失败排进补偿队列由 ticker 重试（E3）。
+// §5.3 说的「旧文件永久删除、不保留副本」要在存储层成立，就不能把删除失败静默吞掉：
+// 库里的行没了、对象还在桶里，从合规角度是真问题。
+func (s *Server) removeObject(ctx context.Context, key string) {
+	if key == "" {
+		return
+	}
+	if err := s.files.Remove(ctx, key); err == nil {
+		return
+	} else {
+		log.Printf("remove object failed, queued for retry: key=%s err=%v", key, err)
+		if qerr := s.q.EnqueueObjectDeletion(ctx, store.EnqueueObjectDeletionParams{
+			ObjectKey: key, LastError: err.Error(),
+		}); qerr != nil {
+			log.Printf("enqueue object deletion failed: key=%s err=%v", key, qerr)
+		}
+	}
 }
