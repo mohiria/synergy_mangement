@@ -601,9 +601,40 @@ body {
 /* 我的工作 work-board 行式列表（AC-55、MW-21；原型 .work-item 规格）：
    卡片正文只有任务编号与名称、所属 KR 和日期；状态列固定宽度左对齐；动作用文字按钮。
    超期／被阻塞只用左侧 3px 侧边条表达，不在正文加标签。 */
+/* 身份卡（模块 PRD §7.2）：说明「我为什么会收到这些事项」，
+   姓名与系统权限在左、当前职责在右；窄屏改上下排。 */
+.work-identity {
+  min-height: 68px; margin-bottom: 16px; padding: 12px 15px;
+  display: flex; align-items: center; justify-content: space-between; gap: 18px;
+  border: 1px solid #dde2ea; border-radius: 10px; background: #f8f9fc;
+}
+.work-identity > div { display: flex; align-items: center; gap: 10px; }
+.work-identity b { display: block; font-size: var(--type-body); font-weight: 650; }
+.work-identity > div span, .work-identity p span { display: block; color: var(--muted); font-size: var(--type-aux); }
+.work-identity p { margin: 0; max-width: 65%; color: #3d4960; font-size: var(--type-aux); line-height: 1.5; text-align: right; }
+.work-identity p span { margin-bottom: 2px; }
+.work-avatar {
+  width: 38px; height: 38px; flex: none; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  background: #e9edff; color: var(--accent); font-size: var(--type-body); font-weight: 650;
+}
+@media (max-width: 720px) {
+  .work-identity { flex-direction: column; align-items: flex-start; }
+  .work-identity p { max-width: none; text-align: left; }
+}
+
 .work-board { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow-card); }
-.work-board .ant-tabs-nav { margin: 0; padding: 0 12px; background: var(--surface-2); }
+.work-board .ant-tabs-nav { margin: 0; padding: 0 12px; background: #fafbfc; }
+.work-board .ant-tabs-tab { height: 50px; padding: 0 12px; }
 .work-board .ant-tabs-content-holder { padding: 0; }
+/* 分组计数徽标（基线 §work-board：pill 22px）：独立徽标，不拼进 tab 文本。 */
+.work-tabs .pill {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 22px; height: 22px; margin-left: 7px; padding: 0 6px;
+  border-radius: 5px; background: #edf0f5; color: #657187;
+  font-size: var(--type-aux); font-variant-numeric: tabular-nums;
+}
+.work-tabs .ant-tabs-tab-active .pill { background: var(--accent-soft); color: var(--accent); }
 .work-list { display: block; }
 .work-item {
   min-height: 82px; padding: 14px 16px; border-bottom: 1px solid var(--line);

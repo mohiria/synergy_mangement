@@ -2083,8 +2083,24 @@ export interface components {
             /** @description 卡片能否直接一键提醒当前待行动人（MW-13；派生字段）；按 refKey 指向的提醒目标寻址，不提醒本人、访客不可，冷却为同一人对同一任务每天 1 次 */
             canRemind: boolean;
         };
-        /** @description 我的工作五分组（AC-16；KR 终审归入待我审批） */
+        /** @description 我的工作身份卡（模块 PRD §3.1）：当前用户在本项目的身份与仍承担的职责 */
+        WorkIdentity: {
+            /** Format: int64 */
+            userId: number;
+            username: string;
+            displayName: string;
+            /** @description 成员角色；项目负责人可以不在成员表里，此时缺省 */
+            role?: components["schemas"]["MemberRole"];
+            /** @description 身份显示文案（派生字段；非成员的项目负责人显示为「项目负责人」） */
+            roleLabel: string;
+            /** @description 当前承担的职责标签，顺序固定（派生字段；口径与移出成员的职责占位同源） */
+            responsibilities: string[];
+            /** @description 职责一行文案；一项不担时为「当前未承担行动职责」（派生字段） */
+            responsibilitiesLabel: string;
+        };
+        /** @description 我的工作五分组（AC-16；KR 终审归入待我审批）与身份卡 */
         MyWork: {
+            identity: components["schemas"]["WorkIdentity"];
             pending: components["schemas"]["WorkItem"][];
             approvals: components["schemas"]["WorkItem"][];
             receipts: components["schemas"]["WorkItem"][];

@@ -2,6 +2,7 @@ package domain
 
 import (
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -574,4 +575,53 @@ func singleApprover(id *int64) []int64 {
 		return nil
 	}
 	return []int64{*id}
+}
+
+// 身份卡「当前职责」（模块 PRD §3.1）：回答「我凭什么会收到这些事项」。
+// 事实用的是移出成员时那份职责占位清单（MemberDuties），两处口径同源——
+// 会挡住移出的职责，正是会给人派活的职责。
+
+// workResponsibilityOrder 职责显示顺序：从项目级到事项级，横排一行读得下来。
+var workResponsibilityOrder = []string{
+	"项目负责人", "KR 负责人", "任务负责人", "中间审核人", "接收方", "输入对接人", "被邀请人",
+}
+
+// WorkResponsibilities 派生当前用户在本项目承担的职责标签（读时派生，不落库）。
+func WorkResponsibilities(d MemberDuties, isProjectOwner, hasPendingInvite bool) []string {
+	held := map[string]bool{
+		"项目负责人":  isProjectOwner,
+		"KR 负责人": len(d.KeyResults) > 0,
+		"任务负责人":  len(d.Tasks) > 0,
+		"中间审核人":  len(d.Reviewers) > 0,
+		"接收方":    len(d.Receivers) > 0,
+		"输入对接人":  len(d.InputProviders) > 0,
+		"被邀请人":   hasPendingInvite,
+	}
+	out := []string{}
+	for _, label := range workResponsibilityOrder {
+		if held[label] {
+			out = append(out, label)
+		}
+	}
+	return out
+}
+
+// WorkResponsibilitiesLabel 职责一行文案；一项不担也要说清楚，不留空白。
+func WorkResponsibilitiesLabel(list []string) string {
+	if len(list) == 0 {
+		return "当前未承担行动职责"
+	}
+	return strings.Join(list, "、")
+}
+
+// WorkIdentityRoleLabel 身份卡的身份文案：优先成员角色；项目负责人可以不在成员表里
+// （CanReadProject 认负责人身份），那时不回显空串。
+func WorkIdentityRoleLabel(role string, isProjectOwner bool) string {
+	if label, ok := memberRoleLabels[role]; ok {
+		return label
+	}
+	if isProjectOwner {
+		return "项目负责人"
+	}
+	return "非项目成员"
 }

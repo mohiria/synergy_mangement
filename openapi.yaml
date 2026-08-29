@@ -3925,11 +3925,40 @@ components:
         canRemind:
           type: boolean
           description: 卡片能否直接一键提醒当前待行动人（MW-13；派生字段）；按 refKey 指向的提醒目标寻址，不提醒本人、访客不可，冷却为同一人对同一任务每天 1 次
+    WorkIdentity:
+      type: object
+      description: 我的工作身份卡（模块 PRD §3.1）：当前用户在本项目的身份与仍承担的职责
+      required: [userId, username, displayName, roleLabel, responsibilities, responsibilitiesLabel]
+      properties:
+        userId:
+          type: integer
+          format: int64
+        username:
+          type: string
+        displayName:
+          type: string
+        role:
+          $ref: "#/components/schemas/MemberRole"
+          description: 成员角色；项目负责人可以不在成员表里，此时缺省
+        roleLabel:
+          type: string
+          description: 身份显示文案（派生字段；非成员的项目负责人显示为「项目负责人」）
+        responsibilities:
+          type: array
+          description: 当前承担的职责标签，顺序固定（派生字段；口径与移出成员的职责占位同源）
+          items:
+            type: string
+        responsibilitiesLabel:
+          type: string
+          description: 职责一行文案；一项不担时为「当前未承担行动职责」（派生字段）
+
     MyWork:
       type: object
-      description: 我的工作五分组（AC-16；KR 终审归入待我审批）
-      required: [pending, approvals, receipts, waiting, blockers]
+      description: 我的工作五分组（AC-16；KR 终审归入待我审批）与身份卡
+      required: [identity, pending, approvals, receipts, waiting, blockers]
       properties:
+        identity:
+          $ref: "#/components/schemas/WorkIdentity"
         pending:
           type: array
           items:

@@ -11,7 +11,8 @@ import (
 // 我的工作五分组（AC-16）。事实装配在此，分组规则在 domain.MyWork。
 
 func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int64) {
-	uid := currentUser(r).ID
+	me := currentUser(r)
+	uid := me.ID
 	ctx := r.Context()
 
 	proj, ok := s.fetchProject(w, r, projectId)
@@ -232,7 +233,11 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 	for _, k := range krRows {
 		krDescByID[k.ID] = k.Description
 	}
+	hasPendingInvite := false
 	for _, iv := range inviteRows {
+		if iv.InviteeID == uid && iv.State == domain.TaskInvitePending {
+			hasPendingInvite = true
+		}
 		facts.Invites = append(facts.Invites, domain.WorkInviteFact{
 			ID: iv.ID, KrDescription: krDescByID[iv.KeyResultID], InviteeID: iv.InviteeID,
 			State: iv.State, Note: iv.Note, CreatedAt: iv.CreatedAt.Time,
@@ -265,8 +270,29 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 	}
 	facts.Blockers = blockers
 
+	// 身份卡（模块 PRD §3.1）：职责事实与「移出成员前必须交接」同源，见 memberDuties。
+	duties, err := s.memberDuties(ctx, projectId, uid)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	responsibilities := domain.WorkResponsibilities(duties, proj.OwnerID == uid, hasPendingInvite)
+	identity := WorkIdentity{
+		UserId:                uid,
+		Username:              me.Username,
+		DisplayName:           me.DisplayName,
+		RoleLabel:             domain.WorkIdentityRoleLabel(proj.MyRole.String, proj.OwnerID == uid),
+		Responsibilities:      responsibilities,
+		ResponsibilitiesLabel: domain.WorkResponsibilitiesLabel(responsibilities),
+	}
+	if proj.MyRole.Valid {
+		role := MemberRole(proj.MyRole.String)
+		identity.Role = &role
+	}
+
 	groups := domain.MyWork(facts)
 	writeJSON(w, http.StatusOK, MyWork{
+		Identity:  identity,
 		Pending:   toWorkItems(groups.Pending),
 		Approvals: toWorkItems(groups.Approvals),
 		Receipts:  toWorkItems(groups.Receipts),

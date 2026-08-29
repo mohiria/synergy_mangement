@@ -239,3 +239,89 @@ func TestMyWorkBlockerStageUsesKindLabel(t *testing.T) {
 		t.Fatalf("卡点事项环节应为中文类型名，实际 %q", g.Blockers[0].Stage)
 	}
 }
+
+// 身份卡「当前职责」（模块 PRD §3.1；#69）：由成员仍占着的职责事实派生，
+// 顺序固定，从项目级到事项级；没有职责时给明确文案，不留空白。
+func TestWorkResponsibilities(t *testing.T) {
+	full := MemberDuties{
+		KeyResults:     []string{"上线自动验收"},
+		Tasks:          []string{"输出验收方案"},
+		Reviewers:      []string{"回归验证分析"},
+		Receivers:      []string{"外部口径汇总"},
+		InputProviders: []string{"现场数据包"},
+	}
+	cases := []struct {
+		name          string
+		duties        MemberDuties
+		projectOwner  bool
+		pendingInvite bool
+		want          []string
+		wantLabel     string
+	}{
+		{
+			name:      "无任何职责",
+			wantLabel: "当前未承担行动职责",
+		},
+		{
+			name:         "项目负责人排在最前",
+			duties:       MemberDuties{Tasks: []string{"输出验收方案"}},
+			projectOwner: true,
+			want:         []string{"项目负责人", "任务负责人"},
+			wantLabel:    "项目负责人、任务负责人",
+		},
+		{
+			name:          "全部职责按固定顺序排列",
+			duties:        full,
+			projectOwner:  true,
+			pendingInvite: true,
+			want: []string{
+				"项目负责人", "KR 负责人", "任务负责人",
+				"中间审核人", "接收方", "输入对接人", "被邀请人",
+			},
+			wantLabel: "项目负责人、KR 负责人、任务负责人、中间审核人、接收方、输入对接人、被邀请人",
+		},
+		{
+			name:          "只有待处理邀请也算一项职责",
+			pendingInvite: true,
+			want:          []string{"被邀请人"},
+			wantLabel:     "被邀请人",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := WorkResponsibilities(c.duties, c.projectOwner, c.pendingInvite)
+			if len(got) != len(c.want) {
+				t.Fatalf("WorkResponsibilities = %v, want %v", got, c.want)
+			}
+			for i := range got {
+				if got[i] != c.want[i] {
+					t.Fatalf("WorkResponsibilities = %v, want %v", got, c.want)
+				}
+			}
+			if label := WorkResponsibilitiesLabel(got); label != c.wantLabel {
+				t.Fatalf("WorkResponsibilitiesLabel = %q, want %q", label, c.wantLabel)
+			}
+		})
+	}
+}
+
+// 身份卡的身份文案（#69）：项目负责人可以不在成员表里（CanReadProject 允许），
+// 那时不能回显空串，退到「项目负责人」。
+func TestWorkIdentityRoleLabel(t *testing.T) {
+	cases := []struct {
+		role    string
+		isOwner bool
+		want    string
+	}{
+		{RoleAdmin, false, "项目管理员"},
+		{RoleMember, false, "普通成员"},
+		{RoleViewer, true, "只读成员"},
+		{"", true, "项目负责人"},
+		{"", false, "非项目成员"},
+	}
+	for _, c := range cases {
+		if got := WorkIdentityRoleLabel(c.role, c.isOwner); got != c.want {
+			t.Fatalf("WorkIdentityRoleLabel(%q,%v) = %q, want %q", c.role, c.isOwner, got, c.want)
+		}
+	}
+}

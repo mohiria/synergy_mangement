@@ -3077,6 +3077,11 @@ func TestMyWorkFiveGroups(t *testing.T) {
 	if len(bobWork.Approvals) != 1 || bobWork.Approvals[0].Kind != "pool_review" {
 		t.Fatalf("入池审批应在待我审批: %+v", bobWork.Approvals)
 	}
+	// 身份卡（#69）：身份文案与当前职责随事实派生；bob 是 KR 负责人。
+	if id := bobWork.Identity; id.UserId != bobUser.ID || id.DisplayName != "李四" ||
+		id.RoleLabel != "普通成员" || id.ResponsibilitiesLabel != "KR 负责人" {
+		t.Fatalf("身份卡异常: %+v", bobWork.Identity)
+	}
 	resp = doJSON(t, carol, http.MethodGet, myWorkURL, nil)
 	wantStatus(t, resp, http.StatusOK)
 	carolWork := decodeBody[api.MyWork](t, resp)
