@@ -15,6 +15,7 @@ func TestAuditActionLabel(t *testing.T) {
 		{"PUT", "/projects/{projectId}/tasks/{taskId}/progress", "更新任务进度"},
 		{"DELETE", "/projects/{projectId}/edges/{edgeId}", "解除交付物边"},
 		{"PUT", "/projects/{projectId}/tasks/{taskId}/receivers", "配置接收方"},
+		{"PUT", "/projects/{projectId}/tasks/{taskId}/participants", "配置参与人"},
 		{"POST", "/projects/{projectId}/members", "新增项目成员"},
 		{"PUT", "/projects/{projectId}/members/{userId}", "调整成员角色"},
 		{"DELETE", "/projects/{projectId}/members/{userId}", "移出项目成员"},

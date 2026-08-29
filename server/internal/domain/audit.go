@@ -36,6 +36,7 @@ var auditActions = map[string]string{
 	"POST /projects/{projectId}/tasks/{taskId}/deliverables":         "配置交付物项",
 	"PUT /projects/{projectId}/tasks/{taskId}/reviewers":             "配置中间审核人",
 	"PUT /projects/{projectId}/tasks/{taskId}/receivers":             "配置接收方",
+	"PUT /projects/{projectId}/tasks/{taskId}/participants":          "配置参与人",
 	"POST /projects/{projectId}/tasks/{taskId}/confirm-receipt":      "确认接收",
 	"POST /projects/{projectId}/tasks/{taskId}/completion-reviews":   "提交完成申请",
 	"DELETE /projects/{projectId}/edges/{edgeId}":                    "解除交付物边",

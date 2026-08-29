@@ -285,6 +285,11 @@ type TaskInvite struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
+type TaskParticipant struct {
+	TaskID int64
+	UserID int64
+}
+
 type TaskReceipt struct {
 	ID          int64
 	TaskID      int64

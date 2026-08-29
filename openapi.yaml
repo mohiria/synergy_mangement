@@ -1185,6 +1185,46 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /projects/{projectId}/tasks/{taskId}/participants:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: taskId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    put:
+      operationId: setTaskParticipants
+      tags: [tasks]
+      summary: 配置参与人（PRD §9.2 按需字段）：不属关键字段，修改直接生效并留痕，不走审批
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetParticipantsRequest"
+      responses:
+        "200":
+          description: 已保存，返回任务最新事实
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
   /projects/{projectId}/tasks/{taskId}/confirm-receipt:
     parameters:
       - name: projectId
@@ -2826,6 +2866,17 @@ components:
         canConfirmReceipt:
           type: boolean
           description: 当前用户是否有本任务的待接收项待确认（派生字段；MW-09）
+        participants:
+          type: array
+          description: >-
+            参与人名单（词汇表「参与人」；PRD §9.2 按需字段）：任务上除负责人以外的协作者，
+            只作展示与检索——不产生待办、不进审批链、不影响权限、不参与我的工作归组与排序。
+            未配置时为空数组
+          items:
+            $ref: "#/components/schemas/ReviewerInfo"
+        canManageParticipants:
+          type: boolean
+          description: 当前用户能否配置参与人（派生字段；负责人／创建人／可编辑项目者，终态不可）
     CreateTaskItem:
       type: object
       required: [keyResultId, name, ownerId, startDate, endDate]
@@ -4071,6 +4122,16 @@ components:
         userIds:
           type: array
           description: scope=members 时的接收方名单（至少一人，须为项目成员）；其余取值忽略
+          items:
+            type: integer
+            format: int64
+    SetParticipantsRequest:
+      type: object
+      required: [userIds]
+      properties:
+        userIds:
+          type: array
+          description: 参与人名单（可为空表示清空）；须为项目成员，且不含任务负责人本人
           items:
             type: integer
             format: int64

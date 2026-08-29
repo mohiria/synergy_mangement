@@ -819,6 +819,15 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 	for _, rv := range receiverRows {
 		receiversByTask[rv.TaskID] = append(receiversByTask[rv.TaskID], ReviewerInfo{UserId: rv.UserID, DisplayName: rv.DisplayName})
 	}
+	// 参与人名单（词汇表「参与人」；§9.2 按需字段，只作展示与检索）。
+	participantRows, err := s.q.ListParticipantsByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	participantsByTask := make(map[int64][]ReviewerInfo)
+	for _, pt := range participantRows {
+		participantsByTask[pt.TaskID] = append(participantsByTask[pt.TaskID], ReviewerInfo{UserId: pt.UserID, DisplayName: pt.DisplayName})
+	}
 	receiptRows, err := s.q.ListReceiptsByProject(ctx, projectID)
 	if err != nil {
 		return nil, err
@@ -929,6 +938,14 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 		item.CanManageReceivers = &canManageReceivers
 		canConfirmReceipt := pendingReceiptByTask[t.ID]
 		item.CanConfirmReceipt = &canConfirmReceipt
+		// 参与人：不进任何判定，只随任务事实一起返回；未配置时给空数组，前端不必区分 null。
+		participants := participantsByTask[t.ID]
+		if participants == nil {
+			participants = []ReviewerInfo{}
+		}
+		item.Participants = &participants
+		canManageParticipants := domain.CanManageParticipants(actor, userID, facts)
+		item.CanManageParticipants = &canManageParticipants
 		if n := openBlockersByTask[t.ID]; n > 0 {
 			item.OpenBlockerCount = &n
 		}

@@ -553,6 +553,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/tasks/{taskId}/participants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 配置参与人（PRD §9.2 按需字段）：不属关键字段，修改直接生效并留痕，不走审批 */
+        put: operations["setTaskParticipants"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/tasks/{taskId}/confirm-receipt": {
         parameters: {
             query?: never;
@@ -1466,6 +1486,10 @@ export interface components {
             canManageReceivers?: boolean;
             /** @description 当前用户是否有本任务的待接收项待确认（派生字段；MW-09） */
             canConfirmReceipt?: boolean;
+            /** @description 参与人名单（词汇表「参与人」；PRD §9.2 按需字段）：任务上除负责人以外的协作者， 只作展示与检索——不产生待办、不进审批链、不影响权限、不参与我的工作归组与排序。 未配置时为空数组 */
+            participants?: components["schemas"]["ReviewerInfo"][];
+            /** @description 当前用户能否配置参与人（派生字段；负责人／创建人／可编辑项目者，终态不可） */
+            canManageParticipants?: boolean;
         };
         CreateTaskItem: {
             /** Format: int64 */
@@ -2185,6 +2209,10 @@ export interface components {
             scope: components["schemas"]["ReceiverScope"];
             /** @description scope=members 时的接收方名单（至少一人，须为项目成员）；其余取值忽略 */
             userIds?: number[];
+        };
+        SetParticipantsRequest: {
+            /** @description 参与人名单（可为空表示清空）；须为项目成员，且不含任务负责人本人 */
+            userIds: number[];
         };
         SetReviewersRequest: {
             /** @description 中间审核人（或签组；可为空表示不配置）；须为非只读项目成员 */
@@ -3451,6 +3479,37 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    setTaskParticipants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetParticipantsRequest"];
+            };
+        };
+        responses: {
+            /** @description 已保存，返回任务最新事实 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Task"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             422: components["responses"]["ValidationError"];
         };
     };

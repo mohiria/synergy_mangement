@@ -4478,7 +4478,9 @@ func TestTimeBlockerActivitySweep(t *testing.T) {
 	}
 
 	// 时间流逝：把周期改到过去（不经过任何业务写操作，因此写触发的 diff 抓不到）
-	overdueOn := time.Now().AddDate(0, 0, -5).Format("2006-01-02")
+	// 日期一律按项目时区解读（domain.ProjectLocation；R7 的同一口径）——
+	// 用机器本地时区断言会让 UTC+8 以外的开发机误报红。
+	overdueOn := time.Now().In(domain.ProjectLocation).AddDate(0, 0, -5).Format("2006-01-02")
 	if _, err := pool.Exec(context.Background(),
 		"UPDATE tasks SET start_date = $2, end_date = $2 WHERE id = $1", task.Id, overdueOn); err != nil {
 		t.Fatalf("模拟超期失败: %v", err)
@@ -4497,7 +4499,7 @@ func TestTimeBlockerActivitySweep(t *testing.T) {
 	if got[0].Summary != "卡点出现：任务超期 · 缺 按期完成任务" {
 		t.Fatalf("补记文案异常: %q", got[0].Summary)
 	}
-	if got[0].OccurredAt.Format("2006-01-02") != overdueOn {
+	if got[0].OccurredAt.In(domain.ProjectLocation).Format("2006-01-02") != overdueOn {
 		t.Fatalf("时间戳应取真实发生时刻 %s: %v", overdueOn, got[0].OccurredAt)
 	}
 	if got[0].ActorName != nil {
@@ -5596,5 +5598,140 @@ func TestProjectSettingsThresholds(t *testing.T) {
 	wantStatus(t, resp, http.StatusConflict)
 	if e := decodeBody[api.Error](t, resp); e.Code != "remind_cooldown" {
 		t.Fatalf("code = %q, want remind_cooldown", e.Code)
+	}
+}
+
+// 参与人（#72-1 裁定；词汇表「参与人」、主 PRD §9.2）：按需字段，配置直接生效并留痕，
+// 不进审批链、不影响权限、不产生待办——名单变化不得在「我的工作」里给参与人多出任何事项。
+func TestTaskParticipants(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
+	daveUser := seedUser(t, q, "dave", "赵六", "dave-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, bob, carol, dave := newClient(t), newClient(t), newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(bob, "bob", "bob-pass")
+	login(carol, "carol", "carol-pass")
+	login(dave, "dave", "dave-pass")
+	sp := func(s string) *string { return &s }
+
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "参与人试点", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	for _, m := range []struct {
+		id   int64
+		role api.MemberRole
+	}{{bobUser.ID, api.Member}, {carolUser.ID, api.Member}, {daveUser.ID, api.Viewer}} {
+		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+			api.AddProjectMemberRequest{UserId: m.id, Role: m.role})
+		wantStatus(t, resp, http.StatusCreated)
+		resp.Body.Close()
+	}
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("协作到位"), KeyResults: &[]api.CreateKeyResultInput{{Description: "关键材料按时产出", OwnerId: &bobUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	okr := decodeBody[[]api.Objective](t, resp)
+	kr1 := okr[0].KeyResults[0].Id
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+
+	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "编写评审材料", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	taskID := decodeBody[[]api.Task](t, resp)[0].Id
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, taskID),
+		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	participantsURL := fmt.Sprintf("%s/%d/participants", tasksURL, taskID)
+	// 无关成员不可配置
+	resp = doJSON(t, dave, http.MethodPut, participantsURL, api.SetParticipantsRequest{UserIds: []int64{aliceUser.ID}})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	// 非项目成员进不了名单
+	resp = doJSON(t, carol, http.MethodPut, participantsURL, api.SetParticipantsRequest{UserIds: []int64{9999}})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	// 负责人已单列，不重复出现在参与人里
+	resp = doJSON(t, carol, http.MethodPut, participantsURL, api.SetParticipantsRequest{UserIds: []int64{carolUser.ID}})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+
+	// 负责人配置生效：不属关键字段，直接落库，任务上不留任何待审批变更单
+	resp = doJSON(t, carol, http.MethodPut, participantsURL,
+		api.SetParticipantsRequest{UserIds: []int64{daveUser.ID, aliceUser.ID, daveUser.ID}})
+	wantStatus(t, resp, http.StatusOK)
+	saved := decodeBody[api.Task](t, resp)
+	if saved.Participants == nil || len(*saved.Participants) != 2 {
+		t.Fatalf("参与人应直接生效并去重: %+v", saved.Participants)
+	}
+	if saved.FieldChange != nil {
+		t.Fatalf("参与人不属关键字段，不应产生变更单: %+v", saved.FieldChange)
+	}
+	if saved.PendingReviewCount != nil && *saved.PendingReviewCount != 0 {
+		t.Fatalf("参与人不应进审批链: %+v", saved.PendingReviewCount)
+	}
+	names := map[string]bool{}
+	for _, p := range *saved.Participants {
+		names[p.DisplayName] = true
+	}
+	if !names["赵六"] || !names["张三"] {
+		t.Fatalf("参与人名单不对: %+v", *saved.Participants)
+	}
+
+	// 参与人不获得任何权限，也不因此收到待办
+	resp = doJSON(t, dave, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	seen := decodeBody[api.TaskDetail](t, resp).Task
+	if seen.CanUpdateProgress || seen.CanProposeFieldChange || seen.CanStart {
+		t.Fatalf("参与人不应获得任何写权限: %+v", seen)
+	}
+	if seen.CanManageParticipants != nil && *seen.CanManageParticipants {
+		t.Fatalf("只读成员即使是参与人也不能改名单: %+v", seen)
+	}
+	resp = doJSON(t, dave, http.MethodGet, fmt.Sprintf("%s/projects/%d/my-work", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	work := decodeBody[api.MyWork](t, resp)
+	if n := len(work.Pending) + len(work.Approvals) + len(work.Receipts) + len(work.Waiting) + len(work.Blockers); n != 0 {
+		t.Fatalf("参与人不应收到任何事项，得到 %d 条", n)
+	}
+
+	// 清空名单同样直接生效
+	resp = doJSON(t, alice, http.MethodPut, participantsURL, api.SetParticipantsRequest{UserIds: []int64{}})
+	wantStatus(t, resp, http.StatusOK)
+	if cleared := decodeBody[api.Task](t, resp); cleared.Participants == nil || len(*cleared.Participants) != 0 {
+		t.Fatalf("清空参与人未生效: %+v", cleared.Participants)
+	}
+
+	// 留痕：§10.4 全量操作审计里能查到「配置参与人」
+	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/audit-logs", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	found := false
+	for _, l := range decodeBody[[]api.AuditLog](t, resp) {
+		if l.Action == "配置参与人" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("配置参与人应留痕")
 	}
 }
