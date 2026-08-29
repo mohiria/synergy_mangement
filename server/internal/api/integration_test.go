@@ -3358,6 +3358,29 @@ func TestArtifactsAndPackages(t *testing.T) {
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
 
+	// 下游任务以这份成果为必要输入，边上绑定交付物项：归档列表的「来源关系边」列由此而来。
+	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "按方案执行验收", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	var downstreamID int64
+	for _, task := range decodeBody[[]api.Task](t, resp) {
+		if task.Name == "按方案执行验收" {
+			downstreamID = task.Id
+		}
+	}
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, downstreamID),
+		api.CreateTaskInputRequest{
+			Name: "验收方案", Necessity: api.Required, EdgeType: api.HardPrerequisite,
+			SourceTaskIds: []int64{taskID}, DeliverableId: &dA,
+		})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp.Body.Close()
+
 	// AC-17：归档视角——O/KR/任务结构、当前内容、审批记录数；无历史入口（契约即无）
 	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/artifacts", base, created.Id), nil)
 	wantStatus(t, resp, http.StatusOK)
@@ -3365,12 +3388,40 @@ func TestArtifactsAndPackages(t *testing.T) {
 	if len(artifacts) != 1 || len(artifacts[0].Krs) != 1 || len(artifacts[0].Krs[0].Tasks) != 1 {
 		t.Fatalf("归档结构异常: %+v", artifacts)
 	}
+	// 只有带交付物的任务进归档视角，下游任务没有输出因此不成行。
 	at := artifacts[0].Krs[0].Tasks[0]
 	if at.ReviewCount != 1 || at.Deliverables[0].Current == nil {
 		t.Fatalf("归档任务节点异常: %+v", at)
 	}
 	if at.StatusLabel != "已完成" {
 		t.Fatalf("归档任务显示文案 = %q, want 已完成", at.StatusLabel)
+	}
+	// AC-17 列表层九列所需的派生字段（#68）：编号、任务负责人、接收方与 KR 组头事实。
+	ao, akr := artifacts[0], artifacts[0].Krs[0]
+	if ao.Code != "O1" || akr.Code != "KR1.1" || at.Code != "1.1.1" {
+		t.Fatalf("归档编号异常: O=%q KR=%q 任务=%q", ao.Code, akr.Code, at.Code)
+	}
+	if akr.OwnerName != "李四" || akr.DeliverableCount != 1 {
+		t.Fatalf("KR 分组头异常: 负责人=%q 交付物数=%d", akr.OwnerName, akr.DeliverableCount)
+	}
+	if at.OwnerName != "李四" || at.ReceiverLabel != "不配置" {
+		t.Fatalf("归档任务负责人／接收方异常: %q / %q", at.OwnerName, at.ReceiverLabel)
+	}
+	// 内容状态与提交／生效时间读时派生：终审通过后是「已生效」，时间取生效时刻。
+	adl := at.Deliverables[0]
+	if adl.ContentState != api.Effective || adl.ContentStateLabel != "已生效" {
+		t.Fatalf("内容状态异常: %q / %q", adl.ContentState, adl.ContentStateLabel)
+	}
+	if adl.ContentStateAt == nil || !adl.ContentStateAt.Equal(*adl.Current.EffectiveAt) {
+		t.Fatalf("提交／生效时间未取当前内容生效时刻: %+v", adl.ContentStateAt)
+	}
+	// 来源关系边可在列表层看到并跳到下游任务（#68）。
+	if len(adl.Edges) != 1 {
+		t.Fatalf("来源关系边异常: %+v", adl.Edges)
+	}
+	if e := adl.Edges[0]; e.Name != "验收方案" || e.TargetTaskId != downstreamID ||
+		e.EdgeTypeLabel != "硬前置交付" || e.TargetTaskName != "按方案执行验收" {
+		t.Fatalf("来源关系边字段异常: %+v", e)
 	}
 
 	// AC-18：普通成员不能建包；管理员勾选当前成果生成

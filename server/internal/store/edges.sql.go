@@ -126,6 +126,102 @@ func (q *Queries) GetEdgeInProject(ctx context.Context, arg GetEdgeInProjectPara
 	return i, err
 }
 
+const listEdgeRefsByDeliverableTask = `-- name: ListEdgeRefsByDeliverableTask :many
+SELECT e.id, e.deliverable_id, e.name, e.edge_type, e.target_task_id,
+    tt.name AS target_task_name
+FROM deliverable_edges e
+JOIN tasks tt ON tt.id = e.target_task_id
+JOIN deliverables d ON d.id = e.deliverable_id
+WHERE d.task_id = $1
+ORDER BY e.id
+`
+
+type ListEdgeRefsByDeliverableTaskRow struct {
+	ID             int64
+	DeliverableID  pgtype.Int8
+	Name           string
+	EdgeType       string
+	TargetTaskID   int64
+	TargetTaskName string
+}
+
+// 交付物承接的关系边（AC-17 归档视角「来源关系边」列）：按来源交付物所属任务过滤。
+func (q *Queries) ListEdgeRefsByDeliverableTask(ctx context.Context, taskID int64) ([]ListEdgeRefsByDeliverableTaskRow, error) {
+	rows, err := q.db.Query(ctx, listEdgeRefsByDeliverableTask, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEdgeRefsByDeliverableTaskRow
+	for rows.Next() {
+		var i ListEdgeRefsByDeliverableTaskRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.DeliverableID,
+			&i.Name,
+			&i.EdgeType,
+			&i.TargetTaskID,
+			&i.TargetTaskName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEdgeRefsByProject = `-- name: ListEdgeRefsByProject :many
+SELECT e.id, e.deliverable_id, e.name, e.edge_type, e.target_task_id,
+    tt.name AS target_task_name
+FROM deliverable_edges e
+JOIN tasks tt ON tt.id = e.target_task_id
+JOIN key_results k ON k.id = tt.key_result_id
+JOIN objectives o ON o.id = k.objective_id
+JOIN deliverables d ON d.id = e.deliverable_id
+WHERE o.project_id = $1
+ORDER BY e.id
+`
+
+type ListEdgeRefsByProjectRow struct {
+	ID             int64
+	DeliverableID  pgtype.Int8
+	Name           string
+	EdgeType       string
+	TargetTaskID   int64
+	TargetTaskName string
+}
+
+// 同上，项目全量：归档视角一次性取齐所有交付物的来源关系边。
+func (q *Queries) ListEdgeRefsByProject(ctx context.Context, projectID int64) ([]ListEdgeRefsByProjectRow, error) {
+	rows, err := q.db.Query(ctx, listEdgeRefsByProject, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEdgeRefsByProjectRow
+	for rows.Next() {
+		var i ListEdgeRefsByProjectRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.DeliverableID,
+			&i.Name,
+			&i.EdgeType,
+			&i.TargetTaskID,
+			&i.TargetTaskName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listEdgesByProject = `-- name: ListEdgesByProject :many
 SELECT e.id, e.target_task_id, e.source_task_id, e.source_user_id, e.deliverable_id, e.name, e.edge_type, e.necessity, e.expected_date, e.created_by, e.created_at,
     st.name AS source_task_name, st.status AS source_task_status,

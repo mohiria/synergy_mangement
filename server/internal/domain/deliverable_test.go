@@ -106,3 +106,38 @@ func TestValidateUploadSize(t *testing.T) {
 		})
 	}
 }
+
+// AC-17：归档视角列表层必须能同时看到已生效当前内容与审核中的候选，
+// 候选不能只在任务抽屉里出现（#68）。
+func TestDeriveContentState(t *testing.T) {
+	cases := []struct {
+		name         string
+		hasCurrent   bool
+		hasCandidate bool
+		want         string
+		wantLabel    string
+	}{
+		{"两者皆无为未提交", false, false, ContentStateEmpty, "未提交"},
+		{"只有候选为审核中", false, true, ContentStateReviewing, "审核中"},
+		{"只有当前内容为已生效", true, false, ContentStateEffective, "已生效"},
+		{"当前内容之上还有候选为有更新审核中", true, true, ContentStateUpdating, "已生效 · 有更新审核中"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := DeriveContentState(c.hasCurrent, c.hasCandidate)
+			if got != c.want {
+				t.Fatalf("DeriveContentState(%v,%v) = %q, want %q", c.hasCurrent, c.hasCandidate, got, c.want)
+			}
+			if label := ContentStateLabel(got); label != c.wantLabel {
+				t.Fatalf("ContentStateLabel(%q) = %q, want %q", got, label, c.wantLabel)
+			}
+		})
+	}
+}
+
+// 未知取值不回显枚举原文，与其余显示文案同口径。
+func TestContentStateLabelUnknown(t *testing.T) {
+	if label := ContentStateLabel("bogus"); label != "未提交" {
+		t.Fatalf("ContentStateLabel(bogus) = %q, want 未提交", label)
+	}
+}

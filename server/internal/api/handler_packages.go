@@ -62,9 +62,35 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 		return
 	}
 	krOwnerNameByTask := map[int64]string{}
+	taskFactsByID := map[int64]store.ListProjectTasksRow{}
 	for _, t := range taskRows {
 		krOwnerNameByTask[t.ID] = t.KrOwnerName.String
+		taskFactsByID[t.ID] = t
 	}
+	// 接收方名单（词汇表「接收方」）：归档列表按项展示成果交给谁。
+	receiverRows, err := s.q.ListReceiversByProject(ctx, projectId)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	receiverNamesByTask := map[int64][]string{}
+	for _, rv := range receiverRows {
+		receiverNamesByTask[rv.TaskID] = append(receiverNamesByTask[rv.TaskID], rv.DisplayName)
+	}
+	// 交付物承接的关系边（AC-17「来源关系边」列）。
+	edgeRefRows, err := s.q.ListEdgeRefsByProject(ctx, projectId)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	refs := make([]edgeRefRow, 0, len(edgeRefRows))
+	for _, e := range edgeRefRows {
+		refs = append(refs, edgeRefRow{
+			ID: e.ID, DeliverableID: e.DeliverableID, Name: e.Name,
+			EdgeType: e.EdgeType, TargetTaskID: e.TargetTaskID, TargetTaskName: e.TargetTaskName,
+		})
+	}
+	edgesByDeliverable := edgeRefsByDeliverable(refs)
 	reviewerRows, err := s.q.IntermediateReviewerNamesByProject(ctx, projectId)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -88,14 +114,18 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 	for _, d := range deliverables {
 		agg, ok := taskByID[d.TaskID]
 		if !ok {
+			facts := taskFactsByID[d.TaskID]
 			agg = &taskAgg{
 				task: ArtifactTask{
-					TaskId:       d.TaskID,
-					Name:         d.TaskName,
-					Status:       TaskStatus(d.TaskStatus),
-					StatusLabel:  domain.StatusLabel(d.TaskStatus, krOwnerNameByTask[d.TaskID], reviewerNamesByTask[d.TaskID]),
-					ReviewCount:  countByTask[d.TaskID],
-					Deliverables: []Deliverable{},
+					TaskId:        d.TaskID,
+					Code:          domain.TaskCode(int(facts.ObjectiveCodeSeq), int(facts.KrCodeSeq), int(facts.CodeSeq)),
+					Name:          d.TaskName,
+					OwnerName:     facts.OwnerName,
+					ReceiverLabel: receiverScopeSummary(facts.ReceiverScope, receiverNamesByTask[d.TaskID]),
+					Status:        TaskStatus(d.TaskStatus),
+					StatusLabel:   domain.StatusLabel(d.TaskStatus, krOwnerNameByTask[d.TaskID], reviewerNamesByTask[d.TaskID]),
+					ReviewCount:   countByTask[d.TaskID],
+					Deliverables:  []Deliverable{},
 				},
 				krID:  d.KeyResultID,
 				objID: d.ObjectiveID,
@@ -103,7 +133,7 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 			taskByID[d.TaskID] = agg
 			order = append(order, d.TaskID)
 		}
-		item := Deliverable{Id: d.ID, TaskId: d.TaskID, Name: d.Name}
+		item := Deliverable{Id: d.ID, TaskId: d.TaskID, Name: d.Name, Edges: edgesByDeliverable[d.ID]}
 		for _, f := range filesByDeliverable[d.ID] {
 			view := toDeliverableFile(store.DeliverableFile{
 				ID: f.ID, DeliverableID: f.DeliverableID, State: f.State, FileName: f.FileName,
@@ -117,21 +147,34 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 				item.Candidate = &view
 			}
 		}
+		fillContentState(&item)
 		agg.task.Deliverables = append(agg.task.Deliverables, item)
 	}
 	// 组装 O → KR → 任务。
 	resp := []ArtifactObjective{}
 	for _, o := range objectives {
-		out := ArtifactObjective{ObjectiveId: o.ID, Title: o.Title, Krs: []ArtifactKr{}}
+		out := ArtifactObjective{
+			ObjectiveId: o.ID,
+			Code:        domain.ObjectiveCode(int(o.CodeSeq)),
+			Title:       o.Title,
+			Krs:         []ArtifactKr{},
+		}
 		for _, k := range krs {
 			if k.ObjectiveID != o.ID {
 				continue
 			}
-			kr := ArtifactKr{KeyResultId: k.ID, Description: k.Description, Tasks: []ArtifactTask{}}
+			kr := ArtifactKr{
+				KeyResultId: k.ID,
+				Code:        domain.KeyResultCode(int(k.ObjectiveCodeSeq), int(k.CodeSeq)),
+				Description: k.Description,
+				OwnerName:   k.OwnerName.String,
+				Tasks:       []ArtifactTask{},
+			}
 			for _, taskID := range order {
 				agg := taskByID[taskID]
 				if agg.krID == k.ID {
 					kr.Tasks = append(kr.Tasks, agg.task)
+					kr.DeliverableCount += len(agg.task.Deliverables)
 				}
 			}
 			if len(kr.Tasks) > 0 {

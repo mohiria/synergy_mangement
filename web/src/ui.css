@@ -765,15 +765,33 @@ body {
 .artifact-group-head h3 { margin: 0; font-size: var(--type-title); font-weight: 650; color: #364257; }
 .artifact-group-head .muted { font-size: var(--type-aux); }
 .artifact-group .data-table-wrap { border-radius: 0 0 var(--radius) var(--radius); }
-.artifact-table { min-width: 880px; }
+.artifact-table { min-width: 1180px; }
+
+/* 勾选后浮出的固定选择条（原型 selection-bar）：深色底、贴底居中，不占页头按钮位。 */
+.selection-bar {
+  position: sticky; bottom: 14px; z-index: 9;
+  margin: 12px auto 0; max-width: 620px;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 12px; border-radius: 10px;
+  background: var(--navy); color: #fff;
+  font-size: var(--type-body);
+  box-shadow: 0 16px 36px rgba(23, 42, 73, .2);
+}
+.selection-bar b { font-weight: 650; }
+.selection-bar-actions { display: flex; gap: 6px; }
+
+.package-section { margin-top: 24px; }
 .package-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .package-item {
   padding: 13px; background: var(--surface); border: 1px solid var(--line);
   border-radius: var(--radius); box-shadow: var(--shadow-card);
 }
 .package-item-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.package-item-head h3 { margin: 0; font-size: var(--type-title); font-weight: 650; color: #364257; }
 .package-item-head .muted { font-size: var(--type-aux); }
 .package-item-body { margin-top: 6px; font-size: var(--type-body); }
+.package-item-body p { margin: 3px 0; font-size: var(--type-aux); }
+.package-item-actions { display: flex; gap: 6px; margin-top: 10px; }
 
 /* 任务动态时间线（词汇表「任务动态」）：只读留痕，倒序，系统派生事件行动人显示为「系统」。 */
 .activity-feed { margin: 0; padding: 0; list-style: none; }

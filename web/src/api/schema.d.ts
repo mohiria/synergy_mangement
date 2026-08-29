@@ -1664,6 +1664,21 @@ export interface components {
              */
             fileId: number;
         };
+        /** @description 交付物承接的关系边引用（词汇表「交付物边」）：本交付物是这条边的来源内容 */
+        DeliverableEdgeRef: {
+            /** Format: int64 */
+            edgeId: number;
+            name: string;
+            edgeType: components["schemas"]["EdgeType"];
+            /** @description 交付物边类型显示文案（派生字段） */
+            edgeTypeLabel: string;
+            /**
+             * Format: int64
+             * @description 下游（接收）任务
+             */
+            targetTaskId: number;
+            targetTaskName: string;
+        };
         /** @description 交付物内容（词汇表「交付物」；当前已生效或候选审核中） */
         DeliverableFile: {
             /** Format: int64 */
@@ -1700,6 +1715,20 @@ export interface components {
             current?: components["schemas"]["DeliverableFile"];
             /** @description 审核中的候选内容；任务概况只提示不展示内容（AC-33） */
             candidate?: components["schemas"]["DeliverableFile"];
+            /**
+             * @description 内容状态（读时由当前／候选内容存在性派生，不落库；AC-17）
+             * @enum {string}
+             */
+            contentState: "empty" | "reviewing" | "effective" | "updating";
+            /** @description 内容状态显示文案（派生字段） */
+            contentStateLabel: string;
+            /**
+             * Format: date-time
+             * @description 提交／生效时间：有当前内容取生效时刻，否则取候选提交时刻（派生字段）
+             */
+            contentStateAt?: string;
+            /** @description 本交付物承接的来源关系边（AC-17 归档视角需在列表层可见可点） */
+            edges: components["schemas"]["DeliverableEdgeRef"][];
         };
         CreateDeliverableRequest: {
             name: string;
@@ -1952,7 +1981,13 @@ export interface components {
         ArtifactTask: {
             /** Format: int64 */
             taskId: number;
+            /** @description 任务展示编号，形如 1.1.1（AC-64；派生字段） */
+            code: string;
             name: string;
+            /** @description 任务负责人姓名（派生字段） */
+            ownerName: string;
+            /** @description 接收方展示文案（词汇表「接收方」；未配置为「不配置」；派生字段） */
+            receiverLabel: string;
             status: components["schemas"]["TaskStatus"];
             /** @description 状态显示文案（AC-04；派生字段） */
             statusLabel: string;
@@ -1960,15 +1995,24 @@ export interface components {
             reviewCount: number;
             deliverables: components["schemas"]["Deliverable"][];
         };
+        /** @description 归档视角的 KR 分组（AC-17）：成果按 KR 归集，组头给出 KR 负责人与交付物数量 */
         ArtifactKr: {
             /** Format: int64 */
             keyResultId: number;
+            /** @description KR 展示编号，形如 KR1.1（AC-64；派生字段） */
+            code: string;
             description: string;
+            /** @description KR 负责人姓名（派生字段） */
+            ownerName: string;
+            /** @description 本 KR 下交付物项总数（派生字段） */
+            deliverableCount: number;
             tasks: components["schemas"]["ArtifactTask"][];
         };
         ArtifactObjective: {
             /** Format: int64 */
             objectiveId: number;
+            /** @description O 展示编号，形如 O1（AC-64；派生字段） */
+            code: string;
             title: string;
             krs: components["schemas"]["ArtifactKr"][];
         };

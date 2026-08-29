@@ -39,3 +39,25 @@ LEFT JOIN deliverables d ON d.id = e.deliverable_id
 LEFT JOIN deliverable_files cf ON cf.deliverable_id = e.deliverable_id AND cf.state = 'current'
 WHERE o.project_id = $1
 ORDER BY e.id;
+
+-- name: ListEdgeRefsByDeliverableTask :many
+-- 交付物承接的关系边（AC-17 归档视角「来源关系边」列）：按来源交付物所属任务过滤。
+SELECT e.id, e.deliverable_id, e.name, e.edge_type, e.target_task_id,
+    tt.name AS target_task_name
+FROM deliverable_edges e
+JOIN tasks tt ON tt.id = e.target_task_id
+JOIN deliverables d ON d.id = e.deliverable_id
+WHERE d.task_id = $1
+ORDER BY e.id;
+
+-- name: ListEdgeRefsByProject :many
+-- 同上，项目全量：归档视角一次性取齐所有交付物的来源关系边。
+SELECT e.id, e.deliverable_id, e.name, e.edge_type, e.target_task_id,
+    tt.name AS target_task_name
+FROM deliverable_edges e
+JOIN tasks tt ON tt.id = e.target_task_id
+JOIN key_results k ON k.id = tt.key_result_id
+JOIN objectives o ON o.id = k.objective_id
+JOIN deliverables d ON d.id = e.deliverable_id
+WHERE o.project_id = $1
+ORDER BY e.id;

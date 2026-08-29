@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"synergy/server/internal/domain"
 	"synergy/server/internal/store"
@@ -282,9 +283,21 @@ func (s *Server) deliverableList(ctx context.Context, taskID int64) ([]Deliverab
 	for _, f := range files {
 		byDeliverable[f.DeliverableID] = append(byDeliverable[f.DeliverableID], f)
 	}
+	edgeRows, err := s.q.ListEdgeRefsByDeliverableTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	refs := make([]edgeRefRow, 0, len(edgeRows))
+	for _, e := range edgeRows {
+		refs = append(refs, edgeRefRow{
+			ID: e.ID, DeliverableID: e.DeliverableID, Name: e.Name,
+			EdgeType: e.EdgeType, TargetTaskID: e.TargetTaskID, TargetTaskName: e.TargetTaskName,
+		})
+	}
+	edgesByDeliverable := edgeRefsByDeliverable(refs)
 	out := make([]Deliverable, 0, len(items))
 	for _, d := range items {
-		item := Deliverable{Id: d.ID, TaskId: d.TaskID, Name: d.Name}
+		item := Deliverable{Id: d.ID, TaskId: d.TaskID, Name: d.Name, Edges: edgesByDeliverable[d.ID]}
 		for _, f := range byDeliverable[d.ID] {
 			view := toDeliverableFile(store.DeliverableFile{
 				ID: f.ID, DeliverableID: f.DeliverableID, State: f.State,
@@ -299,9 +312,55 @@ func (s *Server) deliverableList(ctx context.Context, taskID int64) ([]Deliverab
 				item.Candidate = &view
 			}
 		}
+		fillContentState(&item)
 		out = append(out, item)
 	}
 	return out, nil
+}
+
+// fillContentState 补内容状态与提交／生效时间（AC-17）：状态在 domain 派生，
+// 时间取当前内容的生效时刻，没有当前内容时退到候选的提交时刻。
+func fillContentState(item *Deliverable) {
+	state := domain.DeriveContentState(item.Current != nil, item.Candidate != nil)
+	item.ContentState = DeliverableContentState(state)
+	item.ContentStateLabel = domain.ContentStateLabel(state)
+	switch {
+	case item.Current != nil:
+		item.ContentStateAt = item.Current.EffectiveAt
+	case item.Candidate != nil:
+		item.ContentStateAt = item.Candidate.UploadedAt
+	}
+	if item.Edges == nil {
+		item.Edges = []DeliverableEdgeRef{}
+	}
+}
+
+// edgeRefsByDeliverable 把关系边行按来源交付物归拢；两处查询行结构一致，此处只取公共字段。
+type edgeRefRow struct {
+	ID             int64
+	DeliverableID  pgtype.Int8
+	Name           string
+	EdgeType       string
+	TargetTaskID   int64
+	TargetTaskName string
+}
+
+func edgeRefsByDeliverable(rows []edgeRefRow) map[int64][]DeliverableEdgeRef {
+	out := map[int64][]DeliverableEdgeRef{}
+	for _, row := range rows {
+		if !row.DeliverableID.Valid {
+			continue
+		}
+		out[row.DeliverableID.Int64] = append(out[row.DeliverableID.Int64], DeliverableEdgeRef{
+			EdgeId:         row.ID,
+			Name:           row.Name,
+			EdgeType:       EdgeType(row.EdgeType),
+			EdgeTypeLabel:  domain.EdgeTypeLabel(row.EdgeType),
+			TargetTaskId:   row.TargetTaskID,
+			TargetTaskName: row.TargetTaskName,
+		})
+	}
+	return out
 }
 
 func toDeliverableFile(f store.DeliverableFile, uploadedByName string) DeliverableFile {
