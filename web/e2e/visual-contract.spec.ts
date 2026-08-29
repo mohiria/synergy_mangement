@@ -77,6 +77,7 @@ const PAGES: [string, string][] = [
   ["成果与归档", "/artifacts"],
   ["协作关系", "/graph"],
   ["项目报告", "/reports"],
+  ["项目设置", "/settings"],
 ];
 
 test.describe("视觉契约", () => {

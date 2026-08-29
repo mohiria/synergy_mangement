@@ -5,7 +5,7 @@
 
 | spec | 覆盖 |
 | --- | --- |
-| `visual-contract.spec.ts` | 七个业务页与任务详情抽屉的字号 ⊆ {12,14,16}、圆角 ⊆ {4px, 50%}（基线 §3、§4） |
+| `visual-contract.spec.ts` | 八个业务页与任务详情抽屉的字号 ⊆ {12,14,16}、圆角 ⊆ {4px, 50%}（基线 §3、§4） |
 | `task-detail.spec.ts` | 抽屉 Tab 顺序、任务概况五块顺序、切 Tab 不重挂载（AC-31／AC-50／AC-51／AC-56） |
 | `my-work.spec.ts` | 五分组顺序、计数 pill 徽标与徽标口径、身份卡三要素（AC-16、MW-16） |
 | `graph-completed-toggle.spec.ts` | 「显示已完成」开关在 KR 层／聚焦层／全局展开层／关系列表四处一致（AC-45、AC-46） |
