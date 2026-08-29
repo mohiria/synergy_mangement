@@ -16,5 +16,6 @@
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true
   },
-  "include": ["src"]
+  // e2e 与 playwright.config 一起纳入类型检查：冒烟脚本写错选择器类型也应在 build 时暴露。
+  "include": ["src", "e2e", "playwright.config.ts"]
 }

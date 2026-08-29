@@ -31,7 +31,7 @@
 下「完成」结论前必须真实跑过并附结果：
 
 - `server/`：`go build ./... && go vet ./... && go test ./...`（集成测试需要 postgres 与 minio 两个容器：`docker compose up -d postgres minio`；MinIO 凭据从环境变量 `MINIO_ROOT_USER`／`MINIO_ROOT_PASSWORD` 读，值取本机 `.env`）
-- `web/`：`npm run build`（含 tsc 类型检查）
+- `web/`：`npm run build`（含 tsc 类型检查）；改动前端结构或样式时再跑 `npm run test:e2e`（Playwright 冒烟，见 `web/e2e/README.md`）
 - 契约变更时：两端代码重新生成，确认编译通过
 
 验证／冒烟启动的临时进程（`go run` 起的 server、`npm run dev`、临时端口上的服务等）测试完成后必须关闭，不留后台；`docker compose` 的常驻 postgres 容器除外。
@@ -57,7 +57,7 @@
 - 开发只起数据库：`docker compose up -d postgres`（用户名与库名默认 synergy，口令取 `.env`）；跑集成测试还需 `docker compose up -d minio`（上传走两阶段提交，候选内容必须真的落进对象存储）
 - 全量启动（本地构建镜像）：`docker compose up -d --build`
 - 部署见 `docs/部署.md`（服务器上 clone + `docker compose up -d --build`，镜像本地构建，不走镜像仓库）
-- Playwright 冒烟：尚未搭建，首个业务功能落地后补
+- Playwright 冒烟：`cd web && npm run test:e2e`（需要 postgres 与 minio；会先跑 `cmd/seed` 重建演示数据，**清空全部业务数据**，只在开发库上跑）。覆盖范围与前置见 `web/e2e/README.md`
 
 生成物（api.gen.go、store/*.sql.go、schema.d.ts）提交进仓库，但不手改。
 

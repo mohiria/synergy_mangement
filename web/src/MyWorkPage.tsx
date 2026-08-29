@@ -218,7 +218,7 @@ export default function MyWorkPage({
               职责文案是 API 派生字段，前端不按事实重算。 */}
           <section className="work-identity">
             <div>
-              <span className="work-avatar" aria-hidden>
+              <span className="avatar" aria-hidden>
                 {work.identity.displayName.slice(0, 1)}
               </span>
               <div>

@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "gen:api": "openapi-typescript ../openapi.yaml -o src/api/schema.d.ts"
+    "gen:api": "openapi-typescript ../openapi.yaml -o src/api/schema.d.ts",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "antd": "^5.27.0",
@@ -17,6 +18,8 @@
     "react-router-dom": "^7.18.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.47.2",
+    "@types/node": "^26.4.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
     "@vitejs/plugin-react": "^6.1.0",
