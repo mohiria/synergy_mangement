@@ -20,8 +20,8 @@ const NAV_ITEMS: { key: string; label: string; path: string; icon: IconName }[] 
   { key: "tasks", label: "全部任务", path: "/tasks", icon: "list" },
   { key: "graph", label: "协作关系", path: "/graph", icon: "graph" },
   { key: "mywork", label: "我的工作", path: "/my-work", icon: "inbox" },
-  { key: "artifacts", label: "成果", path: "/artifacts", icon: "archive" },
-  { key: "reports", label: "报告", path: "/reports", icon: "report" },
+  { key: "artifacts", label: "成果与归档", path: "/artifacts", icon: "archive" },
+  { key: "reports", label: "项目报告", path: "/reports", icon: "report" },
 ];
 
 // 项目切换浮层（原型 .project-switch 的 project-menu 动作；原型只是单项目占位，此处落成真实切换）。

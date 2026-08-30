@@ -2057,7 +2057,7 @@ function TaskDrawer({
         </section>
       )}
       {/* 交付物（AC-50/AC-51）：交付物项与当前内容合成一块，每项一行事实——
-          当前文件或「尚无当前内容」、候选提示，有权限时给上传／新增。
+          当前文件或「尚未提交交付物」、候选提示，有权限时给上传／新增。
           无交付物项且无配置权限时整块隐藏，否则负责人失去唯一的新增／上传候选内容入口。 */}
       {(deliverables.length > 0 || task.canManageDeliverables) && (
         <section className="drawer-section" data-focus="deliverables">
@@ -2100,7 +2100,7 @@ function TaskDrawer({
                   </>
                 ) : (
                   <div className="muted" style={{ fontSize: 12 }}>
-                    尚无当前内容
+                    尚未提交交付物
                   </div>
                 )}
                 {d.candidate && (
