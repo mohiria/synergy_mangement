@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Alert, Button, Dropdown, InputNumber, Modal, Select, Spin } from "antd";
+import { Alert, Button, Dropdown, Input, InputNumber, Modal, Select, Spin } from "antd";
+import dayjs, { type Dayjs } from "dayjs";
+import DateRangeField from "./DateRangeField";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import ProjectShell from "./ProjectShell";
@@ -14,6 +16,41 @@ type ImportRecord = components["schemas"]["ImportRecord"];
 type MemberRole = components["schemas"]["MemberRole"];
 type UserSummary = components["schemas"]["UserSummary"];
 type ProjectSettings = components["schemas"]["ProjectSettings"];
+type ProjectStatus = components["schemas"]["ProjectStatus"];
+
+// 项目状态候选项：下拉要列出全部取值，此时没有对象可取派生的 statusLabel，只能在前端枚举；
+// 已有项目的状态显示一律取后端 statusLabel（与角色同口径，F1）。
+const PROJECT_STATUS_LABEL: Record<ProjectStatus, string> = {
+  not_started: "未开始",
+  in_progress: "进行中",
+  completed: "已完成",
+  archived: "已归档",
+};
+
+// 项目基础信息表单的本地草稿（§7.9 项目设置首项）。
+type BasicDraft = {
+  name: string;
+  ownerId?: number;
+  status: ProjectStatus;
+  stage: string;
+  plan?: [Dayjs | null, Dayjs | null];
+};
+
+function toBasicDraft(p: Project): BasicDraft {
+  return {
+    name: p.name,
+    ownerId: p.ownerId,
+    status: p.status,
+    stage: p.stage ?? "",
+    plan:
+      p.plannedStartDate || p.plannedEndDate
+        ? [
+            p.plannedStartDate ? dayjs(p.plannedStartDate) : null,
+            p.plannedEndDate ? dayjs(p.plannedEndDate) : null,
+          ]
+        : undefined,
+  };
+}
 
 // 候选项文案：角色下拉要列出全部取值，此时没有对应成员可取派生字段，只能在前端枚举。
 // 已有成员的角色显示一律取后端的 roleLabel（F1）。
@@ -85,9 +122,12 @@ export default function ProjectSettingsPage({
   const { projectId: projectIdParam } = useParams();
   const projectId = Number(projectIdParam);
 
-  const [tab, setTab] = useState<"members" | "permissions" | "rules" | "audit" | "imports">(
-    "members",
-  );
+  const [tab, setTab] = useState<
+    "basic" | "members" | "permissions" | "rules" | "audit" | "imports"
+  >("basic");
+  // 项目基础信息（§7.9 首项）：与项目列表页的「编辑项目」弹窗复用同一个 PUT /projects/{id}。
+  const [basic, setBasic] = useState<BasicDraft | null>(null);
+  const [savingBasic, setSavingBasic] = useState(false);
   // 导入记录（§7.9、AC-68）：每次表格导入的操作人、时间、文件名、影响计数与结果，只读。
   const [importRecords, setImportRecords] = useState<ImportRecord[]>([]);
   // 操作审计（§10.4）：由后端写路径装饰器统一记录，这里只读展示。
@@ -127,6 +167,7 @@ export default function ProjectSettingsPage({
       return;
     }
     setProject(projectRes.data);
+    setBasic(toBasicDraft(projectRes.data));
     setMembers(membersRes.data ?? []);
     setUsers(usersRes.data ?? []);
     setSettings(settingsRes.data ?? null);
@@ -192,6 +233,30 @@ export default function ProjectSettingsPage({
     }
   };
 
+  const saveBasic = async () => {
+    if (!basic || !basic.ownerId) return;
+    setSavingBasic(true);
+    setError(null);
+    const res = await client.PUT("/projects/{projectId}", {
+      params: { path: { projectId } },
+      body: {
+        name: basic.name.trim(),
+        ownerId: basic.ownerId,
+        status: basic.status,
+        stage: basic.stage.trim() || undefined,
+        plannedStartDate: basic.plan?.[0]?.format("YYYY-MM-DD"),
+        plannedEndDate: basic.plan?.[1]?.format("YYYY-MM-DD"),
+      },
+    });
+    setSavingBasic(false);
+    if (res.data) {
+      setProject(res.data);
+      setBasic(toBasicDraft(res.data));
+    } else {
+      setError(res.error?.message ?? "保存项目基础信息失败");
+    }
+  };
+
   const saveRules = async () => {
     if (!rules) return;
     setSavingRules(true);
@@ -212,6 +277,19 @@ export default function ProjectSettingsPage({
       setError(res.error?.message ?? "保存规则设置失败");
     }
   };
+
+  // 与规则设置同一套「改动过才可保存」口径。
+  const basicDirty =
+    !!basic &&
+    !!project &&
+    JSON.stringify({
+      ...basic,
+      plan: basic.plan?.map((d) => d?.format("YYYY-MM-DD") ?? null),
+    }) !==
+      JSON.stringify({
+        ...toBasicDraft(project),
+        plan: toBasicDraft(project).plan?.map((d) => d?.format("YYYY-MM-DD") ?? null),
+      });
 
   const rulesDirty =
     !!rules &&
@@ -256,6 +334,13 @@ export default function ProjectSettingsPage({
             <aside className="settings-nav">
               <button
                 type="button"
+                className={tab === "basic" ? "active" : ""}
+                onClick={() => setTab("basic")}
+              >
+                项目基础信息
+              </button>
+              <button
+                type="button"
                 className={tab === "members" ? "active" : ""}
                 onClick={() => setTab("members")}
               >
@@ -295,7 +380,103 @@ export default function ProjectSettingsPage({
               )}
             </aside>
             <section className="settings-panel">
-              {tab === "imports" ? (
+              {tab === "basic" ? (
+                <>
+                  <div className="settings-panel-head">
+                    <div>
+                      <h2>项目基础信息</h2>
+                      <span className="muted">
+                        项目名称、负责人、状态、阶段与计划周期（§7.9 项目设置首项）。
+                        {project && !project.canEdit && "（你没有配置权限，以下为只读展示）"}
+                      </span>
+                    </div>
+                    {project?.canEdit && (
+                      <Button
+                        size="small"
+                        type="primary"
+                        loading={savingBasic}
+                        disabled={!basicDirty}
+                        onClick={saveBasic}
+                      >
+                        保存
+                      </Button>
+                    )}
+                  </div>
+                  {basic && (
+                    <div className="settings-panel-body">
+                      <div className="property">
+                        <label>项目名称</label>
+                        <Input
+                          maxLength={100}
+                          value={basic.name}
+                          disabled={!project?.canEdit}
+                          onChange={(e) => setBasic({ ...basic, name: e.target.value })}
+                          style={{ width: 280, flex: "none" }}
+                          aria-label="项目名称"
+                        />
+                      </div>
+                      <div className="property">
+                        <label>项目负责人</label>
+                        <Select
+                          value={basic.ownerId}
+                          disabled={!project?.canEdit}
+                          showSearch
+                          optionFilterProp="label"
+                          options={users.map((u) => ({
+                            value: u.id,
+                            label: `${u.displayName}（${u.username}）`,
+                          }))}
+                          onChange={(v) => setBasic({ ...basic, ownerId: v })}
+                          style={{ width: 280, flex: "none" }}
+                          aria-label="项目负责人"
+                        />
+                      </div>
+                      <div className="property">
+                        <label>
+                          项目状态
+                          <span className="muted" style={{ display: "block" }}>
+                            与自由文本的「项目阶段」正交，由成员手工设置
+                          </span>
+                        </label>
+                        <Select
+                          value={basic.status}
+                          disabled={!project?.canEdit}
+                          options={(Object.keys(PROJECT_STATUS_LABEL) as ProjectStatus[]).map(
+                            (v) => ({ value: v, label: PROJECT_STATUS_LABEL[v] }),
+                          )}
+                          onChange={(v) => setBasic({ ...basic, status: v })}
+                          style={{ width: 160, flex: "none" }}
+                          aria-label="项目状态"
+                        />
+                      </div>
+                      <div className="property">
+                        <label>项目阶段</label>
+                        <Input
+                          maxLength={50}
+                          placeholder="业务里程碑，如：联合联调阶段（选填）"
+                          value={basic.stage}
+                          disabled={!project?.canEdit}
+                          onChange={(e) => setBasic({ ...basic, stage: e.target.value })}
+                          style={{ width: 280, flex: "none" }}
+                          aria-label="项目阶段"
+                        />
+                      </div>
+                      <div className="property">
+                        <label>计划周期</label>
+                        <div style={{ width: 280, flex: "none" }}>
+                          <DateRangeField
+                            allowEmpty
+                            value={basic.plan}
+                            disabled={!project?.canEdit}
+                            onChange={(v) => setBasic({ ...basic, plan: v ?? undefined })}
+                            aria-label="计划周期"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : tab === "imports" ? (
                 <>
                   <div className="settings-panel-head">
                     <div>

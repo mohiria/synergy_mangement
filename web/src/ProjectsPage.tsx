@@ -51,7 +51,6 @@ export default function ProjectsPage({
   const [users, setUsers] = useState<UserSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
-  const [editing, setEditing] = useState<Project | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -83,40 +82,16 @@ export default function ProjectsPage({
   };
 
   const openCreate = () => {
-    setEditing(null);
     setSaveError(null);
     form.resetFields();
-    setModalOpen(true);
-  };
-
-  const openEdit = (p: Project) => {
-    setEditing(p);
-    setSaveError(null);
-    form.setFieldsValue({
-      name: p.name,
-      ownerId: p.ownerId,
-      status: p.status,
-      stage: p.stage ?? undefined,
-      plan:
-        p.plannedStartDate || p.plannedEndDate
-          ? [
-              p.plannedStartDate ? dayjs(p.plannedStartDate) : null,
-              p.plannedEndDate ? dayjs(p.plannedEndDate) : null,
-            ]
-          : undefined,
-    });
     setModalOpen(true);
   };
 
   const save = async (values: ProjectFormValues) => {
     setSaving(true);
     setSaveError(null);
-    const result = editing
-      ? await client.PUT("/projects/{projectId}", {
-          params: { path: { projectId: editing.id } },
-          body: { ...toBody(values), status: values.status ?? editing.status },
-        })
-      : await client.POST("/projects", { body: toBody(values) });
+    // 这里只建新项目；已有项目的基础信息在项目设置页改（§7.9、#85）。
+    const result = await client.POST("/projects", { body: toBody(values) });
     setSaving(false);
     if (result.data) {
       setModalOpen(false);
@@ -305,10 +280,12 @@ export default function ProjectsPage({
                       <Link className="link-btn" to={`/projects/${p.id}`}>
                         进入
                       </Link>
+                      {/* 项目基础信息的编辑入口收口到项目设置页（§7.9 首项、#85）：
+                          两处口径一致，这里只留跳转，不再另开一份表单。 */}
                       {p.canEdit && (
-                        <button className="link-btn" type="button" onClick={() => openEdit(p)}>
-                          编辑
-                        </button>
+                        <Link className="link-btn" to={`/projects/${p.id}/settings`}>
+                          设置
+                        </Link>
                       )}
                     </span>
                   ),
@@ -319,7 +296,7 @@ export default function ProjectsPage({
         </main>
       </section>
       <Modal
-        title={editing ? "编辑项目" : "新建项目"}
+        title="新建项目"
         open={modalOpen}
         confirmLoading={saving}
         onOk={() => form.submit()}
@@ -327,7 +304,7 @@ export default function ProjectsPage({
           setModalOpen(false);
           setSaveError(null);
         }}
-        okText={editing ? "保存" : "创建"}
+        okText="创建"
         cancelText="取消"
         destroyOnHidden
       >
@@ -344,16 +321,6 @@ export default function ProjectsPage({
               placeholder="选择负责人"
             />
           </Form.Item>
-          {editing && (
-            <Form.Item name="status" label="状态" rules={[{ required: true, message: "请选择状态" }]}>
-              <Select
-                options={(Object.keys(STATUS_LABEL) as ProjectStatus[]).map((s) => ({
-                  value: s,
-                  label: STATUS_LABEL[s],
-                }))}
-              />
-            </Form.Item>
-          )}
           <Form.Item name="stage" label="阶段（选填）">
             <Input maxLength={50} placeholder="业务里程碑，如：联合联调阶段" />
           </Form.Item>
