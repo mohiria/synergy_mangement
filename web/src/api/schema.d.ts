@@ -2224,7 +2224,7 @@ export interface components {
             title: string;
             krs: components["schemas"]["ArtifactKr"][];
         };
-        /** @description 成果包目录项（AC-18）：二选一引用——交付物项（下载时解析为当前内容，不复制旧文件）， 或任务文件（过程文件／重要外部材料，§7.7「可以按需选择」） */
+        /** @description 成果包目录项（AC-18）：二选一引用——交付物项（下载时解析为当前内容，不复制旧文件）， 或任务文件（过程文件／重要外部材料，§7.7「可以按需选择」）。 任务文件被删除后条目不消失：按快照保留名称与所属任务，sourceDeleted 为真、包内不放该文件 */
         PackageItem: {
             /**
              * Format: int64
@@ -2249,6 +2249,8 @@ export interface components {
             fileName?: string;
             /** Format: date-time */
             effectiveAt?: string;
+            /** @description 来源文件已删除（§7.7、AC-18；派生字段）。仅任务文件目录项可能为真—— 条目按快照保留在目录与来源清单里，但下载的包内不含该文件。交付物目录项恒为假 */
+            sourceDeleted: boolean;
         };
         /** @description 轻量成果包（词汇表「成果包」） */
         ArtifactPackage: {

@@ -88,17 +88,21 @@ func (q *Queries) CreatePackageItem(ctx context.Context, arg CreatePackageItemPa
 }
 
 const createPackageTaskFileItem = `-- name: CreatePackageTaskFileItem :exec
-INSERT INTO artifact_package_items (package_id, task_file_id)
-VALUES ($1, $2)
+INSERT INTO artifact_package_items (package_id, task_file_id, source_task_name, source_file_name, source_file_kind)
+SELECT $1, tf.id, t.name, tf.file_name, tf.kind
+FROM task_files tf
+JOIN tasks t ON t.id = tf.task_id
+WHERE tf.id = $2
 ON CONFLICT DO NOTHING
 `
 
 type CreatePackageTaskFileItemParams struct {
 	PackageID  int64
-	TaskFileID pgtype.Int8
+	TaskFileID int64
 }
 
 // 成果包也可以收过程文件与重要外部材料（§7.7「可以按需选择」）。
+// 入包时快照来源事实（所属任务名、文件名、类型）：来源文件被删除后条目仍在，靠快照还原「谁的什么文件」。
 func (q *Queries) CreatePackageTaskFileItem(ctx context.Context, arg CreatePackageTaskFileItemParams) error {
 	_, err := q.db.Exec(ctx, createPackageTaskFileItem, arg.PackageID, arg.TaskFileID)
 	return err
@@ -244,7 +248,8 @@ SELECT i.id, i.deliverable_id, i.task_file_id,
     cf.id AS current_file_id, cf.file_name AS current_file_name,
     cf.object_key AS current_object_key, cf.effective_at,
     tf.kind AS file_kind, tf.file_name AS task_file_name,
-    tf.object_key AS task_file_object_key, ft.name AS task_file_task_name
+    tf.object_key AS task_file_object_key, ft.name AS task_file_task_name,
+    i.source_task_name, i.source_file_name, i.source_file_kind
 FROM artifact_package_items i
 LEFT JOIN deliverables d ON d.id = i.deliverable_id
 LEFT JOIN tasks dt ON dt.id = d.task_id
@@ -269,10 +274,14 @@ type ListPackageItemsRow struct {
 	TaskFileName        pgtype.Text
 	TaskFileObjectKey   pgtype.Text
 	TaskFileTaskName    pgtype.Text
+	SourceTaskName      string
+	SourceFileName      string
+	SourceFileKind      string
 }
 
 // 目录项二选一：交付物项解析当前内容（被覆盖后自动指向新内容；退回删除后无当前内容则 file 为空），
 // 或任务文件直接给出自身（过程文件与外部材料没有版本概念）。两侧字段都可能为空，由调用方合并。
+// 任务文件被删除后 task_file_id 置空、tf 侧全空，条目靠 source_* 快照存活（F-10、§7.7）。
 func (q *Queries) ListPackageItems(ctx context.Context, packageID int64) ([]ListPackageItemsRow, error) {
 	rows, err := q.db.Query(ctx, listPackageItems, packageID)
 	if err != nil {
@@ -296,6 +305,9 @@ func (q *Queries) ListPackageItems(ctx context.Context, packageID int64) ([]List
 			&i.TaskFileName,
 			&i.TaskFileObjectKey,
 			&i.TaskFileTaskName,
+			&i.SourceTaskName,
+			&i.SourceFileName,
+			&i.SourceFileKind,
 		); err != nil {
 			return nil, err
 		}

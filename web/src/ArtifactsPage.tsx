@@ -613,8 +613,8 @@ export default function ArtifactsPage({
             onCancel={() => setSourceOf(null)}
           >
             <div className="package-item-body">
-              {sourceOf?.items.map((it) => (
-                <div key={`${it.deliverableId ?? "f"}-${it.taskFileId ?? ""}`}>
+              {sourceOf?.items.map((it, i) => (
+                <div key={`${it.deliverableId ?? "f"}-${it.taskFileId ?? i}`}>
                   <span className="muted">{it.taskName} / </span>
                   {it.deliverableName}
                   {it.fileKind && (
@@ -622,7 +622,9 @@ export default function ArtifactsPage({
                       （{it.fileKind === "external" ? "重要外部材料" : "过程文件"}）
                     </span>
                   )}
-                  {it.fileName ? (
+                  {it.sourceDeleted ? (
+                    <span className="muted">（来源文件已删除）</span>
+                  ) : it.fileName ? (
                     <span className="muted"> → {it.fileName}</span>
                   ) : (
                     <span className="muted">（暂无已生效当前内容）</span>

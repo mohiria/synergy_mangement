@@ -66,3 +66,92 @@ func InArchiveWindow(at, from, to *time.Time) bool {
 func CanCreatePackage(a Actor) bool {
 	return CanEditProject(a)
 }
+
+// PackageItemFacts 成果包目录项的库内事实（§7.7、AC-18）。
+// 两种引用各占一侧：交付物项走 Deliverable*／Current*，任务文件项走 TaskFile*；
+// Source* 是入包时快照下来的来源事实，来源文件被删除后 TaskFile* 全空、只剩快照。
+type PackageItemFacts struct {
+	DeliverableID       *int64
+	DeliverableName     string
+	DeliverableTaskName string
+	CurrentFileID       *int64
+	CurrentFileName     string
+	CurrentObjectKey    string
+	EffectiveAt         *time.Time
+
+	TaskFileID        *int64
+	TaskFileName      string
+	TaskFileKind      string
+	TaskFileObjectKey string
+	TaskFileTaskName  string
+
+	SourceTaskName string
+	SourceFileName string
+	SourceFileKind string
+}
+
+// PackageItem 归一后的成果包目录项：列表、来源清单与打包三处用同一份口径。
+type PackageItem struct {
+	DeliverableID *int64
+	TaskFileID    *int64
+	FileKind      string // 任务文件才有
+	Name          string // 交付物项名称，或任务文件的文件名
+	TaskName      string
+	FileID        *int64 // 无可下载内容时为空
+	FileName      string
+	ObjectKey     string
+	EffectiveAt   *time.Time
+	SourceDeleted bool // 任务文件来源已被删除（F-10）
+}
+
+// ResolvePackageItem 归一目录项（§7.7、AC-18）。
+// 交付物项解析到当前内容——被覆盖后自动指向新内容，没有已生效内容时不带文件；
+// 任务文件项内容就是自己；来源文件被删除后条目不消失：按快照保留名称与所属任务、标为来源已删除，
+// 不带内容（因此也不进包内），这是「保留逻辑清单和来源事实」的落点。
+func ResolvePackageItem(f PackageItemFacts) PackageItem {
+	if f.DeliverableID != nil {
+		return PackageItem{
+			DeliverableID: f.DeliverableID,
+			Name:          f.DeliverableName,
+			TaskName:      f.DeliverableTaskName,
+			FileID:        f.CurrentFileID,
+			FileName:      f.CurrentFileName,
+			ObjectKey:     f.CurrentObjectKey,
+			EffectiveAt:   f.EffectiveAt,
+		}
+	}
+	if f.TaskFileID == nil {
+		return PackageItem{
+			FileKind:      f.SourceFileKind,
+			Name:          f.SourceFileName,
+			TaskName:      f.SourceTaskName,
+			SourceDeleted: true,
+		}
+	}
+	return PackageItem{
+		TaskFileID: f.TaskFileID,
+		FileKind:   f.TaskFileKind,
+		Name:       f.TaskFileName,
+		TaskName:   f.TaskFileTaskName,
+		FileID:     f.TaskFileID,
+		FileName:   f.TaskFileName,
+		ObjectKey:  f.TaskFileObjectKey,
+	}
+}
+
+// PackageManifestLine 来源清单一行（AC-18）：来源事实在前，解析结果在后。
+// 三种去向各有措辞——有内容给文件名，交付物没有已生效内容给「暂无」，来源被删给「已删除」。
+func PackageManifestLine(it PackageItem) string {
+	line := it.TaskName + " / " + it.Name
+	if it.FileKind != "" {
+		line += "（" + TaskFileKindLabel(it.FileKind) + "）"
+	}
+	switch {
+	case it.SourceDeleted:
+		return line + " →（来源文件已删除）"
+	case it.FileID == nil:
+		return line + " →（暂无已生效当前内容）"
+	default:
+		return line + " → " + it.FileName
+	}
+}

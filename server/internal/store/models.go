@@ -17,10 +17,13 @@ type ArtifactPackage struct {
 }
 
 type ArtifactPackageItem struct {
-	PackageID     int64
-	DeliverableID pgtype.Int8
-	ID            int64
-	TaskFileID    pgtype.Int8
+	PackageID      int64
+	DeliverableID  pgtype.Int8
+	ID             int64
+	TaskFileID     pgtype.Int8
+	SourceTaskName string
+	SourceFileName string
+	SourceFileKind string
 }
 
 type AuditLog struct {

@@ -380,7 +380,7 @@ func (s *Server) CreatePackage(w http.ResponseWriter, r *http.Request, projectId
 	}
 	for _, id := range taskFileIDs {
 		if err := qtx.CreatePackageTaskFileItem(r.Context(), store.CreatePackageTaskFileItemParams{
-			PackageID: pkg.ID, TaskFileID: pgtype.Int8{Int64: id, Valid: true},
+			PackageID: pkg.ID, TaskFileID: id,
 		}); err != nil {
 			writeInternalError(w, r, err)
 			return
@@ -423,9 +423,9 @@ func (s *Server) DownloadPackage(w http.ResponseWriter, r *http.Request, project
 		writeInternalError(w, r, err)
 		return
 	}
-	resolved := make([]resolvedPackageItem, 0, len(items))
+	resolved := make([]domain.PackageItem, 0, len(items))
 	for _, row := range items {
-		resolved = append(resolved, resolvePackageItem(row))
+		resolved = append(resolved, domain.ResolvePackageItem(packageItemFacts(row)))
 	}
 	// 先把全部对象取出来：响应头一旦写出就无法再改状态码，缺文件时不能伪装成功（E1）。
 	objects := make(map[int64]io.ReadCloser, len(resolved))
@@ -462,16 +462,7 @@ func (s *Server) DownloadPackage(w http.ResponseWriter, r *http.Request, project
 	// 来源清单随包附带。
 	manifest, _ := zw.Create("成果包目录.txt")
 	for _, item := range resolved {
-		line := fmt.Sprintf("%s / %s", item.TaskName, item.Name)
-		if item.FileKind != "" {
-			line += fmt.Sprintf("（%s）", domain.TaskFileKindLabel(item.FileKind))
-		}
-		if item.FileID != nil {
-			line += " → " + item.FileName
-		} else {
-			line += " →（暂无已生效当前内容）"
-		}
-		_, _ = io.WriteString(manifest, line+"\n")
+		_, _ = io.WriteString(manifest, domain.PackageManifestLine(item)+"\n")
 	}
 	for _, item := range resolved {
 		if item.FileID == nil {
@@ -492,52 +483,38 @@ func (s *Server) DownloadPackage(w http.ResponseWriter, r *http.Request, project
 	}
 }
 
-// resolvedPackageItem 成果包目录项归一后的事实：交付物项解析到当前内容，任务文件直接就是自己。
-// 两种引用在下载与列表两处都要用同一份口径，归一在一处做（§7.7、AC-18）。
-type resolvedPackageItem struct {
-	DeliverableID *int64
-	TaskFileID    *int64
-	FileKind      string // 任务文件才有：process／external
-	Name          string // 交付物项名称，或任务文件的文件名
-	TaskName      string
-	FileID        *int64 // 无已生效当前内容时为空
-	FileName      string
-	ObjectKey     string
-	EffectiveAt   *time.Time
-}
-
-func resolvePackageItem(row store.ListPackageItemsRow) resolvedPackageItem {
-	out := resolvedPackageItem{
-		Name:     row.DeliverableName.String,
-		TaskName: row.DeliverableTaskName.String,
+// packageItemFacts 把库行搬成 domain 的入参：归一口径（含来源已删除的判定）只写在 domain 里。
+func packageItemFacts(row store.ListPackageItemsRow) domain.PackageItemFacts {
+	f := domain.PackageItemFacts{
+		DeliverableName:     row.DeliverableName.String,
+		DeliverableTaskName: row.DeliverableTaskName.String,
+		CurrentFileName:     row.CurrentFileName.String,
+		CurrentObjectKey:    row.CurrentObjectKey.String,
+		TaskFileName:        row.TaskFileName.String,
+		TaskFileKind:        row.FileKind.String,
+		TaskFileObjectKey:   row.TaskFileObjectKey.String,
+		TaskFileTaskName:    row.TaskFileTaskName.String,
+		SourceTaskName:      row.SourceTaskName,
+		SourceFileName:      row.SourceFileName,
+		SourceFileKind:      row.SourceFileKind,
 	}
 	if row.DeliverableID.Valid {
 		id := row.DeliverableID.Int64
-		out.DeliverableID = &id
-		if row.CurrentFileID.Valid {
-			fid := row.CurrentFileID.Int64
-			out.FileID = &fid
-			out.FileName = row.CurrentFileName.String
-			out.ObjectKey = row.CurrentObjectKey.String
-		}
-		if row.EffectiveAt.Valid {
-			t := row.EffectiveAt.Time
-			out.EffectiveAt = &t
-		}
-		return out
+		f.DeliverableID = &id
 	}
-	// 任务文件：过程文件与外部材料没有版本概念，条目本身就是内容。
+	if row.CurrentFileID.Valid {
+		id := row.CurrentFileID.Int64
+		f.CurrentFileID = &id
+	}
+	if row.EffectiveAt.Valid {
+		t := row.EffectiveAt.Time
+		f.EffectiveAt = &t
+	}
 	if row.TaskFileID.Valid {
 		id := row.TaskFileID.Int64
-		out.TaskFileID = &id
-		out.FileID = &id
-		out.FileKind = row.FileKind.String
-		out.Name = row.TaskFileName.String
-		out.FileName = row.TaskFileName.String
-		out.ObjectKey = row.TaskFileObjectKey.String
-		out.TaskName = row.TaskFileTaskName.String
+		f.TaskFileID = &id
 	}
-	return out
+	return f
 }
 
 func (s *Server) packageList(ctx context.Context, projectID int64) ([]ArtifactPackage, error) {
@@ -553,12 +530,13 @@ func (s *Server) packageList(ctx context.Context, projectID int64) ([]ArtifactPa
 		}
 		views := make([]PackageItem, 0, len(items))
 		for _, row := range items {
-			item := resolvePackageItem(row)
+			item := domain.ResolvePackageItem(packageItemFacts(row))
 			v := PackageItem{
 				DeliverableId:   item.DeliverableID,
 				TaskFileId:      item.TaskFileID,
 				DeliverableName: item.Name,
 				TaskName:        item.TaskName,
+				SourceDeleted:   item.SourceDeleted,
 			}
 			if item.FileKind != "" {
 				kind := TaskFileKind(item.FileKind)

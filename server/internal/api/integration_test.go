@@ -5,6 +5,7 @@ package api_test
 // 无 Postgres 环境用 go test -short ./... 跳过。
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"database/sql"
@@ -3652,6 +3653,67 @@ func TestArtifactsAndPackages(t *testing.T) {
 	wantStatus(t, resp, http.StatusOK)
 	if left := *decodeBody[api.TaskDetail](t, resp).Files; len(left) != 1 || left[0].Id != processFile.Id {
 		t.Fatalf("删除后应只剩过程文件: %+v", left)
+	}
+
+	// F-10（#88）：删掉被成果包引用的过程文件——目录与来源清单保留条目并标注「来源文件已删除」，
+	// 包内不再放该文件。此前条目随来源级联消失，包从 2 项变 1 项、清单少一行（§7.7、AC-18）。
+	resp = doJSON(t, bob, http.MethodDelete, fmt.Sprintf("%s/%d/files/%d", tasksURL, downstreamID, processFile.Id), nil)
+	wantStatus(t, resp, http.StatusNoContent)
+	resp.Body.Close()
+
+	resp = doJSON(t, alice, http.MethodGet, pkgURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	pkgs := decodeBody[[]api.ArtifactPackage](t, resp)
+	if len(pkgs) != 1 || len(pkgs[0].Items) != 2 {
+		t.Fatalf("来源删除后目录项数应不变: %+v", pkgs)
+	}
+	gone := pkgs[0].Items[1]
+	if !gone.SourceDeleted {
+		t.Fatalf("来源已删除的条目应标注 sourceDeleted: %+v", gone)
+	}
+	if gone.DeliverableName != "联调记录.md" || gone.TaskFileId != nil || gone.FileId != nil {
+		t.Fatalf("来源已删除的条目应按快照保留名称、不再带内容: %+v", gone)
+	}
+	if gone.FileKind == nil || *gone.FileKind != api.Process {
+		t.Fatalf("来源已删除的条目应保留文件类型: %+v", gone)
+	}
+	if pkgs[0].Items[0].SourceDeleted {
+		t.Fatalf("交付物目录项的 sourceDeleted 恒为假: %+v", pkgs[0].Items[0])
+	}
+
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d/download", pkgURL, pkg.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	if err != nil {
+		t.Fatalf("解包失败: %v", err)
+	}
+	var manifest string
+	names := make([]string, 0, len(zr.File))
+	for _, f := range zr.File {
+		names = append(names, f.Name)
+		if f.Name != "成果包目录.txt" {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatalf("读清单失败: %v", err)
+		}
+		raw, _ := io.ReadAll(rc)
+		rc.Close()
+		manifest = string(raw)
+	}
+	for _, n := range names {
+		if strings.Contains(n, "联调记录.md") {
+			t.Fatalf("来源已删除的文件不应进包: %v", names)
+		}
+	}
+	if !strings.Contains(manifest, "联调记录.md（过程文件） →（来源文件已删除）") {
+		t.Fatalf("来源清单未保留条目并标注已删除:\n%s", manifest)
+	}
+	if strings.Count(manifest, "\n") != 2 {
+		t.Fatalf("来源清单应仍有两行:\n%s", manifest)
 	}
 }
 
