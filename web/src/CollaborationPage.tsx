@@ -183,6 +183,7 @@ export default function CollaborationPage({
   );
   const krById = useMemo(() => new Map(krList.map((k) => [k.id, k])), [krList]);
   const taskById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
+  const edgeById = useMemo(() => new Map(edges.map((e) => [e.id, e])), [edges]);
 
   const enter = (next: Mode) => {
     setViewStack((v) => [...v, { oFilter, krFilter, personFilter, zoom }]);
@@ -302,7 +303,12 @@ export default function CollaborationPage({
         height += 56;
       }
     });
-    return { kr, inKr, neighbors, relevantEdges, positions, memberNodes, height: height + 40 };
+    // 「显示已完成」关闭时被藏起来的本 KR 任务数：全完成的 KR 点进来是空画布，
+    // 空态要能指出「打开开关就看得到」（Q-10、AC-45）。
+    const hiddenCompleted = tasks.filter(
+      (t) => t.keyResultId === mode.krId && t.status === "completed" && !isTaskVisible(t),
+    ).length;
+    return { kr, inKr, neighbors, relevantEdges, positions, memberNodes, hiddenCompleted, height: height + 40 };
   }, [mode, krById, tasks, edges, isTaskVisible]);
 
   // —— 任务聚焦层布局（AC-27、CR-05）：逐层展开 ——
@@ -669,6 +675,26 @@ export default function CollaborationPage({
     const off = dragOffsets.get(taskId);
     if (!off || mode.kind !== "full") return pos;
     return { ...pos, x: pos.x + off.dx, y: pos.y + off.dy };
+  };
+
+  // AC-43：选中一条关系或一个任务时，与之无关的成员节点同样淡化——
+  // 否则「高亮关系两端」会被旁边照常亮着的成员节点削弱（Q-07）。
+  // 成员节点挂在「指定成员输入」的边上，按它所在边与该边的接收任务判定。
+  const memberDimmed = (edgeIds: number[]) => {
+    const targets = edgeIds
+      .map((id) => edgeById.get(id)?.targetTaskId)
+      .filter((id): id is number => id != null);
+    const dimByFilter =
+      hasFilter &&
+      !targets.some((id) => {
+        const t = taskById.get(id);
+        return t ? taskMatchesFilter(t) : false;
+      });
+    const dimBySelect =
+      selectedEdge != null
+        ? !edgeIds.includes(selectedEdge)
+        : neighborIds != null && !targets.some((id) => neighborIds.has(id));
+    return dimByFilter || dimBySelect;
   };
 
   const taskNode = (t: Task, posBase: NodePos) => {
@@ -1210,6 +1236,13 @@ export default function CollaborationPage({
                   <div className="graph-note">
                     {krLayer.kr.code} 任务关系层：硬前置加粗、关键路径最粗、互锁红色虚线、反馈紫色虚线
                   </div>
+                  {krLayer.inKr.length === 0 && krLayer.neighbors.length === 0 && (
+                    <div className="graph-empty">
+                      {krLayer.hiddenCompleted > 0
+                        ? "该 KR 下的任务已全部完成，打开「显示已完成」查看"
+                        : "该 KR 下还没有任务"}
+                    </div>
+                  )}
                   <svg className="graph-svg" width="700" height={krLayer.height}>
                     {arrowDefs}
                     {krLayer.relevantEdges.map((e) => {
@@ -1255,7 +1288,9 @@ export default function CollaborationPage({
                     return pos ? (
                       <div
                         key={`m-${m.edgeId}`}
-                        className={`gnode gnode-member ${selectedEdge === m.edgeId ? "selected" : ""}`}
+                        className={`gnode gnode-member ${selectedEdge === m.edgeId ? "selected" : ""} ${
+                          memberDimmed([m.edgeId]) ? "dimmed" : ""
+                        }`}
                         style={{ left: pos.x, top: pos.y, width: pos.w, height: pos.h }}
                         onClick={() => {
                           setSelectedTask(null);
@@ -1340,7 +1375,9 @@ export default function CollaborationPage({
                     return pos ? (
                       <div
                         key={`fx-m-${m.edgeId}`}
-                        className={`gnode gnode-member ${selectedEdge === m.edgeId ? "selected" : ""}`}
+                        className={`gnode gnode-member ${selectedEdge === m.edgeId ? "selected" : ""} ${
+                          memberDimmed([m.edgeId]) ? "dimmed" : ""
+                        }`}
                         style={{ left: pos.x, top: pos.y, width: pos.w, height: pos.h }}
                         onClick={() => {
                           setSelectedTask(null);
@@ -1470,7 +1507,7 @@ export default function CollaborationPage({
                         key={`fm-${m.providerId}`}
                         className={`gnode gnode-member ${
                           selectedEdge != null && m.edgeIds.includes(selectedEdge) ? "selected" : ""
-                        }`}
+                        } ${memberDimmed(m.edgeIds) ? "dimmed" : ""}`}
                         style={{ left: m.pos.x, top: m.pos.y, width: m.pos.w, height: m.pos.h }}
                         onClick={() => {
                           setSelectedTask(null);

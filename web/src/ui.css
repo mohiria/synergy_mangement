@@ -427,6 +427,14 @@ body {
   padding: 7px 10px; font-size: var(--type-aux); color: var(--muted);
 }
 
+/* KR 任务关系层的空态（Q-10、AC-45）：任务全完成且「显示已完成」关闭时，
+   画布上零节点零边，给一句话说明去哪打开，而不是留一块空白让人以为没加载出来。 */
+.graph-empty {
+  position: absolute; top: 40px; left: 50%; transform: translateX(-50%); z-index: 3;
+  background: #fff; border: 1px dashed var(--line); border-radius: var(--radius);
+  padding: 14px 18px; font-size: var(--type-body); color: var(--muted); white-space: nowrap;
+}
+
 /* 任务详情抽屉（原型 task-drawer）。 */
 .drawer-sub { font-size: var(--type-aux); color: var(--muted); font-weight: 400; margin-top: 3px; }
 .drawer-sub-sep { margin: 0 6px; }
