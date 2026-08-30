@@ -19,7 +19,7 @@
 
 ## Coding 流程（每个功能循环）
 
-1. 从 PRD 验收场景（AC-01～AC-65，主 PRD §12）出发，先改 `openapi.yaml`；
+1. 从 PRD 验收场景（AC-01～AC-68，主 PRD §12）出发，先改 `openapi.yaml`；
 2. 重新生成代码：后端 oapi-codegen，前端 openapi-typescript + openapi-fetch；生成物不手改；
 3. 业务规则（状态派生、卡点、互锁、审批链、权限、进度、五组归类）只写 `server/internal/domain/`；严格 red-green-refactor：先写覆盖对应 AC 的表驱动单测；若编译不过，先补最小桩（空实现／零值返回）让测试可编译运行，再真实跑一次、确认**断言级失败**（红 = 断言失败，编译失败只是中间过程、不算红），然后实现转绿，最后按需重构；从未见断言红的测试不算数，「先写后跑直接全绿」不满足本条；
 4. API handler 保持薄层；集成测试用 httptest + Docker 真 Postgres；
