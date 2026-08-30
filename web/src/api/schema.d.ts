@@ -134,7 +134,7 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** 项目规则设置（审批超时阈值、临期阈值、一键提醒冷却） */
+        /** 项目规则设置（审批超时阈值、临期阈值、一键提醒频次上限） */
         get: operations["getProjectSettings"];
         /** 修改项目规则设置（仅项目管理员） */
         put: operations["updateProjectSettings"];
@@ -2302,7 +2302,7 @@ export interface components {
             drawerTab?: string;
             /** @description 卡片文字按钮文案（我的工作 PRD §5.3、AC-55；派生字段）：本人要办的三组为「去处理」，等待他人与卡点为「查看详情」 */
             actionLabel: string;
-            /** @description 卡片能否直接一键提醒当前待行动人（MW-13；派生字段）；按 refKey 指向的提醒目标寻址，不提醒本人、访客不可，冷却为同一人对同一任务每天 1 次 */
+            /** @description 卡片能否直接一键提醒当前待行动人（MW-13；派生字段）；按 refKey 指向的提醒目标寻址，不提醒本人、访客不可，提醒频次上限为同一人对同一任务每天 1 次 */
             canRemind: boolean;
         };
         /** @description 我的工作身份卡（模块 PRD §3.1）：当前用户在本项目的身份与仍承担的职责 */
@@ -2612,7 +2612,7 @@ export interface components {
             approvalTimeoutDays: number;
             /** @description 临期阈值（天），指距任务截止日期的天数，用于风险等级的预警判定。默认 3 */
             dueSoonDays: number;
-            /** @description 一键提醒冷却，同一发起人对同一被提醒人的同一任务每天可提醒次数。默认 1 */
+            /** @description 一键提醒频次上限，同一发起人对同一被提醒人的同一任务每天可提醒次数。默认 1 */
             remindDailyLimit: number;
             /** @description 当前用户能否修改本项目的规则设置（派生字段，仅项目管理员为 true） */
             canEdit: boolean;

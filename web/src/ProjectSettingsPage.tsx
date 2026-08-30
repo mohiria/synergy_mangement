@@ -101,7 +101,7 @@ const RULE_FIELDS: {
   },
   {
     key: "remindDailyLimit",
-    label: "一键提醒冷却",
+    label: "一键提醒频次上限",
     suffix: "次／天",
     min: 1,
     max: 20,
