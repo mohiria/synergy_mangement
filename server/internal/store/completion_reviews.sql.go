@@ -231,6 +231,21 @@ func (q *Queries) GetCurrentFile(ctx context.Context, deliverableID int64) (Deli
 	return i, err
 }
 
+const hasPendingCompletionReview = `-- name: HasPendingCompletionReview :one
+SELECT EXISTS (
+    SELECT 1 FROM completion_reviews
+    WHERE task_id = $1 AND state IN ('intermediate_review', 'pending_final')
+) AS pending
+`
+
+// 任务上是否存在未决完成申请（内容状态派生用：候选是不是真的在审，AC-67）。
+func (q *Queries) HasPendingCompletionReview(ctx context.Context, taskID int64) (bool, error) {
+	row := q.db.QueryRow(ctx, hasPendingCompletionReview, taskID)
+	var pending bool
+	err := row.Scan(&pending)
+	return pending, err
+}
+
 const intermediateReviewerNamesByProject = `-- name: IntermediateReviewerNamesByProject :many
 SELECT cr.task_id, u.display_name
 FROM completion_reviews cr
@@ -545,6 +560,36 @@ func (q *Queries) ListTaskReviewers(ctx context.Context, taskID int64) ([]ListTa
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const pendingCompletionReviewTasksByProject = `-- name: PendingCompletionReviewTasksByProject :many
+SELECT DISTINCT cr.task_id
+FROM completion_reviews cr
+JOIN tasks t ON t.id = cr.task_id
+JOIN key_results k ON k.id = t.key_result_id
+JOIN objectives o ON o.id = k.objective_id
+WHERE o.project_id = $1 AND cr.state IN ('intermediate_review', 'pending_final')
+`
+
+// 项目内有未决完成申请的任务（归档列表按项派生内容状态用，AC-67）。
+func (q *Queries) PendingCompletionReviewTasksByProject(ctx context.Context, projectID int64) ([]int64, error) {
+	rows, err := q.db.Query(ctx, pendingCompletionReviewTasksByProject, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int64
+	for rows.Next() {
+		var task_id int64
+		if err := rows.Scan(&task_id); err != nil {
+			return nil, err
+		}
+		items = append(items, task_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

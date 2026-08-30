@@ -55,6 +55,16 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 	for _, c := range reviewCounts {
 		countByTask[c.TaskID] = int(c.N)
 	}
+	// AC-67：内容状态里的「在审」以存在未决完成申请为准，不以候选文件在不在为准。
+	pendingReviewTasks, err := s.q.PendingCompletionReviewTasksByProject(ctx, projectId)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	pendingReviewByTask := make(map[int64]bool, len(pendingReviewTasks))
+	for _, id := range pendingReviewTasks {
+		pendingReviewByTask[id] = true
+	}
 	// 任务状态显示文案（AC-04）：入池与终审取所属 KR 负责人，或签取审核组姓名。
 	taskRows, err := s.q.ListProjectTasks(ctx, projectId)
 	if err != nil {
@@ -147,7 +157,7 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 				item.Candidate = &view
 			}
 		}
-		fillContentState(&item)
+		fillContentState(&item, pendingReviewByTask[d.TaskID])
 		agg.task.Deliverables = append(agg.task.Deliverables, item)
 	}
 	// 组装 O → KR → 任务。

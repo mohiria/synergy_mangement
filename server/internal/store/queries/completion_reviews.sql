@@ -96,6 +96,22 @@ JOIN objectives o ON o.id = k.objective_id
 WHERE o.project_id = $1 AND cr.state = 'intermediate_review'
 ORDER BY cr.task_id, crr.user_id;
 
+-- name: HasPendingCompletionReview :one
+-- 任务上是否存在未决完成申请（内容状态派生用：候选是不是真的在审，AC-67）。
+SELECT EXISTS (
+    SELECT 1 FROM completion_reviews
+    WHERE task_id = $1 AND state IN ('intermediate_review', 'pending_final')
+) AS pending;
+
+-- name: PendingCompletionReviewTasksByProject :many
+-- 项目内有未决完成申请的任务（归档列表按项派生内容状态用，AC-67）。
+SELECT DISTINCT cr.task_id
+FROM completion_reviews cr
+JOIN tasks t ON t.id = cr.task_id
+JOIN key_results k ON k.id = t.key_result_id
+JOIN objectives o ON o.id = k.objective_id
+WHERE o.project_id = $1 AND cr.state IN ('intermediate_review', 'pending_final');
+
 -- name: CandidateCountsByProject :many
 -- 每个任务的候选内容数量（canSubmitCompletion 派生用）。
 SELECT d.task_id, COUNT(*) AS n

@@ -1741,13 +1741,13 @@ export interface components {
             taskId: number;
             name: string;
             current?: components["schemas"]["DeliverableFile"];
-            /** @description 审核中的候选内容；任务概况只提示不展示内容（AC-33） */
+            /** @description 候选内容；是否在审看 contentState——已上传未提交时是「待提交审核」。 任务概况只提示不展示内容（AC-33） */
             candidate?: components["schemas"]["DeliverableFile"];
             /**
-             * @description 内容状态（读时由当前／候选内容存在性派生，不落库；AC-17）
+             * @description 内容状态（读时派生，不落库；AC-17、AC-67）：empty＝未提交；pending_submit＝候选内容已上传但 尚未随完成申请提交（「待提交审核」，不进入任何审批）；reviewing＝候选已随完成申请提交在审； effective＝当前内容已生效；updating＝已生效之上还有在审的候选。 「在审」以存在未决完成申请为准，不以候选文件在不在为准
              * @enum {string}
              */
-            contentState: "empty" | "reviewing" | "effective" | "updating";
+            contentState: "empty" | "pending_submit" | "reviewing" | "effective" | "updating";
             /** @description 内容状态显示文案（派生字段） */
             contentStateLabel: string;
             /**

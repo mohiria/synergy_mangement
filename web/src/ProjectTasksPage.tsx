@@ -1730,7 +1730,12 @@ function TaskDrawer({
   );
   const deliverables = detail?.deliverables ?? [];
   const currentFiles = deliverables.filter((d) => d.current);
-  const candidateCount = deliverables.filter((d) => d.candidate).length;
+  // AC-67：「审核中」以内容状态为准——候选传了没提交时后端给 pending_submit，
+  // 顶部不得声称在审（此前按 d.candidate 计数，把待提交也算成了审核中）。
+  const reviewingCount = deliverables.filter(
+    (d) => d.contentState === "reviewing" || d.contentState === "updating",
+  ).length;
+  const pendingSubmitCount = deliverables.filter((d) => d.contentState === "pending_submit").length;
   // 未决审批计数由后端派生（F1），前端不再把三类审批单各自过滤后相加。
   const pendingReviews = detail?.task.pendingReviewCount ?? 0;
 
@@ -1992,9 +1997,14 @@ function TaskDrawer({
               {deliverables.length} 项 · 已有当前内容 {currentFiles.length} 项
             </span>
           </h3>
-          {candidateCount > 0 && (
+          {reviewingCount > 0 && (
             <div className="notice warning" style={{ marginBottom: 10 }}>
-              有 {candidateCount} 项更新审核中，候选内容请在“审核”Tab 查看；当前内容继续有效。
+              有 {reviewingCount} 项更新审核中，候选内容请在“审核”Tab 查看；当前内容继续有效。
+            </div>
+          )}
+          {pendingSubmitCount > 0 && (
+            <div className="notice" style={{ marginBottom: 10 }}>
+              有 {pendingSubmitCount} 项候选内容待提交审核：尚未随完成申请提交，不占用任何人的待办。
             </div>
           )}
           {task.resultUpdate === "open" && (
@@ -2025,7 +2035,7 @@ function TaskDrawer({
                 )}
                 {d.candidate && (
                   <div className="muted" style={{ fontSize: 12 }}>
-                    候选「{d.candidate.fileName}」审核准备中
+                    候选「{d.candidate.fileName}」{d.contentStateLabel}
                   </div>
                 )}
               </div>

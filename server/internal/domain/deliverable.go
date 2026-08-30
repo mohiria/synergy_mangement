@@ -92,23 +92,29 @@ func ValidateCandidateFileName(name string) error {
 // 成果归档列表按项列出，一行要同时说清「现在能用的是什么」和「有没有在审的更新」，
 // 因此已生效之上叠加候选单列一档，不与纯审核中混为一谈。
 const (
-	ContentStateEmpty     = "empty"
-	ContentStateReviewing = "reviewing"
-	ContentStateEffective = "effective"
-	ContentStateUpdating  = "updating"
+	ContentStateEmpty         = "empty"
+	ContentStatePendingSubmit = "pending_submit"
+	ContentStateReviewing     = "reviewing"
+	ContentStateEffective     = "effective"
+	ContentStateUpdating      = "updating"
 )
 
 // contentStateLabels 内容状态的中文显示文案。
 var contentStateLabels = map[string]string{
-	ContentStateEmpty:     "未提交",
-	ContentStateReviewing: "审核中",
-	ContentStateEffective: "已生效",
-	ContentStateUpdating:  "已生效 · 有更新审核中",
+	ContentStateEmpty:         "未提交",
+	ContentStatePendingSubmit: "待提交审核",
+	ContentStateReviewing:     "审核中",
+	ContentStateEffective:     "已生效",
+	ContentStateUpdating:      "已生效 · 有更新审核中",
 }
 
-// DeriveContentState 由当前内容与候选内容的存在性派生内容状态（读时派生，不落库）。
-func DeriveContentState(hasCurrent, hasCandidate bool) string {
+// DeriveContentState 由当前内容、候选内容与未决完成申请派生内容状态（读时派生，不落库）。
+// 「在审」以存在未决完成申请为准，不以候选文件在不在为准（§5.3、AC-33、AC-67）：
+// 传了没提交只是「待提交审核」，说成审核中会让 KR 负责人去找根本不存在的待办审批件。
+func DeriveContentState(hasCurrent, hasCandidate, hasPendingReview bool) string {
 	switch {
+	case hasCandidate && !hasPendingReview:
+		return ContentStatePendingSubmit
 	case hasCurrent && hasCandidate:
 		return ContentStateUpdating
 	case hasCurrent:

@@ -107,26 +107,32 @@ func TestValidateUploadSize(t *testing.T) {
 	}
 }
 
-// AC-17：归档视角列表层必须能同时看到已生效当前内容与审核中的候选，
-// 候选不能只在任务抽屉里出现（#68）。
+// AC-17／AC-33／AC-67：归档视角列表层必须能同时看到已生效当前内容与审核中的候选（#68），
+// 且「在审」以存在未决完成申请为准，不以候选文件在不在为准（#81）——
+// 传了没提交是「待提交审核」，不得声称在审。
 func TestDeriveContentState(t *testing.T) {
 	cases := []struct {
-		name         string
-		hasCurrent   bool
-		hasCandidate bool
-		want         string
-		wantLabel    string
+		name             string
+		hasCurrent       bool
+		hasCandidate     bool
+		hasPendingReview bool
+		want             string
+		wantLabel        string
 	}{
-		{"两者皆无为未提交", false, false, ContentStateEmpty, "未提交"},
-		{"只有候选为审核中", false, true, ContentStateReviewing, "审核中"},
-		{"只有当前内容为已生效", true, false, ContentStateEffective, "已生效"},
-		{"当前内容之上还有候选为有更新审核中", true, true, ContentStateUpdating, "已生效 · 有更新审核中"},
+		{"三者皆无为未提交", false, false, false, ContentStateEmpty, "未提交"},
+		{"候选已传未提交为待提交审核", false, true, false, ContentStatePendingSubmit, "待提交审核"},
+		{"候选随完成申请提交后才是审核中", false, true, true, ContentStateReviewing, "审核中"},
+		{"只有当前内容为已生效", true, false, false, ContentStateEffective, "已生效"},
+		{"已生效之上候选未提交仍为待提交审核", true, true, false, ContentStatePendingSubmit, "待提交审核"},
+		{"已生效之上候选在审为有更新审核中", true, true, true, ContentStateUpdating, "已生效 · 有更新审核中"},
+		{"无候选时未决审批单不影响内容状态", true, false, true, ContentStateEffective, "已生效"},
+		{"无候选无当前内容时未决审批单不影响内容状态", false, false, true, ContentStateEmpty, "未提交"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := DeriveContentState(c.hasCurrent, c.hasCandidate)
+			got := DeriveContentState(c.hasCurrent, c.hasCandidate, c.hasPendingReview)
 			if got != c.want {
-				t.Fatalf("DeriveContentState(%v,%v) = %q, want %q", c.hasCurrent, c.hasCandidate, got, c.want)
+				t.Fatalf("DeriveContentState(%v,%v,%v) = %q, want %q", c.hasCurrent, c.hasCandidate, c.hasPendingReview, got, c.want)
 			}
 			if label := ContentStateLabel(got); label != c.wantLabel {
 				t.Fatalf("ContentStateLabel(%q) = %q, want %q", got, label, c.wantLabel)

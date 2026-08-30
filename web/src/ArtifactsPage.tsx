@@ -22,6 +22,8 @@ const CONTENT_STATE_CLASS: Record<ContentState, string> = {
   effective: "completed",
   updating: "review",
   reviewing: "review",
+  // 待提交审核不是审核态：内容已上传但没进任何审批，配色与「未提交」同档（AC-67）。
+  pending_submit: "archived",
   empty: "archived",
 };
 
@@ -209,6 +211,7 @@ export default function ArtifactsPage({
                   { value: "effective" as const, label: "已生效" },
                   { value: "updating" as const, label: "已生效 · 有更新审核中" },
                   { value: "reviewing" as const, label: "审核中" },
+                  { value: "pending_submit" as const, label: "待提交审核" },
                   { value: "empty" as const, label: "未提交" },
                 ]}
               />

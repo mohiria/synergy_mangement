@@ -5926,6 +5926,26 @@ func TestResultUpdateFlow(t *testing.T) {
 
 	// 上传新候选并提交：任务仍为已完成，内容状态是「已生效 · 有更新审核中」，当前内容仍可下载
 	uploadCandidate(t, carol, tasksURL, taskID, deliverableID, api.UploadCandidateRequest{FileName: "接口说明-v2.docx"}, "v2-bytes")
+	// AC-67：候选已上传但尚未随完成申请提交，任务详情与归档都只能说「待提交审核」
+	resp = doJSON(t, carol, http.MethodGet, detailURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail = decodeBody[api.TaskDetail](t, resp)
+	if ds := detail.Deliverables[0]; ds.ContentState != api.DeliverableContentStatePendingSubmit || ds.ContentStateLabel != "待提交审核" {
+		t.Fatalf("未提交的候选不得声称在审: %q / %q", ds.ContentState, ds.ContentStateLabel)
+	}
+	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/artifacts", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	for _, o := range decodeBody[[]api.ArtifactObjective](t, resp) {
+		for _, kr := range o.Krs {
+			for _, at := range kr.Tasks {
+				for _, ad := range at.Deliverables {
+					if at.TaskId == taskID && ad.ContentState != api.DeliverableContentStatePendingSubmit {
+						t.Fatalf("归档也应显示待提交审核: %q", ad.ContentState)
+					}
+				}
+			}
+		}
+	}
 	resp = doJSON(t, carol, http.MethodPost, completionURL, api.SubmitCompletionRequest{Note: "补充错误码后更新"})
 	wantStatus(t, resp, http.StatusOK)
 	reviewing := decodeBody[api.Task](t, resp)

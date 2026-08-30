@@ -275,6 +275,11 @@ func (s *Server) deliverableList(ctx context.Context, taskID int64) ([]Deliverab
 	if err != nil {
 		return nil, err
 	}
+	// AC-67：候选是不是「在审」看有没有未决完成申请，不看文件在不在。
+	hasPendingReview, err := s.q.HasPendingCompletionReview(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
 	files, err := s.q.ListDeliverableFilesByTask(ctx, taskID)
 	if err != nil {
 		return nil, err
@@ -312,16 +317,16 @@ func (s *Server) deliverableList(ctx context.Context, taskID int64) ([]Deliverab
 				item.Candidate = &view
 			}
 		}
-		fillContentState(&item)
+		fillContentState(&item, hasPendingReview)
 		out = append(out, item)
 	}
 	return out, nil
 }
 
-// fillContentState 补内容状态与提交／生效时间（AC-17）：状态在 domain 派生，
+// fillContentState 补内容状态与提交／生效时间（AC-17、AC-67）：状态在 domain 派生，
 // 时间取当前内容的生效时刻，没有当前内容时退到候选的提交时刻。
-func fillContentState(item *Deliverable) {
-	state := domain.DeriveContentState(item.Current != nil, item.Candidate != nil)
+func fillContentState(item *Deliverable, hasPendingReview bool) {
+	state := domain.DeriveContentState(item.Current != nil, item.Candidate != nil, hasPendingReview)
 	item.ContentState = DeliverableContentState(state)
 	item.ContentStateLabel = domain.ContentStateLabel(state)
 	switch {
