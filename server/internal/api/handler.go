@@ -794,7 +794,16 @@ func (s *Server) okrList(ctx context.Context, projectID int64, actor domain.Acto
 		if kr == nil {
 			kr = []KeyResult{}
 		}
+		// O 层风险（AC-59）：只取下级 KR 的最大值，规则在 domain，前端不复算。
+		krRisks := make([]domain.KrRisk, 0, len(kr))
+		for _, k := range kr {
+			krRisks = append(krRisks, domain.KrRisk{Level: string(k.RiskLevel), Note: derefString(k.RiskNote)})
+		}
+		objRisk := domain.DeriveObjectiveRisk(krRisks)
 		resp = append(resp, Objective{
+			RiskLevel:      RiskLevel(objRisk.Level),
+			RiskLevelLabel: domain.RiskLevelLabel(objRisk.Level),
+			RiskNote:       optString(objRisk.Note),
 			Id:          o.ID,
 			ProjectId:   o.ProjectID,
 			Code:        domain.ObjectiveCode(int(o.CodeSeq)),
@@ -941,6 +950,14 @@ func fromPgText(t pgtype.Text) *string {
 func boolPtr(v bool) *bool { return &v }
 
 func intPtr(v int) *int { return &v }
+
+// derefString 取可选字符串的值，未设置时为空串。
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
 
 func optString(s string) *string {
 	if s == "" {

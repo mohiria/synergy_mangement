@@ -63,6 +63,23 @@ func DeriveKrRisk(now time.Time, dueSoonDays int, tasks []RiskTaskFact, blockers
 	return out
 }
 
+// DeriveObjectiveRisk 读时派生一个 O 的风险等级与一行原因（AC-59、主 PRD §5.7）。
+//
+//	O 风险 = max(下级 KR 风险)
+//
+// 与 KR 同源同序（riskRank）；**不叠加 O 自身的临期与超期**——那条公式只适用于任务级对象
+// （Q-02）：下级任务已全部完成的 O，即使自身周期已过也显示正常，避免假警报。
+// 原因行随等级一起取，严格大于保证同级时保留先出现的那条。
+func DeriveObjectiveRisk(krs []KrRisk) KrRisk {
+	out := KrRisk{Level: RiskNormal}
+	for _, kr := range krs {
+		if riskRank(kr.Level) > riskRank(out.Level) {
+			out.Level, out.Note = kr.Level, kr.Note
+		}
+	}
+	return out
+}
+
 // BlockerRiskNote 把一条卡点压成风险原因行（KR 行、风险队列共用同一文案）。
 func BlockerRiskNote(b Blocker) string {
 	return fmt.Sprintf("「%s」%s：%s", b.TaskName, BlockerKindLabel(b.Kind), b.Reason)

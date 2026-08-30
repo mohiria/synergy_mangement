@@ -181,7 +181,11 @@ export default function ProjectOverviewPage({
                   <h2>{o.title}</h2>
                   <p>{o.description ?? ""}</p>
                 </div>
-                <span className="objective-count">{o.keyResults.length} 个 KR</span>
+                {/* AC-59：O 的风险等级取下级 KR 的最大值，由后端派生，前端只渲染。 */}
+                <span className="objective-meta">
+                  <span className={`status-pill risk-${o.riskLevel}`}>{o.riskLevelLabel}</span>
+                  <span className="objective-count">{o.keyResults.length} 个 KR</span>
+                </span>
               </div>
               {o.keyResults.map((k) => {
                 const code = k.code;

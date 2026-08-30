@@ -147,3 +147,30 @@ func TestDueSoon(t *testing.T) {
 		})
 	}
 }
+
+// AC-59 的「与 O」这一半（#82）：O 只取下级 KR 风险的最大值，
+// 不叠加 O 自身的临期与超期（Q-02：max(卡点, 临期, 超期) 只适用于任务级对象）。
+func TestDeriveObjectiveRisk(t *testing.T) {
+	cases := []struct {
+		name string
+		krs  []KrRisk
+		want KrRisk
+	}{
+		{"没有 KR 时为正常", nil, KrRisk{Level: RiskNormal}},
+		{"全部正常时为正常", []KrRisk{{Level: RiskNormal}, {Level: RiskNormal}}, KrRisk{Level: RiskNormal}},
+		{"含预警取预警并带原因行", []KrRisk{{Level: RiskNormal}, {Level: RiskWarning, Note: "「联调」临期：截止 2026-09-02，不足 3 天"}},
+			KrRisk{Level: RiskWarning, Note: "「联调」临期：截止 2026-09-02，不足 3 天"}},
+		{"含高风险取高风险", []KrRisk{{Level: RiskWarning, Note: "临期"}, {Level: RiskHighRisk, Note: "「验收」超期：截止 2026-08-01 已过"}},
+			KrRisk{Level: RiskHighRisk, Note: "「验收」超期：截止 2026-08-01 已过"}},
+		{"同级取先出现的原因行", []KrRisk{{Level: RiskWarning, Note: "先"}, {Level: RiskWarning, Note: "后"}},
+			KrRisk{Level: RiskWarning, Note: "先"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := DeriveObjectiveRisk(c.krs)
+			if got.Level != c.want.Level || got.Note != c.want.Note {
+				t.Fatalf("DeriveObjectiveRisk = %+v, want %+v", got, c.want)
+			}
+		})
+	}
+}

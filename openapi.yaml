@@ -2595,7 +2595,7 @@ components:
           description: 省略或 null 表示清除进度，回到只展示状态
     Objective:
       type: object
-      required: [id, projectId, code, title, sortOrder, keyResults]
+      required: [id, projectId, code, title, sortOrder, keyResults, riskLevel, riskLevelLabel]
       properties:
         id:
           type: integer
@@ -2618,6 +2618,17 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/KeyResult"
+        riskLevel:
+          $ref: "#/components/schemas/RiskLevel"
+          description: >-
+            O 的风险等级（**只读派生字段，接口不接受写入**；AC-59、§5.7）：只取下级 KR 风险的
+            最大值，不叠加 O 自身的临期与超期
+        riskLevelLabel:
+          type: string
+          description: 风险等级显示文案（派生字段）
+        riskNote:
+          type: string
+          description: 风险原因一行（派生字段，与等级同源；正常时不返回）
         canEdit:
           type: boolean
           description: 当前用户能否编辑本 O（派生字段；仅项目管理员，AC-65）

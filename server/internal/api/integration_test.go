@@ -238,6 +238,29 @@ func doJSON(t *testing.T, c *http.Client, method, urlStr string, body any) *http
 	return resp
 }
 
+// doJSONAgain 直接返回 200 的响应，供「读一次就地断言」的场景内联使用。
+func doJSONAgain(t *testing.T, c *http.Client, method, urlStr string) *http.Response {
+	t.Helper()
+	resp := doJSON(t, c, method, urlStr, nil)
+	wantStatus(t, resp, http.StatusOK)
+	return resp
+}
+
+// doRaw 发送原样 JSON 文本：用于断言契约外的字段（如只读派生字段）被忽略。
+func doRaw(t *testing.T, c *http.Client, method, urlStr, body string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(method, urlStr, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatalf("%s %s: %v", method, urlStr, err)
+	}
+	return resp
+}
+
 func decodeBody[T any](t *testing.T, resp *http.Response) T {
 	t.Helper()
 	defer resp.Body.Close()
@@ -663,6 +686,13 @@ func TestOkrTableBatchCreate(t *testing.T) {
 	kr := list[0].KeyResults[0]
 	if kr.OwnerName == nil || *kr.OwnerName != "李四" || kr.RiskLevel != api.Normal || kr.SortOrder != 1 {
 		t.Fatalf("KR 派生字段异常: %+v", kr)
+	}
+	// AC-59：O 的风险取下级最大值——下面没有 KR 或 KR 全正常时都是正常（#82）。
+	if list[0].RiskLevel != api.Normal || list[0].RiskLevelLabel != "正常" || list[0].RiskNote != nil {
+		t.Fatalf("KR 全正常时 O 应为正常: %+v / %q / %+v", list[0].RiskLevel, list[0].RiskLevelLabel, list[0].RiskNote)
+	}
+	if list[1].RiskLevel != api.Normal {
+		t.Fatalf("没有 KR 的 O 应为正常: %+v", list[1].RiskLevel)
 	}
 	if kr.StartDate == nil || kr.EndDate == nil {
 		t.Fatalf("KR 周期未保存: %+v", kr)
@@ -2953,6 +2983,23 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 	if derivedKr.RiskNote == nil || !strings.Contains(*derivedKr.RiskNote, "任务超期") {
 		t.Fatalf("高风险 KR 的原因行应来自抬高等级的那条卡点: %+v", derivedKr.RiskNote)
 	}
+	// AC-59 的「与 O」这一半（#82）：O 只取下级 KR 的最大值，原因行同源；接口不接受写入。
+	objectiveView := decodeBody[[]api.Objective](t, doJSONAgain(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id)))[0]
+	if objectiveView.RiskLevel != api.HighRisk || objectiveView.RiskLevelLabel != "高风险" {
+		t.Fatalf("O 下有高风险 KR 时应派生高风险: %+v / %q", objectiveView.RiskLevel, objectiveView.RiskLevelLabel)
+	}
+	if objectiveView.RiskNote == nil || *objectiveView.RiskNote != *derivedKr.RiskNote {
+		t.Fatalf("O 的风险原因行应与抬高等级的 KR 同源: %+v", objectiveView.RiskNote)
+	}
+	resp = doRaw(t, alice, http.MethodPatch, fmt.Sprintf("%s/projects/%d/objectives/%d", base, created.Id, objectiveView.Id),
+		`{"riskLevel":"normal","riskNote":"人工抹平"}`)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	afterWrite := decodeBody[[]api.Objective](t, doJSONAgain(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id)))[0]
+	if afterWrite.RiskLevel != api.HighRisk {
+		t.Fatalf("风险等级是只读派生字段，不应被写入改变: %+v", afterWrite.RiskLevel)
+	}
+
 	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/report?range=all", base, created.Id), nil)
 	wantStatus(t, resp, http.StatusOK)
 	reportKrs := decodeBody[api.Report](t, resp).KrProgress

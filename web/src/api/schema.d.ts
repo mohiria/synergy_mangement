@@ -1341,6 +1341,12 @@ export interface components {
             description?: string;
             sortOrder: number;
             keyResults: components["schemas"]["KeyResult"][];
+            /** @description O 的风险等级（**只读派生字段，接口不接受写入**；AC-59、§5.7）：只取下级 KR 风险的 最大值，不叠加 O 自身的临期与超期 */
+            riskLevel: components["schemas"]["RiskLevel"];
+            /** @description 风险等级显示文案（派生字段） */
+            riskLevelLabel: string;
+            /** @description 风险原因一行（派生字段，与等级同源；正常时不返回） */
+            riskNote?: string;
             /** @description 当前用户能否编辑本 O（派生字段；仅项目管理员，AC-65） */
             canEdit?: boolean;
             /** @description 当前用户能否删除本 O（派生字段；仅项目管理员且 O 下无 KR，AC-65） */

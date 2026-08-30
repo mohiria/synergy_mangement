@@ -329,6 +329,7 @@ body {
 }
 .objective-head h2 { margin: 0 0 3px; font-size: var(--type-title); font-weight: 650; color: #364257; }
 .objective-head p { margin: 0; color: var(--muted); font-size: var(--type-aux); }
+.objective-meta { align-self: center; display: flex; align-items: center; gap: 8px; }
 .objective-count { align-self: center; color: var(--muted); font-size: var(--type-aux); white-space: nowrap; }
 .kr-row { border-bottom: 1px solid #edf0f2; }
 .kr-row:last-child { border-bottom: 0; }
