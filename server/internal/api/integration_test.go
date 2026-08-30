@@ -3835,7 +3835,7 @@ func TestImportAndBatchPool(t *testing.T) {
 	resp.Body.Close()
 
 	// AC-02：管理员导入 1 O × 2 KR × 3 任务草稿
-	imp := api.ImportRequest{Items: []api.ImportItem{{
+	imp := api.ImportRequest{SourceFileName: sp("2026Q3 目标拆解.xlsx"), Items: []api.ImportItem{{
 		Title: sp("提升交付质量"),
 		KeyResults: &[]api.ImportKrItem{
 			{Description: "上线自动验收", OwnerId: &bobUser.ID, Tasks: &[]api.ImportTaskItem{
@@ -3874,6 +3874,41 @@ func TestImportAndBatchPool(t *testing.T) {
 	wantStatus(t, resp, http.StatusOK)
 	if got := decodeBody[[]api.Task](t, resp); len(got) != 3 {
 		t.Fatalf("失败导入不应落库: %d", len(got))
+	}
+
+	// AC-68：导入记录——成功一条、失败一条，最新在前；计数取真实写入量，失败不写成功。
+	recordsURL := fmt.Sprintf("%s/projects/%d/import-records", base, created.Id)
+	resp = doJSON(t, carol, http.MethodGet, recordsURL, nil)
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodGet, recordsURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	records := decodeBody[[]api.ImportRecord](t, resp)
+	if len(records) != 2 {
+		t.Fatalf("成功与失败各应留一条导入记录: %+v", records)
+	}
+	failed := records[0]
+	if failed.Result != api.Failed || failed.ResultLabel != "失败" {
+		t.Fatalf("失败的一次不应写成功: %+v", failed)
+	}
+	if failed.ObjectiveCount != 0 || failed.KeyResultCount != 0 || failed.TaskCount != 0 {
+		t.Fatalf("整批回滚的导入计数应为 0: %+v", failed)
+	}
+	if failed.FailureSummary == nil || *failed.FailureSummary == "" {
+		t.Fatalf("失败记录应带摘要: %+v", failed.FailureSummary)
+	}
+	success := records[1]
+	if success.Result != api.Success || success.ResultLabel != "成功" {
+		t.Fatalf("成功的一次记录异常: %+v", success)
+	}
+	if success.ObjectiveCount != 1 || success.KeyResultCount != 2 || success.TaskCount != 3 {
+		t.Fatalf("导入计数应取真实写入量: %+v", success)
+	}
+	if success.SourceFileName == nil || *success.SourceFileName != "2026Q3 目标拆解.xlsx" {
+		t.Fatalf("源文件名未留存: %+v", success.SourceFileName)
+	}
+	if success.OperatorName != "张三" || success.ImportedAt.IsZero() {
+		t.Fatalf("操作人与时间未留存: %+v", success)
 	}
 
 	// AC-25：按 KR1 批量提交（任务一、二）

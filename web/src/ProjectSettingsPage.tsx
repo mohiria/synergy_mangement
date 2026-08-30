@@ -10,6 +10,7 @@ type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
 type ProjectMember = components["schemas"]["ProjectMember"];
 type AuditLog = components["schemas"]["AuditLog"];
+type ImportRecord = components["schemas"]["ImportRecord"];
 type MemberRole = components["schemas"]["MemberRole"];
 type UserSummary = components["schemas"]["UserSummary"];
 type ProjectSettings = components["schemas"]["ProjectSettings"];
@@ -84,7 +85,11 @@ export default function ProjectSettingsPage({
   const { projectId: projectIdParam } = useParams();
   const projectId = Number(projectIdParam);
 
-  const [tab, setTab] = useState<"members" | "permissions" | "rules" | "audit">("members");
+  const [tab, setTab] = useState<"members" | "permissions" | "rules" | "audit" | "imports">(
+    "members",
+  );
+  // 导入记录（§7.9、AC-68）：每次表格导入的操作人、时间、文件名、影响计数与结果，只读。
+  const [importRecords, setImportRecords] = useState<ImportRecord[]>([]);
   // 操作审计（§10.4）：由后端写路径装饰器统一记录，这里只读展示。
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [project, setProject] = useState<Project | null>(null);
@@ -102,13 +107,15 @@ export default function ProjectSettingsPage({
   const [savingRules, setSavingRules] = useState(false);
 
   const load = useCallback(async () => {
-    const [projectRes, membersRes, usersRes, settingsRes, auditRes] = await Promise.all([
+    const [projectRes, membersRes, usersRes, settingsRes, auditRes, importRes] = await Promise.all([
       client.GET("/projects/{projectId}", { params: { path: { projectId } } }),
       client.GET("/projects/{projectId}/members", { params: { path: { projectId } } }),
       client.GET("/users"),
       client.GET("/projects/{projectId}/settings", { params: { path: { projectId } } }),
       // 只有项目管理员能读审计；非管理员会拿到 403，此时留空即可（导航里也不显示这一节）。
       client.GET("/projects/{projectId}/audit-logs", { params: { path: { projectId } } }),
+      // 导入记录同样只对项目管理员开放；非管理员拿到 403，留空即可。
+      client.GET("/projects/{projectId}/import-records", { params: { path: { projectId } } }),
     ]);
     if (projectRes.response.status === 401) {
       onLogout();
@@ -125,6 +132,7 @@ export default function ProjectSettingsPage({
     setSettings(settingsRes.data ?? null);
     setRules(settingsRes.data ?? null);
     setAuditLogs(auditRes.data ?? []);
+    setImportRecords(importRes.data ?? []);
     setLoading(false);
   }, [projectId, onLogout]);
 
@@ -270,6 +278,15 @@ export default function ProjectSettingsPage({
               {project?.canEdit && (
                 <button
                   type="button"
+                  className={tab === "imports" ? "active" : ""}
+                  onClick={() => setTab("imports")}
+                >
+                  导入记录
+                </button>
+              )}
+              {project?.canEdit && (
+                <button
+                  type="button"
                   className={tab === "audit" ? "active" : ""}
                   onClick={() => setTab("audit")}
                 >
@@ -278,7 +295,65 @@ export default function ProjectSettingsPage({
               )}
             </aside>
             <section className="settings-panel">
-              {tab === "audit" ? (
+              {tab === "imports" ? (
+                <>
+                  <div className="settings-panel-head">
+                    <div>
+                      <h2>导入记录</h2>
+                      <span className="muted">
+                        每次表格导入留存操作人、时间、源文件名、本次新建的 O／KR／任务数量与结果（§7.9）；
+                        失败的一次同样留记录，结果不写成功。只读。
+                      </span>
+                    </div>
+                  </div>
+                  {importRecords.length === 0 ? (
+                    <div className="empty">暂无导入记录</div>
+                  ) : (
+                    <div className="data-table-wrap">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th style={{ width: 170 }}>时间</th>
+                            <th style={{ width: 110 }}>操作人</th>
+                            <th style={{ width: 200 }}>源文件</th>
+                            <th style={{ width: 150 }}>新建 O／KR／任务</th>
+                            <th style={{ width: 110 }}>结果</th>
+                            <th>失败摘要</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {importRecords.map((rec) => (
+                            <tr key={rec.id}>
+                              <td className="mono">
+                                {new Date(rec.importedAt).toLocaleString("zh-CN")}
+                              </td>
+                              <td>{rec.operatorName}</td>
+                              <td className={rec.sourceFileName ? "" : "muted"}>
+                                {rec.sourceFileName || "—"}
+                              </td>
+                              <td className="mono">
+                                {rec.objectiveCount} / {rec.keyResultCount} / {rec.taskCount}
+                              </td>
+                              <td>
+                                <span
+                                  className={`status-pill ${
+                                    rec.result === "success" ? "completed" : "risk-high_risk"
+                                  }`}
+                                >
+                                  {rec.resultLabel}
+                                </span>
+                              </td>
+                              <td className={rec.failureSummary ? "" : "muted"}>
+                                {rec.failureSummary || "—"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
+              ) : tab === "audit" ? (
                 <>
                   <div className="settings-panel-head">
                     <div>

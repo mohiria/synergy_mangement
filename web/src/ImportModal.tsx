@@ -61,6 +61,8 @@ export default function ImportModal({
   const [nameOverrides, setNameOverrides] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // 源文件名随导入记录留存（§7.9、AC-68）：选文件时自动带上，粘贴时留空。
+  const [sourceFileName, setSourceFileName] = useState("");
 
   const rows = useMemo(() => {
     const lines = raw.split(/\r?\n/).filter((l) => l.trim() !== "");
@@ -72,6 +74,7 @@ export default function ImportModal({
   const reset = () => {
     setStep(0);
     setRaw("");
+    setSourceFileName("");
     setMapping([]);
     setNameOverrides({});
     setError(null);
@@ -206,7 +209,7 @@ export default function ImportModal({
     };
     const res = await client.POST("/projects/{projectId}/import", {
       params: { path: { projectId } },
-      body,
+      body: { ...body, sourceFileName },
     });
     setSaving(false);
     if (res.data) {
@@ -252,6 +255,20 @@ export default function ImportModal({
         <>
           <div className="notice" style={{ marginBottom: 10 }}>
             从 Excel／表格中复制内容后直接粘贴（首行为表头）；O、KR 列留空表示沿用上一行。
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <input
+              type="file"
+              accept=".csv,.tsv,.txt"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                setRaw(await file.text());
+                setSourceFileName(file.name);
+                setError(null);
+              }}
+            />
+            <span className="muted">选择 CSV／TSV 文件，或直接粘贴到下方；文件名会随导入记录留存</span>
           </div>
           <Input.TextArea
             rows={10}

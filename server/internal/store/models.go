@@ -140,6 +140,19 @@ type FieldChangeRequest struct {
 	Payload               []byte
 }
 
+type ImportRecord struct {
+	ID             int64
+	ProjectID      int64
+	OperatorID     int64
+	SourceFileName string
+	ObjectiveCount int32
+	KeyResultCount int32
+	TaskCount      int32
+	Result         string
+	FailureSummary string
+	ImportedAt     pgtype.Timestamptz
+}
+
 type InputRequest struct {
 	ID           int64
 	EdgeID       int64

@@ -1872,6 +1872,36 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /projects/{projectId}/import-records:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    get:
+      operationId: listImportRecords
+      tags: [projects]
+      summary: >-
+        导入记录（§7.9、AC-68；仅项目管理员）——每次表格导入留存操作人、时间、源文件名、
+        本次新建的 O／KR／任务数量与结果；失败的一次同样留记录。只读
+      responses:
+        "200":
+          description: 导入记录，最新在前
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ImportRecord"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /projects/{projectId}/audit-logs:
     parameters:
       - name: projectId
@@ -3876,6 +3906,47 @@ components:
           minItems: 1
           items:
             $ref: "#/components/schemas/ImportItem"
+        sourceFileName:
+          type: string
+          maxLength: 200
+          description: 源文件名（§7.9 导入记录留存用；AC-68）
+    ImportRecord:
+      type: object
+      description: >-
+        一次表格导入的业务事实（词汇表「导入记录」；§7.9、AC-68）。与通用操作审计并列而非重复：
+        审计不含文件名与影响计数，也不记失败的那一次
+      required: [id, operatorName, importedAt, objectiveCount, keyResultCount, taskCount, result, resultLabel]
+      properties:
+        id:
+          type: integer
+          format: int64
+        operatorName:
+          type: string
+          description: 操作人姓名（派生字段）
+        importedAt:
+          type: string
+          format: date-time
+        sourceFileName:
+          type: string
+        objectiveCount:
+          type: integer
+          description: 本次真实新建的 O 数
+        keyResultCount:
+          type: integer
+          description: 本次真实新建的 KR 数
+        taskCount:
+          type: integer
+          description: 本次真实新建的任务数
+        result:
+          type: string
+          enum: [success, partial, failed]
+          description: 导入结果；失败绝不写成功
+        resultLabel:
+          type: string
+          description: 结果显示文案（派生字段）
+        failureSummary:
+          type: string
+          description: 失败摘要；成功时为空
     ImportResult:
       type: object
       required: [objectives, tasks]

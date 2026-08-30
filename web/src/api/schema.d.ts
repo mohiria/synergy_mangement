@@ -915,6 +915,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/import-records": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        /** 导入记录（§7.9、AC-68；仅项目管理员）——每次表格导入留存操作人、时间、源文件名、 本次新建的 O／KR／任务数量与结果；失败的一次同样留记录。只读 */
+        get: operations["listImportRecords"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/audit-logs": {
         parameters: {
             query?: never;
@@ -2056,6 +2075,33 @@ export interface components {
         /** @description 表格导入（AC-02）：字段映射与人员匹配在前端完成，此处提交结构化结果；整批一个事务 */
         ImportRequest: {
             items: components["schemas"]["ImportItem"][];
+            /** @description 源文件名（§7.9 导入记录留存用；AC-68） */
+            sourceFileName?: string;
+        };
+        /** @description 一次表格导入的业务事实（词汇表「导入记录」；§7.9、AC-68）。与通用操作审计并列而非重复： 审计不含文件名与影响计数，也不记失败的那一次 */
+        ImportRecord: {
+            /** Format: int64 */
+            id: number;
+            /** @description 操作人姓名（派生字段） */
+            operatorName: string;
+            /** Format: date-time */
+            importedAt: string;
+            sourceFileName?: string;
+            /** @description 本次真实新建的 O 数 */
+            objectiveCount: number;
+            /** @description 本次真实新建的 KR 数 */
+            keyResultCount: number;
+            /** @description 本次真实新建的任务数 */
+            taskCount: number;
+            /**
+             * @description 导入结果；失败绝不写成功
+             * @enum {string}
+             */
+            result: "success" | "partial" | "failed";
+            /** @description 结果显示文案（派生字段） */
+            resultLabel: string;
+            /** @description 失败摘要；成功时为空 */
+            failureSummary?: string;
         };
         ImportResult: {
             objectives: components["schemas"]["Objective"][];
@@ -4238,6 +4284,31 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listImportRecords: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 导入记录，最新在前 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportRecord"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
