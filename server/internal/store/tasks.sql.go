@@ -141,7 +141,7 @@ func (q *Queries) DecidePoolReview(ctx context.Context, arg DecidePoolReviewPara
 }
 
 const getKeyResultInProject = `-- name: GetKeyResultInProject :one
-SELECT k.id, k.objective_id, k.description, k.metric, k.owner_id, k.start_date, k.end_date, k.sort_order, k.created_at, k.code_seq, o.project_id
+SELECT k.id, k.objective_id, k.description, k.metric, k.owner_id, k.start_date, k.end_date, k.sort_order, k.created_at, k.code_seq, o.project_id, o.code_seq AS objective_code_seq
 FROM key_results k
 JOIN objectives o ON o.id = k.objective_id
 WHERE k.id = $1 AND o.project_id = $2
@@ -153,20 +153,21 @@ type GetKeyResultInProjectParams struct {
 }
 
 type GetKeyResultInProjectRow struct {
-	ID          int64
-	ObjectiveID int64
-	Description string
-	Metric      string
-	OwnerID     pgtype.Int8
-	StartDate   pgtype.Date
-	EndDate     pgtype.Date
-	SortOrder   int32
-	CreatedAt   pgtype.Timestamptz
-	CodeSeq     int32
-	ProjectID   int64
+	ID               int64
+	ObjectiveID      int64
+	Description      string
+	Metric           string
+	OwnerID          pgtype.Int8
+	StartDate        pgtype.Date
+	EndDate          pgtype.Date
+	SortOrder        int32
+	CreatedAt        pgtype.Timestamptz
+	CodeSeq          int32
+	ProjectID        int64
+	ObjectiveCodeSeq int32
 }
 
-// KR 连同项目归属（任务创建时校验所属 KR 属于本项目）。
+// KR 连同项目归属与所属 O 的编号序号（任务创建时校验归属；邀请通知要拼 KR 编号）。
 func (q *Queries) GetKeyResultInProject(ctx context.Context, arg GetKeyResultInProjectParams) (GetKeyResultInProjectRow, error) {
 	row := q.db.QueryRow(ctx, getKeyResultInProject, arg.ID, arg.ProjectID)
 	var i GetKeyResultInProjectRow
@@ -182,6 +183,7 @@ func (q *Queries) GetKeyResultInProject(ctx context.Context, arg GetKeyResultInP
 		&i.CreatedAt,
 		&i.CodeSeq,
 		&i.ProjectID,
+		&i.ObjectiveCodeSeq,
 	)
 	return i, err
 }

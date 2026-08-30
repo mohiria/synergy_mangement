@@ -1049,6 +1049,21 @@ func TestTaskInviteLifecycle(t *testing.T) {
 	if len(invites) != 1 || invites[0].State != api.TaskInviteStatePending || invites[0].InviteeName != "王五" {
 		t.Fatalf("邀请创建异常: %+v", invites)
 	}
+	// AC-03（#83）：受邀人收到带 KR 编号、名称与邀请说明的站内通知；非受邀人没有。
+	resp = doJSON(t, carol, http.MethodGet, base+"/notifications", nil)
+	wantStatus(t, resp, http.StatusOK)
+	carolNotes := decodeBody[[]api.Notification](t, resp)
+	if len(carolNotes) != 1 || carolNotes[0].Kind != "task_invite" {
+		t.Fatalf("受邀人应收到任务创建邀请通知: %+v", carolNotes)
+	}
+	if !strings.Contains(carolNotes[0].Content, "KR1.1「上线自动验收」") || !strings.Contains(carolNotes[0].Content, note) {
+		t.Fatalf("邀请通知应带 KR 与邀请说明: %q", carolNotes[0].Content)
+	}
+	resp = doJSON(t, alice, http.MethodGet, base+"/notifications", nil)
+	wantStatus(t, resp, http.StatusOK)
+	if others := decodeBody[[]api.Notification](t, resp); len(others) != 0 {
+		t.Fatalf("非受邀人不应收到邀请通知: %+v", others)
+	}
 	inviteID := invites[0].Id
 	if invites[0].CanHandle {
 		t.Fatalf("邀请人视角不应可响应: %+v", invites[0])
@@ -1145,6 +1160,18 @@ func TestTaskInviteLifecycle(t *testing.T) {
 	wantStatus(t, resp, http.StatusOK)
 	if iv := decodeBody[api.TaskInvite](t, resp); iv.State != api.TaskInviteStateRevoked {
 		t.Fatalf("撤回后状态异常: %+v", iv)
+	}
+	// 撤回不补发通知（#83；与 #5 的撤回口径一致）：只有两次「发出」各留一条。
+	resp = doJSON(t, carol, http.MethodGet, base+"/notifications", nil)
+	wantStatus(t, resp, http.StatusOK)
+	inviteNotes := 0
+	for _, n := range decodeBody[[]api.Notification](t, resp) {
+		if n.Kind == "task_invite" {
+			inviteNotes++
+		}
+	}
+	if inviteNotes != 2 {
+		t.Fatalf("撤回不应补发通知，两次发出各一条: %d", inviteNotes)
 	}
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		SubmitForReview: true, TaskInviteId: &second,

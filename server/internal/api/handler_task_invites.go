@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"synergy/server/internal/domain"
 	"synergy/server/internal/store"
@@ -87,12 +88,25 @@ func (s *Server) CreateTaskInvites(w http.ResponseWriter, r *http.Request, proje
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
 	qtx := s.q.WithTx(tx)
+	// AC-03：通知与邀请同事务——邀请进了「待我处理」却没有通知，受邀人不主动打开
+	// 「我的工作」就不知道自己被邀请拆任务。撤回邀请不补发（与 #5 的撤回口径一致）。
+	krCode := domain.KeyResultCode(int(kr.ObjectiveCodeSeq), int(kr.CodeSeq))
+	inviteContent := domain.TaskInviteNotification(currentUser(r).DisplayName, krCode, kr.Description, note)
 	for _, inviteeID := range invitees {
 		if _, err := qtx.CreateTaskInvite(r.Context(), store.CreateTaskInviteParams{
 			KeyResultID: req.KeyResultId,
 			InviterID:   uid,
 			InviteeID:   inviteeID,
 			Note:        note,
+		}); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		if _, err := qtx.CreateNotification(r.Context(), store.CreateNotificationParams{
+			UserID:    inviteeID,
+			Kind:      domain.NotifyTaskInvite,
+			Content:   inviteContent,
+			ProjectID: pgtype.Int8{Int64: projectId, Valid: true},
 		}); err != nil {
 			writeInternalError(w, r, err)
 			return

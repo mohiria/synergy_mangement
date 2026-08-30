@@ -82,8 +82,8 @@ JOIN objectives o ON o.id = k.objective_id
 WHERE o.project_id = $1;
 
 -- name: GetKeyResultInProject :one
--- KR 连同项目归属（任务创建时校验所属 KR 属于本项目）。
-SELECT k.*, o.project_id
+-- KR 连同项目归属与所属 O 的编号序号（任务创建时校验归属；邀请通知要拼 KR 编号）。
+SELECT k.*, o.project_id, o.code_seq AS objective_code_seq
 FROM key_results k
 JOIN objectives o ON o.id = k.objective_id
 WHERE k.id = $1 AND o.project_id = $2;

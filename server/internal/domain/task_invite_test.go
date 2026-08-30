@@ -119,3 +119,36 @@ func TestCanHandleInvite(t *testing.T) {
 		t.Fatal("已撤回邀请不应可响应")
 	}
 }
+
+// AC-03（#83）：邀请发出后受邀人要收到带 KR 和邀请说明的站内通知；
+// 撤回不补发（与 #5 的撤回口径一致），因此这里只定型「发出」这一条的文案。
+func TestTaskInviteNotificationContent(t *testing.T) {
+	cases := []struct {
+		name    string
+		inviter string
+		code    string
+		desc    string
+		note    string
+		want    string
+	}{
+		{
+			"带邀请说明", "王浩然", "KR1.2", "现场回归通过", "按上周口径拆到人",
+			"王浩然邀请你在 KR1.2「现场回归通过」下创建任务：按上周口径拆到人",
+		},
+		{
+			"未填说明时不留空冒号", "王浩然", "KR1.2", "现场回归通过", "",
+			"王浩然邀请你在 KR1.2「现场回归通过」下创建任务",
+		},
+		{
+			"邀请人姓名缺失时退化", "", "KR2.1", "上线自动验收", "",
+			"你被邀请在 KR2.1「上线自动验收」下创建任务",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := TaskInviteNotification(c.inviter, c.code, c.desc, c.note); got != c.want {
+				t.Fatalf("TaskInviteNotification = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
