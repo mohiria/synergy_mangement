@@ -506,7 +506,8 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		writeInternalError(w, r, err)
 		return
 	}
-	factsForReviews := domain.TaskFacts{Status: task.Status, CreatorID: task.CreatedBy, OwnerID: task.OwnerID, KrOwnerID: fromPgInt8(task.KrOwnerID)}
+	factsForReviews := domain.TaskFacts{Status: task.Status, CreatorID: task.CreatedBy, OwnerID: task.OwnerID,
+		KrOwnerID: fromPgInt8(task.KrOwnerID), ResultUpdate: task.ResultUpdate}
 	completions, err := s.completionReviewList(r.Context(), taskId, factsForReviews, actor, uid)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -577,7 +578,8 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 			SubmittedByName: pr.SubmittedByName, DecidedByName: pr.DecidedByName,
 		}, krOwnerName))
 	}
-	facts := domain.TaskFacts{Status: string(item.Status), CreatorID: task.CreatedBy, OwnerID: task.OwnerID, KrOwnerID: fromPgInt8(task.KrOwnerID)}
+	facts := domain.TaskFacts{Status: string(item.Status), CreatorID: task.CreatedBy, OwnerID: task.OwnerID,
+		KrOwnerID: fromPgInt8(task.KrOwnerID), ResultUpdate: task.ResultUpdate}
 	fcs := make([]FieldChange, 0, len(changeRows))
 	for _, fc := range changeRows {
 		fcs = append(fcs, s.fieldChangeView(r.Context(), store.FieldChangeRequest{
@@ -726,10 +728,11 @@ func (s *Server) fetchTask(w http.ResponseWriter, r *http.Request, projectID, ta
 		return store.GetTaskInProjectRow{}, domain.TaskFacts{}, false
 	}
 	facts := domain.TaskFacts{
-		Status:    task.Status,
-		CreatorID: task.CreatedBy,
-		OwnerID:   task.OwnerID,
-		KrOwnerID: fromPgInt8(task.KrOwnerID),
+		Status:       task.Status,
+		CreatorID:    task.CreatedBy,
+		OwnerID:      task.OwnerID,
+		KrOwnerID:    fromPgInt8(task.KrOwnerID),
+		ResultUpdate: task.ResultUpdate,
 	}
 	return task, facts, true
 }
@@ -747,10 +750,11 @@ func lockTaskFacts(r *http.Request, w http.ResponseWriter, qtx *store.Queries, p
 		return store.LockTaskInProjectRow{}, domain.TaskFacts{}, false
 	}
 	facts := domain.TaskFacts{
-		Status:    task.Status,
-		CreatorID: task.CreatedBy,
-		OwnerID:   task.OwnerID,
-		KrOwnerID: fromPgInt8(task.KrOwnerID),
+		Status:       task.Status,
+		CreatorID:    task.CreatedBy,
+		OwnerID:      task.OwnerID,
+		KrOwnerID:    fromPgInt8(task.KrOwnerID),
+		ResultUpdate: task.ResultUpdate,
 	}
 	return task, facts, true
 }
@@ -849,7 +853,8 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 	}
 	resp := make([]Task, 0, len(rows))
 	for _, t := range rows {
-		facts := domain.TaskFacts{Status: t.Status, CreatorID: t.CreatedBy, OwnerID: t.OwnerID, KrOwnerID: fromPgInt8(t.KrOwnerID)}
+		facts := domain.TaskFacts{Status: t.Status, CreatorID: t.CreatedBy, OwnerID: t.OwnerID,
+			KrOwnerID: fromPgInt8(t.KrOwnerID), ResultUpdate: t.ResultUpdate}
 		// 待审批变更单（含取消单）决定编辑、取消与提交入池三处入口是否可用（AC-23、AC-57 互斥）。
 		fc, hasChange := changeByTask[t.ID]
 		hasPending := hasChange && fc.State == domain.FieldChangePendingState
@@ -946,6 +951,11 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 		item.Participants = &participants
 		canManageParticipants := domain.CanManageParticipants(actor, userID, facts)
 		item.CanManageParticipants = &canManageParticipants
+		// 成果更新（AC-66）：进程与发起入口都由后端派生，前端不复算生命周期规则。
+		ru := resultUpdateState(t.ResultUpdate)
+		item.ResultUpdate = &ru
+		canStartResultUpdate := domain.CanStartResultUpdate(actor, userID, facts, hasPending)
+		item.CanStartResultUpdate = &canStartResultUpdate
 		if n := openBlockersByTask[t.ID]; n > 0 {
 			item.OpenBlockerCount = &n
 		}

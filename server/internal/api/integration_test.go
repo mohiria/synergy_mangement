@@ -64,7 +64,8 @@ func putObject(t *testing.T, url, content string) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		t.Fatalf("上传对象失败: %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("上传对象失败: %d %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 }
 
@@ -259,7 +260,9 @@ func openapiDate(t *testing.T, s string) openapi_types.Date {
 func wantStatus(t *testing.T, resp *http.Response, want int) {
 	t.Helper()
 	if resp.StatusCode != want {
-		t.Fatalf("status = %d, want %d", resp.StatusCode, want)
+		// 带上响应体：只报状态码时，排查一次意外的 409／422 得再跑一遍加日志。
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want %d, body=%s", resp.StatusCode, want, strings.TrimSpace(string(body)))
 	}
 }
 
@@ -3414,7 +3417,7 @@ func TestArtifactsAndPackages(t *testing.T) {
 	}
 	// 内容状态与提交／生效时间读时派生：终审通过后是「已生效」，时间取生效时刻。
 	adl := at.Deliverables[0]
-	if adl.ContentState != api.Effective || adl.ContentStateLabel != "已生效" {
+	if adl.ContentState != api.DeliverableContentStateEffective || adl.ContentStateLabel != "已生效" {
 		t.Fatalf("内容状态异常: %q / %q", adl.ContentState, adl.ContentStateLabel)
 	}
 	if adl.ContentStateAt == nil || !adl.ContentStateAt.Equal(*adl.Current.EffectiveAt) {
@@ -5790,4 +5793,262 @@ func TestTaskParticipants(t *testing.T) {
 	if !found {
 		t.Fatal("配置参与人应留痕")
 	}
+}
+
+// 成果更新（AC-66、AC-33、AC-39；#78）：已完成任务重新发起交付物更新，走同一道完成审批，
+// 审批期间任务保持已完成、当前内容继续有效；终审通过后候选覆盖当前内容且旧文件不可恢复，
+// 退回则候选删除、当前内容不变。「已生效 · 有更新审核中」由本流程产生。
+func TestResultUpdateFlow(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, bob, carol := newClient(t), newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(bob, "bob", "bob-pass")
+	login(carol, "carol", "carol-pass")
+	sp := func(s string) *string { return &s }
+
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "成果更新试点", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	for _, uid := range []int64{bobUser.ID, carolUser.ID} {
+		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+		wantStatus(t, resp, http.StatusCreated)
+		resp.Body.Close()
+	}
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("成果可持续更新"), KeyResults: &[]api.CreateKeyResultInput{{Description: "交付物随迭代更新", OwnerId: &bobUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	okr := decodeBody[[]api.Objective](t, resp)
+	kr1 := okr[0].KeyResults[0].Id
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+
+	// carol 建任务 → bob 入池通过 → carol 执行 → 首次定稿走完完成审批
+	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "输出接口说明", OwnerId: carolUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("接口说明")},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	taskID := decodeBody[[]api.Task](t, resp)[0].Id
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, taskID),
+		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, taskID),
+		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	detailURL := fmt.Sprintf("%s/%d", tasksURL, taskID)
+	resp = doJSON(t, carol, http.MethodGet, detailURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail := decodeBody[api.TaskDetail](t, resp)
+	deliverableID := detail.Deliverables[0].Id
+	uploadCandidate(t, carol, tasksURL, taskID, deliverableID, api.UploadCandidateRequest{FileName: "接口说明-v1.docx"}, "v1-bytes")
+	completionURL := fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskID)
+	resp = doJSON(t, carol, http.MethodPost, completionURL, api.SubmitCompletionRequest{Note: "首次定稿"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodGet, detailURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail = decodeBody[api.TaskDetail](t, resp)
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/decision", completionURL, detail.CompletionReviews[0].Id),
+		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusOK)
+	done := decodeBody[api.Task](t, resp)
+	if done.Status != api.TaskStatusCompleted {
+		t.Fatalf("首次定稿后应已完成: %+v", done)
+	}
+	if done.ResultUpdate == nil || *done.ResultUpdate != api.ResultUpdateStateNone {
+		t.Fatalf("尚未发起成果更新: %+v", done.ResultUpdate)
+	}
+	// 派生入口按身份区分：任务负责人可发起，KR 负责人（普通成员）不可代发起
+	resp = doJSON(t, carol, http.MethodGet, detailURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail = decodeBody[api.TaskDetail](t, resp)
+	if detail.Task.CanStartResultUpdate == nil || !*detail.Task.CanStartResultUpdate {
+		t.Fatalf("已完成任务的负责人应可发起成果更新: %+v", detail.Task)
+	}
+	resp = doJSON(t, bob, http.MethodGet, detailURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	if bobView := decodeBody[api.TaskDetail](t, resp); bobView.Task.CanStartResultUpdate == nil || *bobView.Task.CanStartResultUpdate {
+		t.Fatalf("KR 负责人不是任务负责人时不应有发起入口: %+v", bobView.Task.CanStartResultUpdate)
+	}
+	resp = doJSON(t, alice, http.MethodGet, detailURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail = decodeBody[api.TaskDetail](t, resp)
+	firstFileID := detail.Deliverables[0].Current.Id
+
+	// 未发起成果更新时已完成任务不能传候选（§5.3）
+	resultUpdateURL := fmt.Sprintf("%s/%d/result-update", tasksURL, taskID)
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskID, deliverableID),
+		api.UploadCandidateRequest{FileName: "偷偷替换.docx"})
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+
+	// 无关成员不可发起；负责人可发起，且不改变任务生命周期状态
+	resp = doJSON(t, bob, http.MethodPost, resultUpdateURL, nil)
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodPost, resultUpdateURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	opened := decodeBody[api.Task](t, resp)
+	if opened.Status != api.TaskStatusCompleted {
+		t.Fatalf("成果更新不改变任务状态: %+v", opened.Status)
+	}
+	if opened.ResultUpdate == nil || *opened.ResultUpdate != api.ResultUpdateStateOpen {
+		t.Fatalf("成果更新进程应为 open: %+v", opened.ResultUpdate)
+	}
+	if opened.CanUploadCandidate == nil || !*opened.CanUploadCandidate {
+		t.Fatalf("发起后应可登记候选内容: %+v", opened)
+	}
+	// 同一任务至多一件在途
+	resp = doJSON(t, carol, http.MethodPost, resultUpdateURL, nil)
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+
+	// 上传新候选并提交：任务仍为已完成，内容状态是「已生效 · 有更新审核中」，当前内容仍可下载
+	uploadCandidate(t, carol, tasksURL, taskID, deliverableID, api.UploadCandidateRequest{FileName: "接口说明-v2.docx"}, "v2-bytes")
+	resp = doJSON(t, carol, http.MethodPost, completionURL, api.SubmitCompletionRequest{Note: "补充错误码后更新"})
+	wantStatus(t, resp, http.StatusOK)
+	reviewing := decodeBody[api.Task](t, resp)
+	if reviewing.Status != api.TaskStatusCompleted {
+		t.Fatalf("成果更新审批期间任务应保持已完成: %+v", reviewing.Status)
+	}
+	if reviewing.ResultUpdate == nil || *reviewing.ResultUpdate != api.ResultUpdateStateReviewing {
+		t.Fatalf("提交后成果更新进程应为 reviewing: %+v", reviewing.ResultUpdate)
+	}
+	resp = doJSON(t, alice, http.MethodGet, detailURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail = decodeBody[api.TaskDetail](t, resp)
+	d := detail.Deliverables[0]
+	if d.ContentState != api.DeliverableContentStateUpdating || d.ContentStateLabel != "已生效 · 有更新审核中" {
+		t.Fatalf("审核中应为「已生效 · 有更新审核中」: %q / %q", d.ContentState, d.ContentStateLabel)
+	}
+	if d.Current == nil || d.Current.Id != firstFileID {
+		t.Fatalf("审核期间当前内容不得被提前替换: %+v", d.Current)
+	}
+	if d.Candidate == nil || d.Candidate.FileName != "接口说明-v2.docx" {
+		t.Fatalf("候选内容应在审: %+v", d.Candidate)
+	}
+	// 审核期间不能再传候选
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskID, deliverableID),
+		api.UploadCandidateRequest{FileName: "再改一版.docx"})
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+
+	// AC-39：终审通过后候选覆盖当前内容，旧文件永久删除
+	updateReviewID := detail.CompletionReviews[0].Id
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/decision", completionURL, updateReviewID),
+		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusOK)
+	updated := decodeBody[api.Task](t, resp)
+	if updated.Status != api.TaskStatusCompleted {
+		t.Fatalf("成果更新通过后任务仍为已完成: %+v", updated.Status)
+	}
+	if updated.ResultUpdate == nil || *updated.ResultUpdate != api.ResultUpdateStateNone {
+		t.Fatalf("终审后成果更新进程应结束: %+v", updated.ResultUpdate)
+	}
+	resp = doJSON(t, alice, http.MethodGet, detailURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail = decodeBody[api.TaskDetail](t, resp)
+	d = detail.Deliverables[0]
+	if d.Current == nil || d.Current.FileName != "接口说明-v2.docx" || d.Current.Id == firstFileID {
+		t.Fatalf("候选应覆盖为新的当前内容: %+v", d.Current)
+	}
+	if d.Candidate != nil || d.ContentState != api.DeliverableContentStateEffective {
+		t.Fatalf("通过后不应残留候选: %+v / %q", d.Candidate, d.ContentState)
+	}
+	files, err := q.ListDeliverableFilesByTask(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("列任务文件: %v", err)
+	}
+	for _, f := range files {
+		if f.ID == firstFileID {
+			t.Fatal("被覆盖的旧文件应永久删除、不可恢复")
+		}
+	}
+
+	// 退回路径：再发起一次，候选被删除、当前内容不变、任务仍为已完成
+	resp = doJSON(t, carol, http.MethodPost, resultUpdateURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	uploadCandidate(t, carol, tasksURL, taskID, deliverableID, api.UploadCandidateRequest{FileName: "接口说明-v3.docx"}, "v3-bytes")
+	resp = doJSON(t, carol, http.MethodPost, completionURL, api.SubmitCompletionRequest{Note: "再更新一版"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodGet, detailURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail = decodeBody[api.TaskDetail](t, resp)
+	op := "错误码仍有遗漏"
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/decision", completionURL, detail.CompletionReviews[0].Id),
+		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionRejected, Opinion: &op})
+	wantStatus(t, resp, http.StatusOK)
+	rejected := decodeBody[api.Task](t, resp)
+	if rejected.Status != api.TaskStatusCompleted {
+		t.Fatalf("成果更新退回后任务仍为已完成: %+v", rejected.Status)
+	}
+	if rejected.ResultUpdate == nil || *rejected.ResultUpdate != api.ResultUpdateStateNone {
+		t.Fatalf("退回后成果更新进程应结束: %+v", rejected.ResultUpdate)
+	}
+	resp = doJSON(t, alice, http.MethodGet, detailURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail = decodeBody[api.TaskDetail](t, resp)
+	d = detail.Deliverables[0]
+	if d.Candidate != nil {
+		t.Fatalf("退回后候选应删除: %+v", d.Candidate)
+	}
+	if d.Current == nil || d.Current.FileName != "接口说明-v2.docx" {
+		t.Fatalf("退回不改变当前内容: %+v", d.Current)
+	}
+	// 发起、通过、退回均进任务动态（#64 写路径留痕）
+	kinds := map[string]bool{}
+	for _, a := range detail.Activities {
+		kinds[string(a.Kind)] = true
+	}
+	for _, want := range []string{domain.ActivityResultUpdateStarted, domain.ActivityCompletionApproved, domain.ActivityCompletionRejected} {
+		if !kinds[want] {
+			t.Fatalf("任务动态缺少 %s: %+v", want, kinds)
+		}
+	}
+
+	// 已取消任务永不可发起成果更新
+	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: false,
+		Items:           []api.CreateTaskItem{{KeyResultId: kr1, Name: "待取消任务", OwnerId: bobUser.ID, StartDate: start, EndDate: end}},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	var cancelledID int64
+	for _, tk := range decodeBody[[]api.Task](t, resp) {
+		if tk.Name == "待取消任务" {
+			cancelledID = tk.Id
+		}
+	}
+	if cancelledID == 0 {
+		t.Fatal("未找到待取消任务")
+	}
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/cancellation", tasksURL, cancelledID),
+		api.TaskCancellationRequest{Reason: "需求取消"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/result-update", tasksURL, cancelledID), nil)
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
 }

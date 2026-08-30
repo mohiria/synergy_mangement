@@ -44,13 +44,18 @@ func CanManageDeliverables(a Actor, userID int64, t TaskFacts) bool {
 }
 
 // CanUploadCandidate 判定能否登记候选内容：任务负责人（管理员纠错），执行类状态；
-// 完成审核期间整批候选已锁定（§5.3），不可另传。
+// 完成审核期间整批候选已锁定（§5.3），不可另传。已完成任务只在成果更新已发起、
+// 尚未随完成申请提交时放行（AC-66）——这是「已生效 · 有更新审核中」的唯一入口。
 func CanUploadCandidate(a Actor, userID int64, t TaskFacts) bool {
 	if !CanWriteProject(a) {
 		return false
 	}
 	switch t.Status {
 	case TaskNotStarted, TaskWaitingInput, TaskInProgress:
+	case TaskCompleted:
+		if t.ResultUpdate != ResultUpdateOpen {
+			return false
+		}
 	default:
 		return false
 	}

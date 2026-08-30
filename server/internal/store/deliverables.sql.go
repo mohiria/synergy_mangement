@@ -222,7 +222,8 @@ func (q *Queries) GetDeliverableFileInProject(ctx context.Context, arg GetDelive
 }
 
 const getDeliverableInProject = `-- name: GetDeliverableInProject :one
-SELECT d.id, d.task_id, d.name, d.created_by, d.created_at, t.owner_id AS task_owner_id, t.created_by AS task_created_by, t.status AS task_status
+SELECT d.id, d.task_id, d.name, d.created_by, d.created_at, t.owner_id AS task_owner_id, t.created_by AS task_created_by, t.status AS task_status,
+    t.result_update AS task_result_update
 FROM deliverables d
 JOIN tasks t ON t.id = d.task_id
 JOIN key_results k ON k.id = t.key_result_id
@@ -237,14 +238,15 @@ type GetDeliverableInProjectParams struct {
 }
 
 type GetDeliverableInProjectRow struct {
-	ID            int64
-	TaskID        int64
-	Name          string
-	CreatedBy     int64
-	CreatedAt     pgtype.Timestamptz
-	TaskOwnerID   int64
-	TaskCreatedBy int64
-	TaskStatus    string
+	ID               int64
+	TaskID           int64
+	Name             string
+	CreatedBy        int64
+	CreatedAt        pgtype.Timestamptz
+	TaskOwnerID      int64
+	TaskCreatedBy    int64
+	TaskStatus       string
+	TaskResultUpdate string
 }
 
 func (q *Queries) GetDeliverableInProject(ctx context.Context, arg GetDeliverableInProjectParams) (GetDeliverableInProjectRow, error) {
@@ -259,6 +261,7 @@ func (q *Queries) GetDeliverableInProject(ctx context.Context, arg GetDeliverabl
 		&i.TaskOwnerID,
 		&i.TaskCreatedBy,
 		&i.TaskStatus,
+		&i.TaskResultUpdate,
 	)
 	return i, err
 }

@@ -85,7 +85,7 @@ func (s *Server) UploadCandidate(w http.ResponseWriter, r *http.Request, project
 		}
 		return
 	}
-	facts := domain.TaskFacts{Status: d.TaskStatus, CreatorID: d.TaskCreatedBy, OwnerID: d.TaskOwnerID}
+	facts := domain.TaskFacts{Status: d.TaskStatus, CreatorID: d.TaskCreatedBy, OwnerID: d.TaskOwnerID, ResultUpdate: d.TaskResultUpdate}
 	if !domain.CanUploadCandidate(actor, uid, facts) {
 		switch d.TaskStatus {
 		case domain.TaskNotStarted, domain.TaskWaitingInput, domain.TaskInProgress:
@@ -186,7 +186,7 @@ func (s *Server) CommitCandidate(w http.ResponseWriter, r *http.Request, project
 		}
 		return
 	}
-	facts := domain.TaskFacts{Status: d.TaskStatus, CreatorID: d.TaskCreatedBy, OwnerID: d.TaskOwnerID}
+	facts := domain.TaskFacts{Status: d.TaskStatus, CreatorID: d.TaskCreatedBy, OwnerID: d.TaskOwnerID, ResultUpdate: d.TaskResultUpdate}
 	if !domain.CanUploadCandidate(actor, uid, facts) {
 		writeForbidden(w)
 		return

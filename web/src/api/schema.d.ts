@@ -389,6 +389,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/tasks/{taskId}/result-update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 发起成果更新（AC-66；已完成任务的负责人重新开放候选交付物上传并走同一道完成审批。 任务生命周期状态保持“已完成”，不是重新打开任务；与任务上其他未决审批单互斥，已取消任务不可发起） */
+        post: operations["startResultUpdate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/tasks/{taskId}/field-changes": {
         parameters: {
             query?: never;
@@ -1385,6 +1405,11 @@ export interface components {
          */
         TaskStatus: "draft" | "pending_pool_review" | "not_started" | "waiting_input" | "in_progress" | "pending_intermediate_review" | "pending_final_review" | "completed" | "cancelled";
         /**
+         * @description 成果更新进程（词汇表「成果更新」；派生自任务事实，接口不接受直接写入）： none＝无；open＝已发起、候选内容尚未随完成申请提交；reviewing＝已提交，或签或 KR 终审在审。 整个过程中任务生命周期状态保持 completed
+         * @enum {string}
+         */
+        ResultUpdateState: "none" | "open" | "reviewing";
+        /**
          * @description 入池审批单状态（词汇表「入池审批单」）；未提交即无审批单
          * @enum {string}
          */
@@ -1490,6 +1515,9 @@ export interface components {
             participants?: components["schemas"]["ReviewerInfo"][];
             /** @description 当前用户能否配置参与人（派生字段；负责人／创建人／可编辑项目者，终态不可） */
             canManageParticipants?: boolean;
+            resultUpdate?: components["schemas"]["ResultUpdateState"];
+            /** @description 当前用户能否对本任务发起成果更新（派生字段；AC-66：任务负责人／项目管理员， 任务已完成、无在途成果更新且没有其他未决审批单） */
+            canStartResultUpdate?: boolean;
         };
         CreateTaskItem: {
             /** Format: int64 */
@@ -3279,6 +3307,34 @@ export interface operations {
         };
         responses: {
             /** @description 已受理，返回任务最新状态（免审时已为已取消，否则仍为原状态并带待审批取消单） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Task"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    startResultUpdate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已发起，返回任务最新状态（status 仍为 completed，resultUpdate 变为 open） */
             200: {
                 headers: {
                     [name: string]: unknown;

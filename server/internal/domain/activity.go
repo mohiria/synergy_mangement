@@ -14,6 +14,7 @@ const (
 	ActivityCancelRequested      = "cancel_requested"
 	ActivityCancelApproved       = "cancel_approved"
 	ActivityCancelRejected       = "cancel_rejected"
+	ActivityResultUpdateStarted  = "result_update_started"
 	ActivityCompletionSubmitted  = "completion_submitted"
 	ActivityCompletionApproved   = "completion_approved"
 	ActivityCompletionRejected   = "completion_rejected"
@@ -33,6 +34,7 @@ var activityKindLabels = map[string]string{
 	ActivityCancelRequested:      "发起任务取消申请",
 	ActivityCancelApproved:       "任务取消生效",
 	ActivityCancelRejected:       "任务取消退回",
+	ActivityResultUpdateStarted:  "发起成果更新",
 	ActivityCompletionSubmitted:  "提交完成申请",
 	ActivityCompletionApproved:   "完成审核通过",
 	ActivityCompletionRejected:   "完成审核退回",

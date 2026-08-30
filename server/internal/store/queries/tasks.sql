@@ -59,6 +59,14 @@ SET status = $2, cancel_reason = $3, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
+-- name: SetTaskResultUpdate :one
+-- 成果更新进程流转（AC-66）：发起→open，提交完成申请→reviewing，终审通过或退回→''。
+-- 任务生命周期状态不在这里动。
+UPDATE tasks
+SET result_update = $2, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: UpdateTaskProgress :one
 UPDATE tasks
 SET progress = $2, updated_at = now()

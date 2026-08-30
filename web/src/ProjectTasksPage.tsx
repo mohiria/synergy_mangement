@@ -407,6 +407,19 @@ export default function ProjectTasksPage({
     }
   };
 
+  // AC-66：已完成任务发起成果更新——重新开放候选上传，走同一道完成审批，任务状态保持已完成。
+  const startResultUpdate = async (task: Task) => {
+    const res = await client.POST("/projects/{projectId}/tasks/{taskId}/result-update", {
+      params: { path: { projectId, taskId: task.id } },
+    });
+    if (res.data) {
+      message.success("已发起成果更新，请上传新的候选内容后提交完成申请");
+      load();
+    } else {
+      message.error(res.error?.message ?? "发起失败");
+    }
+  };
+
   // MW-09：接收方确认接收，待接收项退出「待我接收」并形成接收记录。
   const confirmReceipt = async (task: Task) => {
     const res = await client.POST("/projects/{projectId}/tasks/{taskId}/confirm-receipt", {
@@ -878,6 +891,7 @@ export default function ProjectTasksPage({
           openReceivers: (t) => setReceiverTask(t),
           openParticipants: (t) => setParticipantTask(t),
           confirmReceipt,
+          startResultUpdate,
           acceptInput,
           openProvide: (id) => {
             setProvideReq(id);
@@ -1523,6 +1537,7 @@ function TaskDrawer({
     openReceivers: (t: Task) => void;
     openParticipants: (t: Task) => void;
     confirmReceipt: (t: Task) => void;
+    startResultUpdate: (t: Task) => void;
     acceptInput: (requestId: number) => void;
     openProvide: (requestId: number) => void;
     openInputFile: (requestId: number) => void;
@@ -1980,6 +1995,11 @@ function TaskDrawer({
           {candidateCount > 0 && (
             <div className="notice warning" style={{ marginBottom: 10 }}>
               有 {candidateCount} 项更新审核中，候选内容请在“审核”Tab 查看；当前内容继续有效。
+            </div>
+          )}
+          {task.resultUpdate === "open" && (
+            <div className="notice" style={{ marginBottom: 10 }}>
+              成果更新已发起：上传新的候选内容后提交完成申请，审批期间任务保持已完成、当前内容继续有效。
             </div>
           )}
           {deliverables.length === 0 && <div className="empty compact-empty">尚无交付物项</div>}
@@ -2502,9 +2522,12 @@ function TaskDrawer({
               提交入池审批
             </Button>
           )}
+          {task.canStartResultUpdate && (
+            <Button onClick={() => actions.startResultUpdate(task)}>发起成果更新</Button>
+          )}
           {task.canSubmitCompletion && (
             <Button type="primary" onClick={() => actions.openSubmitCompletion(task)}>
-              提交完成申请
+              {task.resultUpdate === "open" ? "提交成果更新" : "提交完成申请"}
             </Button>
           )}
         </div>

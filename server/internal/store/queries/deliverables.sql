@@ -4,7 +4,8 @@ VALUES ($1, $2, $3)
 RETURNING *;
 
 -- name: GetDeliverableInProject :one
-SELECT d.*, t.owner_id AS task_owner_id, t.created_by AS task_created_by, t.status AS task_status
+SELECT d.*, t.owner_id AS task_owner_id, t.created_by AS task_created_by, t.status AS task_status,
+    t.result_update AS task_result_update
 FROM deliverables d
 JOIN tasks t ON t.id = d.task_id
 JOIN key_results k ON k.id = t.key_result_id

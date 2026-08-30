@@ -55,6 +55,8 @@ type TaskFacts struct {
 	CreatorID int64
 	OwnerID   int64
 	KrOwnerID *int64
+	// ResultUpdate 成果更新的进程（词汇表「成果更新」）：空＝无，open＝已发起未提交，reviewing＝已提交在审。
+	ResultUpdate string
 }
 
 // ValidateNewTask 校验任务草稿最小骨架（PRD §9.1：名称、负责人、开始／截止时间）。

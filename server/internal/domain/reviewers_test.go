@@ -44,11 +44,11 @@ func TestCanManageReviewers(t *testing.T) {
 
 // AC-13／AC-14 路由：无中间审核人直接待 KR 终审，有则进入中间或签。
 func TestSubmitCompletionOutcome(t *testing.T) {
-	state, status := SubmitCompletionOutcome(0)
+	state, status := SubmitCompletionOutcome(0, false)
 	if state != CompletionPendingFinal || status != TaskPendingFinalReview {
 		t.Fatalf("无审核人应直接待终审: %q %q", state, status)
 	}
-	state, status = SubmitCompletionOutcome(2)
+	state, status = SubmitCompletionOutcome(2, false)
 	if state != CompletionIntermediate || status != TaskPendingIntermediateReview {
 		t.Fatalf("有审核人应进入中间或签: %q %q", state, status)
 	}

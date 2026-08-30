@@ -263,6 +263,7 @@ type Task struct {
 	UpdatedAt          pgtype.Timestamptz
 	ReceiverScope      string
 	CodeSeq            int32
+	ResultUpdate       string
 }
 
 type TaskActivity struct {

@@ -20,7 +20,7 @@ SET name = COALESCE($1, name),
     end_date = COALESCE($5, end_date),
     updated_at = now()
 WHERE id = $6
-RETURNING id, key_result_id, name, owner_id, start_date, end_date, status, created_by, created_at, progress, cancel_reason, description, completion_criteria, updated_at, receiver_scope, code_seq
+RETURNING id, key_result_id, name, owner_id, start_date, end_date, status, created_by, created_at, progress, cancel_reason, description, completion_criteria, updated_at, receiver_scope, code_seq, result_update
 `
 
 type ApplyTaskKeyFieldsParams struct {
@@ -60,6 +60,7 @@ func (q *Queries) ApplyTaskKeyFields(ctx context.Context, arg ApplyTaskKeyFields
 		&i.UpdatedAt,
 		&i.ReceiverScope,
 		&i.CodeSeq,
+		&i.ResultUpdate,
 	)
 	return i, err
 }

@@ -57,8 +57,6 @@ func (s *Server) SubmitCompletion(w http.ResponseWriter, r *http.Request, projec
 		writeInternalError(w, r, err)
 		return
 	}
-	// AC-13/14：无中间审核人直接待 KR 终审；配置了则进入中间或签（配置快照进申请）。
-	reviewState, taskStatus := domain.SubmitCompletionOutcome(len(reviewers))
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -66,12 +64,33 @@ func (s *Server) SubmitCompletion(w http.ResponseWriter, r *http.Request, projec
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
 	qtx := s.q.WithTx(tx)
+	// 锁内重读事实并重跑规则：成果更新的提交与终审可能并发，两次都按未提交处理会开出两张申请（R2）。
+	_, locked, ok := lockTaskFacts(r, w, qtx, projectId, taskId)
+	if !ok {
+		return
+	}
+	if err := domain.SubmitCompletionRule(locked, len(candidates), note); err != nil {
+		writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: err.Error()})
+		return
+	}
+	// AC-66：成果更新走同一道审批链，但任务状态保持已完成，进程转为「在审」。
+	resultUpdate := locked.ResultUpdate == domain.ResultUpdateOpen
+	// AC-13/14：无中间审核人直接待 KR 终审；配置了则进入中间或签（配置快照进申请）。
+	reviewState, taskStatus := domain.SubmitCompletionOutcome(len(reviewers), resultUpdate)
 	review, err := qtx.CreateCompletionReview(r.Context(), store.CreateCompletionReviewParams{
 		TaskID: taskId, SubmittedBy: uid, Note: note, State: reviewState,
 	})
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
+	}
+	if resultUpdate {
+		if _, err := qtx.SetTaskResultUpdate(r.Context(), store.SetTaskResultUpdateParams{
+			ID: taskId, ResultUpdate: domain.ResultUpdateReviewing,
+		}); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
 	}
 	for _, rv := range reviewers {
 		if err := qtx.CreateReviewReviewer(r.Context(), store.CreateReviewReviewerParams{ReviewID: review.ID, UserID: rv.UserID}); err != nil {
@@ -225,6 +244,10 @@ func (s *Server) DecideCompletion(w http.ResponseWriter, r *http.Request, projec
 		writeInternalError(w, r, err)
 		return
 	}
+	// AC-66：成果更新终审有结论即结束进程——通过则新内容已生效，退回则候选已删除。
+	if err := s.closeResultUpdate(r, w, qtx, taskId, facts); err != nil {
+		return
+	}
 	if approve {
 		// AC-63：完成终审通过时进度置 100 并锁定——任务只有一个进度事实。
 		done := domain.CompletedProgress()
@@ -325,6 +348,12 @@ func (s *Server) decideIntermediate(w http.ResponseWriter, r *http.Request, tx p
 	if _, err := qtx.UpdateTaskStatus(r.Context(), store.UpdateTaskStatusParams{ID: taskId, Status: newTaskStatus}); err != nil {
 		writeInternalError(w, r, err)
 		return
+	}
+	// AC-66：或签退回即整体退回，成果更新进程随之结束；或签通过时申请仍在审，进程保持不变。
+	if !approve {
+		if err := s.closeResultUpdate(r, w, qtx, taskId, facts); err != nil {
+			return
+		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
 		writeInternalError(w, r, err)
@@ -502,4 +531,19 @@ func (s *Server) completionReviewList(ctx context.Context, taskID int64, facts d
 		out = append(out, item)
 	}
 	return out, nil
+}
+
+// closeResultUpdate 完成审批有结论时结束成果更新进程（AC-66）；非成果更新的申请不受影响。
+// 出错时已写出响应，调用方直接返回。
+func (s *Server) closeResultUpdate(r *http.Request, w http.ResponseWriter, qtx *store.Queries, taskID int64, facts domain.TaskFacts) error {
+	if !domain.ResultUpdateReviewInFlight(facts) {
+		return nil
+	}
+	if _, err := qtx.SetTaskResultUpdate(r.Context(), store.SetTaskResultUpdateParams{
+		ID: taskID, ResultUpdate: domain.ResultUpdateNone,
+	}); err != nil {
+		writeInternalError(w, r, err)
+		return err
+	}
+	return nil
 }

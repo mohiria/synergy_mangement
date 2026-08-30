@@ -36,27 +36,42 @@ func CanManageReviewers(a Actor, userID int64, t TaskFacts) bool {
 
 // SubmitCompletionOutcome 提交完成申请的路由（AC-13/14）：
 // 未配置中间审核人直接待 KR 终审，配置了则进入中间或签。
-func SubmitCompletionOutcome(reviewerCount int) (string, string) {
+// 成果更新走同一道审批链，但任务状态保持已完成不回退（AC-66、§5.1）。
+func SubmitCompletionOutcome(reviewerCount int, resultUpdate bool) (string, string) {
+	reviewState := CompletionPendingFinal
+	taskStatus := TaskPendingFinalReview
 	if reviewerCount > 0 {
-		return CompletionIntermediate, TaskPendingIntermediateReview
+		reviewState = CompletionIntermediate
+		taskStatus = TaskPendingIntermediateReview
 	}
-	return CompletionPendingFinal, TaskPendingFinalReview
+	if resultUpdate {
+		taskStatus = TaskCompleted
+	}
+	return reviewState, taskStatus
 }
 
 // DecideIntermediateRule 或签处理（AC-14/24/37）：仅或签组成员可处理（KR 负责人与管理员
 // 不能替代）；任一人通过→待 KR 终审并关闭其余待办，任一人退回→整体退回（意见必填）。
 func DecideIntermediateRule(a Actor, t TaskFacts, actorID int64, isReviewer func(int64) bool, approve bool, opinion string) (string, string, error) {
-	if t.Status != TaskPendingIntermediateReview {
+	// 成果更新的或签同样在任务已完成的前提下进行，处理结果不改变生命周期状态（AC-66）。
+	inResultUpdate := ResultUpdateReviewInFlight(t)
+	if t.Status != TaskPendingIntermediateReview && !inResultUpdate {
 		return "", "", ErrCompletionNotIntermediate
 	}
 	if !CanWriteProject(a) || !isReviewer(actorID) {
 		return "", "", ErrNotReviewer
 	}
 	if approve {
+		if inResultUpdate {
+			return TaskCompleted, CompletionPendingFinal, nil
+		}
 		return TaskPendingFinalReview, CompletionPendingFinal, nil
 	}
 	if strings.TrimSpace(opinion) == "" {
 		return "", "", ErrRejectOpinionRequired
+	}
+	if inResultUpdate {
+		return TaskCompleted, CompletionRejected, nil
 	}
 	return TaskInProgress, CompletionRejected, nil
 }

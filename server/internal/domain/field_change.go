@@ -167,6 +167,10 @@ func PendingApprovalOnTask(t TaskFacts, hasPendingChange bool) bool {
 	case TaskPendingPoolReview, TaskPendingIntermediateReview, TaskPendingFinalReview:
 		return true
 	}
+	// 成果更新在审时任务状态仍是已完成，未决事实只体现在成果更新进程上（AC-66）。
+	if ResultUpdateReviewInFlight(t) {
+		return true
+	}
 	return hasPendingChange
 }
 
