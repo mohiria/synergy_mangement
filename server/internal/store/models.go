@@ -18,7 +18,9 @@ type ArtifactPackage struct {
 
 type ArtifactPackageItem struct {
 	PackageID     int64
-	DeliverableID int64
+	DeliverableID pgtype.Int8
+	ID            int64
+	TaskFileID    pgtype.Int8
 }
 
 type AuditLog struct {
@@ -274,6 +276,20 @@ type TaskActivity struct {
 	Summary    string
 	OccurredAt pgtype.Timestamptz
 	BlockerKey pgtype.Text
+}
+
+type TaskFile struct {
+	ID         int64
+	TaskID     int64
+	Kind       string
+	State      string
+	FileName   string
+	FileType   string
+	FileSize   int64
+	ObjectKey  string
+	Note       string
+	UploadedBy int64
+	UploadedAt pgtype.Timestamptz
 }
 
 type TaskInvite struct {

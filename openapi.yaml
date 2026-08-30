@@ -1151,6 +1151,158 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /projects/{projectId}/tasks/{taskId}/files:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: taskId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    post:
+      operationId: uploadTaskFile
+      tags: [tasks]
+      summary: >-
+        登记过程文件或重要外部材料并取得预签名上传地址（§7.7；两阶段提交第一步）。
+        这两类文件不进入完成审批，也不作为下游正式输入，只可按需选进成果包
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadTaskFileRequest"
+      responses:
+        "201":
+          description: 已登记，客户端用 uploadUrl 直传文件
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadTaskFileResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /projects/{projectId}/tasks/{taskId}/files/{fileId}/commit:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: taskId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: fileId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    post:
+      operationId: commitTaskFile
+      tags: [tasks]
+      summary: 确认过程文件／外部材料已写入对象存储（两阶段提交第二步；服务端校验对象存在后才可见）
+      responses:
+        "200":
+          description: 已确认
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskFile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /projects/{projectId}/tasks/{taskId}/files/{fileId}:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: taskId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: fileId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    delete:
+      operationId: deleteTaskFile
+      tags: [tasks]
+      summary: 删除过程文件或重要外部材料（这两类文件不进审批，删除直接生效并留痕）
+      responses:
+        "204":
+          description: 已删除
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /projects/{projectId}/task-files/{fileId}/download-url:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: fileId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    get:
+      operationId: getTaskFileDownloadUrl
+      tags: [tasks]
+      summary: 取得过程文件／外部材料的预签名下载地址（全体项目成员可查看、下载，§3.3）
+      responses:
+        "200":
+          description: 预签名地址
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DownloadUrlResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /projects/{projectId}/files/{fileId}/download-url:
     parameters:
       - name: projectId
@@ -3028,6 +3180,13 @@ components:
           description: 交付物项列表（含当前内容与候选审核提示，AC-32／AC-33）
           items:
             $ref: "#/components/schemas/Deliverable"
+        files:
+          type: array
+          description: >-
+            任务下的过程文件与重要外部材料（§7.7）：不进入完成审批、不作为下游正式输入，
+            可按需选进成果包；未配置时为空数组
+          items:
+            $ref: "#/components/schemas/TaskFile"
         discussions:
           type: array
           description: 任务讨论意见，按时间正序（AC-35／AC-36）
@@ -3394,6 +3553,76 @@ components:
       properties:
         file:
           $ref: "#/components/schemas/DeliverableFile"
+        uploadUrl:
+          type: string
+          description: MinIO 预签名 PUT 地址，客户端直接上传文件内容
+    TaskFileKind:
+      type: string
+      description: >-
+        任务文件类型（词汇表「过程文件」「重要外部材料」；§7.7 文件对象边界表）：
+        process＝过程文件，任务执行过程中产生、不作为正式成果提交审核；
+        external＝重要外部材料，项目外部提供、经内部协调人代为录入。
+        两者都不进入完成审批、不作为下游任务的正式输入（外部材料可作输入证据，
+        但不把输入置为就绪），可以按需选进成果包
+      enum: [process, external]
+    TaskFile:
+      type: object
+      description: 任务下的过程文件或重要外部材料（§7.7；与交付物同走两阶段提交，未确认写入的记录不返回）
+      required: [id, taskId, kind, kindLabel, fileName, uploadedAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        taskId:
+          type: integer
+          format: int64
+        kind:
+          $ref: "#/components/schemas/TaskFileKind"
+        kindLabel:
+          type: string
+          description: 类型显示文案（派生字段）
+        fileName:
+          type: string
+        fileType:
+          type: string
+        fileSize:
+          type: integer
+          format: int64
+        note:
+          type: string
+          description: 背景说明，选填
+        uploadedByName:
+          type: string
+          description: 上传人姓名（派生字段）
+        uploadedAt:
+          type: string
+          format: date-time
+    UploadTaskFileRequest:
+      type: object
+      required: [kind, fileName]
+      properties:
+        kind:
+          $ref: "#/components/schemas/TaskFileKind"
+        fileName:
+          type: string
+          minLength: 1
+          maxLength: 200
+        fileType:
+          type: string
+        fileSize:
+          type: integer
+          format: int64
+          description: 客户端自报大小，仅作提示；确认时以对象存储的真实大小为准
+        note:
+          type: string
+          maxLength: 500
+          description: 背景说明，选填
+    UploadTaskFileResponse:
+      type: object
+      required: [file, uploadUrl]
+      properties:
+        file:
+          $ref: "#/components/schemas/TaskFile"
         uploadUrl:
           type: string
           description: MinIO 预签名 PUT 地址，客户端直接上传文件内容
@@ -3849,6 +4078,11 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Deliverable"
+        files:
+          type: array
+          description: 本任务下的过程文件与重要外部材料（§7.7；归档按「文件类型」维筛选用）
+          items:
+            $ref: "#/components/schemas/TaskFile"
     ArtifactKr:
       type: object
       description: 归档视角的 KR 分组（AC-17）：成果按 KR 归集，组头给出 KR 负责人与交付物数量
@@ -3891,14 +4125,25 @@ components:
             $ref: "#/components/schemas/ArtifactKr"
     PackageItem:
       type: object
-      description: 成果包目录项：引用交付物项并解析为当前内容（不复制旧文件，AC-18）
-      required: [deliverableId, deliverableName, taskName]
+      description: >-
+        成果包目录项（AC-18）：二选一引用——交付物项（下载时解析为当前内容，不复制旧文件），
+        或任务文件（过程文件／重要外部材料，§7.7「可以按需选择」）
+      required: [deliverableName, taskName]
       properties:
         deliverableId:
           type: integer
           format: int64
+          description: 引用交付物项时给出
+        taskFileId:
+          type: integer
+          format: int64
+          description: 引用过程文件或重要外部材料时给出
+        fileKind:
+          $ref: "#/components/schemas/TaskFileKind"
+          description: 任务文件目录项的类型；交付物目录项不返回
         deliverableName:
           type: string
+          description: 交付物项名称；任务文件目录项取文件名
         taskName:
           type: string
         fileId:
@@ -3939,11 +4184,17 @@ components:
           maxLength: 100
         deliverableIds:
           type: array
-          minItems: 1
           items:
             type: integer
             format: int64
           description: 勾选的当前成果（须有已生效当前内容的交付物项）
+        taskFileIds:
+          type: array
+          items:
+            type: integer
+            format: int64
+          description: 勾选的过程文件或重要外部材料（§7.7「可以按需选择」；选填）
+      description: 两个勾选数组至少合计一项（AC-18：成果包可含当前成果与必要过程文件）
     WorkItem:
       type: object
       description: 我的工作事项（词汇表「我的工作事项」）；卡片派生事实，动作在任务详情抽屉完成

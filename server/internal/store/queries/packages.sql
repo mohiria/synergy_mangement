@@ -8,6 +8,12 @@ INSERT INTO artifact_package_items (package_id, deliverable_id)
 VALUES ($1, $2)
 ON CONFLICT DO NOTHING;
 
+-- name: CreatePackageTaskFileItem :exec
+-- 成果包也可以收过程文件与重要外部材料（§7.7「可以按需选择」）。
+INSERT INTO artifact_package_items (package_id, task_file_id)
+VALUES ($1, $2)
+ON CONFLICT DO NOTHING;
+
 -- name: GetPackageInProject :one
 SELECT * FROM artifact_packages
 WHERE id = $1 AND project_id = $2;
@@ -20,15 +26,22 @@ WHERE p.project_id = $1
 ORDER BY p.id DESC;
 
 -- name: ListPackageItems :many
--- 目录项解析当前内容（被覆盖后自动指向新内容；退回删除后无当前内容则 file 为空）。
-SELECT i.deliverable_id, d.name AS deliverable_name, t.name AS task_name,
-    cf.id AS file_id, cf.file_name, cf.object_key, cf.effective_at
+-- 目录项二选一：交付物项解析当前内容（被覆盖后自动指向新内容；退回删除后无当前内容则 file 为空），
+-- 或任务文件直接给出自身（过程文件与外部材料没有版本概念）。两侧字段都可能为空，由调用方合并。
+SELECT i.id, i.deliverable_id, i.task_file_id,
+    d.name AS deliverable_name, dt.name AS deliverable_task_name,
+    cf.id AS current_file_id, cf.file_name AS current_file_name,
+    cf.object_key AS current_object_key, cf.effective_at,
+    tf.kind AS file_kind, tf.file_name AS task_file_name,
+    tf.object_key AS task_file_object_key, ft.name AS task_file_task_name
 FROM artifact_package_items i
-JOIN deliverables d ON d.id = i.deliverable_id
-JOIN tasks t ON t.id = d.task_id
+LEFT JOIN deliverables d ON d.id = i.deliverable_id
+LEFT JOIN tasks dt ON dt.id = d.task_id
 LEFT JOIN deliverable_files cf ON cf.deliverable_id = d.id AND cf.state = 'current'
+LEFT JOIN task_files tf ON tf.id = i.task_file_id
+LEFT JOIN tasks ft ON ft.id = tf.task_id
 WHERE i.package_id = $1
-ORDER BY i.deliverable_id;
+ORDER BY i.id;
 
 -- name: ListDeliverablesByProject :many
 -- 归档视角（AC-17）：项目全部交付物项与任务/KR/O 归属。

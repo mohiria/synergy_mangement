@@ -62,8 +62,8 @@ func TestDeriveKrRisk(t *testing.T) {
 			wantNote:  "「现场勘察」临期：截止 2026-09-02，不足 7 天",
 		},
 		{
-			name:      "已完成与已取消任务不参与风险汇总",
-			dueSoon:   3,
+			name:    "已完成与已取消任务不参与风险汇总",
+			dueSoon: 3,
 			tasks: []RiskTaskFact{
 				{ID: 2, Name: "已完成任务", Status: TaskCompleted, EndDate: riskDay(2026, 8, 20)},
 				{ID: 3, Name: "已取消任务", Status: TaskCancelled, EndDate: riskDay(2026, 8, 20)},

@@ -85,6 +85,12 @@ func (s *Server) SweepStaleUploads(ctx context.Context) {
 	if err != nil {
 		log.Printf("upload sweep: 重置输入待上传记录失败: %v", err)
 	}
+	// 过程文件与外部材料同走两阶段提交，未确认的记录同样会留下孤儿对象（§7.7、#79）。
+	taskFileKeys, err := s.q.DeleteStaleUploadingTaskFiles(ctx, interval)
+	if err != nil {
+		log.Printf("upload sweep: 清理任务文件待上传记录失败: %v", err)
+	}
+	keys = append(keys, taskFileKeys...)
 	for _, key := range append(keys, inputKeys...) {
 		if key == "" {
 			continue

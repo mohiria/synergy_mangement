@@ -69,6 +69,21 @@ func putObject(t *testing.T, url, content string) {
 	}
 }
 
+// uploadTaskFile 走完任务文件的两阶段提交：登记 uploading → 直传对象 → commit 转 ready（§7.7）。
+func uploadTaskFile(t *testing.T, c *http.Client, tasksURL string, taskID int64, req api.UploadTaskFileRequest, content string) api.TaskFile {
+	t.Helper()
+	resp := doJSON(t, c, http.MethodPost, fmt.Sprintf("%s/%d/files", tasksURL, taskID), req)
+	wantStatus(t, resp, http.StatusCreated)
+	up := decodeBody[api.UploadTaskFileResponse](t, resp)
+	if up.UploadUrl == "" {
+		t.Fatalf("任务文件登记异常: %+v", up)
+	}
+	putObject(t, up.UploadUrl, content)
+	resp = doJSON(t, c, http.MethodPost, fmt.Sprintf("%s/%d/files/%d/commit", tasksURL, taskID, up.File.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	return decodeBody[api.TaskFile](t, resp)
+}
+
 // uploadCandidate 走完候选内容的两阶段提交：登记 uploading → 直传对象 → commit 转 candidate。
 func uploadCandidate(t *testing.T, c *http.Client, tasksURL string, taskID, deliverableID int64, req api.UploadCandidateRequest, content string) api.DeliverableFile {
 	t.Helper()
@@ -3479,16 +3494,76 @@ func TestArtifactsAndPackages(t *testing.T) {
 		t.Fatalf("来源关系边字段异常: %+v", e)
 	}
 
+	// §7.7 过程文件与重要外部材料（#79）：落在任务下，与交付物同走两阶段提交。
+	processFile := uploadTaskFile(t, bob, tasksURL, downstreamID,
+		api.UploadTaskFileRequest{Kind: api.Process, FileName: "联调记录.md", Note: sp("每日联调纪要")}, "process-bytes")
+	externalFile := uploadTaskFile(t, bob, tasksURL, downstreamID,
+		api.UploadTaskFileRequest{Kind: api.External, FileName: "厂商回执.pdf"}, "external-bytes")
+	if processFile.KindLabel != "过程文件" || externalFile.KindLabel != "重要外部材料" {
+		t.Fatalf("任务文件类型文案异常: %q / %q", processFile.KindLabel, externalFile.KindLabel)
+	}
+	if processFile.Note == nil || *processFile.Note != "每日联调纪要" {
+		t.Fatalf("背景说明未保存: %+v", processFile.Note)
+	}
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, downstreamID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	downstreamDetail := decodeBody[api.TaskDetail](t, resp)
+	if downstreamDetail.Files == nil || len(*downstreamDetail.Files) != 2 {
+		t.Fatalf("任务详情应带两份任务文件: %+v", downstreamDetail.Files)
+	}
+	// §7.7 边界：这两类文件不作为下游正式输入——上游成果虽已生效，但外部材料不改变任何就绪判定；
+	// 它们也不进入完成审批：只有它们、没有候选内容时提交完成申请仍是「没有候选交付物内容」。
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, downstreamID),
+		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, downstreamID),
+		api.SubmitCompletionRequest{Note: "只有过程文件"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	// 预签名下载走任务文件自己的入口（与交付物文件各自一套 id，互不通用）。
+	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/task-files/%d/download-url", base, created.Id, processFile.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if decodeBody[api.DownloadUrlResponse](t, resp).Url == "" {
+		t.Fatal("任务文件应可取得预签名下载地址")
+	}
+	// 归档列表层可见（AC-17「过程文件」；F-08 的「文件类型」筛选维由它支撑）。
+	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/artifacts", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	var archivedFiles []api.TaskFile
+	for _, o := range decodeBody[[]api.ArtifactObjective](t, resp) {
+		for _, k := range o.Krs {
+			for _, task := range k.Tasks {
+				if task.TaskId == downstreamID && task.Files != nil {
+					archivedFiles = *task.Files
+				}
+			}
+		}
+	}
+	if len(archivedFiles) != 2 {
+		t.Fatalf("归档视角应带任务文件: %+v", archivedFiles)
+	}
+
 	// AC-18：普通成员不能建包；管理员勾选当前成果生成
 	pkgURL := fmt.Sprintf("%s/projects/%d/packages", base, created.Id)
 	resp = doJSON(t, bob, http.MethodPost, pkgURL, api.CreatePackageRequest{Name: "联调成果", DeliverableIds: []int64{dA}})
 	wantStatus(t, resp, http.StatusForbidden)
 	resp.Body.Close()
-	resp = doJSON(t, alice, http.MethodPost, pkgURL, api.CreatePackageRequest{Name: "联调成果", DeliverableIds: []int64{dA}})
+	resp = doJSON(t, alice, http.MethodPost, pkgURL, api.CreatePackageRequest{
+		Name: "联调成果", DeliverableIds: []int64{dA}, TaskFileIds: &[]int64{processFile.Id},
+	})
 	wantStatus(t, resp, http.StatusCreated)
 	pkg := decodeBody[api.ArtifactPackage](t, resp)
-	if len(pkg.Items) != 1 || pkg.Items[0].FileName == nil || *pkg.Items[0].FileName != "验收方案V1.docx" {
+	if len(pkg.Items) != 2 || pkg.Items[0].FileName == nil || *pkg.Items[0].FileName != "验收方案V1.docx" {
 		t.Fatalf("成果包目录异常: %+v", pkg)
+	}
+	// AC-18：目录同时含当前成果与必要过程文件，两类目录项各自可辨。
+	fileItem := pkg.Items[1]
+	if fileItem.TaskFileId == nil || *fileItem.TaskFileId != processFile.Id || fileItem.DeliverableId != nil {
+		t.Fatalf("过程文件目录项异常: %+v", fileItem)
+	}
+	if fileItem.FileKind == nil || *fileItem.FileKind != api.Process || fileItem.DeliverableName != "联调记录.md" {
+		t.Fatalf("过程文件目录项字段异常: %+v", fileItem)
 	}
 
 	// 整包下载（zip）。对象不可读时整体失败：以前会把错误文本塞进包里再回 200（E1）。
@@ -3507,6 +3582,19 @@ func TestArtifactsAndPackages(t *testing.T) {
 		if !bytes.Contains(body, []byte(".docx")) {
 			t.Fatalf("zip 未包含当前内容条目")
 		}
+	}
+	if !bytes.Contains(body, []byte("联调记录.md")) {
+		t.Fatalf("zip 未包含选进包的过程文件")
+	}
+
+	// 删除任务文件：不进审批，直接生效（外部材料同理）。
+	resp = doJSON(t, bob, http.MethodDelete, fmt.Sprintf("%s/%d/files/%d", tasksURL, downstreamID, externalFile.Id), nil)
+	wantStatus(t, resp, http.StatusNoContent)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, downstreamID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if left := *decodeBody[api.TaskDetail](t, resp).Files; len(left) != 1 || left[0].Id != processFile.Id {
+		t.Fatalf("删除后应只剩过程文件: %+v", left)
 	}
 }
 

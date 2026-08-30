@@ -11,8 +11,10 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"synergy/server/internal/domain"
 	"synergy/server/internal/store"
@@ -114,6 +116,20 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 	for _, f := range files {
 		filesByDeliverable[f.DeliverableID] = append(filesByDeliverable[f.DeliverableID], f)
 	}
+	// 过程文件与重要外部材料（§7.7）：归档按「文件类型」维筛选需要它们在列表层可见。
+	taskFileRows, err := s.q.ListTaskFilesByProject(ctx, projectId)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	taskFilesByTask := map[int64][]TaskFile{}
+	for _, f := range taskFileRows {
+		taskFilesByTask[f.TaskID] = append(taskFilesByTask[f.TaskID], toTaskFile(store.TaskFile{
+			ID: f.ID, TaskID: f.TaskID, Kind: f.Kind, State: f.State, FileName: f.FileName,
+			FileType: f.FileType, FileSize: f.FileSize, ObjectKey: f.ObjectKey, Note: f.Note,
+			UploadedBy: f.UploadedBy, UploadedAt: f.UploadedAt,
+		}, f.UploadedByName))
+	}
 	type taskAgg struct {
 		task  ArtifactTask
 		krID  int64
@@ -136,6 +152,7 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 					StatusLabel:   domain.StatusLabel(d.TaskStatus, krOwnerNameByTask[d.TaskID], reviewerNamesByTask[d.TaskID]),
 					ReviewCount:   countByTask[d.TaskID],
 					Deliverables:  []Deliverable{},
+					Files:         taskFilesOf(taskFilesByTask, d.TaskID),
 				},
 				krID:  d.KeyResultID,
 				objID: d.ObjectiveID,
@@ -159,6 +176,38 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 		}
 		fillContentState(&item, pendingReviewByTask[d.TaskID])
 		agg.task.Deliverables = append(agg.task.Deliverables, item)
+	}
+	// 只有过程文件／外部材料、还没有交付物项的任务同样进归档（§7.7 四类文件都在这里看，
+	// 「文件类型」筛选维否则会漏掉它们）。
+	objectiveByKr := make(map[int64]int64, len(krs))
+	for _, k := range krs {
+		objectiveByKr[k.ID] = k.ObjectiveID
+	}
+	for _, f := range taskFileRows {
+		if _, ok := taskByID[f.TaskID]; ok {
+			continue
+		}
+		facts, ok := taskFactsByID[f.TaskID]
+		if !ok {
+			continue
+		}
+		taskByID[f.TaskID] = &taskAgg{
+			task: ArtifactTask{
+				TaskId:        f.TaskID,
+				Code:          domain.TaskCode(int(facts.ObjectiveCodeSeq), int(facts.KrCodeSeq), int(facts.CodeSeq)),
+				Name:          facts.Name,
+				OwnerName:     facts.OwnerName,
+				ReceiverLabel: receiverScopeSummary(facts.ReceiverScope, receiverNamesByTask[f.TaskID]),
+				Status:        TaskStatus(facts.Status),
+				StatusLabel:   domain.StatusLabel(facts.Status, krOwnerNameByTask[f.TaskID], reviewerNamesByTask[f.TaskID]),
+				ReviewCount:   countByTask[f.TaskID],
+				Deliverables:  []Deliverable{},
+				Files:         taskFilesOf(taskFilesByTask, f.TaskID),
+			},
+			krID:  facts.KeyResultID,
+			objID: objectiveByKr[facts.KeyResultID],
+		}
+		order = append(order, f.TaskID)
 	}
 	// 组装 O → KR → 任务。
 	resp := []ArtifactObjective{}
@@ -246,9 +295,25 @@ func (s *Server) CreatePackage(w http.ResponseWriter, r *http.Request, projectId
 			hasCurrent[f.DeliverableID] = true
 		}
 	}
+	// 过程文件与重要外部材料也可按需进包（§7.7 边界表第三列）。
+	taskFileIDs := []int64{}
+	if req.TaskFileIds != nil {
+		taskFileIDs = *req.TaskFileIds
+	}
+	projectFiles, err := s.q.ListTaskFilesByProject(r.Context(), projectId)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	fileInProject := map[int64]bool{}
+	for _, f := range projectFiles {
+		fileInProject[f.ID] = true
+	}
 	name := strings.TrimSpace(req.Name)
-	if err := domain.ValidatePackage(name, req.DeliverableIds, func(id int64) bool {
+	if err := domain.ValidatePackage(name, req.DeliverableIds, taskFileIDs, func(id int64) bool {
 		return inProject[id] && hasCurrent[id]
+	}, func(id int64) bool {
+		return fileInProject[id]
 	}); err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_package", Message: err.Error()})
 		return
@@ -266,7 +331,17 @@ func (s *Server) CreatePackage(w http.ResponseWriter, r *http.Request, projectId
 		return
 	}
 	for _, id := range req.DeliverableIds {
-		if err := qtx.CreatePackageItem(r.Context(), store.CreatePackageItemParams{PackageID: pkg.ID, DeliverableID: id}); err != nil {
+		if err := qtx.CreatePackageItem(r.Context(), store.CreatePackageItemParams{
+			PackageID: pkg.ID, DeliverableID: pgtype.Int8{Int64: id, Valid: true},
+		}); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+	}
+	for _, id := range taskFileIDs {
+		if err := qtx.CreatePackageTaskFileItem(r.Context(), store.CreatePackageTaskFileItemParams{
+			PackageID: pkg.ID, TaskFileID: pgtype.Int8{Int64: id, Valid: true},
+		}); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
@@ -308,25 +383,29 @@ func (s *Server) DownloadPackage(w http.ResponseWriter, r *http.Request, project
 		writeInternalError(w, r, err)
 		return
 	}
+	resolved := make([]resolvedPackageItem, 0, len(items))
+	for _, row := range items {
+		resolved = append(resolved, resolvePackageItem(row))
+	}
 	// 先把全部对象取出来：响应头一旦写出就无法再改状态码，缺文件时不能伪装成功（E1）。
-	objects := make(map[int64]io.ReadCloser, len(items))
+	objects := make(map[int64]io.ReadCloser, len(resolved))
 	defer func() {
 		for _, obj := range objects {
 			_ = obj.Close()
 		}
 	}()
 	var missing []string
-	for _, item := range items {
-		if !item.FileID.Valid || item.ObjectKey.String == "" {
+	for _, item := range resolved {
+		if item.FileID == nil || item.ObjectKey == "" {
 			continue
 		}
-		obj, err := s.files.Get(r.Context(), item.ObjectKey.String)
+		obj, err := s.files.Get(r.Context(), item.ObjectKey)
 		if err != nil {
-			log.Printf("[package] request_id=%s 取对象失败 key=%s: %v", requestIDFrom(r.Context()), item.ObjectKey.String, err)
-			missing = append(missing, fmt.Sprintf("%s / %s", item.TaskName, item.DeliverableName))
+			log.Printf("[package] request_id=%s 取对象失败 key=%s: %v", requestIDFrom(r.Context()), item.ObjectKey, err)
+			missing = append(missing, fmt.Sprintf("%s / %s", item.TaskName, item.Name))
 			continue
 		}
-		objects[item.FileID.Int64] = obj
+		objects[*item.FileID] = obj
 	}
 	if len(missing) > 0 {
 		writeJSON(w, http.StatusBadGateway, Error{
@@ -342,21 +421,27 @@ func (s *Server) DownloadPackage(w http.ResponseWriter, r *http.Request, project
 	defer func() { _ = zw.Close() }()
 	// 来源清单随包附带。
 	manifest, _ := zw.Create("成果包目录.txt")
-	for _, item := range items {
-		line := fmt.Sprintf("%s / %s", item.TaskName, item.DeliverableName)
-		if item.FileID.Valid {
-			line += " → " + item.FileName.String
+	for _, item := range resolved {
+		line := fmt.Sprintf("%s / %s", item.TaskName, item.Name)
+		if item.FileKind != "" {
+			line += fmt.Sprintf("（%s）", domain.TaskFileKindLabel(item.FileKind))
+		}
+		if item.FileID != nil {
+			line += " → " + item.FileName
 		} else {
 			line += " →（暂无已生效当前内容）"
 		}
 		_, _ = io.WriteString(manifest, line+"\n")
 	}
-	for _, item := range items {
-		obj, ok := objects[item.FileID.Int64]
+	for _, item := range resolved {
+		if item.FileID == nil {
+			continue
+		}
+		obj, ok := objects[*item.FileID]
 		if !ok {
 			continue
 		}
-		entry, err := zw.Create(fmt.Sprintf("%s/%s", sanitizeObjectName(item.TaskName), sanitizeObjectName(item.FileName.String)))
+		entry, err := zw.Create(fmt.Sprintf("%s/%s", sanitizeObjectName(item.TaskName), sanitizeObjectName(item.FileName)))
 		if err != nil {
 			log.Printf("[package] request_id=%s 写入包内条目失败: %v", requestIDFrom(r.Context()), err)
 			continue
@@ -365,6 +450,54 @@ func (s *Server) DownloadPackage(w http.ResponseWriter, r *http.Request, project
 			log.Printf("[package] request_id=%s 拷贝对象失败: %v", requestIDFrom(r.Context()), err)
 		}
 	}
+}
+
+// resolvedPackageItem 成果包目录项归一后的事实：交付物项解析到当前内容，任务文件直接就是自己。
+// 两种引用在下载与列表两处都要用同一份口径，归一在一处做（§7.7、AC-18）。
+type resolvedPackageItem struct {
+	DeliverableID *int64
+	TaskFileID    *int64
+	FileKind      string // 任务文件才有：process／external
+	Name          string // 交付物项名称，或任务文件的文件名
+	TaskName      string
+	FileID        *int64 // 无已生效当前内容时为空
+	FileName      string
+	ObjectKey     string
+	EffectiveAt   *time.Time
+}
+
+func resolvePackageItem(row store.ListPackageItemsRow) resolvedPackageItem {
+	out := resolvedPackageItem{
+		Name:     row.DeliverableName.String,
+		TaskName: row.DeliverableTaskName.String,
+	}
+	if row.DeliverableID.Valid {
+		id := row.DeliverableID.Int64
+		out.DeliverableID = &id
+		if row.CurrentFileID.Valid {
+			fid := row.CurrentFileID.Int64
+			out.FileID = &fid
+			out.FileName = row.CurrentFileName.String
+			out.ObjectKey = row.CurrentObjectKey.String
+		}
+		if row.EffectiveAt.Valid {
+			t := row.EffectiveAt.Time
+			out.EffectiveAt = &t
+		}
+		return out
+	}
+	// 任务文件：过程文件与外部材料没有版本概念，条目本身就是内容。
+	if row.TaskFileID.Valid {
+		id := row.TaskFileID.Int64
+		out.TaskFileID = &id
+		out.FileID = &id
+		out.FileKind = row.FileKind.String
+		out.Name = row.TaskFileName.String
+		out.FileName = row.TaskFileName.String
+		out.ObjectKey = row.TaskFileObjectKey.String
+		out.TaskName = row.TaskFileTaskName.String
+	}
+	return out
 }
 
 func (s *Server) packageList(ctx context.Context, projectID int64) ([]ArtifactPackage, error) {
@@ -379,18 +512,22 @@ func (s *Server) packageList(ctx context.Context, projectID int64) ([]ArtifactPa
 			return nil, err
 		}
 		views := make([]PackageItem, 0, len(items))
-		for _, item := range items {
+		for _, row := range items {
+			item := resolvePackageItem(row)
 			v := PackageItem{
 				DeliverableId:   item.DeliverableID,
-				DeliverableName: item.DeliverableName,
+				TaskFileId:      item.TaskFileID,
+				DeliverableName: item.Name,
 				TaskName:        item.TaskName,
 			}
-			if item.FileID.Valid {
-				v.FileId = &item.FileID.Int64
-				v.FileName = fromPgText(item.FileName)
-				if item.EffectiveAt.Valid {
-					v.EffectiveAt = &item.EffectiveAt.Time
-				}
+			if item.FileKind != "" {
+				kind := TaskFileKind(item.FileKind)
+				v.FileKind = &kind
+			}
+			if item.FileID != nil {
+				v.FileId = item.FileID
+				v.FileName = optString(item.FileName)
+				v.EffectiveAt = item.EffectiveAt
 			}
 			views = append(views, v)
 		}
@@ -403,4 +540,13 @@ func (s *Server) packageList(ctx context.Context, projectID int64) ([]ArtifactPa
 		})
 	}
 	return out, nil
+}
+
+// taskFilesOf 取任务下的过程文件与外部材料；没有时给空数组，前端不必区分 null。
+func taskFilesOf(byTask map[int64][]TaskFile, taskID int64) *[]TaskFile {
+	files := byTask[taskID]
+	if files == nil {
+		files = []TaskFile{}
+	}
+	return &files
 }

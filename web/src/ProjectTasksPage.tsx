@@ -35,6 +35,7 @@ type TaskInvite = components["schemas"]["TaskInvite"];
 type TaskDetail = components["schemas"]["TaskDetail"];
 type EdgeType = components["schemas"]["EdgeType"];
 type TaskRelation = components["schemas"]["TaskRelation"];
+type TaskFileKind = components["schemas"]["TaskFileKind"];
 type MemberRole = components["schemas"]["MemberRole"];
 
 // 风险等级词表（与 OKR、总览、图谱、报告各页一致）；卡点类型名一律消费 API 的 kindLabel。
@@ -1604,6 +1605,11 @@ function TaskDrawer({
   const [uploadingId, setUploadingId] = useState<number | null>(null);
   const [candidateFor, setCandidateFor] = useState<{ id: number; name: string } | null>(null);
   const [candidateFile, setCandidateFile] = useState<File | null>(null);
+  // 过程文件与重要外部材料（§7.7）：与候选内容同一套两阶段提交，但不进审批、不影响就绪。
+  const [taskFileKind, setTaskFileKind] = useState<TaskFileKind | null>(null);
+  const [taskFileNote, setTaskFileNote] = useState("");
+  const [taskFileValue, setTaskFileValue] = useState<File | null>(null);
+  const [taskFileBusy, setTaskFileBusy] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
 
   // 换一个任务时动态回到默认的最近 5 条（刷新同一任务不收起）。
@@ -1636,6 +1642,69 @@ function TaskDrawer({
     } else {
       message.error(res.error?.message ?? "获取下载地址失败");
     }
+  };
+
+  // 上传过程文件／重要外部材料：登记 → 直传 → 确认，三步都成才算数（与候选内容同口径）。
+  const closeTaskFile = () => {
+    setTaskFileKind(null);
+    setTaskFileNote("");
+    setTaskFileValue(null);
+  };
+
+  const uploadTaskFile = async () => {
+    if (!task || !taskFileKind || !taskFileValue) return;
+    const file = taskFileValue;
+    setTaskFileBusy(true);
+    const res = await client.POST("/projects/{projectId}/tasks/{taskId}/files", {
+      params: { path: { projectId, taskId: task.id } },
+      body: {
+        kind: taskFileKind,
+        fileName: file.name,
+        fileType: file.name.split(".").pop() ?? "",
+        fileSize: file.size,
+        note: taskFileNote.trim(),
+      },
+    });
+    if (!res.data) {
+      setTaskFileBusy(false);
+      message.error(res.error?.message ?? "登记失败");
+      return;
+    }
+    try {
+      const put = await fetch(res.data.uploadUrl, { method: "PUT", body: file });
+      if (!put.ok) throw new Error(`HTTP ${put.status}`);
+      const commit = await client.POST("/projects/{projectId}/tasks/{taskId}/files/{fileId}/commit", {
+        params: { path: { projectId, taskId: task.id, fileId: res.data.file.id } },
+      });
+      if (!commit.data) throw new Error(commit.error?.message ?? "确认失败");
+      message.success(`${commit.data.kindLabel}已上传；它不进入完成审批，也不作为下游正式输入`);
+      closeTaskFile();
+    } catch {
+      message.error("文件上传失败，请确认文件服务可用后重试");
+    }
+    setTaskFileBusy(false);
+    setRefreshTick((n) => n + 1);
+  };
+
+  const removeTaskFile = async (fileId: number) => {
+    if (!task) return;
+    const res = await client.DELETE("/projects/{projectId}/tasks/{taskId}/files/{fileId}", {
+      params: { path: { projectId, taskId: task.id, fileId } },
+    });
+    if (res.response.status === 204) {
+      message.success("已删除");
+      setRefreshTick((n) => n + 1);
+    } else {
+      message.error(res.error?.message ?? "删除失败");
+    }
+  };
+
+  const openTaskFile = async (fileId: number) => {
+    const res = await client.GET("/projects/{projectId}/task-files/{fileId}/download-url", {
+      params: { path: { projectId, fileId } },
+    });
+    if (res.data) window.open(res.data.url, "_blank");
+    else message.error(res.error?.message ?? "获取下载地址失败");
   };
 
   const addDeliverable = async () => {
@@ -1736,6 +1805,7 @@ function TaskDrawer({
     (d) => d.contentState === "reviewing" || d.contentState === "updating",
   ).length;
   const pendingSubmitCount = deliverables.filter((d) => d.contentState === "pending_submit").length;
+  const taskFiles = detail?.files ?? [];
   // 未决审批计数由后端派生（F1），前端不再把三类审批单各自过滤后相加。
   const pendingReviews = detail?.task.pendingReviewCount ?? 0;
 
@@ -2069,6 +2139,60 @@ function TaskDrawer({
               />
               <Button size="small" onClick={addDeliverable} disabled={!newDeliverableName.trim()}>
                 ＋ 新增交付物项
+              </Button>
+            </div>
+          )}
+        </section>
+      )}
+      {/* 过程文件与重要外部材料（§7.7 文件对象边界表）：与交付物并列展示但边界不同——
+          不进入完成审批、不作为下游正式输入，可按需选进成果包。 */}
+      {(taskFiles.length > 0 || task.canManageDeliverables) && (
+        <section className="drawer-section" data-focus="task-files">
+          <h3>
+            过程文件与外部材料 <span className="section-count">{taskFiles.length} 项</span>
+          </h3>
+          <div className="notice" style={{ marginBottom: 10 }}>
+            这两类文件不进入完成审批，也不作为下游任务的正式输入；可按需选进成果包。
+          </div>
+          {taskFiles.length === 0 && <div className="empty compact-empty">尚无过程文件与外部材料</div>}
+          {taskFiles.map((f) => (
+            <article key={f.id} className="fact-card">
+              <div style={{ minWidth: 0 }}>
+                <b>{f.kindLabel}</b>
+                <span className="file-link" onClick={() => openTaskFile(f.id)}>
+                  {f.fileName}
+                </span>
+                <div className="muted" style={{ fontSize: 12 }}>
+                  {fileTypeLabel(f.fileName)}
+                  {f.fileSize ? ` · ${formatFileSize(f.fileSize)}` : ""}
+                  {f.uploadedByName ? ` · ${f.uploadedByName}` : ""}
+                  {f.uploadedAt ? ` · ${fmtTime(f.uploadedAt)}` : ""}
+                </div>
+                {f.note && (
+                  <div className="muted" style={{ fontSize: 12 }}>
+                    {f.note}
+                  </div>
+                )}
+              </div>
+              <div className="fact-card-actions">
+                <Button size="small" onClick={() => openTaskFile(f.id)}>
+                  下载
+                </Button>
+                {task.canManageDeliverables && (
+                  <Button size="small" onClick={() => removeTaskFile(f.id)}>
+                    删除
+                  </Button>
+                )}
+              </div>
+            </article>
+          ))}
+          {task.canManageDeliverables && (
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <Button size="small" onClick={() => setTaskFileKind("process")}>
+                ＋ 上传过程文件
+              </Button>
+              <Button size="small" onClick={() => setTaskFileKind("external")}>
+                ＋ 录入外部材料
               </Button>
             </div>
           )}
@@ -2573,6 +2697,31 @@ function TaskDrawer({
         <FileUploadField value={candidateFile} onChange={setCandidateFile} />
         <div className="notice" style={{ marginTop: 8 }}>
           文件在点击「确认上传」后才登记为候选内容；关闭窗口不保留本次选择。候选内容随完成申请整体提交后进入审核。
+        </div>
+      </Modal>
+      <Modal
+        title={taskFileKind === "external" ? "录入重要外部材料" : "上传过程文件"}
+        open={!!taskFileKind}
+        okText="确认上传"
+        cancelText="取消"
+        confirmLoading={taskFileBusy}
+        okButtonProps={{ disabled: !taskFileValue }}
+        onCancel={closeTaskFile}
+        onOk={uploadTaskFile}
+      >
+        <FileUploadField value={taskFileValue} onChange={setTaskFileValue} />
+        <Input.TextArea
+          rows={2}
+          maxLength={500}
+          style={{ marginTop: 8 }}
+          placeholder="背景说明（选填）"
+          value={taskFileNote}
+          onChange={(e) => setTaskFileNote(e.target.value)}
+        />
+        <div className="notice" style={{ marginTop: 8 }}>
+          {taskFileKind === "external"
+            ? "外部材料由内部协调人代为录入：可作为输入证据，但不会把任何输入置为就绪，也不进入完成审批。"
+            : "过程文件不进入完成审批，也不作为下游任务的正式输入；可按需选进成果包。"}
         </div>
       </Modal>
     </Drawer>

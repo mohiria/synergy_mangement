@@ -51,8 +51,8 @@ func NewHandler(db *pgxpool.Pool, baseURL string, files filestore.Store) http.Ha
 // NewHandlerFromServer 由既有 Server 组装路由；main 需要同一个 Server 同时跑卡点 ticker。
 func NewHandlerFromServer(s *Server, baseURL string) http.Handler {
 	return HandlerWithOptions(s, StdHTTPServerOptions{
-		BaseURL:     baseURL,
-		BaseRouter:  http.NewServeMux(),
+		BaseURL:    baseURL,
+		BaseRouter: http.NewServeMux(),
 		// 切片里靠前的先包住 handler，也就是越靠前越内层：写路径装饰器要放最前，
 		// 才能在会话中间件之后运行、拿得到当前用户。
 		Middlewares: []MiddlewareFunc{s.writePathMiddleware, requestIDMiddleware, s.sessionMiddleware, requestValidator()},
@@ -804,15 +804,15 @@ func (s *Server) okrList(ctx context.Context, projectID int64, actor domain.Acto
 			RiskLevel:      RiskLevel(objRisk.Level),
 			RiskLevelLabel: domain.RiskLevelLabel(objRisk.Level),
 			RiskNote:       optString(objRisk.Note),
-			Id:          o.ID,
-			ProjectId:   o.ProjectID,
-			Code:        domain.ObjectiveCode(int(o.CodeSeq)),
-			Title:       o.Title,
-			Description: optString(o.Description),
-			SortOrder:   int(o.SortOrder),
-			KeyResults:  kr,
-			CanEdit:     boolPtr(domain.CanEditObjective(actor)),
-			CanDelete:   boolPtr(domain.CanDeleteObjective(actor, krCountByObjective[o.ID])),
+			Id:             o.ID,
+			ProjectId:      o.ProjectID,
+			Code:           domain.ObjectiveCode(int(o.CodeSeq)),
+			Title:          o.Title,
+			Description:    optString(o.Description),
+			SortOrder:      int(o.SortOrder),
+			KeyResults:     kr,
+			CanEdit:        boolPtr(domain.CanEditObjective(actor)),
+			CanDelete:      boolPtr(domain.CanDeleteObjective(actor, krCountByObjective[o.ID])),
 		})
 	}
 	return resp, nil

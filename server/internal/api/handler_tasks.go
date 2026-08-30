@@ -496,6 +496,12 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		writeInternalError(w, r, err)
 		return
 	}
+	// 过程文件与重要外部材料（§7.7）：与交付物并列展示，但不进审批、不作正式输入。
+	taskFiles, err := s.taskFileList(r.Context(), taskId)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
 	discussions, err := s.discussionList(r.Context(), taskId)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -702,6 +708,7 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		PoolReviews:       prs,
 		FieldChanges:      fcs,
 		Deliverables:      deliverables,
+		Files:             &taskFiles,
 		Discussions:       discussions,
 		CompletionReviews: completions,
 		Reviewers:         reviewerViews,

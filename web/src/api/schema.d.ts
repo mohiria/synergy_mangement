@@ -533,6 +533,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/tasks/{taskId}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 登记过程文件或重要外部材料并取得预签名上传地址（§7.7；两阶段提交第一步）。 这两类文件不进入完成审批，也不作为下游正式输入，只可按需选进成果包 */
+        post: operations["uploadTaskFile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/tasks/{taskId}/files/{fileId}/commit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+                fileId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 确认过程文件／外部材料已写入对象存储（两阶段提交第二步；服务端校验对象存在后才可见） */
+        post: operations["commitTaskFile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/tasks/{taskId}/files/{fileId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+                fileId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除过程文件或重要外部材料（这两类文件不进审批，删除直接生效并留痕） */
+        delete: operations["deleteTaskFile"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/task-files/{fileId}/download-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                fileId: number;
+            };
+            cookie?: never;
+        };
+        /** 取得过程文件／外部材料的预签名下载地址（全体项目成员可查看、下载，§3.3） */
+        get: operations["getTaskFileDownloadUrl"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/files/{fileId}/download-url": {
         parameters: {
             query?: never;
@@ -1564,6 +1646,8 @@ export interface components {
             fieldChanges: components["schemas"]["FieldChange"][];
             /** @description 交付物项列表（含当前内容与候选审核提示，AC-32／AC-33） */
             deliverables: components["schemas"]["Deliverable"][];
+            /** @description 任务下的过程文件与重要外部材料（§7.7）：不进入完成审批、不作为下游正式输入， 可按需选进成果包；未配置时为空数组 */
+            files?: components["schemas"]["TaskFile"][];
             /** @description 任务讨论意见，按时间正序（AC-35／AC-36） */
             discussions: components["schemas"]["Discussion"][];
             /** @description 完成申请记录，最新在前（AC-13／AC-15／AC-38～40） */
@@ -1775,6 +1859,48 @@ export interface components {
         };
         UploadCandidateResponse: {
             file: components["schemas"]["DeliverableFile"];
+            /** @description MinIO 预签名 PUT 地址，客户端直接上传文件内容 */
+            uploadUrl: string;
+        };
+        /**
+         * @description 任务文件类型（词汇表「过程文件」「重要外部材料」；§7.7 文件对象边界表）： process＝过程文件，任务执行过程中产生、不作为正式成果提交审核； external＝重要外部材料，项目外部提供、经内部协调人代为录入。 两者都不进入完成审批、不作为下游任务的正式输入（外部材料可作输入证据， 但不把输入置为就绪），可以按需选进成果包
+         * @enum {string}
+         */
+        TaskFileKind: "process" | "external";
+        /** @description 任务下的过程文件或重要外部材料（§7.7；与交付物同走两阶段提交，未确认写入的记录不返回） */
+        TaskFile: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            taskId: number;
+            kind: components["schemas"]["TaskFileKind"];
+            /** @description 类型显示文案（派生字段） */
+            kindLabel: string;
+            fileName: string;
+            fileType?: string;
+            /** Format: int64 */
+            fileSize?: number;
+            /** @description 背景说明，选填 */
+            note?: string;
+            /** @description 上传人姓名（派生字段） */
+            uploadedByName?: string;
+            /** Format: date-time */
+            uploadedAt: string;
+        };
+        UploadTaskFileRequest: {
+            kind: components["schemas"]["TaskFileKind"];
+            fileName: string;
+            fileType?: string;
+            /**
+             * Format: int64
+             * @description 客户端自报大小，仅作提示；确认时以对象存储的真实大小为准
+             */
+            fileSize?: number;
+            /** @description 背景说明，选填 */
+            note?: string;
+        };
+        UploadTaskFileResponse: {
+            file: components["schemas"]["TaskFile"];
             /** @description MinIO 预签名 PUT 地址，客户端直接上传文件内容 */
             uploadUrl: string;
         };
@@ -2028,6 +2154,8 @@ export interface components {
             /** @description 完成审核记录条数（详情在任务抽屉审核 Tab） */
             reviewCount: number;
             deliverables: components["schemas"]["Deliverable"][];
+            /** @description 本任务下的过程文件与重要外部材料（§7.7；归档按「文件类型」维筛选用） */
+            files?: components["schemas"]["TaskFile"][];
         };
         /** @description 归档视角的 KR 分组（AC-17）：成果按 KR 归集，组头给出 KR 负责人与交付物数量 */
         ArtifactKr: {
@@ -2050,10 +2178,21 @@ export interface components {
             title: string;
             krs: components["schemas"]["ArtifactKr"][];
         };
-        /** @description 成果包目录项：引用交付物项并解析为当前内容（不复制旧文件，AC-18） */
+        /** @description 成果包目录项（AC-18）：二选一引用——交付物项（下载时解析为当前内容，不复制旧文件）， 或任务文件（过程文件／重要外部材料，§7.7「可以按需选择」） */
         PackageItem: {
-            /** Format: int64 */
-            deliverableId: number;
+            /**
+             * Format: int64
+             * @description 引用交付物项时给出
+             */
+            deliverableId?: number;
+            /**
+             * Format: int64
+             * @description 引用过程文件或重要外部材料时给出
+             */
+            taskFileId?: number;
+            /** @description 任务文件目录项的类型；交付物目录项不返回 */
+            fileKind?: components["schemas"]["TaskFileKind"];
+            /** @description 交付物项名称；任务文件目录项取文件名 */
             deliverableName: string;
             taskName: string;
             /**
@@ -2075,10 +2214,13 @@ export interface components {
             createdAt: string;
             items: components["schemas"]["PackageItem"][];
         };
+        /** @description 两个勾选数组至少合计一项（AC-18：成果包可含当前成果与必要过程文件） */
         CreatePackageRequest: {
             name: string;
             /** @description 勾选的当前成果（须有已生效当前内容的交付物项） */
             deliverableIds: number[];
+            /** @description 勾选的过程文件或重要外部材料（§7.7「可以按需选择」；选填） */
+            taskFileIds?: number[];
         };
         /** @description 我的工作事项（词汇表「我的工作事项」）；卡片派生事实，动作在任务详情抽屉完成 */
         WorkItem: {
@@ -3545,6 +3687,118 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["ValidationError"];
+        };
+    };
+    uploadTaskFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadTaskFileRequest"];
+            };
+        };
+        responses: {
+            /** @description 已登记，客户端用 uploadUrl 直传文件 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadTaskFileResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    commitTaskFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+                fileId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已确认 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskFile"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    deleteTaskFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+                fileId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getTaskFileDownloadUrl: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                fileId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 预签名地址 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DownloadUrlResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
         };
     };
     getFileDownloadUrl: {

@@ -79,11 +79,28 @@ ON CONFLICT DO NOTHING
 
 type CreatePackageItemParams struct {
 	PackageID     int64
-	DeliverableID int64
+	DeliverableID pgtype.Int8
 }
 
 func (q *Queries) CreatePackageItem(ctx context.Context, arg CreatePackageItemParams) error {
 	_, err := q.db.Exec(ctx, createPackageItem, arg.PackageID, arg.DeliverableID)
+	return err
+}
+
+const createPackageTaskFileItem = `-- name: CreatePackageTaskFileItem :exec
+INSERT INTO artifact_package_items (package_id, task_file_id)
+VALUES ($1, $2)
+ON CONFLICT DO NOTHING
+`
+
+type CreatePackageTaskFileItemParams struct {
+	PackageID  int64
+	TaskFileID pgtype.Int8
+}
+
+// 成果包也可以收过程文件与重要外部材料（§7.7「可以按需选择」）。
+func (q *Queries) CreatePackageTaskFileItem(ctx context.Context, arg CreatePackageTaskFileItemParams) error {
+	_, err := q.db.Exec(ctx, createPackageTaskFileItem, arg.PackageID, arg.TaskFileID)
 	return err
 }
 
@@ -222,27 +239,40 @@ func (q *Queries) ListDeliverablesByProject(ctx context.Context, projectID int64
 }
 
 const listPackageItems = `-- name: ListPackageItems :many
-SELECT i.deliverable_id, d.name AS deliverable_name, t.name AS task_name,
-    cf.id AS file_id, cf.file_name, cf.object_key, cf.effective_at
+SELECT i.id, i.deliverable_id, i.task_file_id,
+    d.name AS deliverable_name, dt.name AS deliverable_task_name,
+    cf.id AS current_file_id, cf.file_name AS current_file_name,
+    cf.object_key AS current_object_key, cf.effective_at,
+    tf.kind AS file_kind, tf.file_name AS task_file_name,
+    tf.object_key AS task_file_object_key, ft.name AS task_file_task_name
 FROM artifact_package_items i
-JOIN deliverables d ON d.id = i.deliverable_id
-JOIN tasks t ON t.id = d.task_id
+LEFT JOIN deliverables d ON d.id = i.deliverable_id
+LEFT JOIN tasks dt ON dt.id = d.task_id
 LEFT JOIN deliverable_files cf ON cf.deliverable_id = d.id AND cf.state = 'current'
+LEFT JOIN task_files tf ON tf.id = i.task_file_id
+LEFT JOIN tasks ft ON ft.id = tf.task_id
 WHERE i.package_id = $1
-ORDER BY i.deliverable_id
+ORDER BY i.id
 `
 
 type ListPackageItemsRow struct {
-	DeliverableID   int64
-	DeliverableName string
-	TaskName        string
-	FileID          pgtype.Int8
-	FileName        pgtype.Text
-	ObjectKey       pgtype.Text
-	EffectiveAt     pgtype.Timestamptz
+	ID                  int64
+	DeliverableID       pgtype.Int8
+	TaskFileID          pgtype.Int8
+	DeliverableName     pgtype.Text
+	DeliverableTaskName pgtype.Text
+	CurrentFileID       pgtype.Int8
+	CurrentFileName     pgtype.Text
+	CurrentObjectKey    pgtype.Text
+	EffectiveAt         pgtype.Timestamptz
+	FileKind            pgtype.Text
+	TaskFileName        pgtype.Text
+	TaskFileObjectKey   pgtype.Text
+	TaskFileTaskName    pgtype.Text
 }
 
-// 目录项解析当前内容（被覆盖后自动指向新内容；退回删除后无当前内容则 file 为空）。
+// 目录项二选一：交付物项解析当前内容（被覆盖后自动指向新内容；退回删除后无当前内容则 file 为空），
+// 或任务文件直接给出自身（过程文件与外部材料没有版本概念）。两侧字段都可能为空，由调用方合并。
 func (q *Queries) ListPackageItems(ctx context.Context, packageID int64) ([]ListPackageItemsRow, error) {
 	rows, err := q.db.Query(ctx, listPackageItems, packageID)
 	if err != nil {
@@ -253,13 +283,19 @@ func (q *Queries) ListPackageItems(ctx context.Context, packageID int64) ([]List
 	for rows.Next() {
 		var i ListPackageItemsRow
 		if err := rows.Scan(
+			&i.ID,
 			&i.DeliverableID,
+			&i.TaskFileID,
 			&i.DeliverableName,
-			&i.TaskName,
-			&i.FileID,
-			&i.FileName,
-			&i.ObjectKey,
+			&i.DeliverableTaskName,
+			&i.CurrentFileID,
+			&i.CurrentFileName,
+			&i.CurrentObjectKey,
 			&i.EffectiveAt,
+			&i.FileKind,
+			&i.TaskFileName,
+			&i.TaskFileObjectKey,
+			&i.TaskFileTaskName,
 		); err != nil {
 			return nil, err
 		}
