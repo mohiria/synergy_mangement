@@ -1054,7 +1054,7 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** 统一归档视角（AC-17）：按 O／KR／任务组织当前成果、候选状态与审批记录数 */
+        /** 统一归档视角（AC-17）：按 O／KR／任务组织当前成果、候选状态与审批记录数。 「时间」筛选在服务端裁剪（§7.7 六个筛选维度之一，沿用 #65 的服务端裁剪口径） */
         get: operations["getArtifacts"];
         put?: never;
         post?: never;
@@ -4469,7 +4469,12 @@ export interface operations {
     };
     getArtifacts: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 只返回该日期（含）之后有内容的项：交付物比对内容状态时间（contentStateAt， 有当前内容取生效时刻、否则取候选提交时刻），过程文件与外部材料比对上传时间； 两者皆无时间的项在给了时间区间后不返回 */
+                from?: string;
+                /** @description 只返回该日期（含）之前有内容的项；与 from 可单给 */
+                to?: string;
+            };
             header?: never;
             path: {
                 projectId: number;

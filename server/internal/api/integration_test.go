@@ -3571,6 +3571,36 @@ func TestArtifactsAndPackages(t *testing.T) {
 		t.Fatalf("归档视角应带任务文件: %+v", archivedFiles)
 	}
 
+	// §7.7「时间」筛选维（#86）：服务端裁剪，端点当天算在内，区间外一条不返回。
+	today := time.Now().Format("2006-01-02")
+	tomorrow := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+	countRows := func(list []api.ArtifactObjective) (deliverables, files int) {
+		for _, o := range list {
+			for _, k := range o.Krs {
+				for _, task := range k.Tasks {
+					deliverables += len(task.Deliverables)
+					if task.Files != nil {
+						files += len(*task.Files)
+					}
+				}
+			}
+		}
+		return
+	}
+	resp = doJSON(t, alice, http.MethodGet,
+		fmt.Sprintf("%s/projects/%d/artifacts?from=%s&to=%s", base, created.Id, today, today), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if d, f := countRows(decodeBody[[]api.ArtifactObjective](t, resp)); d == 0 || f != 2 {
+		t.Fatalf("今天生成的内容应落在今天的区间内: 交付物=%d 文件=%d", d, f)
+	}
+	resp = doJSON(t, alice, http.MethodGet,
+		fmt.Sprintf("%s/projects/%d/artifacts?from=%s", base, created.Id, tomorrow), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if list := decodeBody[[]api.ArtifactObjective](t, resp); len(list) != 0 {
+		d, f := countRows(list)
+		t.Fatalf("明天之后没有任何内容，应筛空: 交付物=%d 文件=%d", d, f)
+	}
+
 	// AC-18：普通成员不能建包；管理员勾选当前成果生成
 	pkgURL := fmt.Sprintf("%s/projects/%d/packages", base, created.Id)
 	resp = doJSON(t, bob, http.MethodPost, pkgURL, api.CreatePackageRequest{Name: "联调成果", DeliverableIds: []int64{dA}})

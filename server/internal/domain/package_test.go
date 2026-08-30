@@ -3,6 +3,7 @@ package domain
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 // AC-18：成果包——名称必填、勾选项非空、交付物项须有已生效当前内容；
@@ -41,5 +42,48 @@ func TestCanCreatePackage(t *testing.T) {
 	}
 	if CanCreatePackage(Actor{Role: RoleMember}) || CanCreatePackage(Actor{Role: RoleViewer}) {
 		t.Fatal("普通/只读成员只可查看下载")
+	}
+}
+
+// §7.7 统一归档的「时间」筛选维（AC-17、#86）：按日期闭区间裁剪，端点当天算在内；
+// 没有时间的项在给了区间后不返回——它无法证明自己落在区间里。
+func TestInArchiveWindow(t *testing.T) {
+	day := func(s string) time.Time {
+		v, err := time.Parse("2006-01-02", s)
+		if err != nil {
+			t.Fatalf("bad date %q: %v", s, err)
+		}
+		return v
+	}
+	at := func(s string) *time.Time {
+		v := day(s)
+		return &v
+	}
+	from, to := day("2026-09-10"), day("2026-09-20")
+	cases := []struct {
+		name string
+		at   *time.Time
+		from *time.Time
+		to   *time.Time
+		want bool
+	}{
+		{"不给区间时一律通过", at("2026-01-01"), nil, nil, true},
+		{"无时间且不给区间也通过", nil, nil, nil, true},
+		{"区间内", at("2026-09-15"), &from, &to, true},
+		{"起点当天算在内", at("2026-09-10"), &from, &to, true},
+		{"终点当天算在内", at("2026-09-20"), &from, &to, true},
+		{"终点当天的晚些时刻也算在内", func() *time.Time { v := day("2026-09-20").Add(23 * time.Hour); return &v }(), &from, &to, true},
+		{"早于起点", at("2026-09-09"), &from, &to, false},
+		{"晚于终点", at("2026-09-21"), &from, &to, false},
+		{"只给起点", at("2026-12-01"), &from, nil, true},
+		{"只给终点", at("2026-12-01"), nil, &to, false},
+		{"无时间的项在给了区间后不返回", nil, &from, nil, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := InArchiveWindow(c.at, c.from, c.to); got != c.want {
+				t.Fatalf("InArchiveWindow = %v, want %v", got, c.want)
+			}
+		})
 	}
 }

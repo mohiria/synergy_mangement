@@ -3,6 +3,7 @@ package domain
 import (
 	"errors"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -38,6 +39,27 @@ func ValidatePackage(name string, deliverableIDs, taskFileIDs []int64, hasCurren
 		}
 	}
 	return nil
+}
+
+// InArchiveWindow 判定一条归档记录是否落在「时间」筛选区间内（§7.7 六个筛选维度之一，AC-17）。
+// from／to 是日期，闭区间——终点当天整天都算在内（否则用户选到今天却看不到今天的东西）。
+// 任一端为空表示该侧不限；两端都为空时一律通过。
+// 没有时间的项（既无当前内容也无候选、或任务文件时间缺失）在给了区间后不返回：
+// 它无法证明自己落在区间里，混进结果只会让「按时间筛」失去意义。
+func InArchiveWindow(at, from, to *time.Time) bool {
+	if from == nil && to == nil {
+		return true
+	}
+	if at == nil {
+		return false
+	}
+	if from != nil && at.Before(*from) {
+		return false
+	}
+	if to != nil && !at.Before(to.AddDate(0, 0, 1)) {
+		return false
+	}
+	return true
 }
 
 // CanCreatePackage 创建成果包：项目管理员／项目负责人（§3.4；其余成员查看/下载）。

@@ -23,11 +23,21 @@ import (
 // 成果与归档、轻量成果包（AC-17、AC-18）。业务规则在 domain，handler 仅编排。
 
 // GetArtifacts 统一归档视角：按 O／KR／任务组织当前成果、候选状态与审批记录数。
-func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId int64) {
+// 「时间」维在服务端裁剪（§7.7、#86；沿用 #65 的服务端裁剪口径，不在前端过滤）。
+func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId int64, params GetArtifactsParams) {
 	if _, ok := s.fetchProject(w, r, projectId); !ok {
 		return
 	}
 	ctx := r.Context()
+	var from, to *time.Time
+	if params.From != nil {
+		v := params.From.Time
+		from = &v
+	}
+	if params.To != nil {
+		v := params.To.Time
+		to = &v
+	}
 	objectives, err := s.q.ListObjectives(ctx, projectId)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -124,6 +134,15 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 	}
 	taskFilesByTask := map[int64][]TaskFile{}
 	for _, f := range taskFileRows {
+		// 「时间」维：过程文件与外部材料比对上传时间。
+		var uploadedAt *time.Time
+		if f.UploadedAt.Valid {
+			v := f.UploadedAt.Time
+			uploadedAt = &v
+		}
+		if !domain.InArchiveWindow(uploadedAt, from, to) {
+			continue
+		}
 		taskFilesByTask[f.TaskID] = append(taskFilesByTask[f.TaskID], toTaskFile(store.TaskFile{
 			ID: f.ID, TaskID: f.TaskID, Kind: f.Kind, State: f.State, FileName: f.FileName,
 			FileType: f.FileType, FileSize: f.FileSize, ObjectKey: f.ObjectKey, Note: f.Note,
@@ -175,6 +194,10 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 			}
 		}
 		fillContentState(&item, pendingReviewByTask[d.TaskID])
+		// 「时间」维：交付物比对内容状态时间（有当前内容取生效时刻，否则取候选提交时刻）。
+		if !domain.InArchiveWindow(item.ContentStateAt, from, to) {
+			continue
+		}
 		agg.task.Deliverables = append(agg.task.Deliverables, item)
 	}
 	// 只有过程文件／外部材料、还没有交付物项的任务同样进归档（§7.7 四类文件都在这里看，
@@ -185,6 +208,9 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 	}
 	for _, f := range taskFileRows {
 		if _, ok := taskByID[f.TaskID]; ok {
+			continue
+		}
+		if len(taskFilesByTask[f.TaskID]) == 0 {
 			continue
 		}
 		facts, ok := taskFactsByID[f.TaskID]
@@ -208,6 +234,20 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 			objID: objectiveByKr[facts.KeyResultID],
 		}
 		order = append(order, f.TaskID)
+	}
+	// 时间维裁掉全部内容后，任务节点是空壳（既无交付物行也无文件行）——不再返回它，
+	// 否则「按时间筛」会筛出一堆没有任何内容的任务行。
+	if from != nil || to != nil {
+		kept := order[:0]
+		for _, id := range order {
+			agg := taskByID[id]
+			if len(agg.task.Deliverables) == 0 && (agg.task.Files == nil || len(*agg.task.Files) == 0) {
+				delete(taskByID, id)
+				continue
+			}
+			kept = append(kept, id)
+		}
+		order = kept
 	}
 	// 组装 O → KR → 任务。
 	resp := []ArtifactObjective{}

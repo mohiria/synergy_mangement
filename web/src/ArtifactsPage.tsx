@@ -11,6 +11,7 @@ import {
   message,
 } from "antd";
 import { client } from "./api/client";
+import DateRangeField, { type DateRange } from "./DateRangeField";
 import type { components } from "./api/schema";
 import Icon from "./icons";
 import ProjectShell from "./ProjectShell";
@@ -84,6 +85,8 @@ export default function ArtifactsPage({
   const [krFilter, setKrFilter] = useState<number | "all">("all");
   const [stateFilter, setStateFilter] = useState<ContentState | "all">("all");
   const [kindFilter, setKindFilter] = useState<FileKind | "all">("all");
+  // 「时间」筛选维（§7.7、#86）：服务端裁剪，改动后重新拉取，不在前端过滤。
+  const [range, setRange] = useState<DateRange>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -109,7 +112,7 @@ export default function ArtifactsPage({
     setArtifacts(artifactsRes.data ?? []);
     setPackages(packagesRes.data ?? []);
     setLoading(false);
-  }, [projectId, onLogout]);
+  }, [projectId, onLogout, range]);
 
   useEffect(() => {
     load();
@@ -360,6 +363,14 @@ export default function ArtifactsPage({
                   ...krOptions,
                 ]}
               />
+              <div style={{ width: 250 }}>
+                <DateRangeField
+                  allowEmpty
+                  value={range}
+                  onChange={setRange}
+                  aria-label="时间区间"
+                />
+              </div>
               <Select
                 style={{ width: 150 }}
                 value={kindFilter}
@@ -392,7 +403,10 @@ export default function ArtifactsPage({
             <span className="muted">当前已生效交付物与过程文件／外部材料可进入成果包</span>
           </div>
           {artifacts.length === 0 ? (
-            <div className="empty">尚无带交付物的任务</div>
+            // 时间维在服务端裁剪：筛空时返回的就是空数组，此时不能说「尚无带交付物的任务」。
+            <div className="empty">
+              {range?.[0] || range?.[1] ? "该时间区间内没有成果与文件" : "尚无带交付物的任务"}
+            </div>
           ) : (
             groups.length === 0 && (
               <div className="empty">没有符合筛选条件的交付物</div>
