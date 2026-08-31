@@ -280,6 +280,7 @@ export default function TaskDrawerHost({
     reviewId: number,
     decision: "approved" | "rejected",
     opinion?: string,
+    intermediate?: boolean,
   ) => {
     const res = await client.POST(
       "/projects/{projectId}/tasks/{taskId}/completion-reviews/{reviewId}/decision",
@@ -290,9 +291,11 @@ export default function TaskDrawerHost({
     );
     if (res.data) {
       message.success(
-        decision === "approved"
-          ? "终审通过，候选内容已覆盖当前交付物，任务完成"
-          : "已退回，候选文件删除，任务回到进行中",
+        decision === "rejected"
+          ? "已退回，候选文件删除，任务回到进行中"
+          : intermediate
+            ? "或签通过，进入待 KR 终审"
+            : "终审通过，候选内容已覆盖当前交付物，任务完成",
       );
       refresh();
     } else {
@@ -353,7 +356,8 @@ export default function TaskDrawerHost({
             setCompletionTask(t);
             setCompletionNote("");
           },
-          approveCompletion: (t, id) => decideCompletion(t, id, "approved"),
+          approveCompletion: (t, id, intermediate) =>
+            decideCompletion(t, id, "approved", undefined, intermediate),
           openCrReject: (t, id) => {
             setCrReject({ task: t, reviewId: id });
             setCrRejectOpinion("");

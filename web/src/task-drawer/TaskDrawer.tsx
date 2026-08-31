@@ -55,7 +55,7 @@ export default function TaskDrawer({
     openFcReject: (t: Task, changeId: number) => void;
     abandonFieldChange: (t: Task, changeId: number) => void;
     openSubmitCompletion: (t: Task) => void;
-    approveCompletion: (t: Task, reviewId: number) => void;
+    approveCompletion: (t: Task, reviewId: number, intermediate?: boolean) => void;
     openCrReject: (t: Task, reviewId: number) => void;
     openConfigureInput: (t: Task) => void;
     openReviewers: (t: Task) => void;
@@ -1024,7 +1024,13 @@ export default function TaskDrawer({
           <div className="empty compact-empty">暂无审核记录</div>
         )}
       {(detail?.completionReviews ?? []).map((cr) => (
-        <article key={"cr-" + cr.id} className={"audit-card " + (cr.state === "pending_final" ? "pending" : "")}>
+        <article
+          key={"cr-" + cr.id}
+          className={
+            "audit-card " +
+            (cr.state === "pending_final" || cr.state === "intermediate_review" ? "pending" : "")
+          }
+        >
           <div className="audit-card-head">
             <div>
               <b>完成申请</b>{" "}
@@ -1086,13 +1092,20 @@ export default function TaskDrawer({
               <div>{cr.opinion || "未填写意见"}</div>
             </div>
           )}
-          {cr.state === "pending_final" && cr.canDecide && (
+          {/* #116：或签（intermediate_review）与终审（pending_final）都要渲染动作行，canDecide 由后端派生 */}
+          {(cr.state === "pending_final" || cr.state === "intermediate_review") && cr.canDecide && (
             <div className="audit-actions">
               <Button size="small" danger onClick={() => actions.openCrReject(task, cr.id)}>
                 退回
               </Button>
-              <Button size="small" type="primary" onClick={() => actions.approveCompletion(task, cr.id)}>
-                通过 / 闭环
+              <Button
+                size="small"
+                type="primary"
+                onClick={() =>
+                  actions.approveCompletion(task, cr.id, cr.state === "intermediate_review")
+                }
+              >
+                {cr.state === "intermediate_review" ? "通过（进入 KR 终审）" : "通过 / 闭环"}
               </Button>
             </div>
           )}
