@@ -4,7 +4,7 @@
 
 ## 文档指针（唯一事实源，不在本文件重复）
 
-- 需求：`docs/协同管理工具_详细PRD_V4.5.md`（含 §0.3～0.5 继承修订与 §0.6 参考稿取舍说明）+ `docs/我的工作模块_详细PRD_V1.1.md`、`docs/协作关系模块_详细PRD_V1.1.md`；旧版（V4.4、V1.0）仅作历史参考
+- 需求：`docs/协同管理工具_详细PRD_V4.5.md`（含 §0.3～0.5 继承修订与 §0.6 参考稿取舍说明）+ `docs/我的工作模块_详细PRD_V1.1.md`、`docs/协作关系模块_详细PRD_V1.1.md`
 - 技术选型与依据：`docs/adr/0001-tech-stack.md`
 - 领域词汇：`docs/CONTEXT.md` —— 代码命名、API 字段用词必须与词汇表一致，含义冲突时先改词汇表再写代码
 
@@ -12,7 +12,6 @@
 
 - `docs/`：PRD、词汇表、ADR
 - `collaboration-prototype-v2/`：V4.5 UI 重设计原型（纯前端、可抛弃；是前端视觉与交互的还原基准，但不复用其代码）
-- `collaboration-prototype/`：旧 V4.4 原型，已废弃，仅作历史参考
 - `server/`：Go 后端（`cmd/`、`internal/domain/`、`internal/api/`、`internal/store/`、`migrations/`）
 - `web/`：React + TypeScript SPA（Vite + Ant Design 5）
 - `openapi.yaml`：唯一 API 契约源（spec-first，手写）
