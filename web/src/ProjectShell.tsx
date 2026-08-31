@@ -44,18 +44,17 @@ function ProjectMenu({
   );
   return (
     <div className="project-menu">
-      {projects.length > 6 && (
-        <Input
-          className="project-menu-search"
-          size="small"
-          allowClear
-          autoFocus
-          prefix={<Icon name="search" size={15} />}
-          placeholder="搜索项目"
-          value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
-        />
-      )}
+      {/* #132：搜索框常驻，任意项目数下打开即聚焦可过滤。 */}
+      <Input
+        className="project-menu-search"
+        size="small"
+        allowClear
+        autoFocus
+        prefix={<Icon name="search" size={15} />}
+        placeholder="搜索项目"
+        value={keyword}
+        onChange={(e) => setKeyword(e.target.value)}
+      />
       <div className="project-menu-list">
         {matched.map((p) => (
           <button
