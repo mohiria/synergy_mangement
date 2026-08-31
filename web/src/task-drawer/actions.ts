@@ -61,9 +61,9 @@ export async function cancelTask(projectId: number, task: Task, reason: string, 
     body: { reason },
   });
   if (res.data) {
-    // AC-57：除 KR 负责人本人负责 KR 下免审外，取消要经所属 KR 负责人审批。
+    // AC-57：除 KR 负责人本人负责 KR 下免审外，关闭要经所属 KR 负责人审批。
     message.success(
-      res.data.status === "cancelled" ? "任务已取消" : "取消申请已提交，待所属 KR 负责人审批",
+      res.data.status === "cancelled" ? "任务已关闭" : "关闭申请已提交，待所属 KR 负责人审批",
     );
     done();
   } else {

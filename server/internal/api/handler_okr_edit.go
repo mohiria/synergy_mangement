@@ -217,7 +217,7 @@ func (s *Server) UpdateKeyResult(w http.ResponseWriter, r *http.Request, project
 	s.writeKeyResult(w, r, projectId, keyResultId, actor, uid)
 }
 
-// DeleteKeyResult 删除 KR：仅项目管理员，且 KR 下没有任务（含已完成、已取消）。
+// DeleteKeyResult 删除 KR：仅项目管理员，且 KR 下没有任务（含已完成、已关闭）。
 func (s *Server) DeleteKeyResult(w http.ResponseWriter, r *http.Request, projectId int64, keyResultId int64) {
 	proj, ok := s.fetchProject(w, r, projectId)
 	if !ok {
@@ -340,7 +340,7 @@ func jsonFieldIsNull(raw []byte, field string) bool {
 	return ok && string(v) == "null"
 }
 
-// taskCountByKeyResult 每个 KR 下的任务数（含已完成与已取消，AC-65）。
+// taskCountByKeyResult 每个 KR 下的任务数（含已完成与已关闭，AC-65）。
 func (s *Server) taskCountByKeyResult(ctx context.Context, projectID int64) (map[int64]int, error) {
 	rows, err := s.q.CountTasksByKeyResultInProject(ctx, projectID)
 	if err != nil {

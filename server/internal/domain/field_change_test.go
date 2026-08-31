@@ -67,7 +67,7 @@ func TestFieldChangeRoute(t *testing.T) {
 		{"待入池审批不可修改", Actor{Role: RoleMember}, 5, facts(TaskPendingPoolReview), false, 0, ErrChangeNotAllowed},
 		{"完成审核中不可修改", Actor{Role: RoleMember}, 5, facts(TaskPendingFinalReview), false, 0, ErrChangeNotAllowed},
 		{"已完成不可修改", Actor{Role: RoleMember}, 5, facts(TaskCompleted), false, 0, ErrChangeNotAllowed},
-		{"已取消不可修改", Actor{Role: RoleAdmin}, 9, facts(TaskCancelled), false, 0, ErrChangeNotAllowed},
+		{"已关闭不可修改", Actor{Role: RoleAdmin}, 9, facts(TaskCancelled), false, 0, ErrChangeNotAllowed},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -105,7 +105,7 @@ func TestDecideFieldChangeRule(t *testing.T) {
 	if err := DecideFieldChangeRule(Actor{Role: RoleMember}, "pending", TaskFacts{Status: TaskInProgress}, 7, true, ""); !errors.Is(err, ErrNotKrOwner) {
 		t.Fatalf("KR 无负责人时应被拒: %v", err)
 	}
-	// 终态任务的未决变更单不得再被批准：批准会改写已完成／已取消任务的名称、负责人与截止时间。
+	// 终态任务的未决变更单不得再被批准：批准会改写已完成／已关闭任务的名称、负责人与截止时间。
 	for _, status := range []string{TaskCompleted, TaskCancelled} {
 		if err := DecideFieldChangeRule(Actor{Role: RoleMember}, "pending", TaskFacts{Status: status, KrOwnerID: krOwner}, 7, true, ""); !errors.Is(err, ErrChangeTaskTerminal) {
 			t.Fatalf("任务状态 %s 时应拒绝处理变更单: %v", status, err)

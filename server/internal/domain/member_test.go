@@ -18,7 +18,7 @@ func TestValidateMemberRole(t *testing.T) {
 		{"空角色", "", ErrMemberRoleInvalid},
 		{"未知角色", "superuser", ErrMemberRoleInvalid},
 		{"大小写不匹配", "Admin", ErrMemberRoleInvalid},
-		{"已取消的可编辑成员角色", "editor", ErrMemberRoleInvalid},
+		{"已关闭的可编辑成员角色", "editor", ErrMemberRoleInvalid},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

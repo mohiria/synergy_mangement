@@ -33,7 +33,7 @@ func TestWriteActionsRequireNonViewerMembership(t *testing.T) {
 				t.Fatal("不应可更新进度")
 			}
 			if CanCancelTask(actor, me, facts, false) {
-				t.Fatal("不应可发起取消")
+				t.Fatal("不应可发起关闭")
 			}
 			if CanSubmitPoolReview(actor, me, draft, false) {
 				t.Fatal("不应可提交入池")
@@ -66,7 +66,7 @@ func TestWriteActionsRequireNonViewerMembership(t *testing.T) {
 				t.Fatalf("不应可提交关键字段修改: %v", err)
 			}
 			if _, err := CancelRoute(actor, me, facts, false); !errors.Is(err, ErrCancelForbidden) {
-				t.Fatalf("不应可发起取消申请: %v", err)
+				t.Fatalf("不应可发起关闭申请: %v", err)
 			}
 			if _, err := DecidePoolReview(actor, poolPending, me, true, ""); !errors.Is(err, ErrNotKrOwner) {
 				t.Fatalf("不应可处理入池审批: %v", err)

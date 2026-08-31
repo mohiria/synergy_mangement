@@ -63,7 +63,7 @@ func TestCanManageParticipants(t *testing.T) {
 		{"无关成员不可配置", Actor{Role: RoleMember}, 9, facts, false},
 		{"访客不可配置", Actor{Role: RoleViewer}, 5, facts, false},
 		{"已完成任务不可配置", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCompleted, CreatorID: 3, OwnerID: 5}, false},
-		{"已取消任务不可配置", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCancelled, CreatorID: 3, OwnerID: 5}, false},
+		{"已关闭任务不可配置", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCancelled, CreatorID: 3, OwnerID: 5}, false},
 		{"审核中仍可配置（不属关键字段，不影响审批）", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskPendingFinalReview, CreatorID: 3, OwnerID: 5}, true},
 	}
 	for _, c := range cases {

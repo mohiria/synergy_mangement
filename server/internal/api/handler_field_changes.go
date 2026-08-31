@@ -197,7 +197,7 @@ func (s *Server) DecideFieldChange(w http.ResponseWriter, r *http.Request, proje
 				return
 			}
 		} else if isCancel {
-			// AC-57：取消单通过后任务进入已取消并保留原因。
+			// AC-57：关闭单通过后任务进入已关闭并保留原因。
 			if _, err := qtx.UpdateTaskStatusWithReason(r.Context(), store.UpdateTaskStatusWithReasonParams{
 				ID: taskId, Status: domain.TaskCancelled, CancelReason: fc.Reason,
 			}); err != nil {

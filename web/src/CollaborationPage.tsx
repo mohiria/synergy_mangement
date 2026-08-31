@@ -237,7 +237,7 @@ export default function CollaborationPage({
 
   const openBlockers = blockers;
 
-  // AC-45：可见任务口径只此一份。已取消任务在图谱与列表两侧一律不出现，
+  // AC-45：可见任务口径只此一份。已关闭任务在图谱与列表两侧一律不出现，
   // 已完成任务由「显示已完成」开关控制；tree / kr / full / list 四处都走这里，
   // 免得再出现某一层漏带过滤的情况（U1）。
   const isTaskVisible = useCallback(

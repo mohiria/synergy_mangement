@@ -45,7 +45,7 @@ func TestStatusLabel(t *testing.T) {
 		{"终审显示 KR 负责人", TaskPendingFinalReview, "周宁", nil, "待周宁审批"},
 		{"KR 无负责人时退化", TaskPendingFinalReview, "", nil, "待审批"},
 		{"已完成", TaskCompleted, "周宁", nil, "已完成"},
-		{"已取消", TaskCancelled, "周宁", nil, "已取消"},
+		{"已关闭", TaskCancelled, "周宁", nil, "已关闭"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -136,7 +136,7 @@ func TestStageLabel(t *testing.T) {
 		{"等待输入沿用环节名", StageWaitingInput, "周宁", nil, "等待输入"},
 		{"任务执行沿用环节名", StageInProgress, "周宁", nil, "任务执行"},
 		{"已闭环沿用环节名", StageCompleted, "周宁", nil, "已闭环"},
-		{"已取消沿用环节名", StageCancelled, "周宁", nil, "已取消"},
+		{"已关闭沿用环节名", StageCancelled, "周宁", nil, "已关闭"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -95,7 +95,7 @@ func TestDeriveBlockersEntryAndExit(t *testing.T) {
 			f.Tasks[0].EndDate = blockerDay(-1)
 			f.Tasks[0].Status = TaskCompleted
 		}, ""},
-		{"截止已过但已取消", func(f *BlockerFacts) {
+		{"截止已过但已关闭", func(f *BlockerFacts) {
 			f.Tasks[0].EndDate = blockerDay(-1)
 			f.Tasks[0].Status = TaskCancelled
 		}, ""},

@@ -390,7 +390,7 @@ function OkrEditDrawer({
 
   const canDelete = target.kind === "O" ? target.o.canDelete : target.k.canDelete;
   const deleteHint =
-    target.kind === "O" ? "O 下还有 KR 时不能删除" : "KR 下还有任务（含已完成、已取消）时不能删除";
+    target.kind === "O" ? "O 下还有 KR 时不能删除" : "KR 下还有任务（含已完成、已关闭）时不能删除";
 
   return (
     <Drawer

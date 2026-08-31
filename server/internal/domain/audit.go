@@ -27,7 +27,7 @@ var auditActions = map[string]string{
 	"POST /projects/{projectId}/tasks":                               "创建任务",
 	"POST /projects/{projectId}/tasks/{taskId}/update-status":        "流转任务状态",
 	"PUT /projects/{projectId}/tasks/{taskId}/progress":              "更新任务进度",
-	"POST /projects/{projectId}/tasks/{taskId}/cancellation":         "发起任务取消申请",
+	"POST /projects/{projectId}/tasks/{taskId}/cancellation":         "发起任务关闭申请",
 	"POST /projects/{projectId}/tasks/{taskId}/submit-pool-review":   "提交任务入池",
 	"POST /projects/{projectId}/tasks/{taskId}/pool-review-decision": "处理入池审批",
 	"POST /projects/{projectId}/tasks/{taskId}/field-changes":        "提交关键字段修改",

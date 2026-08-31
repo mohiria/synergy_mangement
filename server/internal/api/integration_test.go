@@ -603,7 +603,7 @@ func TestProjectMembersAndPermissions(t *testing.T) {
 		t.Fatalf("角色调整返回异常: %+v", m)
 	}
 
-	// 已取消的 editor 角色（V4.4.3）→ 422
+	// 已关闭的 editor 角色（V4.4.3）→ 422
 	// 契约校验中间件先于 handler 拦下枚举越界，返回通用 invalid_request；
 	// domain 的 invalid_member_role 作为兜底保留（契约未声明枚举的入口仍走它）。
 	resp = doJSON(t, alice, http.MethodPut, fmt.Sprintf("%s/projects/%d/members/%d", base, created.Id, carolUser.ID),
@@ -1380,31 +1380,31 @@ func TestTaskStatusAndProgress(t *testing.T) {
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 
-	// 任务负责人发起：任务状态不变，生成待 KR 负责人审批的取消单
+	// 任务负责人发起：任务状态不变，生成待 KR 负责人审批的关闭单
 	reason := "需求合并，不再单独执行"
 	resp = doJSON(t, carol, http.MethodPost, cancelURL(carolTask.Id), api.TaskCancellationRequest{Reason: reason})
 	wantStatus(t, resp, http.StatusOK)
 	requested := decodeBody[api.Task](t, resp)
 	if requested.Status == api.TaskStatusCancelled {
-		t.Fatalf("取消申请不应即时生效: %+v", requested)
+		t.Fatalf("关闭申请不应即时生效: %+v", requested)
 	}
 	if requested.FieldChange == nil || requested.FieldChange.ChangeType != api.Cancel ||
 		requested.FieldChange.State != api.FieldChangeStatePending {
-		t.Fatalf("未生成待审批取消单: %+v", requested.FieldChange)
+		t.Fatalf("未生成待审批关闭单: %+v", requested.FieldChange)
 	}
 	if len(requested.FieldChange.Changes) != 1 || requested.FieldChange.Changes[0].Field != "status" ||
-		requested.FieldChange.Changes[0].NewValue != "已取消" {
-		t.Fatalf("取消单差异行异常: %+v", requested.FieldChange.Changes)
+		requested.FieldChange.Changes[0].NewValue != "已关闭" {
+		t.Fatalf("关闭单差异行异常: %+v", requested.FieldChange.Changes)
 	}
-	// 互斥：待审批取消单在时，编辑与再次发起取消的入口都关闭
+	// 互斥：待审批关闭单在时，编辑与再次发起关闭的入口都关闭
 	if requested.CanProposeFieldChange || requested.CanCancel {
-		t.Fatalf("未决取消单期间不应保留其他审批入口: %+v", requested)
+		t.Fatalf("未决关闭单期间不应保留其他审批入口: %+v", requested)
 	}
 	resp = doJSON(t, carol, http.MethodPost, cancelURL(carolTask.Id), api.TaskCancellationRequest{Reason: reason})
 	wantStatus(t, resp, http.StatusConflict)
 	resp.Body.Close()
 
-	// KR 负责人 bob 通过取消单：任务进入已取消并保留原因
+	// KR 负责人 bob 通过关闭单：任务进入已关闭并保留原因
 	resp = doJSON(t, bob, http.MethodPost,
 		fmt.Sprintf("%s/%d/field-changes/%d/decision", tasksURL, carolTask.Id, requested.FieldChange.Id),
 		api.FieldChangeDecisionRequest{Decision: api.FieldChangeDecisionRequestDecisionApproved})
@@ -1416,18 +1416,18 @@ func TestTaskStatusAndProgress(t *testing.T) {
 	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id), nil)
 	wantStatus(t, resp, http.StatusOK)
 	okr = decodeBody[[]api.Objective](t, resp)
-	// AC-63：已取消整体剔除，剩下的一个任务未填进度按 0 计入
+	// AC-63：已关闭整体剔除，剩下的一个任务未填进度按 0 计入
 	if s2 := okr[0].KeyResults[0].ProgressSummary; s2 == nil || s2.TotalTasks != 1 || s2.FilledTasks != 0 ||
 		s2.AverageProgress == nil || *s2.AverageProgress != 0 {
 		t.Fatalf("取消后覆盖度异常: %+v", okr[0].KeyResults[0].ProgressSummary)
 	}
 
-	// 已取消任务不可再发起取消 409
+	// 已关闭任务不可再发起关闭 409
 	resp = doJSON(t, carol, http.MethodPost, cancelURL(carolTask.Id), api.TaskCancellationRequest{Reason: reason})
 	wantStatus(t, resp, http.StatusConflict)
 	resp.Body.Close()
 
-	// KR 负责人在本人负责 KR 下取消免审即时生效，且仍留一张已通过的单
+	// KR 负责人在本人负责 KR 下关闭免审即时生效，且仍留一张已通过的单
 	resp = doJSON(t, bob, http.MethodPost, cancelURL(bobTask.Id), api.TaskCancellationRequest{Reason: "并入其他任务"})
 	wantStatus(t, resp, http.StatusOK)
 	exempt := decodeBody[api.Task](t, resp)
@@ -5355,7 +5355,7 @@ func TestStructureChangeRejected(t *testing.T) {
 	}
 }
 
-// 变更单与取消的双向互斥（AC-57，回归 R3）：未决变更单在时不能发起取消，
+// 变更单与取消的双向互斥（AC-57，回归 R3）：未决变更单在时不能发起关闭，
 // 取消生效后任务进入终态，既有变更单不得再被处理、也不接受新的审批单。
 func TestFieldChangeOnTerminalTask(t *testing.T) {
 	q, pool := setupDB(t)
@@ -5418,7 +5418,7 @@ func TestFieldChangeOnTerminalTask(t *testing.T) {
 	pending := decodeBody[api.Task](t, resp)
 	changeID := pending.FieldChange.Id
 
-	// 变更单未决期间不能发起取消，KR 负责人的免审通道同样受互斥约束（AC-57）
+	// 变更单未决期间不能发起关闭，KR 负责人的免审通道同样受互斥约束（AC-57）
 	cancelURL := fmt.Sprintf("%s/%d/cancellation", tasksURL, taskID)
 	for _, c := range []*http.Client{carol, bob} {
 		resp = doJSON(t, c, http.MethodPost, cancelURL, api.TaskCancellationRequest{Reason: "需求取消"})
@@ -5435,7 +5435,7 @@ func TestFieldChangeOnTerminalTask(t *testing.T) {
 	wantStatus(t, resp, http.StatusOK)
 	cancelled := decodeBody[api.Task](t, resp)
 	if cancelled.Status != api.TaskStatusCancelled {
-		t.Fatalf("任务应为已取消: %+v", cancelled.Status)
+		t.Fatalf("任务应为已关闭: %+v", cancelled.Status)
 	}
 
 	// 终态任务不再接受任何审批单：既有变更单不可再处理，也不能提交新的关键字段修改
@@ -6461,7 +6461,7 @@ func TestResultUpdateFlow(t *testing.T) {
 		}
 	}
 
-	// 已取消任务永不可发起成果更新
+	// 已关闭任务永不可发起成果更新
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		SubmitForReview: false,
 		Items:           []api.CreateTaskItem{{KeyResultId: kr1, Name: "待取消任务", OwnerId: bobUser.ID, StartDate: start, EndDate: end}},

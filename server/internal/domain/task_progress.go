@@ -8,7 +8,7 @@ import (
 var (
 	ErrProgressOutOfRange   = errors.New("进度百分比必须在 0～100 之间")
 	ErrCannotStart          = errors.New("当前状态不能开始执行")
-	ErrCannotCancel         = errors.New("已完成或已取消的任务不能取消")
+	ErrCannotCancel         = errors.New("已完成或已关闭的任务不能取消")
 	ErrCancelReasonRequired = errors.New("取消任务需要填写原因")
 )
 
@@ -41,7 +41,7 @@ func StartTask(status string) (string, error) {
 	return TaskInProgress, nil
 }
 
-// ValidateCancelReason 取消原因必填（PRD §5.1「任务不再执行并保留原因」；AC-57）。
+// ValidateCancelReason 关闭原因必填（PRD §5.1「任务不再执行并保留原因」；AC-57）。
 // 能否取消由 CancelRoute 判定，本函数只管原因。
 func ValidateCancelReason(reason string) error {
 	if strings.TrimSpace(reason) == "" {
@@ -60,7 +60,7 @@ func CanUpdateProgress(a Actor, userID int64, t TaskFacts) bool {
 }
 
 // ProgressCoverage 计算 KR 层进度汇总与数据覆盖度（AC-12、AC-63、§5.6）：
-// 统计范围是已入池且未取消的任务，已取消整体剔除（不进分子也不进分母）；
+// 统计范围是已入池且未取消的任务，已关闭整体剔除（不进分子也不进分母）；
 // 分母为该范围内全部任务、任务等权，未填按 0 计入，已完成一律按 100；
 // FilledTasks 只数真实填写，用来说明这个平均值里有多少来自负责人填的值。
 func ProgressCoverage(tasks []TaskProgressFact) ProgressSummaryFacts {
@@ -101,7 +101,7 @@ func CanStartTask(a Actor, userID int64, t TaskFacts) bool {
 	return userID == t.OwnerID || CanEditProject(a)
 }
 
-// CanCancelTask 判定能否发起取消申请（派生动作标志，AC-57）：口径与 CancelRoute 同源。
+// CanCancelTask 判定能否发起关闭申请（派生动作标志，AC-57）：口径与 CancelRoute 同源。
 func CanCancelTask(a Actor, userID int64, t TaskFacts, hasPendingChange bool) bool {
 	_, err := CancelRoute(a, userID, t, hasPendingChange)
 	return err == nil

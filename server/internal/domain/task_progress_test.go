@@ -43,7 +43,7 @@ func TestStartTask(t *testing.T) {
 		{"待入池审批不可开始", TaskPendingPoolReview, "", ErrCannotStart},
 		{"进行中不可重复开始", TaskInProgress, "", ErrCannotStart},
 		{"已完成不可开始", TaskCompleted, "", ErrCannotStart},
-		{"已取消不可开始", TaskCancelled, "", ErrCannotStart},
+		{"已关闭不可开始", TaskCancelled, "", ErrCannotStart},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -79,7 +79,7 @@ func TestProgressLockedAfterCompletion(t *testing.T) {
 	}
 }
 
-// §5.1／AC-57：取消原因必填。
+// §5.1／AC-57：关闭原因必填。
 func TestValidateCancelReason(t *testing.T) {
 	if err := ValidateCancelReason("需求变更不再执行"); err != nil {
 		t.Fatalf("填了原因不应报错: %v", err)
@@ -128,8 +128,8 @@ func TestProgressCoverage(t *testing.T) {
 		{"草稿与待审批不计入", []TaskProgressFact{
 			{Status: TaskDraft}, {Status: TaskPendingPoolReview, Progress: ip(50)},
 		}, 0, 0, nil},
-		// AC-63：已取消整体剔除，既不进分子也不进分母。
-		{"已取消不计入", []TaskProgressFact{
+		// AC-63：已关闭整体剔除，既不进分子也不进分母。
+		{"已关闭不计入", []TaskProgressFact{
 			{Status: TaskCancelled, Progress: ip(80)}, {Status: TaskNotStarted},
 		}, 1, 0, ip(0)},
 		// AC-63：未填按 0 计入分子与分母，覆盖度只数真实填写。
@@ -185,7 +185,7 @@ func TestCanStartAndCancelFlags(t *testing.T) {
 		t.Fatal("进行中不应再显示开始")
 	}
 	if !CanCancelTask(Actor{Role: RoleMember}, 5, facts, false) {
-		t.Fatal("负责人应可发起取消")
+		t.Fatal("负责人应可发起关闭")
 	}
 	if CanCancelTask(Actor{Role: RoleMember}, 3, facts, false) {
 		t.Fatal("创建人不再是取消发起人（AC-57）")
@@ -194,7 +194,7 @@ func TestCanStartAndCancelFlags(t *testing.T) {
 		t.Fatal("无关成员不应可取消")
 	}
 	if CanCancelTask(Actor{Role: RoleMember}, 5, facts, true) {
-		t.Fatal("有未决审批单时取消入口应关闭")
+		t.Fatal("有未决审批单时关闭入口应关闭")
 	}
 	if CanCancelTask(Actor{Role: RoleAdmin}, 9, TaskFacts{Status: TaskCompleted, OwnerID: 5, KrOwnerID: i64(7)}, false) {
 		t.Fatal("已完成不应可取消")

@@ -14,7 +14,7 @@ const NotifyKrHandover = "kr_handover"
 
 var (
 	ErrObjectiveHasKeyResults = errors.New("该 O 下还有 KR，请先处理下级再删除")
-	ErrKeyResultHasTasks      = errors.New("该 KR 下还有任务（含已完成、已取消），请先处理下级再删除")
+	ErrKeyResultHasTasks      = errors.New("该 KR 下还有任务（含已完成、已关闭），请先处理下级再删除")
 	ErrOkrDeleteForbidden     = errors.New("只有项目管理员可以删除 O 与 KR")
 	ErrKrOwnerRequired        = errors.New("KR 负责人不可为空，更换时必须直接指定继任者")
 	ErrMemberHasDuties        = errors.New("该成员仍在承担项目职责，请先交接后再移出项目")
@@ -54,7 +54,7 @@ func DeleteObjectiveRule(a Actor, keyResultCount int) error {
 }
 
 // CanDeleteKeyResult 判定能否删除 KR（AC-65）：仅项目管理员，且 KR 下没有任务
-// （含已完成与已取消——它们仍是项目事实，不能随 KR 一起消失）。
+// （含已完成与已关闭——它们仍是项目事实，不能随 KR 一起消失）。
 func CanDeleteKeyResult(a Actor, taskCount int) bool {
 	return DeleteKeyResultRule(a, taskCount) == nil
 }

@@ -46,7 +46,7 @@ func NormalizeParticipants(userIDs []int64) []int64 {
 
 // CanManageParticipants 判定能否配置参与人：负责人／创建人／可编辑项目者。
 // 与交付物项配置同口径，但审核期间不锁——参与人不进审批链，改名单不会动到审批中的事实；
-// 终态任务不再变更事实，因此已完成与已取消不可配置。
+// 终态任务不再变更事实，因此已完成与已关闭不可配置。
 func CanManageParticipants(a Actor, userID int64, t TaskFacts) bool {
 	if !CanWriteProject(a) || t.Status == TaskCompleted || t.Status == TaskCancelled {
 		return false

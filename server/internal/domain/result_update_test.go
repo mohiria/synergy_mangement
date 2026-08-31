@@ -6,7 +6,7 @@ import (
 )
 
 // 成果更新的发起规则（AC-66、§5.1、§5.3）：已完成任务唯一接受的审批单，
-// 发起人限任务负责人与可编辑项目者，与其他未决审批单互斥，已取消任务永不可发起。
+// 发起人限任务负责人与可编辑项目者，与其他未决审批单互斥，已关闭任务永不可发起。
 func TestStartResultUpdateRule(t *testing.T) {
 	krOwner := int64(7)
 	completed := TaskFacts{Status: TaskCompleted, CreatorID: 3, OwnerID: 5, KrOwnerID: &krOwner}
@@ -25,7 +25,7 @@ func TestStartResultUpdateRule(t *testing.T) {
 		{"访客不可发起", Actor{Role: RoleViewer}, 5, completed, false, ErrResultUpdateForbidden},
 		{"创建人不是负责人也不可发起", Actor{Role: RoleMember}, 3, completed, false, ErrResultUpdateForbidden},
 		{"进行中任务不可发起", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskInProgress, OwnerID: 5, KrOwnerID: &krOwner}, false, ErrResultUpdateNotCompleted},
-		{"已取消任务不可发起", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCancelled, OwnerID: 5, KrOwnerID: &krOwner}, false, ErrResultUpdateNotCompleted},
+		{"已关闭任务不可发起", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCancelled, OwnerID: 5, KrOwnerID: &krOwner}, false, ErrResultUpdateNotCompleted},
 		{"已有未提交的成果更新不可再发起", Actor{Role: RoleMember}, 5, withResultUpdate(completed, ResultUpdateOpen), false, ErrResultUpdateExists},
 		{"审批中的成果更新不可再发起", Actor{Role: RoleMember}, 5, withResultUpdate(completed, ResultUpdateReviewing), false, ErrResultUpdateExists},
 		{"存在未决变更单时互斥", Actor{Role: RoleMember}, 5, completed, true, ErrResultUpdatePendingExists},
@@ -57,7 +57,7 @@ func TestCanUploadCandidateUnderResultUpdate(t *testing.T) {
 		{"已发起成果更新可传", 5, withResultUpdate(completed, ResultUpdateOpen), true},
 		{"成果更新审核中不可另传", 5, withResultUpdate(completed, ResultUpdateReviewing), false},
 		{"非负责人不可传", 9, withResultUpdate(completed, ResultUpdateOpen), false},
-		{"已取消任务不可传", 5, withResultUpdate(TaskFacts{Status: TaskCancelled, OwnerID: 5}, ResultUpdateOpen), false},
+		{"已关闭任务不可传", 5, withResultUpdate(TaskFacts{Status: TaskCancelled, OwnerID: 5}, ResultUpdateOpen), false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

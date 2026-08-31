@@ -51,7 +51,7 @@ func TestOkrDeleteRules(t *testing.T) {
 		t.Fatal("管理员应可删除没有任务的 KR")
 	}
 	if CanDeleteKeyResult(admin, 1) {
-		t.Fatal("KR 下有任务（含已完成、已取消）时不应可删")
+		t.Fatal("KR 下有任务（含已完成、已关闭）时不应可删")
 	}
 	if CanDeleteKeyResult(member, 0) {
 		t.Fatal("项目成员不应可删 KR")

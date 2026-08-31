@@ -34,7 +34,7 @@ type KeyFieldChanges struct {
 	CompletionCriteria *string
 	OwnerID            *int64
 	EndDate            *time.Time
-	// Status 仅用于取消申请：拟议值恒为「已取消」（PRD §5.2.B）。
+	// Status 仅用于关闭申请：拟议值恒为「已关闭」（PRD §5.2.B）。
 	Status *string
 }
 
@@ -139,22 +139,22 @@ func CanAbandonFieldChange(a Actor, userID, submitterID int64, state string, res
 	return userID == submitterID || CanEditProject(a)
 }
 
-// 变更类型（PRD §5.2.B）：关键字段修改，或复用同一张变更单的任务取消申请。
+// 变更类型（PRD §5.2.B）：关键字段修改，或复用同一张变更单的任务关闭申请。
 const (
 	FieldChangeTypeKeyFields = "key_fields"
 	FieldChangeTypeCancel    = "cancel"
 )
 
-// CancelExemptOpinion 取消免审即时生效时系统记录的说明（AC-57）。
-const CancelExemptOpinion = "KR 负责人本人负责 KR 下取消，免审即时生效"
+// CancelExemptOpinion 关闭免审即时生效时系统记录的说明（AC-57）。
+const CancelExemptOpinion = "KR 负责人本人负责 KR 下关闭，免审即时生效"
 
 var (
-	ErrCancelForbidden     = errors.New("只有任务负责人与项目管理员可以发起取消")
-	ErrCancelPendingExists = errors.New("任务上存在未决审批单，暂不能发起取消")
-	ErrCancelBlocked       = errors.New("取消申请审批期间不能提交其他审批单")
+	ErrCancelForbidden     = errors.New("只有任务负责人与项目管理员可以发起关闭")
+	ErrCancelPendingExists = errors.New("任务上存在未决审批单，暂不能发起关闭")
+	ErrCancelBlocked       = errors.New("关闭申请审批期间不能提交其他审批单")
 )
 
-// CancelChange 取消申请的拟议值：任务状态 → 已取消（旧值由任务当前状态快照）。
+// CancelChange 关闭申请的拟议值：任务状态 → 已关闭（旧值由任务当前状态快照）。
 func CancelChange() KeyFieldChanges {
 	cancelled := TaskCancelled
 	return KeyFieldChanges{Status: &cancelled}
@@ -174,7 +174,7 @@ func PendingApprovalOnTask(t TaskFacts, hasPendingChange bool) bool {
 	return hasPendingChange
 }
 
-// CancelRoute 路由取消申请（AC-57、§5.1）：终态不可取消；任务上有任一未决审批单时互斥；
+// CancelRoute 路由关闭申请（AC-57、§5.1）：终态不可取消；任务上有任一未决审批单时互斥；
 // 发起人限任务负责人与项目管理员；KR 负责人在本人负责 KR 下免审即时生效，其余进入审批。
 func CancelRoute(a Actor, userID int64, t TaskFacts, hasPendingChange bool) (FieldChangeOutcome, error) {
 	if t.Status == TaskCompleted || t.Status == TaskCancelled {

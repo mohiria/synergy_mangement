@@ -1085,7 +1085,7 @@ export default function TaskDrawer({
         <article key={`fc-${fc.id}`} className={`audit-card ${fc.state === "pending" ? "pending" : ""}`}>
           <div className="audit-card-head">
             <div>
-              <b>{fc.changeType === "cancel" ? "任务取消申请" : "关键字段修改"}</b>{" "}
+              <b>{fc.changeType === "cancel" ? "任务关闭申请" : "关键字段修改"}</b>{" "}
               <span
                 className={`status-pill ${
                   fc.state === "pending" ? "warning" : fc.state === "approved" ? "completed" : "danger"
@@ -1108,7 +1108,7 @@ export default function TaskDrawer({
             {fc.reason && (
               <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
                 {fc.changeType === "cancel"
-                  ? `取消原因:${fc.reason}；审批通过前任务照常执行。`
+                  ? `关闭原因:${fc.reason}；审批通过前任务照常执行。`
                   : `修改原因:${fc.reason}；审批完成前旧值继续生效。`}
               </div>
             )}
@@ -1226,7 +1226,7 @@ export default function TaskDrawer({
             <Button onClick={() => actions.openConfigureInput(task)}>配置输入</Button>
           )}
           {task.canStart && <Button onClick={() => actions.start(task)}>开始执行</Button>}
-          {task.canCancel && <Button onClick={() => actions.openCancel(task)}>申请取消</Button>}
+          {task.canCancel && <Button onClick={() => actions.openCancel(task)}>关闭任务</Button>}
           {task.canSubmitPoolReview && (
             <Button type="primary" onClick={() => actions.submitPool(task)}>
               提交入池审批

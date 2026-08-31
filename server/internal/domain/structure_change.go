@@ -43,7 +43,7 @@ func ValidStructureOp(op string) bool {
 
 // StructureChangeRoute 路由结构变更（AC-23、§5.2.B）：与关键字段修改完全同源——
 // 草稿由创建人／负责人／可编辑项目者直接生效，已入池任务的 KR 负责人本人免审即时生效，
-// 其余进入审批（同一任务最多一张待审批变更单，与取消单互斥）。
+// 其余进入审批（同一任务最多一张待审批变更单，与关闭单互斥）。
 func StructureChangeRoute(a Actor, userID int64, t TaskFacts, hasPending bool) (FieldChangeOutcome, error) {
 	return FieldChangeRoute(a, userID, t, hasPending)
 }

@@ -33,7 +33,7 @@ type WorkApprovalFact struct {
 	SubmittedAt time.Time
 	TaskEnd     *time.Time
 	Summary     string
-	// ChangeType 变更类型，仅关键字段变更单有意义（AC-57：取消单复用同一张单）。
+	// ChangeType 变更类型，仅关键字段变更单有意义（AC-57：关闭单复用同一张单）。
 	ChangeType string
 }
 
@@ -128,10 +128,10 @@ type WorkItem struct {
 }
 
 // 上游等待项的阶段文案（MW-14、模块 PRD §4.2 规则 6）：
-// 来源任务已取消时与「尚未交付」分开出文案，提醒该来源的负责人已无意义。
+// 来源任务已关闭时与「尚未交付」分开出文案，提醒该来源的负责人已无意义。
 const (
 	WorkStageUpstreamWaiting   = "等待上游交付"
-	WorkStageUpstreamCancelled = "上游已取消"
+	WorkStageUpstreamCancelled = "上游已关闭"
 )
 
 // 卡片动作文案（模块 PRD §5.3；AC-55 只用文字按钮）。
@@ -159,7 +159,7 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 	}
 	me := f.UserID
 
-	// MW-14：任务取消后该任务的审批件与输入请求一并消失（卡点侧由「执行中才派生」自然排除）。
+	// MW-14：任务关闭后该任务的审批件与输入请求一并消失（卡点侧由「执行中才派生」自然排除）。
 	terminal := make(map[int64]bool, len(f.Tasks))
 	for _, t := range f.Tasks {
 		if t.DisplayStatus == TaskCancelled || t.DisplayStatus == TaskCompleted {
@@ -215,10 +215,10 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		}
 		if fc.KrOwnerID != nil && *fc.KrOwnerID == me {
 			days, overdue := waitingDays(fc.SubmittedAt)
-			// AC-57：取消单复用同一张变更单，卡片前缀区分开，免得审批人看不出这是终止任务。
+			// AC-57：关闭单复用同一张变更单，卡片前缀区分开，免得审批人看不出这是终止任务。
 			prefix := "[关键字段修改] "
 			if fc.ChangeType == FieldChangeTypeCancel {
-				prefix = "[取消申请] "
+				prefix = "[关闭申请] "
 			}
 			g.Approvals = append(g.Approvals, WorkItem{
 				Kind: "field_change", Title: prefix + fc.TaskName,
@@ -336,7 +336,7 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 				RefID: tid(up.EdgeID), Stage: WorkStageUpstreamWaiting, DrawerTab: "overview",
 			}
 			if src, ok := taskByID[*up.SourceTaskID]; ok && src.DisplayStatus == TaskCancelled {
-				// 来源已取消：输入仍未就绪，但催上游负责人交付已无意义，只留卡片说明该改指来源
+				// 来源已关闭：输入仍未就绪，但催上游负责人交付已无意义，只留卡片说明该改指来源
 				// （模块 PRD §4.2 规则 6）。
 				item.Stage = WorkStageUpstreamCancelled
 			} else {

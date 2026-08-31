@@ -21,7 +21,7 @@ func TestCurrentStage(t *testing.T) {
 		{"待中间审核", facts(TaskPendingIntermediateReview), "中间或签审核", nil},
 		{"待 KR 终审停在 KR 负责人", facts(TaskPendingFinalReview), "KR 终审", i64(7)},
 		{"已完成即已闭环", facts(TaskCompleted), "已闭环", nil},
-		{"已取消无待行动人", facts(TaskCancelled), "已取消", nil},
+		{"已关闭无待行动人", facts(TaskCancelled), "已关闭", nil},
 		{"KR 无负责人时终审待行动人为空", TaskFacts{Status: TaskPendingFinalReview, OwnerID: 5}, "KR 终审", nil},
 	}
 	for _, tc := range cases {

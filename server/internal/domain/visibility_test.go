@@ -87,7 +87,7 @@ func TestImplicitViewerReadsAllButWritesNothing(t *testing.T) {
 		{"创建任务", CanCreateTask(implicit)},
 		{"开始任务", CanStartTask(implicit, me, notStarted)},
 		{"更新进度", CanUpdateProgress(implicit, me, facts)},
-		{"发起取消", CanCancelTask(implicit, me, facts, false)},
+		{"发起关闭", CanCancelTask(implicit, me, facts, false)},
 		{"提交入池", CanSubmitPoolReview(implicit, me, draft, false)},
 		{"审批入池", CanDecidePoolReview(implicit, me, poolPending)},
 		{"配置输入", CanConfigureInputs(implicit, me, facts)},
@@ -113,7 +113,7 @@ func TestImplicitViewerReadsAllButWritesNothing(t *testing.T) {
 		t.Fatalf("隐式访客不应可提交关键字段修改: %v", err)
 	}
 	if _, err := CancelRoute(implicit, me, facts, false); !errors.Is(err, ErrCancelForbidden) {
-		t.Fatalf("隐式访客不应可发起取消申请: %v", err)
+		t.Fatalf("隐式访客不应可发起关闭申请: %v", err)
 	}
 	if _, err := DecidePoolReview(implicit, poolPending, me, true, ""); !errors.Is(err, ErrNotKrOwner) {
 		t.Fatalf("隐式访客不应可处理入池审批: %v", err)

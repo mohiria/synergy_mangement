@@ -37,7 +37,7 @@ func (s *Server) UploadTaskFile(w http.ResponseWriter, r *http.Request, projectI
 	}
 	if !domain.CanManageTaskFiles(actor, uid, facts) {
 		if facts.Status == domain.TaskCancelled {
-			writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: "已取消任务不再接受文件"})
+			writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: "已关闭任务不再接受文件"})
 			return
 		}
 		writeForbidden(w)

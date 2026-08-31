@@ -813,7 +813,7 @@ func (s *Server) okrList(ctx context.Context, projectID int64, actor domain.Acto
 	if err != nil {
 		return nil, err
 	}
-	// KR 下任务数（含已完成与已取消）：OKR 表「任务」列与删除守卫同源（AC-65）。
+	// KR 下任务数（含已完成与已关闭）：OKR 表「任务」列与删除守卫同源（AC-65）。
 	taskCounts, err := s.taskCountByKeyResult(ctx, projectID)
 	if err != nil {
 		return nil, err

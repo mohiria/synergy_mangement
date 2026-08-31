@@ -34,7 +34,7 @@ func TestCanManageDeliverables(t *testing.T) {
 		{"无关成员不可配置", Actor{Role: RoleMember}, 9, facts, false},
 		{"草稿可配置", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskDraft, OwnerID: 5}, true},
 		{"已完成不可配置", Actor{Role: RoleAdmin}, 9, TaskFacts{Status: TaskCompleted, OwnerID: 5}, false},
-		{"已取消不可配置", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCancelled, OwnerID: 5}, false},
+		{"已关闭不可配置", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCancelled, OwnerID: 5}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

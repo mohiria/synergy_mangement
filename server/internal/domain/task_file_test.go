@@ -62,7 +62,7 @@ func TestValidateTaskFileKind(t *testing.T) {
 }
 
 // 谁能上传／删除过程文件与外部材料：与配置输出同一批人（负责人／创建人／可编辑项目者），
-// 已取消任务不再接受任何写入；已完成任务仍可补录——这两类文件不进审批、不影响任何判定。
+// 已关闭任务不再接受任何写入；已完成任务仍可补录——这两类文件不进审批、不影响任何判定。
 func TestCanManageTaskFiles(t *testing.T) {
 	facts := TaskFacts{Status: TaskInProgress, CreatorID: 3, OwnerID: 5}
 	cases := []struct {
@@ -79,7 +79,7 @@ func TestCanManageTaskFiles(t *testing.T) {
 		{"访客不可管理", Actor{Role: RoleViewer}, 5, facts, false},
 		{"草稿可管理", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskDraft, OwnerID: 5}, true},
 		{"已完成仍可补录", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCompleted, OwnerID: 5}, true},
-		{"已取消不可管理", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCancelled, OwnerID: 5}, false},
+		{"已关闭不可管理", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCancelled, OwnerID: 5}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

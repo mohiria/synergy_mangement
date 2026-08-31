@@ -44,7 +44,7 @@ func StatusLabel(status, krOwnerName string, reviewerNames []string) string {
 	case TaskCompleted:
 		return "已完成"
 	case TaskCancelled:
-		return "已取消"
+		return "已关闭"
 	}
 	return status
 }
@@ -104,7 +104,7 @@ const (
 	StageIntermediateReview = "中间或签审核"
 	StageFinalReview        = "KR 终审"
 	StageCompleted          = "已闭环"
-	StageCancelled          = "已取消"
+	StageCancelled          = "已关闭"
 )
 
 // StageLabel 当前环节的面向用户显示文案（AC-04）：审批等待环节按当前审批人姓名显示，

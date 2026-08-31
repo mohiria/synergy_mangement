@@ -84,7 +84,7 @@ func TaskFileKindLabel(kind string) string {
 }
 
 // CanManageTaskFiles 判定能否上传／删除任务文件：与配置输出同一批人
-// （负责人／创建人／可编辑项目者）。已取消任务不再接受任何写入；
+// （负责人／创建人／可编辑项目者）。已关闭任务不再接受任何写入；
 // 已完成任务仍可补录——这两类文件不进审批、不影响就绪与任何派生判定，
 // 补一份过程文件或外部材料不改变任何既成事实。
 func CanManageTaskFiles(a Actor, userID int64, t TaskFacts) bool {

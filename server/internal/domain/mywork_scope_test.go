@@ -46,8 +46,8 @@ func TestMyWorkExcludesReferenceInputRequests(t *testing.T) {
 	}
 }
 
-// R11-2（MW-14）：上游等待项随下游任务终态收口；来源任务已取消时与「尚未交付」分开出文案，
-// 且不给提醒入口——提醒已取消任务的负责人交付没有意义。
+// R11-2（MW-14）：上游等待项随下游任务终态收口；来源任务已关闭时与「尚未交付」分开出文案，
+// 且不给提醒入口——提醒已关闭任务的负责人交付没有意义。
 func TestMyWorkUpstreamWaitingScope(t *testing.T) {
 	now := time.Date(2026, 8, 28, 10, 0, 0, 0, time.UTC)
 	me, upstreamOwner := int64(1), int64(2)
@@ -62,9 +62,9 @@ func TestMyWorkUpstreamWaitingScope(t *testing.T) {
 		wantRemind   bool
 	}{
 		{"下游在办、上游在办：等待上游交付并可提醒", TaskInProgress, TaskInProgress, 1, WorkStageUpstreamWaiting, true},
-		{"下游已取消：等待项消失", TaskCancelled, TaskInProgress, 0, "", false},
+		{"下游已关闭：等待项消失", TaskCancelled, TaskInProgress, 0, "", false},
 		{"下游已完成：等待项消失", TaskCompleted, TaskInProgress, 0, "", false},
-		{"上游已取消：文案分开且不可提醒", TaskInProgress, TaskCancelled, 1, WorkStageUpstreamCancelled, false},
+		{"上游已关闭：文案分开且不可提醒", TaskInProgress, TaskCancelled, 1, WorkStageUpstreamCancelled, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -61,9 +61,9 @@ export function CancelTaskModal({
 }) {
   return (
     <Modal
-      title="申请取消任务"
+      title="申请关闭任务"
       open={!!task}
-      okText="提交取消申请"
+      okText="提交关闭申请"
       cancelText="返回"
       okButtonProps={{ danger: true, disabled: !reason.trim() }}
       onCancel={onClose}
@@ -73,12 +73,12 @@ export function CancelTaskModal({
       }}
     >
       <p className="muted" style={{ marginTop: 0 }}>
-        取消须经所属 KR 负责人审批（KR 负责人在本人负责 KR 下免审即时生效）；已取消任务不计入 KR 进度汇总。
+        关闭须经所属 KR 负责人审批（KR 负责人在本人负责 KR 下免审即时生效）；已关闭任务不计入 KR 进度汇总。
       </p>
       <Input.TextArea
         rows={3}
         maxLength={500}
-        placeholder="取消原因（必填）"
+        placeholder="关闭原因（必填）"
         value={reason}
         onChange={(e) => onReasonChange(e.target.value)}
       />

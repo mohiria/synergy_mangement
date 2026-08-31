@@ -21,7 +21,7 @@ var (
 )
 
 // StartResultUpdateRule 校验发起成果更新（AC-66）：仅已完成任务；同一任务至多一件在途；
-// 与其他未决审批单互斥（与 AC-57 取消申请同口径）；KR 必须已指定负责人，否则无人终审；
+// 与其他未决审批单互斥（与 AC-57 关闭申请同口径）；KR 必须已指定负责人，否则无人终审；
 // 发起人限任务负责人与可编辑项目者（创建人不在其列——成果由负责人交付）。
 func StartResultUpdateRule(a Actor, userID int64, t TaskFacts, hasPendingChange bool) error {
 	if t.Status != TaskCompleted {

@@ -33,7 +33,7 @@ type KrRisk struct {
 //	任务风险 = max(该任务未解除卡点的最高等级, 超期判定, 临期判定)
 //	KR 风险  = max(下级任务风险)
 //
-// 只有处于执行区间（已入池、未终态）的任务参与临期与超期判定——已完成、已取消任务不构成
+// 只有处于执行区间（已入池、未终态）的任务参与临期与超期判定——已完成、已关闭任务不构成
 // 风险；卡点本身已由 DeriveBlockers 按同一执行区间口径派生。blockers 传该 KR 下任务的卡点。
 func DeriveKrRisk(now time.Time, dueSoonDays int, tasks []RiskTaskFact, blockers []Blocker) KrRisk {
 	if dueSoonDays <= 0 {

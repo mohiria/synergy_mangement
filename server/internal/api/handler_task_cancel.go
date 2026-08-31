@@ -12,9 +12,9 @@ import (
 	"synergy/server/internal/store"
 )
 
-// 任务取消申请（AC-57）：复用关键字段变更单的一种变更类型，规则在 domain，handler 仅编排。
+// 任务关闭申请（AC-57）：复用关键字段变更单的一种变更类型，规则在 domain，handler 仅编排。
 
-// RequestTaskCancellation 发起取消申请：KR 负责人在本人负责 KR 下免审即时生效，其余进入其待我审批。
+// RequestTaskCancellation 发起关闭申请：KR 负责人在本人负责 KR 下免审即时生效，其余进入其待我审批。
 func (s *Server) RequestTaskCancellation(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64) {
 	var req TaskCancellationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -97,7 +97,7 @@ func (s *Server) RequestTaskCancellation(w http.ResponseWriter, r *http.Request,
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 
-// cancelChangeParams 组装取消单：变更字段＝任务状态，旧值＝当前状态，拟议值＝已取消（PRD §5.2.B）。
+// cancelChangeParams 组装关闭单：变更字段＝任务状态，旧值＝当前状态，拟议值＝已关闭（PRD §5.2.B）。
 func cancelChangeParams(taskID int64, currentStatus string, uid int64, reason, state string,
 	exempt bool, opinion string, decidedBy pgtype.Int8, decidedAt pgtype.Timestamptz,
 ) store.CreateFieldChangeParams {

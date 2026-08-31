@@ -862,7 +862,7 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 	for _, t := range rows {
 		facts := domain.TaskFacts{Status: t.Status, CreatorID: t.CreatedBy, OwnerID: t.OwnerID,
 			KrOwnerID: fromPgInt8(t.KrOwnerID), ResultUpdate: t.ResultUpdate}
-		// 待审批变更单（含取消单）决定编辑、取消与提交入池三处入口是否可用（AC-23、AC-57 互斥）。
+		// 待审批变更单（含关闭单）决定编辑、取消与提交入池三处入口是否可用（AC-23、AC-57 互斥）。
 		fc, hasChange := changeByTask[t.ID]
 		hasPending := hasChange && fc.State == domain.FieldChangePendingState
 		item := Task{

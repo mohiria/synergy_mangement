@@ -33,7 +33,7 @@ func TestStructureChangeRoute(t *testing.T) {
 		{"待入池审批期间不可改", Actor{Role: RoleMember}, 5, facts(TaskPendingPoolReview), false, 0, ErrChangeNotAllowed},
 		{"终审中不可改", Actor{Role: RoleMember}, 5, facts(TaskPendingFinalReview), false, 0, ErrChangeNotAllowed},
 		{"已完成不可改", Actor{Role: RoleMember}, 5, facts(TaskCompleted), false, 0, ErrChangeNotAllowed},
-		{"已取消不可改", Actor{Role: RoleMember}, 5, facts(TaskCancelled), false, 0, ErrChangeNotAllowed},
+		{"已关闭不可改", Actor{Role: RoleMember}, 5, facts(TaskCancelled), false, 0, ErrChangeNotAllowed},
 	}
 	for _, op := range ops {
 		for _, tc := range cases {

@@ -45,11 +45,11 @@ const STATUS_FILTER_LABEL: Record<TaskStatus, string> = {
   pending_intermediate_review: "待中间审核",
   pending_final_review: "待 KR 终审",
   completed: "已完成",
-  cancelled: "已取消",
+  cancelled: "已关闭",
 };
 
 
-// 全部任务列表的状态备注（#91）：退回理由、取消原因、卡点与变更审批合成一行文本，
+// 全部任务列表的状态备注（#91）：退回理由、关闭原因、卡点与变更审批合成一行文本，
 // alert 决定用红色还是弱化色；没有备注时返回 null，状态列只剩状态胶囊。
 function statusNote(t: Task): { text: string; alert: boolean } | null {
   const parts: string[] = [];
@@ -66,11 +66,11 @@ function statusNote(t: Task): { text: string; alert: boolean } | null {
     const detail = t.fieldChange.changes
       .map((c) => `${c.label} ${c.oldValue || "—"}→${c.newValue}`)
       .join("；");
-    parts.push((t.fieldChange.changeType === "cancel" ? "取消审批中：" : "变更审批中：") + detail);
+    parts.push((t.fieldChange.changeType === "cancel" ? "关闭审批中：" : "变更审批中：") + detail);
   }
   if (t.fieldChange?.state === "rejected" && !t.fieldChange.resolved) {
     parts.push(
-      (t.fieldChange.changeType === "cancel" ? "取消申请已退回" : "变更已退回") +
+      (t.fieldChange.changeType === "cancel" ? "关闭申请已退回" : "变更已退回") +
         (t.fieldChange.opinion ? `：${t.fieldChange.opinion}` : ""),
     );
     alert = true;
@@ -261,7 +261,7 @@ export default function ProjectTasksPage({
             <span className="cell-text">{t.ownerName}</span>
           </span>
         </td>
-        {/* 状态备注（退回理由、取消原因、卡点、变更审批）与状态胶囊同排一行（#91）：
+        {/* 状态备注（退回理由、关闭原因、卡点、变更审批）与状态胶囊同排一行（#91）：
             行高恒定，超长在列宽处省略，完整内容悬停看 title，明细仍在任务抽屉里。 */}
         <td title={statusNote(t)?.text}>
           <span className={`status-pill ${STATUS_CLASS[t.status]}`}>{t.statusLabel}</span>

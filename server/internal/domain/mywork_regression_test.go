@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// MW-14：任务取消后，该任务相关的审批件、输入请求与卡点卡片全部从我的工作消失。
+// MW-14：任务关闭后，该任务相关的审批件、输入请求与卡点卡片全部从我的工作消失。
 // 卡点侧本来就按「执行中才派生」排除了取消任务，审批件与输入请求此前没有跟着终态收口。
 func TestMyWorkDropsCancelledTaskItems(t *testing.T) {
 	now := time.Date(2026, 8, 26, 10, 0, 0, 0, time.UTC)
@@ -16,15 +16,15 @@ func TestMyWorkDropsCancelledTaskItems(t *testing.T) {
 	facts := MyWorkFacts{
 		UserID: me, Now: now, Actor: Actor{Role: RoleMember},
 		Tasks: []WorkTaskFact{
-			{ID: 10, Name: "已取消任务", DisplayStatus: TaskCancelled, OwnerID: me, CreatorID: me, KrOwnerID: &me, EndDate: &end},
+			{ID: 10, Name: "已关闭任务", DisplayStatus: TaskCancelled, OwnerID: me, CreatorID: me, KrOwnerID: &me, EndDate: &end},
 			{ID: 11, Name: "在办任务", DisplayStatus: TaskInProgress, OwnerID: me, CreatorID: me, KrOwnerID: &me, EndDate: &end},
 		},
 		PoolReviews: []WorkApprovalFact{
-			{ID: 90, TaskID: 10, TaskName: "已取消任务", SubmittedBy: other, KrOwnerID: &me, KrOwnerName: "我", SubmittedAt: now.AddDate(0, 0, -1), TaskEnd: &end},
+			{ID: 90, TaskID: 10, TaskName: "已关闭任务", SubmittedBy: other, KrOwnerID: &me, KrOwnerName: "我", SubmittedAt: now.AddDate(0, 0, -1), TaskEnd: &end},
 			{ID: 91, TaskID: 11, TaskName: "在办任务", SubmittedBy: other, KrOwnerID: &me, KrOwnerName: "我", SubmittedAt: now.AddDate(0, 0, -1), TaskEnd: &end},
 		},
 		InputRequests: []WorkInputRequestFact{
-			{ID: 80, TaskID: 10, TaskName: "已取消任务", InputName: "接口清单", Necessity: NecessityRequired, ProviderID: me, TaskOwnerID: other,
+			{ID: 80, TaskID: 10, TaskName: "已关闭任务", InputName: "接口清单", Necessity: NecessityRequired, ProviderID: me, TaskOwnerID: other,
 				State: InputRequestPending, CreatedAt: now.AddDate(0, 0, -1), Notified: true},
 			{ID: 81, TaskID: 11, TaskName: "在办任务", InputName: "现场数据", Necessity: NecessityRequired, ProviderID: me, TaskOwnerID: other,
 				State: InputRequestPending, CreatedAt: now.AddDate(0, 0, -1), Notified: true},
@@ -34,12 +34,12 @@ func TestMyWorkDropsCancelledTaskItems(t *testing.T) {
 
 	for _, it := range g.Approvals {
 		if it.TaskID != nil && *it.TaskID == 10 {
-			t.Errorf("已取消任务的审批件不应出现在待我审批: %+v", it)
+			t.Errorf("已关闭任务的审批件不应出现在待我审批: %+v", it)
 		}
 	}
 	for _, it := range g.Pending {
 		if it.TaskID != nil && *it.TaskID == 10 {
-			t.Errorf("已取消任务的输入请求不应出现在待我处理: %+v", it)
+			t.Errorf("已关闭任务的输入请求不应出现在待我处理: %+v", it)
 		}
 	}
 	// 在办任务的同类事项仍在，确认不是被一刀切掉的

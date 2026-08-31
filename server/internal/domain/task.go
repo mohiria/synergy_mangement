@@ -92,7 +92,7 @@ func TaskCreationOutcome(creatorID int64, krOwnerID *int64) (string, bool) {
 }
 
 // SubmitPoolReview 校验提交入池：仅草稿可提交，所属 KR 必须已指定负责人（否则无人可审），
-// 且任务上不能有待审批的取消单（AC-57 双向互斥）。
+// 且任务上不能有待审批的关闭单（AC-57 双向互斥）。
 func SubmitPoolReview(t TaskFacts, hasPendingChange bool) error {
 	if t.Status != TaskDraft {
 		return ErrTaskNotDraft
