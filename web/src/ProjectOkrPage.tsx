@@ -142,7 +142,7 @@ export default function ProjectOkrPage({
                 </div>
                 {project.canEdit && (
                   <div style={{ display: "flex", gap: 8 }}>
-                    <Button onClick={() => setImportOpen(true)}>导入已有表格</Button>
+                    <Button onClick={() => setImportOpen(true)}>导入 O / KR 表格</Button>
                     <Button type="primary" onClick={() => setModalOpen(true)}>
                       ＋ 新增 O / KR
                     </Button>

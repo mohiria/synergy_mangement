@@ -28,6 +28,8 @@ export type AssembleContext<K extends string> = {
   cell: (row: string[], key: K) => string;
   resolvePerson: (name: string) => number | undefined;
   memberName: (userId?: number) => string;
+  /** 「统一指派」选中的成员：人名列为空的行用它兜底（#106） */
+  fallbackPerson?: number;
 };
 
 export type ImportSkeletonProps<K extends string, S> = {
@@ -47,6 +49,12 @@ export type ImportSkeletonProps<K extends string, S> = {
   /** 提交成功返回 null，失败返回要展示的错误文案 */
   submit: (structure: S, sourceFileName: string) => Promise<string | null>;
   successMessage: (structure: S) => string;
+  /** 人名列为空的行的统一指派入口（#106）：missing 返回还差多少行没有负责人 */
+  fallbackPersonSlot?: {
+    label: string;
+    hint: string;
+    missing: (ctx: AssembleContext<K>) => number;
+  };
   previewNote?: ReactNode;
   width?: number;
   onClose: () => void;
@@ -70,6 +78,7 @@ export default function ImportSkeleton<K extends string, S>({
   isEmpty,
   submit,
   successMessage,
+  fallbackPersonSlot,
   previewNote,
   width = 860,
   onClose,
@@ -80,6 +89,7 @@ export default function ImportSkeleton<K extends string, S>({
   const [fileRows, setFileRows] = useState<string[][] | null>(null);
   const [mapping, setMapping] = useState<string[]>([]);
   const [nameOverrides, setNameOverrides] = useState<Record<string, number>>({});
+  const [fallbackPerson, setFallbackPerson] = useState<number | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   // 源文件名随导入记录留存（§7.9、AC-68）：选文件时自动带上，粘贴时留空。
@@ -94,6 +104,7 @@ export default function ImportSkeleton<K extends string, S>({
     setSourceFileName("");
     setMapping([]);
     setNameOverrides({});
+    setFallbackPerson(undefined);
     setError(null);
   };
   useEffect(() => {
@@ -171,12 +182,15 @@ export default function ImportSkeleton<K extends string, S>({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, mapping]);
 
+  const ctx: AssembleContext<K> = { rows: dataRows, cell, resolvePerson, memberName, fallbackPerson };
   const assembled = useMemo(
-    () => assemble({ rows: dataRows, cell, resolvePerson, memberName }),
+    () => assemble(ctx),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rows, mapping, nameOverrides],
+    [rows, mapping, nameOverrides, fallbackPerson],
   );
   const unmatched = personNames.filter((n) => !resolvePerson(n));
+  // 人名列为空的行：先按「统一指派」算，指派后不再计数。
+  const missingPersons = fallbackPersonSlot ? fallbackPersonSlot.missing(ctx) : 0;
 
   const doSubmit = async () => {
     setSaving(true);
@@ -298,7 +312,27 @@ export default function ImportSkeleton<K extends string, S>({
       )}
       {step === 2 && (
         <>
-          {personNames.length === 0 && <div className="empty compact-empty">表格中没有人员列</div>}
+          {personNames.length === 0 && missingPersons === 0 && (
+            <div className="empty compact-empty">表格中没有需要匹配的人员</div>
+          )}
+          {/* 未填写负责人的行没有可覆盖的姓名，给一个统一指派入口（#106）。 */}
+          {fallbackPersonSlot && missingPersons > 0 && (
+            <div className="fact-card fact-card-aux">
+              <div>
+                <b>{fallbackPersonSlot.label.replace("{n}", String(missingPersons))}</b>
+                <small>{fallbackPersonSlot.hint}</small>
+              </div>
+              <Select
+                style={{ width: 240 }}
+                showSearch
+                optionFilterProp="label"
+                placeholder="统一指派项目成员"
+                value={fallbackPerson}
+                onChange={setFallbackPerson}
+                options={memberOptions}
+              />
+            </div>
+          )}
           {personNames.map((n) => (
             <div key={n} className="fact-card fact-card-aux">
               <div>
@@ -318,7 +352,11 @@ export default function ImportSkeleton<K extends string, S>({
           ))}
           <div style={{ display: "flex", justifyContent: "space-between", marginTop: 12 }}>
             <Button onClick={() => setStep(1)}>上一步</Button>
-            <Button type="primary" disabled={unmatched.length > 0} onClick={() => setStep(3)}>
+            <Button
+              type="primary"
+              disabled={unmatched.length > 0 || missingPersons > 0}
+              onClick={() => setStep(3)}
+            >
               下一步：结构预览
             </Button>
           </div>

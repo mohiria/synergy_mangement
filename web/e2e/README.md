@@ -13,7 +13,7 @@
 | `okr-batch-groups.spec.ts` | 新增 O / KR 弹窗按所属 O 分组：每组就地加 KR、改归属后行移动、删 O 行后 KR 不丢（#104） |
 | `input-source.spec.ts` | 输入源区块：区块名、单行事实与 title、点行进来源任务、逐级返回回到原来的 Tab（#101） |
 | `long-title.spec.ts` | 长 O／KR 标题不撑破配置输入弹窗：弹窗与两侧面板无横向滚动、分组标题截断且带全称（#100；1440／1920 两档） |
-| `import-csv.spec.ts` | 表格导入的读取：三种 CSV 编码、引号包裹字段、按首行判定分隔符、全空行剔除（#97）；xlsx 前端解析、导入流程不发外链请求、模板现生成（#105）。fixture 在 `e2e/fixtures/` |
+| `import-csv.spec.ts` | 表格导入的读取：三种 CSV 编码、引号包裹字段、按首行判定分隔符、全空行剔除（#97）；xlsx 前端解析、导入流程不发外链请求、模板现生成（#105）；O／KR 导入器只有六个字段、模板表头被原样认出、未填负责人的行走统一指派（#106）。fixture 在 `e2e/fixtures/` |
 
 解析层本身的口径由 vitest 单测覆盖（`cd web && npm test`，见 `src/import/parseTable.test.ts`），
 这里只验它在真实浏览器与真实上传入口下的表现。
