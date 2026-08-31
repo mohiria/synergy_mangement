@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Drawer, Input, InputNumber, Mentions, Modal, Tabs, message } from "antd";
+import { Button, Drawer, Input, Mentions, Modal, Slider, Tabs, message } from "antd";
 import { client } from "../api/client";
 import FileUploadField, { fileTypeLabel, formatFileSize } from "../FileUploadField";
 import Icon from "../icons";
@@ -48,7 +48,6 @@ export default function TaskDrawer({
     approvePool: (t: Task) => void;
     openReject: (t: Task) => void;
     openCancel: (t: Task) => void;
-    openProgress: (t: Task) => void;
     saveProgress: (t: Task, progress: number | null) => Promise<void>;
     openEdit: (t: Task) => void;
     approveFieldChange: (t: Task, changeId: number) => void;
@@ -74,9 +73,7 @@ export default function TaskDrawer({
 }) {
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const drawerRef = useRef<HTMLDivElement>(null);
-  const [progressEditing, setProgressEditing] = useState(false);
   const [progressDraft, setProgressDraft] = useState<number | null>(null);
-  const [savingProgress, setSavingProgress] = useState(false);
   const [addingDeliverable, setAddingDeliverable] = useState(false);
   const [newDeliverableFile, setNewDeliverableFile] = useState<File | null>(null);
   const [newDeliverableBusy, setNewDeliverableBusy] = useState(false);
@@ -412,9 +409,6 @@ export default function TaskDrawer({
       </div>
     );
 
-  // 概况内进度编辑（MW-22）：只有从「待我处理」打开的、本人可更新进度的任务才给编辑入口，
-  // 其他来源只读。未填写进度时该行平时按 AC-50 隐藏，可编辑时保留以便首次填写。
-  const canEditProgressInline = source === "pending" && !!task.canUpdateProgress;
   // 参与人只作展示与检索，不参与任何判定，直接读契约派生字段（词汇表「参与人」）。
   const participants = task.participants ?? [];
 
@@ -465,57 +459,31 @@ export default function TaskDrawer({
               )}
             </div>
           </div>
-          {(task.progress != null || canEditProgressInline) && (
+          {/* #119：进度改为行内可拖进度条（刻度 1%），canUpdateProgress 为假时只读；
+              拖动结束（onChangeComplete）才落库，保存失败时清掉草稿回滚显示。
+              进度未填且无权限时该行按 AC-50 隐藏；终态 100 由后端派生（#76），前端只消费。 */}
+          {(task.progress != null || task.canUpdateProgress) && (
             <div className="task-info-row">
               <span>进度</span>
-              {progressEditing ? (
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <InputNumber
-                    size="small"
-                    min={0}
-                    max={100}
-                    value={progressDraft}
-                    onChange={(v) => setProgressDraft(v as number | null)}
-                    style={{ width: 96 }}
-                  />
-                  <Button
-                    size="small"
-                    type="primary"
-                    loading={savingProgress}
-                    onClick={async () => {
-                      setSavingProgress(true);
-                      await actions.saveProgress(task, progressDraft);
-                      setSavingProgress(false);
-                      setProgressEditing(false);
-                      setRefreshTick((n) => n + 1);
-                    }}
-                  >
-                    确认
-                  </Button>
-                  <Button size="small" onClick={() => setProgressEditing(false)}>
-                    取消
-                  </Button>
-                </div>
-              ) : (
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <strong className={task.progress != null ? "" : "muted"}>
-                    {task.progress != null ? `${task.progress}%` : "未填写"}
-                  </strong>
-                  {canEditProgressInline && (
-                    <Button
-                      size="small"
-                      type="text"
-                      aria-label="编辑进度"
-                      onClick={() => {
-                        setProgressDraft(task.progress ?? null);
-                        setProgressEditing(true);
-                      }}
-                    >
-                      ✎
-                    </Button>
-                  )}
-                </div>
-              )}
+              <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, maxWidth: 340 }}>
+                <Slider
+                  style={{ flex: 1, margin: "0 4px" }}
+                  min={0}
+                  max={100}
+                  step={1}
+                  disabled={!task.canUpdateProgress}
+                  value={progressDraft ?? task.progress ?? 0}
+                  tooltip={{ formatter: (v) => `${v}%` }}
+                  onChange={(v) => setProgressDraft(v)}
+                  onChangeComplete={async (v) => {
+                    await actions.saveProgress(task, v);
+                    setProgressDraft(null);
+                  }}
+                />
+                <strong style={{ minWidth: 40, textAlign: "right" }}>
+                  {progressDraft ?? task.progress ?? 0}%
+                </strong>
+              </div>
             </div>
           )}
           {task.description && (
@@ -1258,9 +1226,6 @@ export default function TaskDrawer({
             <Button onClick={() => actions.openConfigureInput(task)}>配置输入</Button>
           )}
           {task.canStart && <Button onClick={() => actions.start(task)}>开始执行</Button>}
-          {task.canUpdateProgress && (
-            <Button onClick={() => actions.openProgress(task)}>更新进度</Button>
-          )}
           {task.canCancel && <Button onClick={() => actions.openCancel(task)}>申请取消</Button>}
           {task.canSubmitPoolReview && (
             <Button type="primary" onClick={() => actions.submitPool(task)}>

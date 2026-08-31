@@ -10,7 +10,7 @@ import ConfigureInputModal from "./ConfigureInputModal";
 import ReviewersModal from "./ReviewersModal";
 import ParticipantsModal from "./ParticipantsModal";
 import ReceiversModal from "./ReceiversModal";
-import { CancelTaskModal, PoolRejectModal, ProgressModal } from "./modals";
+import { CancelTaskModal, PoolRejectModal } from "./modals";
 import { cancelTask as apiCancelTask, decidePoolReview, saveProgress as apiSaveProgress, startTask as apiStartTask, submitPoolReview } from "./actions";
 import { structureMessage, type KrOption } from "./shared";
 
@@ -104,8 +104,6 @@ export default function TaskDrawerHost({
   const [crRejectOpinion, setCrRejectOpinion] = useState("");
   const [cancelTask, setCancelTask] = useState<Task | null>(null);
   const [cancelReason, setCancelReason] = useState("");
-  const [progressTask, setProgressTask] = useState<Task | null>(null);
-  const [progressValue, setProgressValue] = useState<number | null>(null);
 
   // 列表行与抽屉共用的几个单任务动作放在 actions.ts，两边都只是包一层刷新。
   const startTask = (task: Task) => apiStartTask(projectId, task, refresh);
@@ -340,10 +338,6 @@ export default function TaskDrawerHost({
             setCancelTask(t);
             setCancelReason("");
           },
-          openProgress: (t) => {
-            setProgressTask(t);
-            setProgressValue(t.progress ?? null);
-          },
           saveProgress,
           openEdit: (t) => setEditTask(t),
           approveFieldChange: (t, id) => decideFieldChange(t, id, "approved"),
@@ -550,13 +544,6 @@ export default function TaskDrawerHost({
         onOpinionChange={setRejectOpinion}
         onClose={() => setRejectTask(null)}
         onSubmit={(t, opinion) => decidePool(t, "rejected", opinion)}
-      />
-      <ProgressModal
-        task={progressTask}
-        value={progressValue}
-        onValueChange={setProgressValue}
-        onClose={() => setProgressTask(null)}
-        onSubmit={saveProgress}
       />
       <CancelTaskModal
         task={cancelTask}

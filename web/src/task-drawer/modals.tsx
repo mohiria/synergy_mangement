@@ -1,4 +1,4 @@
-import { Input, InputNumber, Modal } from "antd";
+import { Input, Modal } from "antd";
 import type { components } from "../api/schema";
 
 type Task = components["schemas"]["Task"];
@@ -41,47 +41,6 @@ export function PoolRejectModal({
         placeholder="退回意见（必填）"
         value={opinion}
         onChange={(e) => onOpinionChange(e.target.value)}
-      />
-    </Modal>
-  );
-}
-
-export function ProgressModal({
-  task,
-  value,
-  onValueChange,
-  onClose,
-  onSubmit,
-}: {
-  task: Task | null;
-  value: number | null;
-  onValueChange: (v: number | null) => void;
-  onClose: () => void;
-  onSubmit: (task: Task, progress: number | null) => Promise<void> | void;
-}) {
-  return (
-    <Modal
-      title="更新进度"
-      open={!!task}
-      okText="保存"
-      cancelText="取消"
-      onCancel={onClose}
-      onOk={async () => {
-        if (task) await onSubmit(task, value);
-        onClose();
-      }}
-    >
-      <p className="muted" style={{ marginTop: 0 }}>
-        按真实情况填写百分比；留空表示不填写，页面只展示状态。
-      </p>
-      <InputNumber
-        min={0}
-        max={100}
-        value={value}
-        onChange={(v) => onValueChange(v ?? null)}
-        addonAfter="%"
-        placeholder="未填写"
-        style={{ width: 160 }}
       />
     </Modal>
   );
