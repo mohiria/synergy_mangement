@@ -145,10 +145,10 @@ export default function TaskImportModal({
         </>
       )}
       previewNote={
-        <div className="notice">导入后任务为草稿；按 KR 勾选并批量提交入池审批。</div>
+        <div className="notice">导入后任务为草稿；在任务抽屉逐条提交入池审批（裁决 A2）。</div>
       }
       successMessage={(structure) =>
-        `已导入 ${structure.reduce((n, g) => n + g.tasks.length, 0)} 项任务草稿；请按 KR 批量提交入池`
+        `已导入 ${structure.reduce((n, g) => n + g.tasks.length, 0)} 项任务草稿；请在任务抽屉逐条提交入池`
       }
       submit={async (structure, sourceFileName) => {
         const res = await client.POST("/projects/{projectId}/import-tasks", {

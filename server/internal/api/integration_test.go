@@ -3974,7 +3974,7 @@ func TestReportExport(t *testing.T) {
 
 // 表格导入与批量入池（#27，AC-02/25）：结构化导入生成 O/KR 与任务草稿（整批事务）；
 // 按 KR 批量提交；KR 负责人批量通过或退回。
-func TestImportAndBatchPool(t *testing.T) {
+func TestImportAndPool(t *testing.T) {
 	q, pool := setupDB(t)
 	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
 	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
@@ -4153,82 +4153,51 @@ func TestImportAndBatchPool(t *testing.T) {
 		t.Fatalf("任务导入源文件名未留存: %+v", latest.SourceFileName)
 	}
 
-	// AC-25：按 KR1 批量提交（任务一、二）
+	// AC-25（裁决 A2）：批量端点已移除，导入的任务逐条经单条端点提交入池与审批。
 	kr1Tasks := []int64{}
 	for _, task := range result.Tasks {
 		if task.Name == "导入任务一" || task.Name == "导入任务二" {
 			kr1Tasks = append(kr1Tasks, task.Id)
 		}
 	}
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/projects/%d/tasks/batch-pool-submit", base, created.Id),
-		api.BatchPoolSubmitRequest{TaskIds: kr1Tasks})
-	wantStatus(t, resp, http.StatusOK)
-	list := decodeBody[[]api.Task](t, resp)
-	pendingCount := 0
-	for _, task := range list {
-		if task.Status == api.TaskStatusPendingPoolReview {
-			pendingCount++
+	for _, id := range kr1Tasks {
+		resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/projects/%d/tasks/%d/submit-pool-review", base, created.Id, id), nil)
+		wantStatus(t, resp, http.StatusOK)
+		if got := decodeBody[api.Task](t, resp); got.Status != api.TaskStatusPendingPoolReview {
+			t.Fatalf("逐条提交后应待入池审批: %+v", got)
 		}
 	}
-	if pendingCount != 2 {
-		t.Fatalf("批量提交后待审批数量异常: %d", pendingCount)
-	}
 
-	decideURL := fmt.Sprintf("%s/projects/%d/tasks/batch-pool-decision", base, created.Id)
-
-	// 非法 decision 必须 422，且不得改变任何任务状态。
-	// 回归背景：此前 decision 未校验，approve 由 == "approved" 推出，任意非法值都会静默执行「批量退回」。
-	resp = doJSON(t, bob, http.MethodPost, decideURL, map[string]any{"taskIds": kr1Tasks, "decision": "APPROVE"})
-	wantStatus(t, resp, http.StatusUnprocessableEntity)
-	resp.Body.Close()
-	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/projects/%d/tasks", base, created.Id), nil)
-	wantStatus(t, resp, http.StatusOK)
-	stillPending := 0
-	for _, task := range decodeBody[[]api.Task](t, resp) {
-		if task.Status == api.TaskStatusPendingPoolReview {
-			stillPending++
-		}
-	}
-	if stillPending != 2 {
-		t.Fatalf("非法 decision 后待审批数量 = %d, want 2（不应被静默退回）", stillPending)
-	}
-
-	// 非 KR 负责人批量处理 403；KR 负责人 bob 批量通过
-	resp = doJSON(t, alice, http.MethodPost, decideURL, api.BatchPoolDecisionRequest{TaskIds: kr1Tasks, Decision: api.BatchPoolDecisionRequestDecisionApproved})
+	// 非 KR 负责人处理 403；KR 负责人 bob 逐条通过
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/tasks/%d/pool-review-decision", base, created.Id, kr1Tasks[0]),
+		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
 	wantStatus(t, resp, http.StatusForbidden)
 	resp.Body.Close()
-	resp = doJSON(t, bob, http.MethodPost, decideURL, api.BatchPoolDecisionRequest{TaskIds: kr1Tasks, Decision: api.BatchPoolDecisionRequestDecisionApproved})
-	wantStatus(t, resp, http.StatusOK)
-	list = decodeBody[[]api.Task](t, resp)
-	notStarted := 0
-	for _, task := range list {
-		if task.Status == api.TaskStatusNotStarted {
-			notStarted++
+	for _, id := range kr1Tasks {
+		resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/projects/%d/tasks/%d/pool-review-decision", base, created.Id, id),
+			api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
+		wantStatus(t, resp, http.StatusOK)
+		if got := decodeBody[api.Task](t, resp); got.Status != api.TaskStatusNotStarted {
+			t.Fatalf("逐条通过后应未开始: %+v", got)
 		}
 	}
-	if notStarted != 2 {
-		t.Fatalf("批量通过后未开始数量异常: %d", notStarted)
-	}
 
-	// 批量退回路径：任务三提交后被退回
+	// 退回路径：任务三提交后被逐条退回，回到草稿
 	var task3 int64
 	for _, task := range result.Tasks {
 		if task.Name == "导入任务三" {
 			task3 = task.Id
 		}
 	}
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/projects/%d/tasks/batch-pool-submit", base, created.Id),
-		api.BatchPoolSubmitRequest{TaskIds: []int64{task3}})
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/projects/%d/tasks/%d/submit-pool-review", base, created.Id, task3), nil)
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
 	op := "范围与 KR 不匹配"
-	resp = doJSON(t, bob, http.MethodPost, decideURL, api.BatchPoolDecisionRequest{TaskIds: []int64{task3}, Decision: api.BatchPoolDecisionRequestDecisionRejected, Opinion: &op})
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/projects/%d/tasks/%d/pool-review-decision", base, created.Id, task3),
+		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionRejected, Opinion: &op})
 	wantStatus(t, resp, http.StatusOK)
-	list = decodeBody[[]api.Task](t, resp)
-	for _, task := range list {
-		if task.Id == task3 && task.Status != api.TaskStatusDraft {
-			t.Fatalf("批量退回后应回草稿: %+v", task)
-		}
+	if got := decodeBody[api.Task](t, resp); got.Status != api.TaskStatusDraft {
+		t.Fatalf("退回后应回草稿: %+v", got)
 	}
 }
 

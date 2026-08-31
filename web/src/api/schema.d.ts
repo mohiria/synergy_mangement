@@ -1212,44 +1212,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/projects/{projectId}/tasks/batch-pool-submit": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 批量提交入池（AC-25；按 KR 勾选草稿任务整批提交，一个事务） */
-        post: operations["batchSubmitPool"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/projects/{projectId}/tasks/batch-pool-decision": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 批量通过或退回入池审批（AC-25；每个任务须由其所属 KR 负责人处理，一个事务） */
-        post: operations["batchDecidePool"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/projects/{projectId}/task-invites": {
         parameters: {
             query?: never;
@@ -2205,15 +2167,6 @@ export interface components {
             objectives: components["schemas"]["Objective"][];
             /** @description 导入生成的任务草稿（待按 KR 批量提交入池，AC-25） */
             tasks: components["schemas"]["Task"][];
-        };
-        BatchPoolSubmitRequest: {
-            taskIds: number[];
-        };
-        BatchPoolDecisionRequest: {
-            taskIds: number[];
-            /** @enum {string} */
-            decision: "approved" | "rejected";
-            opinion?: string;
         };
         /**
          * @description 报告时间范围（PRD §7.8）
@@ -4854,68 +4807,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    batchSubmitPool: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["BatchPoolSubmitRequest"];
-            };
-        };
-        responses: {
-            /** @description 已提交，返回项目最新任务列表 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Task"][];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    batchDecidePool: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["BatchPoolDecisionRequest"];
-            };
-        };
-        responses: {
-            /** @description 已处理，返回项目最新任务列表 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Task"][];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
             422: components["responses"]["ValidationError"];
         };
     };

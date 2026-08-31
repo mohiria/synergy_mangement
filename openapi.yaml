@@ -2400,82 +2400,6 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
-  /projects/{projectId}/tasks/batch-pool-submit:
-    parameters:
-      - name: projectId
-        in: path
-        required: true
-        schema:
-          type: integer
-          format: int64
-    post:
-      operationId: batchSubmitPool
-      tags: [tasks]
-      summary: 批量提交入池（AC-25；按 KR 勾选草稿任务整批提交，一个事务）
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/BatchPoolSubmitRequest"
-      responses:
-        "200":
-          description: 已提交，返回项目最新任务列表
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Task"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          $ref: "#/components/responses/Conflict"
-        "422":
-          $ref: "#/components/responses/ValidationError"
-
-  /projects/{projectId}/tasks/batch-pool-decision:
-    parameters:
-      - name: projectId
-        in: path
-        required: true
-        schema:
-          type: integer
-          format: int64
-    post:
-      operationId: batchDecidePool
-      tags: [tasks]
-      summary: 批量通过或退回入池审批（AC-25；每个任务须由其所属 KR 负责人处理，一个事务）
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/BatchPoolDecisionRequest"
-      responses:
-        "200":
-          description: 已处理，返回项目最新任务列表
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Task"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          $ref: "#/components/responses/Conflict"
-        "422":
-          $ref: "#/components/responses/ValidationError"
-
   /projects/{projectId}/task-invites:
     parameters:
       - name: projectId
@@ -4147,31 +4071,6 @@ components:
           description: 导入生成的任务草稿（待按 KR 批量提交入池，AC-25）
           items:
             $ref: "#/components/schemas/Task"
-    BatchPoolSubmitRequest:
-      type: object
-      required: [taskIds]
-      properties:
-        taskIds:
-          type: array
-          minItems: 1
-          items:
-            type: integer
-            format: int64
-    BatchPoolDecisionRequest:
-      type: object
-      required: [taskIds, decision]
-      properties:
-        taskIds:
-          type: array
-          minItems: 1
-          items:
-            type: integer
-            format: int64
-        decision:
-          type: string
-          enum: [approved, rejected]
-        opinion:
-          type: string
           maxLength: 500
     ReportRange:
       type: string
