@@ -850,35 +850,65 @@ export default function CollaborationPage({
           ✕
         </button>
       </div>
+      {/* #128：面板完整展示任务内容；放不下的一律单行省略、悬停 title 看全文，不换行撑高。 */}
       <div className="graph-inspector-body">
-        <div className="muted">
+        <div
+          className="muted gi-row"
+          title={`${inspectorDetail.objectiveTitle} / ${inspectorDetail.krDescription}`}
+        >
           所属：{inspectorDetail.objectiveTitle} / {inspectorDetail.krDescription}
         </div>
-        <div>负责人：{inspectorDetail.task.ownerName}</div>
-        <div>
+        <div className="gi-row" title={inspectorDetail.task.ownerName}>
+          负责人：{inspectorDetail.task.ownerName}
+        </div>
+        <div className="gi-row">
           状态：<span className="status-pill">{inspectorDetail.task.statusLabel}</span>
           {inspectorDetail.task.progress != null && ` · ${inspectorDetail.task.progress}%`}
         </div>
-        <div>
+        <div className="gi-row">
           输入 {inspectorDetail.inputs.length} 条 / 输出 {inspectorDetail.outputs.length} 条
         </div>
-        {inspectorDetail.inputs.map((e) => (
-          <div key={e.id} className="muted">
-            ← {e.sourceTaskName ?? e.inputRequest?.providerName} · {e.name} ·{" "}
-            {e.ready ? "已就绪" : "未就绪"}
-          </div>
-        ))}
-        {inspectorDetail.outputs.map((e) => (
-          <div key={e.id} className="muted">
-            → {e.targetTaskName} · {e.name}
-          </div>
-        ))}
-        {inspectorDetail.blockers.length > 0 && (
-          <div className="muted" style={{ color: "var(--red)" }}>
-            卡点：{inspectorDetail.blockers.map((b) => `${b.kindLabel}：缺 ${b.missing}`).join("；")}
-          </div>
-        )}
-        <div>
+        {/* 输入／输出行按 #101 读法：编号 · 任务名 · 类型 · 就绪；来源为成员时显成员名。 */}
+        {inspectorDetail.inputs.map((e) => {
+          const src =
+            e.sourceTaskId != null
+              ? `${taskById.get(e.sourceTaskId)?.code ?? ""} · ${e.sourceTaskName ?? ""}`
+              : (e.inputRequest?.providerName ?? "");
+          const line = `← ${src} · ${e.edgeTypeLabel} · ${e.ready ? "已就绪" : "未就绪"}`;
+          return (
+            <div key={e.id} className="muted gi-row" title={line}>
+              {line}
+            </div>
+          );
+        })}
+        {inspectorDetail.outputs.map((e) => {
+          const line = `→ ${taskById.get(e.targetTaskId)?.code ?? ""} · ${e.targetTaskName ?? ""} · ${e.edgeTypeLabel} · ${e.ready ? "已就绪" : "未就绪"}`;
+          return (
+            <div key={e.id} className="muted gi-row" title={line}>
+              {line}
+            </div>
+          );
+        })}
+        {/* 卡点一行一条，按等级配色（与抽屉一致）。 */}
+        {inspectorDetail.blockers.map((b) => {
+          const line = `卡点 · ${b.kindLabel}：缺 ${b.missing}`;
+          return (
+            <div key={b.key} className={`gi-row gi-blocker risk-${b.level}`} title={line}>
+              {line}
+            </div>
+          );
+        })}
+        <div
+          className="gi-row"
+          title={
+            inspectorDetail.deliverables.filter((d) => d.current).length === 0
+              ? undefined
+              : inspectorDetail.deliverables
+                  .filter((d) => d.current)
+                  .map((d) => d.current!.fileName)
+                  .join("、")
+          }
+        >
           当前交付物：
           {inspectorDetail.deliverables.filter((d) => d.current).length === 0
             ? "无"

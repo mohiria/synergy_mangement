@@ -819,6 +819,11 @@ body {
 .graph-inspector-head button:hover { background: var(--surface-3); color: var(--text); }
 .graph-inspector-body { display: grid; gap: 6px; padding: 12px 14px; font-size: var(--type-body); }
 .graph-inspector-body .muted { font-size: var(--type-aux); }
+/* #128：面板行单行省略、悬停 title 看全文；卡点按等级配色（与抽屉一致）。 */
+.graph-inspector-body .gi-row { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.graph-inspector-body .gi-blocker { font-size: var(--type-aux); }
+.graph-inspector-body .gi-blocker.risk-warning { color: var(--amber); }
+.graph-inspector-body .gi-blocker.risk-high_risk { color: var(--red); }
 
 /* 项目报告 report-sheet 版式（风格基线 §6）：正文纸张居中，眉题由 ::before 提供。 */
 .report-toolbar { max-width: 920px; margin-left: auto; margin-right: auto; }
