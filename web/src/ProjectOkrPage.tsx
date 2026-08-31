@@ -439,6 +439,10 @@ type OkrRow = {
 
 let rowSeq = 0;
 
+// 已有 O 在弹窗里的编号预览：与 OKR 列表同序，列表本身消费的是后端的 code。
+const oCodeOf = (objectives: Objective[], id: number) =>
+  `O${objectives.findIndex((o) => o.id === id) + 1}`;
+
 function OkrBatchModal({
   open,
   projectId,
@@ -475,18 +479,13 @@ function OkrBatchModal({
     }
   }, [open]);
 
-  const newRow = (kind: "O" | "KR"): OkrRow => {
-    const oRows = rows.filter((r) => r.kind === "O");
-    const defaultRef =
-      kind === "KR"
-        ? oRows.length > 0
-          ? `new:${oRows[oRows.length - 1].key}`
-          : objectives.length > 0
-            ? `existing:${objectives[objectives.length - 1].id}`
-            : undefined
-        : undefined;
-    return { key: ++rowSeq, kind, title: "", objRef: defaultRef, description: "", metric: "" };
-  };
+  // 新 O 行；新建后它自成一组，KR 由组末尾的按钮就地添加（#104）。
+  const addObjective = () =>
+    setRows((rs) => [...rs, { key: ++rowSeq, kind: "O", title: "", objRef: undefined, description: "", metric: "" }]);
+
+  // 点哪一组就加到哪一组：归属由按钮所在的组给出，不再默认落到最后一个 O。
+  const addKeyResult = (objRef: string) =>
+    setRows((rs) => [...rs, { key: ++rowSeq, kind: "KR", title: "", objRef, description: "", metric: "" }]);
 
   const patch = (key: number, p: Partial<OkrRow>) =>
     setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)));
@@ -498,26 +497,44 @@ function OkrBatchModal({
         .map((r) => (r.objRef === `new:${key}` ? { ...r, objRef: undefined } : r)),
     );
 
-  // 弹窗内展示编号：新 O 接在已有 O 之后，KR 接在已有 KR 之后。
-  const existingKrCount = objectives.reduce((n, o) => n + o.keyResults.length, 0);
+  // 分组（#104）：本次新建的每个 O 一组、已有的每个 O 一组，最后是归属待定的孤儿行。
+  // 组内顺序即 rows 里的顺序，也就是保存顺序。
+  const oRows = rows.filter((r) => r.kind === "O");
+  const krRows = rows.filter((r) => r.kind === "KR");
+  const oSeqByRef = new Map<string, number>();
+  objectives.forEach((o, i) => oSeqByRef.set(`existing:${o.id}`, i + 1));
+  oRows.forEach((r, i) => oSeqByRef.set(`new:${r.key}`, objectives.length + i + 1));
+
+  // 编号预览：O 接在已有 O 之后，KR 在所属 O 的现有 KR 之后接着排（AC-64 的展示口径）。
   const oCodeByKey = new Map<number, string>();
+  oRows.forEach((r) => oCodeByKey.set(r.key, `O${oSeqByRef.get(`new:${r.key}`)}`));
   const krCodeByKey = new Map<number, string>();
-  {
-    let oN = objectives.length;
-    let krN = existingKrCount;
-    for (const r of rows) {
-      if (r.kind === "O") oCodeByKey.set(r.key, `O${++oN}`);
-      else krCodeByKey.set(r.key, `KR${++krN}`);
-    }
+  const krSeqByRef = new Map<string, number>();
+  objectives.forEach((o) => krSeqByRef.set(`existing:${o.id}`, o.keyResults.length));
+  for (const r of krRows) {
+    if (!r.objRef) continue;
+    const oSeq = oSeqByRef.get(r.objRef);
+    if (oSeq === undefined) continue;
+    const next = (krSeqByRef.get(r.objRef) ?? 0) + 1;
+    krSeqByRef.set(r.objRef, next);
+    krCodeByKey.set(r.key, `KR${oSeq}.${next}`);
   }
 
+  const groups = [
+    ...oRows.map((r) => ({ ref: `new:${r.key}`, oRow: r, title: "" })),
+    ...objectives.map((o) => ({
+      ref: `existing:${o.id}`,
+      oRow: undefined,
+      title: `${oCodeOf(objectives, o.id)} ${o.title}`,
+    })),
+  ];
+  const orphanKrRows = krRows.filter((r) => !r.objRef || !oSeqByRef.has(r.objRef));
+
   const objRefOptions = [
-    ...rows
-      .filter((r) => r.kind === "O")
-      .map((r) => ({
-        value: `new:${r.key}`,
-        label: `${oCodeByKey.get(r.key)}：${r.title.trim() || "（未命名）"}`,
-      })),
+    ...oRows.map((r) => ({
+      value: `new:${r.key}`,
+      label: `${oCodeByKey.get(r.key)}：${r.title.trim() || "（未命名）"}`,
+    })),
     ...objectives.map((o, i) => ({ value: `existing:${o.id}`, label: `O${i + 1}：${o.title}` })),
   ];
 
@@ -529,6 +546,99 @@ function OkrBatchModal({
       value: m.userId,
       label: `${m.displayName}（${m.username}）`,
     }));
+
+  const renderObjectiveRow = (r: OkrRow) => (
+    <div key={r.key} className="okr-sheet-row">
+      <div className="okr-sheet-cell">
+        <div className="sheet-input-pair">
+          <span className="sheet-code">{oCodeByKey.get(r.key)}</span>
+          <Input
+            maxLength={100}
+            placeholder="O 目标描述"
+            value={r.title}
+            onChange={(e) => patch(r.key, { title: e.target.value })}
+          />
+        </div>
+      </div>
+      <div className="okr-sheet-cell">
+        <span className="sheet-placeholder">该行用于创建 O</span>
+      </div>
+      <div className="okr-sheet-cell">
+        <span className="sheet-placeholder">在 KR 上填</span>
+      </div>
+      <div className="okr-sheet-cell">
+        <span className="sheet-placeholder">项目目标</span>
+      </div>
+      <div className="okr-sheet-cell">
+        <span className="sheet-placeholder">—</span>
+      </div>
+      <div className="okr-sheet-cell">
+        <span className="sheet-placeholder">沿用项目周期</span>
+      </div>
+      <Button type="text" size="small" onClick={() => removeRow(r.key)} aria-label="删除该行">
+        ✕
+      </Button>
+    </div>
+  );
+
+  const renderKeyResultRow = (r: OkrRow) => (
+    <div key={r.key} className="okr-sheet-row">
+      <div className="okr-sheet-cell">
+        <span className="sheet-placeholder">—</span>
+      </div>
+      <div className="okr-sheet-cell">
+        <div className="sheet-input-pair">
+          <span className="sheet-code">{krCodeByKey.get(r.key)}</span>
+          <Input
+            maxLength={200}
+            placeholder="KR 目标描述"
+            value={r.description}
+            onChange={(e) => patch(r.key, { description: e.target.value })}
+          />
+        </div>
+      </div>
+      <div className="okr-sheet-cell">
+        <Input
+          maxLength={100}
+          placeholder="量化指标（选填）"
+          value={r.metric}
+          onChange={(e) => patch(r.key, { metric: e.target.value })}
+        />
+      </div>
+      {/* 「所属 O」下拉保留做纠错：改归属后该行移动到目标组（#104）。 */}
+      <div className="okr-sheet-cell">
+        <Select
+          style={{ width: "100%" }}
+          options={objRefOptions}
+          value={r.objRef}
+          onChange={(v) => patch(r.key, { objRef: v })}
+          placeholder="所属 O"
+        />
+      </div>
+      <div className="okr-sheet-cell">
+        <Select
+          style={{ width: "100%" }}
+          options={ownerOptions}
+          value={r.ownerId}
+          onChange={(v) => patch(r.key, { ownerId: v })}
+          allowClear
+          showSearch
+          optionFilterProp="label"
+          placeholder="负责人"
+        />
+      </div>
+      <div className="okr-sheet-cell">
+        <DateRangeField
+          allowEmpty
+          value={r.period}
+          onChange={(v) => patch(r.key, { period: v })}
+        />
+      </div>
+      <Button type="text" size="small" onClick={() => removeRow(r.key)} aria-label="删除该行">
+        ✕
+      </Button>
+    </div>
+  );
 
   const save = async () => {
     const oRows = rows.filter((r) => r.kind === "O");
@@ -625,108 +735,40 @@ function OkrBatchModal({
           <span>周期</span>
           <span />
         </div>
-        {rows.map((r) =>
-          r.kind === "O" ? (
-            <div key={r.key} className="okr-sheet-row">
-              <div className="okr-sheet-cell">
-                <div className="sheet-input-pair">
-                  <span className="sheet-code">{oCodeByKey.get(r.key)}</span>
-                  <Input
-                    maxLength={100}
-                    placeholder="O 目标描述"
-                    value={r.title}
-                    onChange={(e) => patch(r.key, { title: e.target.value })}
-                  />
-                </div>
+        {/* 一个 O 一组（#104）：组头是 O 行（新建的可编辑、已有的只读），
+            组末尾的「＋ 添加 KR」把新行加进本组，不再统一落到最后一个 O。 */}
+        {groups.map((g) => (
+          <div key={g.ref} className="okr-sheet-group">
+            {g.oRow ? (
+              renderObjectiveRow(g.oRow)
+            ) : (
+              <div className="okr-sheet-grouphead" title={g.title}>
+                <b className="cell-text">{g.title}</b>
+                <span className="muted">已有 O</span>
               </div>
-              <div className="okr-sheet-cell">
-                <span className="sheet-placeholder">该行用于创建 O</span>
-              </div>
-              <div className="okr-sheet-cell">
-                <span className="sheet-placeholder">在 KR 上填</span>
-              </div>
-              <div className="okr-sheet-cell">
-                <span className="sheet-placeholder">项目目标</span>
-              </div>
-              <div className="okr-sheet-cell">
-                <span className="sheet-placeholder">—</span>
-              </div>
-              <div className="okr-sheet-cell">
-                <span className="sheet-placeholder">沿用项目周期</span>
-              </div>
-              <Button type="text" size="small" onClick={() => removeRow(r.key)} aria-label="删除该行">
-                ✕
+            )}
+            {krRows.filter((r) => r.objRef === g.ref).map(renderKeyResultRow)}
+            <div className="okr-sheet-groupfoot">
+              <Button size="small" type="text" onClick={() => addKeyResult(g.ref)}>
+                ＋ 添加 KR
               </Button>
             </div>
-          ) : (
-            <div key={r.key} className="okr-sheet-row">
-              <div className="okr-sheet-cell">
-                <span className="sheet-placeholder">—</span>
-              </div>
-              <div className="okr-sheet-cell">
-                <div className="sheet-input-pair">
-                  <span className="sheet-code">{krCodeByKey.get(r.key)}</span>
-                  <Input
-                    maxLength={200}
-                    placeholder="KR 目标描述"
-                    value={r.description}
-                    onChange={(e) => patch(r.key, { description: e.target.value })}
-                  />
-                </div>
-              </div>
-              <div className="okr-sheet-cell">
-                <Input
-                  maxLength={100}
-                  placeholder="量化指标（选填）"
-                  value={r.metric}
-                  onChange={(e) => patch(r.key, { metric: e.target.value })}
-                />
-              </div>
-              <div className="okr-sheet-cell">
-                <Select
-                  style={{ width: "100%" }}
-                  options={objRefOptions}
-                  value={r.objRef}
-                  onChange={(v) => patch(r.key, { objRef: v })}
-                  placeholder="所属 O"
-                />
-              </div>
-              <div className="okr-sheet-cell">
-                <Select
-                  style={{ width: "100%" }}
-                  options={ownerOptions}
-                  value={r.ownerId}
-                  onChange={(v) => patch(r.key, { ownerId: v })}
-                  allowClear
-                  showSearch
-                  optionFilterProp="label"
-                  placeholder="负责人"
-                />
-              </div>
-              <div className="okr-sheet-cell">
-                <DateRangeField
-                  allowEmpty
-                  value={r.period}
-                  onChange={(v) => patch(r.key, { period: v })}
-                />
-              </div>
-              <Button type="text" size="small" onClick={() => removeRow(r.key)} aria-label="删除该行">
-                ✕
-              </Button>
+          </div>
+        ))}
+        {/* 删掉一个新建 O 行后，它下面的 KR 不静默丢失，落到这里等重新指定归属。 */}
+        {orphanKrRows.length > 0 && (
+          <div className="okr-sheet-group">
+            <div className="okr-sheet-grouphead">
+              <b>待指定所属 O</b>
+              <span className="muted">保存前需为每行选择所属 O</span>
             </div>
-          ),
+            {orphanKrRows.map(renderKeyResultRow)}
+          </div>
         )}
       </div>
       <div className="okr-sheet-actions">
-        <Button size="small" onClick={() => setRows((rs) => [...rs, newRow("O")])}>
+        <Button size="small" onClick={addObjective}>
           ＋ 添加 O 事项
-        </Button>
-        <Button
-          size="small"
-          disabled={rows.every((r) => r.kind !== "O") && objectives.length === 0}
-          onClick={() => setRows((rs) => [...rs, newRow("KR")])}
-        >
-          ＋ 添加 KR 事项
         </Button>
       </div>
     </Modal>

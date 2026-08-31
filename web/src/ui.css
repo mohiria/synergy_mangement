@@ -274,6 +274,16 @@ body {
 .sheet-input-pair { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 6px; align-items: center; }
 .sheet-code { color: var(--navy); font-weight: 600; text-align: center; }
 .sheet-placeholder { color: var(--muted); font-size: var(--type-aux); }
+/* 分组（#104）：一个 O 一组，组末尾的「＋ 添加 KR」把新行加进本组。 */
+.okr-sheet-group { border-bottom: 1px solid var(--line); }
+.okr-sheet-group:last-child { border-bottom: 0; }
+.okr-sheet-grouphead {
+  min-height: 38px; padding: 8px 10px; display: flex; align-items: center; gap: 10px;
+  background: #eef1f5; color: #3e4b61; font-weight: 650; font-size: var(--type-body);
+}
+.okr-sheet-grouphead b { min-width: 0; font-weight: 650; }
+.okr-sheet-grouphead .muted { margin-left: auto; flex: none; font-size: var(--type-aux); font-weight: 400; }
+.okr-sheet-groupfoot { padding: 4px 10px 8px; }
 .okr-sheet-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
 .modal-sub { display: block; font-size: var(--type-aux); color: var(--muted); font-weight: 400; margin-top: 3px; }
 
