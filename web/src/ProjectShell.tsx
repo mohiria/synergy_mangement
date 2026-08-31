@@ -79,7 +79,7 @@ function ProjectMenu({
       </div>
       <button type="button" className="project-menu-foot" onClick={() => onNavigate("/")}>
         <Icon name="package" size={15} />
-        查看全部项目
+        全部项目
       </button>
     </div>
   );
@@ -174,14 +174,11 @@ export default function ProjectShell({
             );
           })}
         </nav>
+        {/* #131：侧栏只留「项目设置」；回项目列表走切换浮层底部的「全部项目」或面包屑。 */}
         <div className="sidebar-foot">
           <Link className={`nav-row ${pathname === settingsPath ? "active" : ""}`} to={settingsPath}>
             <Icon name="settings" />
             <span>项目设置</span>
-          </Link>
-          <Link className="nav-row" to="/">
-            <Icon name="package" />
-            <span>项目列表</span>
           </Link>
         </div>
       </aside>
