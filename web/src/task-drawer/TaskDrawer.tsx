@@ -4,7 +4,7 @@ import { client } from "../api/client";
 import FileUploadField, { fileTypeLabel, formatFileSize } from "../FileUploadField";
 import Icon from "../icons";
 import type { components } from "../api/schema";
-import { ACTIVITY_PREVIEW, STATUS_CLASS, fmtTime, structureMessage } from "./shared";
+import { ACTIVITY_PREVIEW, STATUS_CLASS, fmtTime, pendingStructureChange } from "./shared";
 
 type Task = components["schemas"]["Task"];
 type ProjectMember = components["schemas"]["ProjectMember"];
@@ -77,7 +77,9 @@ export default function TaskDrawer({
   const [progressEditing, setProgressEditing] = useState(false);
   const [progressDraft, setProgressDraft] = useState<number | null>(null);
   const [savingProgress, setSavingProgress] = useState(false);
-  const [newDeliverableName, setNewDeliverableName] = useState("");
+  const [addingDeliverable, setAddingDeliverable] = useState(false);
+  const [newDeliverableFile, setNewDeliverableFile] = useState<File | null>(null);
+  const [newDeliverableBusy, setNewDeliverableBusy] = useState(false);
   const [discussionDraft, setDiscussionDraft] = useState("");
   const [postingDiscussion, setPostingDiscussion] = useState(false);
   const [activityExpanded, setActivityExpanded] = useState(false);
@@ -231,19 +233,53 @@ export default function TaskDrawer({
     else message.error(res.error?.message ?? "获取下载地址失败");
   };
 
+  const closeAddDeliverable = () => {
+    setAddingDeliverable(false);
+    setNewDeliverableFile(null);
+  };
+
+  // 新增交付物项（裁决 G1）：入口就是选文件，一步建项并上传候选内容——项名由服务端按文件名派生，
+  // 前端不自己算名字。已入池任务的新增是关键字段变更，进审批时项还没建出来，只能等审批通过再传内容。
   const addDeliverable = async () => {
-    if (!task) return;
+    if (!task || !newDeliverableFile) return;
+    const file = newDeliverableFile;
+    setNewDeliverableBusy(true);
+    const before = new Set((detail?.deliverables ?? []).map((d) => d.id));
     const res = await client.POST("/projects/{projectId}/tasks/{taskId}/deliverables", {
       params: { path: { projectId, taskId: task.id } },
-      body: { name: newDeliverableName.trim() },
+      body: { fileName: file.name },
     });
-    if (res.data) {
-      message.success(structureMessage(res.data, "交付物项已新增"));
-      setNewDeliverableName("");
-      setRefreshTick((n) => n + 1);
-    } else {
+    if (!res.data) {
+      setNewDeliverableBusy(false);
       message.error(res.error?.message ?? "新增失败");
+      return;
     }
+    if (pendingStructureChange(res.data)) {
+      setNewDeliverableBusy(false);
+      closeAddDeliverable();
+      message.success("已提交，待所属 KR 负责人审批后生效；通过后再上传内容");
+      setRefreshTick((n) => n + 1);
+      return;
+    }
+    // 项已建出来：取回详情认出新项（按 id 差集，不猜派生出来的项名），接着走候选内容两阶段上传。
+    const after = await client.GET("/projects/{projectId}/tasks/{taskId}", {
+      params: { path: { projectId, taskId: task.id } },
+    });
+    const created = (after.data?.deliverables ?? []).find((d) => !before.has(d.id));
+    if (!created) {
+      setNewDeliverableBusy(false);
+      closeAddDeliverable();
+      message.success("交付物项已新增");
+      setRefreshTick((n) => n + 1);
+      return;
+    }
+    const ok = await putCandidate(created.id, file);
+    setNewDeliverableBusy(false);
+    if (ok) {
+      closeAddDeliverable();
+      message.success(`交付物项「${created.name}」已新增，候选内容已上传`);
+    }
+    setRefreshTick((n) => n + 1);
   };
 
   // 候选内容上传（AC-52）：先在窗口内选择，点「确认上传」才登记并直传；
@@ -253,14 +289,13 @@ export default function TaskDrawer({
     setCandidateFile(null);
   };
 
-  const uploadCandidate = async () => {
-    if (!task || !candidateFor || !candidateFile) return;
-    const file = candidateFile;
-    setUploadingId(candidateFor.id);
+  // 候选内容两阶段上传：登记 → 直传 → 确认，三步都成才算数。新增交付物项也复用这一段。
+  const putCandidate = async (deliverableId: number, file: File): Promise<boolean> => {
+    if (!task) return false;
     const res = await client.POST(
       "/projects/{projectId}/tasks/{taskId}/deliverables/{deliverableId}/candidate",
       {
-        params: { path: { projectId, taskId: task.id, deliverableId: candidateFor.id } },
+        params: { path: { projectId, taskId: task.id, deliverableId } },
         body: {
           fileName: file.name,
           fileType: file.name.split(".").pop() ?? "",
@@ -269,9 +304,8 @@ export default function TaskDrawer({
       },
     );
     if (!res.data) {
-      setUploadingId(null);
       message.error(res.error?.message ?? "登记候选内容失败");
-      return;
+      return false;
     }
     try {
       const put = await fetch(res.data.uploadUrl, { method: "PUT", body: file });
@@ -280,15 +314,24 @@ export default function TaskDrawer({
       const commit = await client.POST(
         "/projects/{projectId}/tasks/{taskId}/deliverables/{deliverableId}/candidate/commit",
         {
-          params: { path: { projectId, taskId: task.id, deliverableId: candidateFor.id } },
+          params: { path: { projectId, taskId: task.id, deliverableId } },
           body: { fileId: res.data.file.id },
         },
       );
       if (!commit.data) throw new Error(commit.error?.message ?? "确认失败");
-      message.success("候选内容已上传；随完成申请提交后进入审核");
-      closeCandidate();
+      return true;
     } catch {
       message.error("文件上传失败，请确认文件服务可用后重试");
+      return false;
+    }
+  };
+
+  const uploadCandidate = async () => {
+    if (!task || !candidateFor || !candidateFile) return;
+    setUploadingId(candidateFor.id);
+    if (await putCandidate(candidateFor.id, candidateFile)) {
+      message.success("候选内容已上传；随完成申请提交后进入审核");
+      closeCandidate();
     }
     setUploadingId(null);
     setRefreshTick((n) => n + 1);
@@ -672,17 +715,12 @@ export default function TaskDrawer({
           ))}
           {task.canManageDeliverables && (
             <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-              <Input
-                size="small"
-                maxLength={100}
-                placeholder="新增交付物项名称"
-                value={newDeliverableName}
-                onChange={(e) => setNewDeliverableName(e.target.value)}
-                style={{ width: 240 }}
-              />
-              <Button size="small" onClick={addDeliverable} disabled={!newDeliverableName.trim()}>
+              <Button size="small" onClick={() => setAddingDeliverable(true)}>
                 ＋ 新增交付物项
               </Button>
+              <span className="muted" style={{ fontSize: 12, alignSelf: "center" }}>
+                选文件即可，项名取文件名
+              </span>
             </div>
           )}
         </section>
@@ -1240,6 +1278,21 @@ export default function TaskDrawer({
         ]}
       />
       </div>
+      <Modal
+        title="新增交付物项"
+        open={addingDeliverable}
+        okText="确认上传"
+        cancelText="取消"
+        confirmLoading={newDeliverableBusy}
+        okButtonProps={{ disabled: !newDeliverableFile }}
+        onCancel={closeAddDeliverable}
+        onOk={addDeliverable}
+      >
+        <FileUploadField value={newDeliverableFile} onChange={setNewDeliverableFile} />
+        <div className="notice" style={{ marginTop: 8 }}>
+          交付物项名取所选文件的文件名（不含扩展名），之后更新成果不会改变项名；同名的交付物项已存在时请在该项上「重传候选内容」。
+        </div>
+      </Modal>
       <Modal
         title={candidateFor ? `上传候选内容 · ${candidateFor.name}` : "上传候选内容"}
         open={!!candidateFor}

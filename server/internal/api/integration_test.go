@@ -1742,13 +1742,19 @@ func TestDeliverablesAndFiles(t *testing.T) {
 
 	// 再补一个交付物项（一个任务多项交付物）；bob 是所属 KR 负责人，免审即时生效
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/deliverables", tasksURL, taskID),
-		api.CreateDeliverableRequest{Name: "现场验收记录"})
+		api.CreateDeliverableRequest{FileName: "现场验收记录.docx"})
 	wantStructureAccepted(t, resp)
 	second := deliverableOf(t, bob, base, created.Id, taskID, "现场验收记录")
 
-	// 空名称 422
+	// 空文件名 422
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/deliverables", tasksURL, taskID),
-		api.CreateDeliverableRequest{Name: "  "})
+		api.CreateDeliverableRequest{FileName: "  "})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+
+	// 同名文件不静默新建第二项（裁决 G1）：项名派生后与已有项重名 422
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/deliverables", tasksURL, taskID),
+		api.CreateDeliverableRequest{FileName: "现场验收记录.pdf"})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 
@@ -1809,6 +1815,11 @@ func TestDeliverablesAndFiles(t *testing.T) {
 	}
 	if detail.Deliverables[1].Candidate == nil || detail.Deliverables[1].Candidate.FileName != "现场验收记录-rev2.xlsx" {
 		t.Fatalf("候选覆盖异常: %+v", detail.Deliverables[1])
+	}
+	// 裁决 G：项名取首次建项时的文件名，成果更新只换内容不改名——
+	// 建项文件是「现场验收记录.docx」，此后传了 .xlsx 与 -rev2.xlsx，项名仍是「现场验收记录」。
+	if detail.Deliverables[1].Name != "现场验收记录" {
+		t.Fatalf("成果更新不应改项名: %+v", detail.Deliverables[1].Name)
 	}
 	if detail.Deliverables[1].Current != nil {
 		t.Fatalf("候选不应提前成为当前内容: %+v", detail.Deliverables[1])
@@ -2010,7 +2021,7 @@ func TestCompletionReviewFlow(t *testing.T) {
 	resp.Body.Close()
 	// 输出属关键字段：已入池任务由所属 KR 负责人 bob 加交付物项，免审即时生效（AC-23）
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/deliverables", tasksURL, taskID),
-		api.CreateDeliverableRequest{Name: "验收记录"})
+		api.CreateDeliverableRequest{FileName: "验收记录.docx"})
 	wantStructureAccepted(t, resp)
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, taskID),
 		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
@@ -5270,7 +5281,7 @@ func TestStructureChangeRejected(t *testing.T) {
 
 	// 任务负责人 carol 新增交付物项 → 待审批，交付物项尚未产生
 	deliverablesURL := fmt.Sprintf("%s/%d/deliverables", tasksURL, taskID)
-	resp = doJSON(t, carol, http.MethodPost, deliverablesURL, api.CreateDeliverableRequest{Name: "联调报告"})
+	resp = doJSON(t, carol, http.MethodPost, deliverablesURL, api.CreateDeliverableRequest{FileName: "联调报告.docx"})
 	pending := wantStructureAccepted(t, resp)
 	if pending.FieldChange == nil || pending.FieldChange.ChangeType != api.Structure {
 		t.Fatalf("未生成结构变更单: %+v", pending.FieldChange)
@@ -5284,7 +5295,7 @@ func TestStructureChangeRejected(t *testing.T) {
 		t.Fatalf("待审批期间不应先建交付物项: %+v", ds)
 	}
 	// 互斥：待审批期间不接受第二张单
-	resp = doJSON(t, carol, http.MethodPost, deliverablesURL, api.CreateDeliverableRequest{Name: "另一项"})
+	resp = doJSON(t, carol, http.MethodPost, deliverablesURL, api.CreateDeliverableRequest{FileName: "另一项.docx"})
 	wantStatus(t, resp, http.StatusConflict)
 	resp.Body.Close()
 
@@ -5301,7 +5312,7 @@ func TestStructureChangeRejected(t *testing.T) {
 	}
 
 	// 重新提交并通过：这次才真的建出来
-	resp = doJSON(t, carol, http.MethodPost, deliverablesURL, api.CreateDeliverableRequest{Name: "联调报告"})
+	resp = doJSON(t, carol, http.MethodPost, deliverablesURL, api.CreateDeliverableRequest{FileName: "联调报告.docx"})
 	again := wantStructureAccepted(t, resp)
 	approveStructureChange(t, bob, base, created.Id, taskID, again)
 	if d := deliverableOf(t, carol, base, created.Id, taskID, "联调报告"); d.Name != "联调报告" {
@@ -5444,7 +5455,7 @@ func TestDeliverableFileStateUnique(t *testing.T) {
 	})
 	wantStatus(t, resp, http.StatusCreated)
 	taskID := decodeBody[[]api.Task](t, resp)[0].Id
-	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/deliverables", tasksURL, taskID), api.CreateDeliverableRequest{Name: "验收方案"})
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/deliverables", tasksURL, taskID), api.CreateDeliverableRequest{FileName: "验收方案.docx"})
 	wantStructureAccepted(t, resp)
 	deliverableID := deliverableOf(t, alice, base, created.Id, taskID, "验收方案").Id
 

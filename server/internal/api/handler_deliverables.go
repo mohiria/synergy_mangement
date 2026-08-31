@@ -36,8 +36,18 @@ func (s *Server) CreateDeliverable(w http.ResponseWriter, r *http.Request, proje
 	if !ok {
 		return
 	}
-	name := strings.TrimSpace(req.Name)
-	if err := domain.ValidateDeliverableName(name); err != nil {
+	// 项名取上传文件的文件名（裁决 G1）：用户不再手填，重名不静默新建第二项。
+	name := domain.DeliverableName("", req.FileName)
+	existing, err := s.q.ListDeliverablesByTask(r.Context(), taskId)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	existingNames := make([]string, 0, len(existing))
+	for _, d := range existing {
+		existingNames = append(existingNames, d.Name)
+	}
+	if err := domain.ValidateNewDeliverableName(name, existingNames); err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_deliverable", Message: err.Error()})
 		return
 	}
@@ -46,7 +56,7 @@ func (s *Server) CreateDeliverable(w http.ResponseWriter, r *http.Request, proje
 	if !ok {
 		return
 	}
-	raw, err := json.Marshal(CreateDeliverableRequest{Name: name})
+	raw, err := json.Marshal(req)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return

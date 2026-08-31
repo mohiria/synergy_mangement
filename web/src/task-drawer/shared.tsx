@@ -78,10 +78,11 @@ export function memberTreeItems(members: ProjectMember[]): TreeTransferItem[] {
 
 // 结构变更（输入、输入源、输出、接收方）属关键字段：已入池任务要经所属 KR 负责人审批（AC-23）。
 // 回包里带着待审批的结构变更单，就说明这次没有立即生效。
-export function structureMessage(task: Task | undefined, applied: string): string {
+export function pendingStructureChange(task: Task | undefined): boolean {
   const fc = task?.fieldChange;
-  if (fc && fc.state === "pending" && fc.changeType === "structure") {
-    return "已提交，待所属 KR 负责人审批后生效";
-  }
-  return applied;
+  return !!fc && fc.state === "pending" && fc.changeType === "structure";
+}
+
+export function structureMessage(task: Task | undefined, applied: string): string {
+  return pendingStructureChange(task) ? "已提交，待所属 KR 负责人审批后生效" : applied;
 }

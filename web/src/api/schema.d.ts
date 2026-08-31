@@ -1913,8 +1913,15 @@ export interface components {
             /** @description 本交付物承接的来源关系边（AC-17 归档视角需在列表层可见可点） */
             edges: components["schemas"]["DeliverableEdgeRef"][];
         };
+        /**
+         * @description 新增交付物项（裁决 G1）：不收项名，入口就是选文件。
+         *     项名由服务端按文件名派生（去掉最后一段扩展名，见 domain.DeliverableName）；
+         *     同一任务下重名会被拒绝（invalid_deliverable），同一件成果的新版本走已有项的重传候选内容。
+         *     本请求只建项，不登记内容：客户端在项建立后再走 candidate 两阶段上传。
+         */
         CreateDeliverableRequest: {
-            name: string;
+            /** @description 用户选中的文件名，项名由它派生 */
+            fileName: string;
         };
         UploadCandidateRequest: {
             fileName: string;

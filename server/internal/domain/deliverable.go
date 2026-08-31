@@ -17,11 +17,16 @@ const (
 var (
 	ErrDeliverableNameEmpty   = errors.New("交付物名称不能为空")
 	ErrDeliverableNameTooLong = errors.New("交付物名称不能超过 100 字")
+	// ErrDeliverableNameDuplicate 同一任务下已有同名交付物项：新增要挡下，更新内容请走已有项（裁决 G1）。
+	ErrDeliverableNameDuplicate = errors.New("同名交付物项已存在，请在该项上更新内容")
 	ErrFileTooLarge           = errors.New("单个文件不能超过 20MB")
 	ErrFileEmpty              = errors.New("文件内容为空")
 	ErrFileNameEmpty          = errors.New("文件名不能为空")
 	ErrFileNameTooLong        = errors.New("文件名不能超过 200 字")
 )
+
+// deliverableNameRunes 交付物项名长度上限。
+const deliverableNameRunes = 100
 
 // ValidateDeliverableName 校验交付物项名称。
 func ValidateDeliverableName(name string) error {
@@ -29,7 +34,7 @@ func ValidateDeliverableName(name string) error {
 	if n == "" {
 		return ErrDeliverableNameEmpty
 	}
-	if utf8.RuneCountInString(n) > 100 {
+	if utf8.RuneCountInString(n) > deliverableNameRunes {
 		return ErrDeliverableNameTooLong
 	}
 	return nil

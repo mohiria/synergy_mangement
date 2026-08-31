@@ -161,8 +161,9 @@ func (s *Server) applyStructureChange(ctx context.Context, qtx *store.Queries,
 		if err := json.Unmarshal(p.Request, &req); err != nil {
 			return err
 		}
+		// 项名按同一条派生规则现算（裁决 G1）：审批通过时重算与提交时同值。
 		_, err := qtx.CreateDeliverable(ctx, store.CreateDeliverableParams{
-			TaskID: taskID, Name: strings.TrimSpace(req.Name), CreatedBy: uid,
+			TaskID: taskID, Name: domain.DeliverableName("", req.FileName), CreatedBy: uid,
 		})
 		return err
 	}
