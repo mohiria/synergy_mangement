@@ -18,7 +18,7 @@ END $$;
 
 -- O／KR／任务的持久编号序号（AC-64）：种子按 id 显式插入，没写 code_seq，
 -- 而回填只在迁移 00031 里跑过一次——种子重建后编号会全部落空。
--- 这里按与迁移相同的口径补一次，让演示数据里的 O1／KR1.1／1.1.1 与真实使用一致。
+-- 这里按与迁移相同的口径补一次，让演示数据里的 O1／KR1.1／T1.1.1 与真实使用一致。
 UPDATE objectives o SET code_seq = s.n
 FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY sort_order, id) AS n FROM objectives) s
 WHERE o.id = s.id;

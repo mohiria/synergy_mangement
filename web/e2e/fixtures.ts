@@ -8,9 +8,9 @@ export const DEMO = {
   projectId: 1,
   // KR1.1 下四项任务全部已完成，用来验证「显示已完成」开关。
   completedKrId: 1,
-  completedTask: { code: "1.1.1", name: "盘点三套核心库对象与不兼容项" },
+  completedTask: { code: "T1.1.1", name: "盘点三套核心库对象与不兼容项" },
   // 进行中的任务，任务详情抽屉的结构断言用它（五块齐全）。
-  activeTask: { code: "1.2.2", name: "完成资金模块驱动切换与连接池调优" },
+  activeTask: { code: "T1.2.2", name: "完成资金模块驱动切换与连接池调优" },
 } as const;
 
 export async function login(page: Page, username = DEMO.admin.username) {

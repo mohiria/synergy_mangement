@@ -1,7 +1,7 @@
 -- +goose Up
 -- O／KR／任务的持久编号序号（AC-64、F1）：编号在创建时分配、之后不再变动，
--- 删除同级对象也不重排——用户会把「1.1.1」当标识符在会议和讨论里引用。
--- 只存各级序号，展示编号（O1 / KR1.1 / 1.1.1）由序号链在 domain 派生。
+-- 删除同级对象也不重排——用户会把「T1.1.1」当标识符在会议和讨论里引用。
+-- 只存各级序号，展示编号（O1 / KR1.1 / T1.1.1）由序号链在 domain 派生。
 ALTER TABLE objectives   ADD COLUMN code_seq INT NOT NULL DEFAULT 0;
 ALTER TABLE key_results  ADD COLUMN code_seq INT NOT NULL DEFAULT 0;
 ALTER TABLE tasks        ADD COLUMN code_seq INT NOT NULL DEFAULT 0;

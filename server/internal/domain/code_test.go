@@ -2,7 +2,7 @@ package domain
 
 import "testing"
 
-// AC-64：O 编号为自然数、KR 编号形如 KR1.1、任务编号形如 1.1.1；
+// AC-64：O 编号为自然数、KR 编号形如 KR1.1、任务编号形如 T1.1.1（#102 加 T 前缀）；
 // 编号创建时分配并持久保存，删除同级对象后其余编号不变。
 func TestEntityCodes(t *testing.T) {
 	if got := ObjectiveCode(2); got != "O2" {
@@ -14,10 +14,10 @@ func TestEntityCodes(t *testing.T) {
 	if got := KeyResultCode(3, 12); got != "KR3.12" {
 		t.Fatalf("KeyResultCode(3,12) = %q", got)
 	}
-	if got := TaskCode(1, 1, 1); got != "1.1.1" {
+	if got := TaskCode(1, 1, 1); got != "T1.1.1" {
 		t.Fatalf("TaskCode(1,1,1) = %q", got)
 	}
-	if got := TaskCode(2, 3, 10); got != "2.3.10" {
+	if got := TaskCode(2, 3, 10); got != "T2.3.10" {
 		t.Fatalf("TaskCode(2,3,10) = %q", got)
 	}
 	// 序号缺失（存量数据未回填）时不编造编号，返回空串让界面退化显示。

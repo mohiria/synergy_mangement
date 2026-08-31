@@ -3509,7 +3509,7 @@ func TestArtifactsAndPackages(t *testing.T) {
 	}
 	// AC-17 列表层九列所需的派生字段（#68）：编号、任务负责人、接收方与 KR 组头事实。
 	ao, akr := artifacts[0], artifacts[0].Krs[0]
-	if ao.Code != "O1" || akr.Code != "KR1.1" || at.Code != "1.1.1" {
+	if ao.Code != "O1" || akr.Code != "KR1.1" || at.Code != "T1.1.1" {
 		t.Fatalf("归档编号异常: O=%q KR=%q 任务=%q", ao.Code, akr.Code, at.Code)
 	}
 	if akr.OwnerName != "李四" || akr.DeliverableCount != 1 {
@@ -5657,7 +5657,7 @@ func TestWritePathAudit(t *testing.T) {
 	}
 }
 
-// AC-64 编号稳定：O 编号为自然数、KR 形如 KR1.1、任务形如 1.1.1；
+// AC-64 编号稳定：O 编号为自然数、KR 形如 KR1.1、任务形如 T1.1.1；
 // 编号创建时分配并持久保存，删除 O2 后 O3 编号不变、新建的 O 也不复用 2。
 func TestEntityCodesStable(t *testing.T) {
 	q, pool := setupDB(t)
@@ -5703,7 +5703,7 @@ func TestEntityCodesStable(t *testing.T) {
 		t.Fatalf("KR 编号异常: %+v", okr[0].KeyResults)
 	}
 
-	// 任务编号形如 1.1.1，同 KR 内递增
+	// 任务编号形如 T1.1.1，同 KR 内递增
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 	kr11 := okr[0].KeyResults[0].Id
@@ -5722,7 +5722,7 @@ func TestEntityCodesStable(t *testing.T) {
 			firstTaskID = tk.Id
 		}
 	}
-	if byName["任务甲"] != "1.1.1" || byName["任务乙"] != "1.1.2" {
+	if byName["任务甲"] != "T1.1.1" || byName["任务乙"] != "T1.1.2" {
 		t.Fatalf("任务编号异常: %+v", byName)
 	}
 	_ = firstTaskID
