@@ -36,6 +36,122 @@ const FIELD_LABEL: Record<FieldKey, string> = {
   deliverable: "预期交付物",
 };
 
+// CSV 读取（#97）：Excel 另存的 CSV 有三种常见来源——「CSV UTF-8」带 BOM、
+// 中文环境默认的「CSV (逗号分隔)」是 GB18030／GBK、以及纯 UTF-8。
+// 先剥 BOM，再用严格 UTF-8 试解；解不出（遇到非法字节序列）才回落 GB18030。
+export function decodeTable(buffer: ArrayBuffer): string {
+  let bytes = new Uint8Array(buffer);
+  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    bytes = bytes.subarray(3);
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return new TextDecoder("gb18030").decode(bytes);
+  }
+}
+
+// 分隔符只看首行（表头）：正文单元格里偶然出现的制表符不该改变整篇的切分口径。
+// 计数相同时按 制表符 → 逗号 → 分号 取，剪贴板粘贴的表格因此仍走制表符。
+const DELIMITERS = ["\t", ",", ";"] as const;
+
+export function detectDelimiter(text: string): string {
+  const header = firstLogicalLine(text);
+  let best = ",";
+  let bestCount = 0;
+  for (const d of DELIMITERS) {
+    const n = countOutsideQuotes(header, d);
+    if (n > bestCount) {
+      best = d;
+      bestCount = n;
+    }
+  }
+  return best;
+}
+
+// 首行要按引号规则取：被引号包裹的字段里可以有换行，那不是行尾。
+function firstLogicalLine(text: string): string {
+  let quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '"') {
+      if (quoted && text[i + 1] === '"') i++;
+      else quoted = !quoted;
+    } else if (!quoted && (c === "\n" || c === "\r")) {
+      return text.slice(0, i);
+    }
+  }
+  return text;
+}
+
+function countOutsideQuotes(line: string, delim: string): number {
+  let quoted = false;
+  let n = 0;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') {
+      if (quoted && line[i + 1] === '"') i++;
+      else quoted = !quoted;
+    } else if (!quoted && c === delim) {
+      n++;
+    }
+  }
+  return n;
+}
+
+// RFC 4180 口径的切分：双引号包裹的字段里可以有分隔符与换行，两个连续引号表示一个引号。
+// 全空行（含 ",,,," 这类只有分隔符的行）在这一步就剔除，不进后面的映射与预览。
+export function parseDelimited(text: string, delim = detectDelimiter(text)): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let quoted = false;
+  const endField = () => {
+    row.push(field.trim());
+    field = "";
+  };
+  const endRow = () => {
+    endField();
+    if (row.some((c) => c !== "")) rows.push(row);
+    row = [];
+  };
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          quoted = false;
+        }
+      } else {
+        field += c;
+      }
+      continue;
+    }
+    switch (c) {
+      case '"':
+        quoted = true;
+        break;
+      case delim:
+        endField();
+        break;
+      case "\r":
+        if (text[i + 1] === "\n") i++;
+        endRow();
+        break;
+      case "\n":
+        endRow();
+        break;
+      default:
+        field += c;
+    }
+  }
+  if (field !== "" || row.length > 0) endRow();
+  return rows;
+}
+
 const normalizeDate = (s: string) => {
   const m = s.trim().replace(/[./]/g, "-").match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
   if (!m) return "";
@@ -64,11 +180,7 @@ export default function ImportModal({
   // 源文件名随导入记录留存（§7.9、AC-68）：选文件时自动带上，粘贴时留空。
   const [sourceFileName, setSourceFileName] = useState("");
 
-  const rows = useMemo(() => {
-    const lines = raw.split(/\r?\n/).filter((l) => l.trim() !== "");
-    const delim = raw.includes("\t") ? "\t" : ",";
-    return lines.map((l) => l.split(delim).map((c) => c.trim()));
-  }, [raw]);
+  const rows = useMemo(() => parseDelimited(raw), [raw]);
   const columnCount = rows.reduce((n, r) => Math.max(n, r.length), 0);
 
   const reset = () => {
@@ -263,7 +375,8 @@ export default function ImportModal({
               onChange={async (e) => {
                 const file = e.target.files?.[0];
                 if (!file) return;
-                setRaw(await file.text());
+                // 读原始字节再自行解码：file.text() 固定按 UTF-8 且不剥 BOM（#97）。
+                setRaw(decodeTable(await file.arrayBuffer()));
                 setSourceFileName(file.name);
                 setError(null);
               }}
