@@ -143,7 +143,13 @@ export default function ProjectOverviewPage({
               </p>
             </div>
             {/* §7.1：页头不提供「创建任务」，关系入口统一命名为「查看协作全景」。 */}
-            <Button onClick={() => navigate(`/projects/${projectId}/graph`)}>查看协作全景</Button>
+            <div style={{ display: "flex", gap: 8 }}>
+              {/* #125：OKR 管理并入总览——有编辑权限者从这里进入全页管理模式。 */}
+              {project.canEdit && (
+                <Button onClick={() => navigate(`/projects/${projectId}/okr`)}>管理 O/KR</Button>
+              )}
+              <Button onClick={() => navigate(`/projects/${projectId}/graph`)}>查看协作全景</Button>
+            </div>
           </div>
           {/* overview-brief 头卡：只汇总 O／KR 层级事实与需关注数量。
               原型这里还有一列「活跃任务」，但 AC-05 要求概览首层不出现任务与进度数字，

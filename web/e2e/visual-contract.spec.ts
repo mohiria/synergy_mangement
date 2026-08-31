@@ -71,7 +71,7 @@ function violations(pairs: [string, string][], allowed: Set<string>) {
 // 只等「有个 h1」会静默变成在项目列表上跑，必须比对标题本身。
 const PAGES: [string, string][] = [
   ["项目总览", ""],
-  ["OKR 管理", "/okr"],
+  ["管理 O/KR", "/okr"],
   ["全部任务", "/tasks"],
   ["我的工作", "/my-work"],
   ["成果与归档", "/artifacts"],

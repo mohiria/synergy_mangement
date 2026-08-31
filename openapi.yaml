@@ -397,13 +397,11 @@ paths:
               $ref: "#/components/schemas/CreateOkrBatchRequest"
       responses:
         "201":
-          description: 创建成功，返回项目最新的完整 O／KR 列表
+          description: 创建成功，返回项目最新的完整 O／KR 列表与本次已通知的负责人数（#125）
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Objective"
+                $ref: "#/components/schemas/CreateOkrBatchResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -3043,6 +3041,17 @@ components:
           minItems: 1
           items:
             $ref: "#/components/schemas/CreateOkrBatchItem"
+    CreateOkrBatchResponse:
+      type: object
+      description: 批量创建结果（#125）：最新 O/KR 列表 + 本次站内通知的负责人数（去重、不含操作者本人）
+      required: [objectives, notifiedCount]
+      properties:
+        objectives:
+          type: array
+          items:
+            $ref: "#/components/schemas/Objective"
+        notifiedCount:
+          type: integer
     TaskStatus:
       type: string
       description: 任务生命周期状态（词汇表「任务生命周期状态」）；页面主状态汇总，审批原始状态在审批单中

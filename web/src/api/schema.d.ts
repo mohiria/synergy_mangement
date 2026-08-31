@@ -1567,6 +1567,11 @@ export interface components {
         CreateOkrBatchRequest: {
             items: components["schemas"]["CreateOkrBatchItem"][];
         };
+        /** @description 批量创建结果（#125）：最新 O/KR 列表 + 本次站内通知的负责人数（去重、不含操作者本人） */
+        CreateOkrBatchResponse: {
+            objectives: components["schemas"]["Objective"][];
+            notifiedCount: number;
+        };
         /**
          * @description 任务生命周期状态（词汇表「任务生命周期状态」）；页面主状态汇总，审批原始状态在审批单中
          * @enum {string}
@@ -2285,7 +2290,7 @@ export interface components {
             name: string;
             /** @description 任务负责人姓名（派生字段） */
             ownerName: string;
-            /** @description 接收方展示文案（词汇表「接收方」；未配置为「不配置」；派生字段） */
+            /** @description 接收方展示文案（词汇表「接收方」；空接收方为「未配置」，#124；派生字段） */
             receiverLabel: string;
             status: components["schemas"]["TaskStatus"];
             /** @description 状态显示文案（AC-04；派生字段） */
@@ -3234,13 +3239,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 创建成功，返回项目最新的完整 O／KR 列表 */
+            /** @description 创建成功，返回项目最新的完整 O／KR 列表与本次已通知的负责人数（#125） */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Objective"][];
+                    "application/json": components["schemas"]["CreateOkrBatchResponse"];
                 };
             };
             401: components["responses"]["Unauthorized"];

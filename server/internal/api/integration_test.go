@@ -277,6 +277,18 @@ func doRaw(t *testing.T, c *http.Client, method, urlStr, body string) *http.Resp
 	return resp
 }
 
+// dropOkrAssigned 过滤新增 O/KR 的指派通知（#125）：多数用例只断言自己触发的那一条通知，
+// 而创建 OKR 的准备步骤会给 KR 负责人发 okr_assigned，先滤掉再断言。
+func dropOkrAssigned(notes []api.Notification) []api.Notification {
+	out := []api.Notification{}
+	for _, n := range notes {
+		if n.Kind != "okr_assigned" {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
 func decodeBody[T any](t *testing.T, resp *http.Response) T {
 	t.Helper()
 	defer resp.Body.Close()
@@ -712,7 +724,12 @@ func TestOkrTableBatchCreate(t *testing.T) {
 		{Title: sp("扩大市场份额")},
 	}})
 	wantStatus(t, resp, http.StatusCreated)
-	list := decodeBody[[]api.Objective](t, resp)
+	batchResp := decodeBody[api.CreateOkrBatchResponse](t, resp)
+	list := batchResp.Objectives
+	// #125「保存并通知负责人」：本次指派 bob 一名负责人，人数按人去重；操作者本人不计。
+	if batchResp.NotifiedCount != 1 {
+		t.Fatalf("已通知负责人数异常: %d", batchResp.NotifiedCount)
+	}
 	if len(list) != 2 || list[0].Title != "提升产品体验" || list[1].Title != "扩大市场份额" {
 		t.Fatalf("批量创建返回异常: %+v", list)
 	}
@@ -737,12 +754,25 @@ func TestOkrTableBatchCreate(t *testing.T) {
 		t.Fatalf("未指定负责人的 KR 异常: %+v", second)
 	}
 
+	// #125：被指派的 KR 负责人收到 okr_assigned 站内通知，文案含 KR 描述；操作者本人不收。
+	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
+	wantStatus(t, resp, http.StatusOK)
+	bobNotes := decodeBody[[]api.Notification](t, resp)
+	if len(bobNotes) != 1 || bobNotes[0].Kind != "okr_assigned" || !strings.Contains(bobNotes[0].Content, "上线新版工作台") {
+		t.Fatalf("KR 负责人应收到指派通知: %+v", bobNotes)
+	}
+	resp = doJSON(t, alice, http.MethodGet, base+"/notifications", nil)
+	wantStatus(t, resp, http.StatusOK)
+	if aliceNotes := decodeBody[[]api.Notification](t, resp); len(aliceNotes) != 0 {
+		t.Fatalf("操作者本人不应收指派通知: %+v", aliceNotes)
+	}
+
 	// 向已有 O 追加 KR
 	resp = doJSON(t, alice, http.MethodPost, okrURL, api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
 		{ObjectiveId: &list[1].Id, KeyResults: &[]api.CreateKeyResultInput{{Description: "签下 10 家标杆客户"}}},
 	}})
 	wantStatus(t, resp, http.StatusCreated)
-	list = decodeBody[[]api.Objective](t, resp)
+	list = decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
 	if len(list) != 2 || len(list[1].KeyResults) != 1 || list[1].KeyResults[0].Description != "签下 10 家标杆客户" {
 		t.Fatalf("追加 KR 异常: %+v", list)
 	}
@@ -837,7 +867,7 @@ func TestTaskCreateAndPoolReview(t *testing.T) {
 			}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	okr := decodeBody[[]api.Objective](t, resp)
+	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
 	krWithOwner := okr[0].KeyResults[0].Id
 	krNoOwner := okr[0].KeyResults[1].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
@@ -1051,7 +1081,7 @@ func TestTaskInviteLifecycle(t *testing.T) {
 			}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	okr := decodeBody[[]api.Objective](t, resp)
+	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
 	kr1, kr2 := okr[0].KeyResults[0].Id, okr[0].KeyResults[1].Id
 	invitesURL := fmt.Sprintf("%s/projects/%d/task-invites", base, created.Id)
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
@@ -1263,7 +1293,7 @@ func TestTaskStatusAndProgress(t *testing.T) {
 			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	okr := decodeBody[[]api.Objective](t, resp)
+	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
 	kr1 := okr[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
@@ -1447,7 +1477,7 @@ func TestTaskDetail(t *testing.T) {
 			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	okr := decodeBody[[]api.Objective](t, resp)
+	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
 	kr1 := okr[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
@@ -1554,7 +1584,7 @@ func TestFieldChangeApproval(t *testing.T) {
 			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	okr := decodeBody[[]api.Objective](t, resp)
+	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
 	kr1 := okr[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
@@ -1726,7 +1756,7 @@ func TestDeliverablesAndFiles(t *testing.T) {
 			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	okr := decodeBody[[]api.Objective](t, resp)
+	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
 	kr1 := okr[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
@@ -1887,7 +1917,7 @@ func TestDiscussionsAndNotifications(t *testing.T) {
 			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	okr := decodeBody[[]api.Objective](t, resp)
+	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
 	kr1 := okr[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
@@ -1928,7 +1958,7 @@ func TestDiscussionsAndNotifications(t *testing.T) {
 	// AC-36：通知只发任务负责人 bob 与被 @ 的 alice，携带 taskId 可直达讨论 Tab
 	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
 	wantStatus(t, resp, http.StatusOK)
-	bobNotes := decodeBody[[]api.Notification](t, resp)
+	bobNotes := dropOkrAssigned(decodeBody[[]api.Notification](t, resp))
 	if len(bobNotes) != 1 || bobNotes[0].Kind != "discussion_owner" || bobNotes[0].TaskId == nil || *bobNotes[0].TaskId != taskID {
 		t.Fatalf("负责人通知异常: %+v", bobNotes)
 	}
@@ -2005,7 +2035,7 @@ func TestCompletionReviewFlow(t *testing.T) {
 			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	okr := decodeBody[[]api.Objective](t, resp)
+	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
 	kr1 := okr[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
@@ -2212,7 +2242,7 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 			}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	okr := decodeBody[[]api.Objective](t, resp)
+	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
 	kr1, kr2 := okr[0].KeyResults[0].Id, okr[0].KeyResults[1].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
@@ -2425,7 +2455,7 @@ func TestIntermediateReviewOrSign(t *testing.T) {
 			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	okr := decodeBody[[]api.Objective](t, resp)
+	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
 	kr1 := okr[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
@@ -2594,7 +2624,7 @@ func TestMemberInputRequests(t *testing.T) {
 			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	okr := decodeBody[[]api.Objective](t, resp)
+	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
 	kr1 := okr[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
@@ -2773,7 +2803,7 @@ func TestMultiSourceInputs(t *testing.T) {
 			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	kr1 := decodeBody[[]api.Objective](t, resp)[0].KeyResults[0].Id
+	kr1 := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	edgesURL := fmt.Sprintf("%s/projects/%d/edges", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
@@ -2979,7 +3009,7 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	okr := decodeBody[[]api.Objective](t, resp)
+	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
 	kr1 := okr[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	blockersURL := fmt.Sprintf("%s/projects/%d/blockers", base, created.Id)
@@ -3103,7 +3133,7 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 	resp.Body.Close()
 	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
 	wantStatus(t, resp, http.StatusOK)
-	notes := decodeBody[[]api.Notification](t, resp)
+	notes := dropOkrAssigned(decodeBody[[]api.Notification](t, resp))
 	if len(notes) != 1 || notes[0].Kind != "blocker_remind" || *notes[0].TaskId != downstream.Id {
 		t.Fatalf("提醒通知异常: %+v", notes)
 	}
@@ -3179,7 +3209,7 @@ func TestMyWorkFiveGroups(t *testing.T) {
 			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	okr := decodeBody[[]api.Objective](t, resp)
+	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
 	kr1 := okr[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	myWorkURL := fmt.Sprintf("%s/projects/%d/my-work", base, created.Id)
@@ -3336,7 +3366,7 @@ func TestInterlockAndCriticalPath(t *testing.T) {
 			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	okr := decodeBody[[]api.Objective](t, resp)
+	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
 	kr1 := okr[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-10")
@@ -3451,7 +3481,7 @@ func TestArtifactsAndPackages(t *testing.T) {
 			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	okr := decodeBody[[]api.Objective](t, resp)
+	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
 	kr1 := okr[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
@@ -3784,7 +3814,7 @@ func TestProjectReport(t *testing.T) {
 			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	okr := decodeBody[[]api.Objective](t, resp)
+	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
 	kr1 := okr[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start := openapiDate(t, "2026-08-01")
@@ -4244,7 +4274,7 @@ func TestUnifiedPermissionsAcrossIdentities(t *testing.T) {
 			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	okr := decodeBody[[]api.Objective](t, resp)
+	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
 	kr1 := okr[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
@@ -4427,7 +4457,7 @@ func TestTaskActivity(t *testing.T) {
 			{Title: sp("联调收敛"), KeyResults: &[]api.CreateKeyResultInput{{Description: "打通端到端", OwnerId: &aliceUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	kr1 := decodeBody[[]api.Objective](t, resp)[0].KeyResults[0].Id
+	kr1 := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
 
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	// 周期取已经过去的窗口：任务在草稿态不派生卡点，入池通过进入未开始后才成为超期卡点，
@@ -4576,7 +4606,7 @@ func TestReceiversAndReceipts(t *testing.T) {
 			{Title: sp("交付到位"), KeyResults: &[]api.CreateKeyResultInput{{Description: "成果按时移交", OwnerId: &bobUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	okr := decodeBody[[]api.Objective](t, resp)
+	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
 	kr1 := okr[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
@@ -4771,7 +4801,7 @@ func TestRemindWaitingTargets(t *testing.T) {
 			{Title: sp("按时推进"), KeyResults: &[]api.CreateKeyResultInput{{Description: "入池及时审批", OwnerId: &bobUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	okr := decodeBody[[]api.Objective](t, resp)
+	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
 	kr1 := okr[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
@@ -4822,7 +4852,7 @@ func TestRemindWaitingTargets(t *testing.T) {
 	resp.Body.Close()
 	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
 	wantStatus(t, resp, http.StatusOK)
-	notes := decodeBody[[]api.Notification](t, resp)
+	notes := dropOkrAssigned(decodeBody[[]api.Notification](t, resp))
 	if len(notes) != 1 || notes[0].Kind != "blocker_remind" || notes[0].TaskId == nil || *notes[0].TaskId != task.Id {
 		t.Fatalf("提醒通知异常: %+v", notes)
 	}
@@ -4882,7 +4912,7 @@ func TestTimeBlockerActivitySweep(t *testing.T) {
 			{Title: sp("按期交付"), KeyResults: &[]api.CreateKeyResultInput{{Description: "无超期任务", OwnerId: &aliceUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	kr1 := decodeBody[[]api.Objective](t, resp)[0].KeyResults[0].Id
+	kr1 := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 
 	// 建一个不会超期的任务并开始执行：此时没有任何卡点动态
@@ -5069,7 +5099,7 @@ func TestOkrEditHandoverAndMemberRemoval(t *testing.T) {
 			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	okr := decodeBody[[]api.Objective](t, resp)
+	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
 	objectiveID, kr1 := okr[0].Id, okr[0].KeyResults[0].Id
 
 	// 访客不能被任命为 KR 负责人（创建路径）
@@ -5217,7 +5247,7 @@ func TestOkrEditHandoverAndMemberRemoval(t *testing.T) {
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{{Title: sp("待删除的 O")}}})
 	wantStatus(t, resp, http.StatusCreated)
 	var emptyObjective int64
-	for _, o := range decodeBody[[]api.Objective](t, resp) {
+	for _, o := range decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives {
 		if o.Title == "待删除的 O" {
 			emptyObjective = o.Id
 		}
@@ -5274,7 +5304,7 @@ func TestStructureChangeRejected(t *testing.T) {
 			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	kr1 := decodeBody[[]api.Objective](t, resp)[0].KeyResults[0].Id
+	kr1 := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
@@ -5363,7 +5393,7 @@ func TestFieldChangeOnTerminalTask(t *testing.T) {
 			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	kr1 := decodeBody[[]api.Objective](t, resp)[0].KeyResults[0].Id
+	kr1 := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
@@ -5452,7 +5482,7 @@ func TestDeliverableFileStateUnique(t *testing.T) {
 			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &aliceUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	kr1 := decodeBody[[]api.Objective](t, resp)[0].KeyResults[0].Id
+	kr1 := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
@@ -5580,7 +5610,7 @@ func TestWritePathQueryBudget(t *testing.T) {
 			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &aliceUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	kr1 := decodeBody[[]api.Objective](t, resp)[0].KeyResults[0].Id
+	kr1 := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
@@ -5699,7 +5729,7 @@ func TestWritePathAudit(t *testing.T) {
 			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &aliceUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	kr1 := decodeBody[[]api.Objective](t, resp)[0].KeyResults[0].Id
+	kr1 := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
@@ -5767,7 +5797,7 @@ func TestEntityCodesStable(t *testing.T) {
 		{Title: sp("O 三")},
 	}})
 	wantStatus(t, resp, http.StatusCreated)
-	okr := decodeBody[[]api.Objective](t, resp)
+	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
 	codeOf := func(list []api.Objective, title string) string {
 		for _, o := range list {
 			if o.Title == title {
@@ -5820,7 +5850,7 @@ func TestEntityCodesStable(t *testing.T) {
 	resp = doJSON(t, alice, http.MethodPost, objectivesURL,
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{{Title: sp("O 四")}}})
 	wantStatus(t, resp, http.StatusCreated)
-	after := decodeBody[[]api.Objective](t, resp)
+	after := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
 	if codeOf(after, "O 一") != "O1" || codeOf(after, "O 三") != "O3" {
 		t.Fatalf("删除 O2 后其余 O 编号应保持不变: %+v", after)
 	}
@@ -5959,7 +5989,7 @@ func TestProjectSettingsThresholds(t *testing.T) {
 			{Title: sp("按时推进"), KeyResults: &[]api.CreateKeyResultInput{{Description: "入池及时审批", OwnerId: &bobUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	kr1 := decodeBody[[]api.Objective](t, resp)[0].KeyResults[0].Id
+	kr1 := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/projects/%d/tasks", base, created.Id),
 		api.CreateTaskBatchRequest{
 			SubmitForReview: true,
@@ -6085,7 +6115,7 @@ func TestTaskParticipants(t *testing.T) {
 			{Title: sp("协作到位"), KeyResults: &[]api.CreateKeyResultInput{{Description: "关键材料按时产出", OwnerId: &bobUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	okr := decodeBody[[]api.Objective](t, resp)
+	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
 	kr1 := okr[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
@@ -6215,7 +6245,7 @@ func TestResultUpdateFlow(t *testing.T) {
 			{Title: sp("成果可持续更新"), KeyResults: &[]api.CreateKeyResultInput{{Description: "交付物随迭代更新", OwnerId: &bobUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	okr := decodeBody[[]api.Objective](t, resp)
+	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
 	kr1 := okr[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
@@ -6495,7 +6525,7 @@ func TestPublicProjectImplicitViewer(t *testing.T) {
 			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
-	kr1 := decodeBody[[]api.Objective](t, resp)[0].KeyResults[0].Id
+	kr1 := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
 	tasksURL := projectURL + "/tasks"
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{

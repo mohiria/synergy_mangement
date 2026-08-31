@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, Drawer, Input, Modal, Select, Spin, message } from "antd";
 import type { Dayjs } from "dayjs";
 import { client } from "./api/client";
@@ -28,6 +28,7 @@ export default function ProjectOkrPage({
 }) {
   const { projectId: projectIdParam } = useParams();
   const projectId = Number(projectIdParam);
+  const navigate = useNavigate();
 
   const [project, setProject] = useState<Project | null>(null);
   const [objectives, setObjectives] = useState<Objective[]>([]);
@@ -65,27 +66,42 @@ export default function ProjectOkrPage({
     load();
   }, [load]);
 
-  // 编号是持久字段（AC-64），直接消费 code，不再按数组下标现算。
+  // #125：管理模式只维护结构字段（编号／名称／所属 O／负责人／周期／量化标准），
+  // 风险、卡点、任务数与进度一律留在项目总览；点行开右侧编辑抽屉（§7.2）。
   const rows = objectives.flatMap((o) => [
     <tr
       key={`o-${o.id}`}
-      className={`table-group${o.canEdit ? " row-clickable" : ""}`}
+      className={`okr-structure-o${o.canEdit ? " row-clickable okr-editable-row" : ""}`}
       onClick={o.canEdit ? () => setEditing({ kind: "O", o }) : undefined}
     >
-      <td colSpan={7} title={`${o.code} ${o.title}${o.description ? `　${o.description}` : ""}`}>
-        {o.code}　{o.title}
+      <td>
+        <span className="okr-level-tag">O</span>
+        <span className="mono">{o.code}</span>
+      </td>
+      <td title={`${o.title}${o.description ? `　${o.description}` : ""}`}>
+        <strong>{o.title}</strong>
         {o.description && <span className="muted">　{o.description}</span>}
       </td>
+      <td className="muted">—</td>
+      <td className="muted">—</td>
+      <td className="muted">—</td>
+      <td className="muted">—</td>
+      <td>{o.canEdit && <span className="okr-row-action">编辑</span>}</td>
     </tr>,
     ...o.keyResults.map((k: KeyResult) => {
       return (
         <tr
           key={`kr-${k.id}`}
-          className={k.canEdit ? "row-clickable" : undefined}
+          className={`okr-structure-kr${k.canEdit ? " row-clickable okr-editable-row" : ""}`}
           onClick={k.canEdit ? () => setEditing({ kind: "KR", k }) : undefined}
         >
-          <td className="mono">{k.code}</td>
+          <td className="okr-kr-code-cell">
+            <span className="okr-level-branch" aria-hidden="true" />
+            <span className="okr-level-tag kr">KR</span>
+            <span className="mono">{k.code}</span>
+          </td>
           <td title={k.description}>{k.description}</td>
+          <td className="mono">{o.code}</td>
           <td title={k.ownerName ?? "未指定"}>
             {k.ownerName ? (
               <span className="owner-cell">
@@ -108,21 +124,24 @@ export default function ProjectOkrPage({
           <td title={k.metric ?? "待补充量化指标"}>
             {k.metric ?? <span className="muted">待补充量化指标</span>}
           </td>
-          <td>
-            <span className={`status-pill risk-${k.riskLevel}`}>{k.riskLevelLabel}</span>
-          </td>
-          <td>{k.taskCount ? `${k.taskCount} 项` : <span className="muted">—</span>}</td>
+          <td>{k.canEdit && <span className="okr-row-action">编辑</span>}</td>
         </tr>
       );
     }),
   ]);
+  const krTotal = objectives.reduce((n, o) => n + o.keyResults.length, 0);
 
+  // #125：/okr 是总览页头进入的全页管理模式，仅项目负责人／项目管理员可用；
+  // 无权限直接访问按权限挡回项目总览。
+  if (!loading && project && !project.canEdit) {
+    return <Navigate to={`/projects/${projectId}`} replace />;
+  }
   return (
     <ProjectShell
       user={user}
       project={project}
       projectId={projectId}
-      pageLabel="OKR 管理"
+      pageLabel="项目总览"
       onLogout={onLogout}
     >
       {notFound ? (
@@ -137,29 +156,37 @@ export default function ProjectOkrPage({
             <>
               <div className="page-head">
                 <div>
-                  <h1>OKR 管理</h1>
-                  <p>O、KR 在线下确定后在此连续录入；系统不承载 OKR 讨论审批。</p>
+                  <h1>管理 O/KR</h1>
+                  <p>集中维护目标结构和责任信息；项目态势、风险与任务进度仍在项目总览查看。</p>
                 </div>
-                {project.canEdit && (
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <Button onClick={() => setImportOpen(true)}>导入 O / KR 表格</Button>
-                    <Button type="primary" onClick={() => setModalOpen(true)}>
-                      ＋ 新增 O / KR
-                    </Button>
-                  </div>
-                )}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Button onClick={() => navigate(`/projects/${projectId}`)}>返回项目总览</Button>
+                  <Button onClick={() => setImportOpen(true)}>导入 O / KR 表格</Button>
+                  <Button type="primary" onClick={() => setModalOpen(true)}>
+                    ＋ 新增 O / KR
+                  </Button>
+                </div>
               </div>
-              <div className="data-table-wrap">
-                <table className="data-table">
+              <section className="okr-management-note">
+                <div>
+                  <b>结构维护模式</b>
+                  <span>点击任一 O 或 KR 行，在右侧编辑对应结构字段。</span>
+                </div>
+                <span>
+                  {objectives.length} 个 O · {krTotal} 个 KR
+                </span>
+              </section>
+              <div className="data-table-wrap okr-structure-wrap">
+                <table className="data-table okr-structure-table">
                   <thead>
                     <tr>
-                      <th style={{ width: 70 }}>KR</th>
-                      <th>目标描述</th>
-                      <th style={{ width: 140 }}>负责人</th>
-                      <th style={{ width: 210 }}>周期</th>
-                      <th style={{ width: 260 }}>量化指标</th>
-                      <th style={{ width: 100 }}>状态</th>
-                      <th style={{ width: 90 }}>任务</th>
+                      <th style={{ width: 130 }}>编号</th>
+                      <th>名称</th>
+                      <th style={{ width: 80 }}>所属 O</th>
+                      <th style={{ width: 150 }}>负责人</th>
+                      <th style={{ width: 180 }}>周期</th>
+                      <th style={{ width: 240 }}>量化标准</th>
+                      <th style={{ width: 64 }} />
                     </tr>
                   </thead>
                   <tbody>
@@ -700,7 +727,13 @@ function OkrBatchModal({
     });
     setSaving(false);
     if (res.data) {
-      onSaved(res.data);
+      // #125：保存后按本次涉及的 KR 负责人发站内通知（本人不收），提示含人数。
+      message.success(
+        res.data.notifiedCount > 0
+          ? `O / KR 已保存，已通知 ${res.data.notifiedCount} 名负责人`
+          : "O / KR 已保存；本次负责人均为你本人",
+      );
+      onSaved(res.data.objectives);
     } else {
       setError(res.error?.message ?? "保存失败");
     }
@@ -719,7 +752,7 @@ function OkrBatchModal({
       confirmLoading={saving}
       onOk={save}
       onCancel={onClose}
-      okText="保存 O / KR"
+      okText="保存并通知负责人"
       cancelText="取消"
       destroyOnHidden
     >

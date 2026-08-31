@@ -727,18 +727,35 @@ func (s *Server) CreateOkrBatch(w http.ResponseWriter, r *http.Request, projectI
 				writeInternalError(w, r, err)
 				return
 			}
+			// #125「保存并通知负责人」：本次指派的 KR 负责人逐条收站内通知，本人不收；
+			// 与创建同一事务，创建失败不发通知。
+			if k.OwnerID != nil && *k.OwnerID != currentUser(r).ID {
+				if _, err := qtx.CreateNotification(r.Context(), store.CreateNotificationParams{
+					UserID:    *k.OwnerID,
+					Kind:      domain.NotifyOkrAssigned,
+					Content:   domain.OkrAssignedContent(k.Description),
+					ProjectID: pgtype.Int8{Int64: projectId, Valid: true},
+				}); err != nil {
+					writeInternalError(w, r, err)
+					return
+				}
+			}
 		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
-	resp, err := s.okrList(r.Context(), projectId, projectActor(currentUser(r).ID, proj.OwnerID, proj.MyRole, proj.Visibility), currentUser(r).ID)
+	objectivesResp, err := s.okrList(r.Context(), projectId, projectActor(currentUser(r).ID, proj.OwnerID, proj.MyRole, proj.Visibility), currentUser(r).ID)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, resp)
+	// 已通知人数按人去重（规则在 domain），提示「已通知 N 名负责人」用。
+	writeJSON(w, http.StatusCreated, CreateOkrBatchResponse{
+		Objectives:    objectivesResp,
+		NotifiedCount: len(domain.OkrNotifyTargets(currentUser(r).ID, items)),
+	})
 }
 
 // okrList 组装 O 含下属 KR 的层级列表（按排序返回）。

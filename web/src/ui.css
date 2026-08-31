@@ -446,6 +446,30 @@ body {
 .gnode b { display: block; font-size: var(--type-body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gnode small { display: block; color: var(--muted); font-size: var(--type-aux); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gnode-member { background: #f4f5ff; border-color: #aab5ee; }
+/* 管理 O/KR 全页模式（#125；原型 overview-okr-merged.css，按系统调色板与 4px 圆角契约适配）。 */
+.okr-management-note {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  margin-bottom: 12px; padding: 12px 16px;
+  border: 1px solid var(--line); border-left: 3px solid var(--primary);
+  border-radius: var(--radius); background: #fff; color: var(--muted); font-size: var(--type-aux);
+}
+.okr-management-note div { display: flex; align-items: baseline; gap: 10px; }
+.okr-management-note b { color: var(--ink); font-size: var(--type-body); }
+.okr-structure-table .okr-structure-o td { background: #f3f5f8; border-top: 1px solid var(--line-strong); }
+.okr-structure-table td:first-child { white-space: nowrap; }
+.okr-kr-code-cell { position: relative; padding-left: 38px !important; }
+.okr-level-branch {
+  position: absolute; left: 18px; top: 0; bottom: 50%; width: 12px;
+  border-left: 1px solid #c8d0dc; border-bottom: 1px solid #c8d0dc;
+}
+.okr-level-tag {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 24px; height: 20px; margin-right: 8px; padding: 0 5px;
+  border-radius: var(--radius); background: var(--navy); color: #fff;
+  font-size: var(--type-aux); font-weight: 700;
+}
+.okr-level-tag.kr { background: #eef1ff; color: var(--primary); }
+.okr-row-action { color: var(--primary); font-size: var(--type-body); font-weight: 600; }
 /* 说明条挂在 graph-scroll 的顶部留白里（top 为负，落在 padding-top 区域），不压住第一排节点。 */
 .graph-note {
   position: absolute; top: -36px; left: 10px; z-index: 4; display: inline-block;

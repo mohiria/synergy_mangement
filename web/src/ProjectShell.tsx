@@ -16,7 +16,7 @@ type Project = components["schemas"]["Project"];
 // 侧边栏自上而下：brand → project-switch（项目切换）→ main-nav → sidebar-foot（项目设置）。
 const NAV_ITEMS: { key: string; label: string; path: string; icon: IconName }[] = [
   { key: "overview", label: "项目总览", path: "", icon: "overview" },
-  { key: "okr", label: "OKR 管理", path: "/okr", icon: "target" },
+  // #125：「OKR 管理」并入项目总览——/okr 是总览页头进入的全页管理模式，不再单列导航。
   { key: "tasks", label: "全部任务", path: "/tasks", icon: "list" },
   { key: "graph", label: "协作关系", path: "/graph", icon: "graph" },
   { key: "mywork", label: "我的工作", path: "/my-work", icon: "inbox" },
@@ -162,8 +162,12 @@ export default function ProjectShell({
         <nav>
           {NAV_ITEMS.map((item) => {
             const to = `/projects/${projectId}${item.path}`;
+            // #125：/okr 是总览页头进入的全页管理模式，侧栏仍高亮「项目总览」。
+            const active =
+              pathname === to ||
+              (item.key === "overview" && pathname === `/projects/${projectId}/okr`);
             return (
-              <Link key={item.key} className={`nav-row ${pathname === to ? "active" : ""}`} to={to}>
+              <Link key={item.key} className={`nav-row ${active ? "active" : ""}`} to={to}>
                 <Icon name={item.icon} />
                 <span>{item.label}</span>
               </Link>

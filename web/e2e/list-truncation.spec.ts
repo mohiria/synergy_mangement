@@ -6,7 +6,7 @@ import { gotoPage, login } from "./fixtures";
 // 「悬停显示全称」由 title 属性承载，随文本截断一并断言。
 
 const LIST_PAGES = [
-  { path: "/okr", heading: "OKR 管理" },
+  { path: "/okr", heading: "管理 O/KR" },
   { path: "/tasks", heading: "全部任务" },
   { path: "/artifacts", heading: "成果与归档" },
   { path: "/graph", heading: "协作关系" },
