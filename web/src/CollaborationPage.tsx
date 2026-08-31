@@ -1105,20 +1105,15 @@ export default function CollaborationPage({
           </div>
           {viewMode === "list" ? (
             <>
-              <div className="toolbar" style={{ marginTop: -4 }}>
-                <div className="toolbar-group">
-                  <AutoComplete
-                    style={{ width: 240 }}
-                    value={searchText}
-                    onChange={setSearchText}
-                    options={searchOptions}
-                    filterOption={(input, option) =>
-                      (option?.label as string).toLowerCase().includes(input.toLowerCase())
-                    }
-                    onSelect={onSearchSelect}
-                  >
-                    <Input prefix={<Icon name="search" size={15} />} placeholder="搜索关系、任务或成员" />
-                  </AutoComplete>
+              {/* CR-18（#144）：页面只有一个搜索框——列表复用顶部工具栏的搜索与筛选，
+                  排序与只读说明并入表头（原型 cp-list-head 形态）。 */}
+              <div className="list-card-head">
+                <div>
+                  <b>{listRows.length} 条任务关系</b>
+                  <span>与图谱共享搜索、O／KR／人员筛选和已完成任务范围；只读呈现，业务处理从任务相关页面进入</span>
+                </div>
+                <label>
+                  排序
                   <Select
                     size="small"
                     style={{ width: 140 }}
@@ -1130,10 +1125,7 @@ export default function CollaborationPage({
                       { value: "type", label: "按关系类型" },
                     ]}
                   />
-                </div>
-                <span className="muted" style={{ fontSize: 12 }}>
-                  只读呈现：不提供新增、修改、解除或批量维护；业务处理从任务相关页面进入
-                </span>
+                </label>
               </div>
               <div className="data-table-wrap">
                 <table className="data-table">
@@ -1204,9 +1196,9 @@ export default function CollaborationPage({
               </div>
             </>
           ) : (
-          <div className="graph-layout" style={mode.kind === "full" ? { gridTemplateColumns: "minmax(0,1fr)" } : {}}>
-            {mode.kind !== "full" && (
-              <aside className="risk-queue">
+          <div className="graph-layout">
+            {/* #144：风险队列在全局展开下同样保留（PRD §5.2 无隐藏规定，原型两种模式恒在）。 */}
+            <aside className="risk-queue">
                 <div className="risk-queue-head">风险队列</div>
                 {/* #122：按 KR 聚合，每 KR 一条——编号 · 等级 · 卡点数，副行只显最高风险卡点
                     （挑选规则在域层，前端只消费 topBlocker）；正常且无卡点的 KR 不出现。 */}
@@ -1231,8 +1223,7 @@ export default function CollaborationPage({
                       </small>
                     </button>
                   ))}
-              </aside>
-            )}
+            </aside>
             <div className="graph-shell">
               {(mode.kind === "full" || mode.kind === "kr" || mode.kind === "focus") && (edgeInspector || inspector)}
               <div

@@ -235,6 +235,16 @@ body {
 .data-table tr:last-child td { border-bottom: 0; }
 .data-table tbody tr:hover td { background: #f8f9fc; }
 .data-table tr.table-group td { height: 38px; background: #eef1f5; color: #3e4b61; font-weight: 650; }
+/* 关系列表表头（#144，原型 cp-list-head）：计数＋只读说明在左、排序在右，与表格拼成一张卡。 */
+.list-card-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 9px 14px; background: #fff;
+  border: 1px solid var(--line); border-bottom: 0; border-radius: var(--radius) var(--radius) 0 0;
+}
+.list-card-head b { display: block; font-size: var(--type-body); }
+.list-card-head span { display: block; font-size: var(--type-aux); color: var(--muted); margin-top: 2px; }
+.list-card-head label { display: flex; align-items: center; gap: 7px; font-size: var(--type-aux); color: var(--muted); white-space: nowrap; }
+.list-card-head + .data-table-wrap { border-top-left-radius: 0; border-top-right-radius: 0; }
 .data-table tr.table-group:hover td { background: #eef1f5; }
 
 /* 列表字段一律单行截断（#91）：table-layout 固定后列宽只由表头声明决定，
