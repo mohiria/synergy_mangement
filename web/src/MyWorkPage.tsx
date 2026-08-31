@@ -159,9 +159,10 @@ export default function MyWorkPage({
             </div>
             <div className="work-main">
               <h3 title={title}>{title}</h3>
+              {/* #130：五组副行统一「KR 编号 · 截止 日期」；输入请求的期望时间也写「截止」。 */}
               <div className="work-meta">
                 <span title={kr}>{kr}</span>
-                <span>日期 {it.dueDate ?? "—"}</span>
+                <span>· 截止 {it.dueDate ?? "—"}</span>
               </div>
             </div>
             <div className="work-trailing">
