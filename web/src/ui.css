@@ -453,7 +453,6 @@ body {
 
 /* 任务详情抽屉（原型 task-drawer）。 */
 .drawer-sub { font-size: var(--type-aux); color: var(--muted); font-weight: 400; margin-top: 3px; }
-.drawer-sub-sep { margin: 0 6px; }
 /* AC-56：切换 Tab 只更新内容区，页头与抽屉尺寸稳定不闪烁。 */
 .task-drawer-tabs > .ant-tabs-content-holder { min-height: 420px; }
 .drawer-section { margin-top: 18px; }
@@ -640,7 +639,9 @@ body {
 }
 .work-identity > div { display: flex; align-items: center; gap: 10px; }
 .work-identity b { display: block; font-size: var(--type-body); font-weight: 650; }
-.work-identity > div span, .work-identity p span { display: block; color: var(--muted); font-size: var(--type-aux); }
+/* 通用副文案规则要避开头像：.avatar 靠 grid + place-items 居中，被 display: block 覆盖后
+   首字会按块级左上排布、脱出圆形背景（#98）。 */
+.work-identity > div span:not(.avatar), .work-identity p span { display: block; color: var(--muted); font-size: var(--type-aux); }
 .work-identity p { margin: 0; max-width: 65%; color: #3d4960; font-size: var(--type-aux); line-height: 1.5; text-align: right; }
 .work-identity p span { margin-bottom: 2px; }
 /* 头像沿用 .avatar 的圆形语义（基线 §4 圆角例外），这里只放大到身份卡的 38px。 */
@@ -695,6 +696,18 @@ body {
 .work-text-action.quiet { color: var(--muted); font-weight: 500; }
 .work-text-action.quiet:hover { background: var(--surface-3); color: var(--text); }
 .work-empty { min-height: 220px; padding: 36px 20px; display: grid; place-content: center; color: var(--muted); font-size: var(--type-aux); text-align: center; }
+
+/* 任务详情抽屉页头（#99、AC-50）：关闭图标顶格在右上角、与标题分离，命中区 32×32；
+   副标题只放 O／KR 编号，不展开标题、不显示更新时间。 */
+.task-drawer .ant-drawer-header { align-items: flex-start; }
+.task-drawer .ant-drawer-header-title { align-items: flex-start; }
+.task-drawer .ant-drawer-extra { margin-left: 12px; }
+.drawer-close {
+  width: 32px; height: 32px; display: grid; place-items: center;
+  border: 0; border-radius: var(--radius); background: transparent;
+  color: var(--muted); cursor: pointer;
+}
+.drawer-close:hover { background: var(--surface-3); color: var(--text); }
 
 /* 按来源落位后的短暂高亮（我的工作 PRD §6.2）：原因、退回理由、卡点在详情里被点出来。 */
 @keyframes focus-flash { from { background: var(--accent-soft); } to { background: transparent; } }
