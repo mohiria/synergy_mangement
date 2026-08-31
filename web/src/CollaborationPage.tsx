@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Alert, AutoComplete, Button, Input, Select, Spin, Switch } from "antd";
 import { client } from "./api/client";
@@ -30,6 +30,14 @@ const ARROW_COLORS: Record<string, string> = {
 // 其余按帧增量补齐。
 const GRAPH_FIRST_BATCH = 200;
 const GRAPH_BATCH_STEP = 100;
+
+// 缩放范围与步进取原型（collaboration-prototype.js:506、530）：滚轮 0.08、按钮 0.15。
+const ZOOM_MIN = 0.45;
+const ZOOM_MAX = 2.2;
+
+// CR-19（#145）：节点拖拽在当前浏览会话内固定——模块级缓存在组件卸载后存活，
+// 刷新页面即清空、其他用户不继承；key 为「项目:视图:节点」，各层级坐标系互不串。
+const sessionDragOffsets = new Map<string, { dx: number; dy: number }>();
 
 
 // 层级固定为：层级树 → O → KR 任务关系层 → 任务聚焦层 → 全局展开（AC-27、CR-05／CR-06）。
@@ -97,20 +105,37 @@ export default function CollaborationPage({
   const [mode, setMode] = useState<Mode>({ kind: "tree" });
   // 已展开的任务集合：聚焦层里每点一个节点就把它并进来，画布节点集合随之增长（CR-05）。
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
-  // 历史栈只用来恢复筛选与缩放；层级回退按固定层级推导，不依赖进入路径（CR-06）。
+  // 历史栈只用来恢复筛选与视口；层级回退按固定层级推导，不依赖进入路径（CR-06）。
   const [viewStack, setViewStack] = useState<
-    { oFilter: number | "all"; krFilter: number | "all"; personFilter: number | "all"; zoom: number }[]
+    {
+      oFilter: number | "all";
+      krFilter: number | "all";
+      personFilter: number | "all";
+      zoom: number;
+      pan: { x: number; y: number };
+    }[]
   >([]);
   const [selectedTask, setSelectedTask] = useState<number | null>(null);
   const [inspectorDetail, setInspectorDetail] = useState<TaskDetail | null>(null);
   const [zoom, setZoom] = useState(1);
+  // #145：画布不再滚动，改为平移＋缩放的视口（PRD §6.4）。
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [panning, setPanning] = useState(false);
+  const [viewportSize, setViewportSize] = useState({ w: 0, h: 0 });
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const panRef = useRef({ active: false, moved: false, startX: 0, startY: 0, origin: { x: 0, y: 0 } });
+  // 节点拖拽超过阈值后吞掉随后的 click，避免拖完还触发选中/展开（原型 suppressClick）。
+  const suppressClickRef = useRef(false);
   const [oFilter, setOFilter] = useState<number | "all">("all");
   const [krFilter, setKrFilter] = useState<number | "all">("all");
   const [personFilter, setPersonFilter] = useState<number | "all">("all");
   const [showCompleted, setShowCompleted] = useState(false);
   const [impactMode, setImpactMode] = useState(false);
   const [selectedEdge, setSelectedEdge] = useState<number | null>(null);
-  const [dragOffsets, setDragOffsets] = useState<Map<number, { dx: number; dy: number }>>(new Map());
+  // 会话内节点固定（CR-19）：初值取模块级缓存，写入时双写，组件重挂载不丢。
+  const [dragOffsets, setDragOffsets] = useState<Map<string, { dx: number; dy: number }>>(
+    () => new Map(sessionDragOffsets),
+  );
   const [searchText, setSearchText] = useState("");
   const [viewMode, setViewMode] = useState<"graph" | "list">("graph");
   // #121：任务详情在本页抽屉打开，关闭后图谱层级与筛选不丢。
@@ -219,21 +244,33 @@ export default function CollaborationPage({
   const taskById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
   const edgeById = useMemo(() => new Map(edges.map((e) => [e.id, e])), [edges]);
 
+  // 拖拽固定的缓存 key：不同层级布局坐标系不同，偏移只在本视图内生效（CR-19）。
+  const modeKey =
+    mode.kind === "kr" ? `kr:${mode.krId}` : mode.kind === "focus" ? `focus:${mode.taskId}` : mode.kind;
+  const offsetKey = (id: number) => `${projectId}:${modeKey}:${id}`;
+
+  const resetViewport = () => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  };
+
   const enter = (next: Mode) => {
-    setViewStack((v) => [...v, { oFilter, krFilter, personFilter, zoom }]);
+    setViewStack((v) => [...v, { oFilter, krFilter, personFilter, zoom, pan }]);
     setMode(next);
     setSelectedTask(null);
     setExpanded(new Set());
+    resetViewport();
   };
 
   // 进入任务聚焦层：以该任务为起点，先展开它自己的一层邻居（AC-27）。
   const enterFocus = (taskId: number) => {
-    setViewStack((v) => [...v, { oFilter, krFilter, personFilter, zoom }]);
+    setViewStack((v) => [...v, { oFilter, krFilter, personFilter, zoom, pan }]);
     setMode({ kind: "focus", taskId });
     setExpanded(new Set([taskId]));
     setSelectedTask(taskId);
     setSelectedEdge(null);
     setImpactMode(false);
+    resetViewport();
   };
 
   // 返回按固定层级回退（CR-06）：聚焦 → 所属 KR 层 → 所属 O 层 → 层级树；
@@ -246,7 +283,10 @@ export default function CollaborationPage({
       setKrFilter(restore.krFilter);
       setPersonFilter(restore.personFilter);
       setZoom(restore.zoom);
+      setPan(restore.pan);
       setViewStack((v) => v.slice(0, -1));
+    } else {
+      resetViewport();
     }
     setSelectedEdge(null);
     setImpactMode(false);
@@ -728,34 +768,104 @@ export default function CollaborationPage({
     };
   };
 
+  // #145：节点拖拽对所有出现任务节点的层级生效（kr／focus／full），不再限于全局展开。
   const startDrag = (taskId: number, startX: number, startY: number) => {
-    if (mode.kind !== "full") return;
-    const base = dragOffsets.get(taskId) ?? { dx: 0, dy: 0 };
+    const key = offsetKey(taskId);
+    const base = dragOffsets.get(key) ?? { dx: 0, dy: 0 };
     let moved = false;
     const onMove = (ev: MouseEvent) => {
       const dx = base.dx + (ev.clientX - startX) / zoom;
       const dy = base.dy + (ev.clientY - startY) / zoom;
-      if (Math.abs(dx - base.dx) > 3 || Math.abs(dy - base.dy) > 3) moved = true;
+      if (Math.hypot(dx - base.dx, dy - base.dy) > 4) moved = true;
+      const off = { dx, dy };
+      sessionDragOffsets.set(key, off);
       setDragOffsets((prev) => {
         const next = new Map(prev);
-        next.set(taskId, { dx, dy });
+        next.set(key, off);
         return next;
       });
     };
     const onUp = () => {
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
-      void moved;
+      if (moved) suppressClickRef.current = true;
     };
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
   };
 
   const withOffset = (taskId: number, pos: NodePos): NodePos => {
-    const off = dragOffsets.get(taskId);
-    if (!off || mode.kind !== "full") return pos;
+    const off = dragOffsets.get(offsetKey(taskId));
+    if (!off) return pos;
     return { ...pos, x: pos.x + off.dx, y: pos.y + off.dy };
   };
+
+  // 「重新布局」清除会话内固定并复位视口（PRD §6.4；只清本项目的 key，不动其他项目）。
+  const relayout = () => {
+    for (const key of [...sessionDragOffsets.keys()]) {
+      if (key.startsWith(`${projectId}:`)) sessionDragOffsets.delete(key);
+    }
+    setDragOffsets(new Map(sessionDragOffsets));
+    resetViewport();
+  };
+
+  // 画布平移（§6.4）＋点击空白取消选择（§6.2）：位移 ≤4px 的按放视为单击，
+  // 只清选择，不收起已展开节点。节点与边的命中目标不触发平移。
+  const onViewportPointerDown = (ev: React.PointerEvent<HTMLDivElement>) => {
+    const target = ev.target as Element;
+    if (target.closest(".gnode") || target.closest(".edge-hit")) return;
+    panRef.current = {
+      active: true,
+      moved: false,
+      startX: ev.clientX,
+      startY: ev.clientY,
+      origin: { ...pan },
+    };
+    ev.currentTarget.setPointerCapture(ev.pointerId);
+    setPanning(true);
+  };
+  const onViewportPointerMove = (ev: React.PointerEvent<HTMLDivElement>) => {
+    const p = panRef.current;
+    if (!p.active) return;
+    const dx = ev.clientX - p.startX;
+    const dy = ev.clientY - p.startY;
+    if (Math.hypot(dx, dy) > 4) p.moved = true;
+    setPan({ x: p.origin.x + dx, y: p.origin.y + dy });
+  };
+  const onViewportPointerUp = () => {
+    const p = panRef.current;
+    if (!p.active) return;
+    p.active = false;
+    setPanning(false);
+    if (!p.moved) {
+      setSelectedTask(null);
+      setSelectedEdge(null);
+      setImpactMode(false);
+    }
+  };
+
+  // 滚轮缩放：React 的 onWheel 是 passive 监听，preventDefault 无效，走原生监听。
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const onWheel = (ev: WheelEvent) => {
+      ev.preventDefault();
+      setZoom((z) => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z + (ev.deltaY < 0 ? 0.08 : -0.08))));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [viewMode, loading, notFound]);
+
+  // 小地图视口框需要视口实际尺寸。
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const update = () => setViewportSize({ w: el.clientWidth, h: el.clientHeight });
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [viewMode, loading, notFound]);
 
   // AC-43：选中一条关系或一个任务时，与之无关的成员节点同样淡化——
   // 否则「高亮关系两端」会被旁边照常亮着的成员节点削弱（Q-07）。
@@ -777,14 +887,20 @@ export default function CollaborationPage({
     return dimByFilter || dimBySelect;
   };
 
-  const taskNode = (t: Task, posBase: NodePos) => {
-    const pos = withOffset(t.id, posBase);
-    const taskBlockers = openBlockers.filter((b) => b.taskId === t.id);
-    const risk = taskBlockers.some((b) => b.level === "high_risk")
+  // 任务风险三态：卡点等级取最大值；小地图与节点样式共用一份口径。
+  const taskRiskLevel = (taskId: number): "high_risk" | "warning" | "" => {
+    const taskBlockers = openBlockers.filter((b) => b.taskId === taskId);
+    return taskBlockers.some((b) => b.level === "high_risk")
       ? "high_risk"
       : taskBlockers.length > 0
         ? "warning"
         : "";
+  };
+
+  const taskNode = (t: Task, posBase: NodePos) => {
+    const pos = withOffset(t.id, posBase);
+    const taskBlockers = openBlockers.filter((b) => b.taskId === t.id);
+    const risk = taskRiskLevel(t.id);
     const dimByFilter = hasFilter && !taskMatchesFilter(t);
     const dimBySelect = neighborIds != null && !neighborIds.has(t.id);
     return (
@@ -796,6 +912,10 @@ export default function CollaborationPage({
         style={{ left: pos.x, top: pos.y, width: pos.w, height: pos.h }}
         onMouseDown={(ev) => startDrag(t.id, ev.clientX, ev.clientY)}
         onClick={() => {
+          if (suppressClickRef.current) {
+            suppressClickRef.current = false;
+            return;
+          }
           setImpactMode(false);
           setSelectedEdge(null);
           if (mode.kind === "focus") {
@@ -1013,6 +1133,73 @@ export default function CollaborationPage({
     );
   };
 
+  // #145：舞台尺寸按当前层级取布局画布大小；平移缩放作用在整个舞台上。
+  const stageSize =
+    mode.kind === "kr" && krLayer
+      ? { w: 700, h: krLayer.height }
+      : mode.kind === "focus" && focusLayer
+        ? { w: focusLayer.width, h: focusLayer.height }
+        : mode.kind === "full" && full
+          ? { w: full.width, h: full.height }
+          : { w: 700, h: tree.height };
+
+  // 小地图模型（原型 cp-minimap）：非归属关系边画线、节点画色点；数据量小，直接算不缓存。
+  const mmDots: { x: number; y: number; cls: string }[] = [];
+  const mmLines: { x1: number; y1: number; x2: number; y2: number }[] = [];
+  const mmDot = (id: number | null, pos: NodePos, cls: string) => {
+    const p = id != null ? withOffset(id, pos) : pos;
+    mmDots.push({ x: p.x + p.w / 2, y: p.y + p.h / 2, cls });
+  };
+  const mmEdgeLines = (
+    edgeList: DeliverableEdge[],
+    positions: Map<number, NodePos>,
+  ) => {
+    for (const e of edgeList) {
+      const fromBase = e.sourceTaskId != null ? positions.get(e.sourceTaskId) : positions.get(-e.id);
+      const toBase = positions.get(e.targetTaskId);
+      if (!fromBase || !toBase) continue;
+      const from = e.sourceTaskId != null ? withOffset(e.sourceTaskId, fromBase) : fromBase;
+      const to = withOffset(e.targetTaskId, toBase);
+      mmLines.push({ x1: from.x + from.w / 2, y1: from.y + from.h / 2, x2: to.x + to.w / 2, y2: to.y + to.h / 2 });
+    }
+  };
+  if (mode.kind === "tree" || mode.kind === "o") {
+    for (const n of tree.nodes) {
+      mmDot(null, n.pos, n.kind === "o" ? "objective" : `kr ${krVisualState(n.id)}`);
+    }
+    for (const l of tree.lines) mmLines.push({ x1: l.x1, y1: l.y1, x2: l.x2, y2: l.y2 });
+  } else if (mode.kind === "kr" && krLayer) {
+    for (const t of [...krLayer.inKr, ...krLayer.neighbors]) {
+      const pos = krLayer.positions.get(t.id);
+      if (pos) mmDot(t.id, pos, taskRiskLevel(t.id));
+    }
+    for (const m of krLayer.memberNodes) {
+      const pos = krLayer.positions.get(-m.edgeId);
+      if (pos) mmDot(null, pos, "member");
+    }
+    mmEdgeLines(krLayer.relevantEdges, krLayer.positions);
+  } else if (mode.kind === "focus" && focusLayer) {
+    for (const t of focusLayer.visibleTasks) {
+      const pos = focusLayer.positions.get(t.id);
+      if (pos) mmDot(t.id, pos, taskRiskLevel(t.id));
+    }
+    for (const m of focusLayer.memberNodes) {
+      const pos = focusLayer.positions.get(-m.edgeId);
+      if (pos) mmDot(null, pos, "member");
+    }
+    mmEdgeLines(focusLayer.relevantEdges, focusLayer.positions);
+  } else if (mode.kind === "full" && full) {
+    for (const n of full.oNodes) mmDot(null, n.pos, "objective");
+    for (const n of full.krNodes) mmDot(null, n.pos, `kr ${krVisualState(n.id)}`);
+    for (const t of full.visibleTasks) {
+      const pos = full.positions.get(t.id);
+      if (pos) mmDot(t.id, pos, taskRiskLevel(t.id));
+    }
+    for (const m of full.memberNodes) mmDot(null, m.pos, "member");
+    mmEdgeLines(full.visibleEdges, full.positions);
+  }
+  const mmDotR = Math.max(10, stageSize.w / 110);
+
   return (
     <ProjectShell user={user} project={project} projectId={projectId} pageLabel="协作关系" pageWidth="wide" onLogout={onLogout}>
       {notFound ? (
@@ -1032,7 +1219,7 @@ export default function CollaborationPage({
                   全局展开
                 </Button>
               ) : (
-                <Button onClick={() => { setMode({ kind: "tree" }); setViewStack([]); setExpanded(new Set()); setSelectedTask(null); }}>
+                <Button onClick={() => { setMode({ kind: "tree" }); setViewStack([]); setExpanded(new Set()); setSelectedTask(null); resetViewport(); }}>
                   返回层级视图
                 </Button>
               )}
@@ -1226,42 +1413,55 @@ export default function CollaborationPage({
             </aside>
             <div className="graph-shell">
               {(mode.kind === "full" || mode.kind === "kr" || mode.kind === "focus") && (edgeInspector || inspector)}
+              {/* #145：画布操作按原型三簇布置——返回左上、缩放簇顶部居中、重新布局右上，
+                  全层级可用（PRD §5.1、§6.4）。 */}
+              <div className="graph-ops graph-ops-left">
+                <Button size="small" disabled={mode.kind === "tree"} onClick={back}>
+                  ← 返回上一级
+                </Button>
+              </div>
+              <div className="graph-ops graph-ops-center">
+                <Button size="small" aria-label="缩小" onClick={() => setZoom((z) => Math.max(ZOOM_MIN, z - 0.15))}>
+                  −
+                </Button>
+                <span className="muted" style={{ fontSize: 12 }}>{Math.round(zoom * 100)}%</span>
+                <Button size="small" aria-label="放大" onClick={() => setZoom((z) => Math.min(ZOOM_MAX, z + 0.15))}>
+                  ＋
+                </Button>
+                <Button size="small" onClick={resetViewport}>
+                  适应
+                </Button>
+              </div>
               <div
-                className={`graph-canvas-ops${
+                className={`graph-ops graph-ops-right${
                   (mode.kind === "full" || mode.kind === "kr" || mode.kind === "focus") &&
                   (edgeInspector || inspector)
                     ? " with-inspector"
                     : ""
                 }`}
               >
-                <Button size="small" disabled={mode.kind === "tree"} onClick={back}>
-                  ← 返回上一级
+                <Button size="small" onClick={relayout}>
+                  重新布局
                 </Button>
-                {/* 缩放、适应与重新布局只作用于全局展开画布，其余层级不出现。 */}
-                {mode.kind === "full" && (
-                  <>
-                    <Button size="small" onClick={() => setZoom((z) => Math.max(0.4, z - 0.15))}>
-                      −
-                    </Button>
-                    <span className="muted" style={{ fontSize: 12 }}>{Math.round(zoom * 100)}%</span>
-                    <Button size="small" onClick={() => setZoom((z) => Math.min(1.6, z + 0.15))}>
-                      ＋
-                    </Button>
-                    <Button size="small" onClick={() => setZoom(1)}>
-                      适应
-                    </Button>
-                    <Button size="small" onClick={() => setDragOffsets(new Map())}>
-                      重新布局
-                    </Button>
-                  </>
-                )}
               </div>
-              <div className="graph-scroll">
+              <div
+                className={`graph-viewport${panning ? " dragging" : ""}`}
+                ref={viewportRef}
+                onPointerDown={onViewportPointerDown}
+                onPointerMove={onViewportPointerMove}
+                onPointerUp={onViewportPointerUp}
+                onPointerCancel={onViewportPointerUp}
+              >
+                <div
+                  className="graph-stage"
+                  style={{
+                    width: stageSize.w,
+                    height: stageSize.h,
+                    transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                  }}
+                >
               {mode.kind === "tree" || mode.kind === "o" ? (
-                <div className="graph-canvas-inner" style={{ height: tree.height, minWidth: 700 }}>
-                  <div className="graph-note">
-                    默认只显示 O、KR 与层级连线（不可点击）；点击 O 聚焦下属 KR，点击 KR 进入任务关系层
-                  </div>
+                <>
                   <svg className="graph-svg" width="700" height={tree.height}>
                     {tree.lines.map((l, i) => (
                       <path
@@ -1298,26 +1498,18 @@ export default function CollaborationPage({
                       </div>
                     ),
                   )}
-                </div>
+                </>
               ) : mode.kind === "kr" && krLayer ? (
-                <div className="graph-canvas-inner" style={{ height: krLayer.height, minWidth: 700 }}>
-                  <div className="graph-note">
-                    {krLayer.kr.code} 任务关系层：硬前置加粗、关键路径最粗、互锁红色虚线、反馈紫色虚线
-                  </div>
-                  {krLayer.inKr.length === 0 && krLayer.neighbors.length === 0 && (
-                    <div className="graph-empty">
-                      {krLayer.hiddenCompleted > 0
-                        ? "该 KR 下的任务已全部完成，打开「显示已完成」查看"
-                        : "该 KR 下还没有任务"}
-                    </div>
-                  )}
+                <>
                   <svg className="graph-svg" width="700" height={krLayer.height}>
                     {arrowDefs}
                     {krLayer.relevantEdges.map((e) => {
-                      const from =
+                      const fromBase =
                         e.sourceTaskId != null ? krLayer.positions.get(e.sourceTaskId) : krLayer.positions.get(-e.id);
-                      const to = krLayer.positions.get(e.targetTaskId);
-                      if (!from || !to) return null;
+                      const toBase = krLayer.positions.get(e.targetTaskId);
+                      if (!fromBase || !toBase) return null;
+                      const from = e.sourceTaskId != null ? withOffset(e.sourceTaskId, fromBase) : fromBase;
+                      const to = withOffset(e.targetTaskId, toBase);
                       const st = edgeStroke(e);
                       const d = edgePath(from, to);
                       const isSel = selectedEdge === e.id;
@@ -1334,6 +1526,7 @@ export default function CollaborationPage({
                           <path
                             d={d}
                             fill="none"
+                            className="edge-hit"
                             stroke="transparent"
                             strokeWidth={14}
                             style={{ pointerEvents: "stroke", cursor: "pointer" }}
@@ -1371,40 +1564,20 @@ export default function CollaborationPage({
                       </div>
                     ) : null;
                   })}
-                </div>
+                </>
               ) : mode.kind === "focus" && focusLayer ? (
-                <div
-                  className="graph-canvas-inner"
-                  style={{ height: focusLayer.height, minWidth: focusLayer.width }}
-                >
-                  <div className="graph-note">
-                    以「{focusLayer.origin.name}」为起点逐层展开：点任一相邻节点继续展开下一层，
-                    当前 {focusLayer.visibleTasks.length} 个任务在画布上
-                    {expanded.size > 1 && (
-                      <Button
-                        size="small"
-                        type="link"
-                        style={{ padding: "0 6px" }}
-                        onClick={() => {
-                          // CR §6.2：已展开节点要有明确的「收起」控制，不靠双击这类隐藏手势。
-                          setExpanded(new Set([focusLayer.origin.id]));
-                          setSelectedTask(focusLayer.origin.id);
-                          setSelectedEdge(null);
-                        }}
-                      >
-                        收起到起点
-                      </Button>
-                    )}
-                  </div>
+                <>
                   <svg className="graph-svg" width={focusLayer.width} height={focusLayer.height}>
                     {arrowDefs}
                     {focusLayer.relevantEdges.map((e) => {
-                      const from =
+                      const fromBase =
                         e.sourceTaskId != null
                           ? focusLayer.positions.get(e.sourceTaskId)
                           : focusLayer.positions.get(-e.id);
-                      const to = focusLayer.positions.get(e.targetTaskId);
-                      if (!from || !to) return null;
+                      const toBase = focusLayer.positions.get(e.targetTaskId);
+                      if (!fromBase || !toBase) return null;
+                      const from = e.sourceTaskId != null ? withOffset(e.sourceTaskId, fromBase) : fromBase;
+                      const to = withOffset(e.targetTaskId, toBase);
                       const st = edgeStroke(e);
                       const d = edgePath(from, to);
                       const isSel = selectedEdge === e.id;
@@ -1421,6 +1594,7 @@ export default function CollaborationPage({
                           <path
                             d={d}
                             fill="none"
+                            className="edge-hit"
                             stroke="transparent"
                             strokeWidth={14}
                             style={{ pointerEvents: "stroke", cursor: "pointer" }}
@@ -1458,25 +1632,9 @@ export default function CollaborationPage({
                       </div>
                     ) : null;
                   })}
-                </div>
+                </>
               ) : mode.kind === "full" && full ? (
-                <div
-                  className="graph-canvas-inner"
-                  style={{
-                    height: full.height * zoom,
-                    width: full.width * zoom,
-                    minWidth: 400,
-                  }}
-                >
-                  <div
-                    style={{
-                      transform: `scale(${zoom})`,
-                      transformOrigin: "top left",
-                      position: "relative",
-                      width: full.width,
-                      height: full.height,
-                    }}
-                  >
+                <>
                     <svg className="graph-svg" width={full.width} height={full.height}>
                       {arrowDefs}
                       {/* O→KR→任务层级连线（#123）：owns 边灰色无箭头，绘于关系边之下。 */}
@@ -1531,7 +1689,8 @@ export default function CollaborationPage({
                             <path
                               d={edgePath(from, to)}
                               fill="none"
-                              stroke="transparent"
+                              className="edge-hit"
+                            stroke="transparent"
                               strokeWidth={14}
                               style={{ pointerEvents: "stroke", cursor: "pointer" }}
                               onClick={() => {
@@ -1584,12 +1743,6 @@ export default function CollaborationPage({
                       const pos = full.positions.get(t.id);
                       return pos ? taskNode(t, pos) : null;
                     })}
-                    {renderBudget < full.visibleTasks.length && (
-                      <div className="graph-note" style={{ top: "auto", bottom: 12 }}>
-                        正在补齐剩余 {full.visibleTasks.length - renderBudget} 个节点，画布已可缩放、拖动与返回；
-                        数据量较大时可按 O、KR 或人员缩小范围
-                      </div>
-                    )}
                     {full.memberNodes.map((m) => (
                       <div
                         key={`fm-${m.providerId}`}
@@ -1608,9 +1761,71 @@ export default function CollaborationPage({
                         <small>关系相关项目成员</small>
                       </div>
                     ))}
-                  </div>
-                </div>
+                </>
               ) : null}
+                </div>
+              </div>
+              {/* 说明条与空态是画布覆盖层，不随平移缩放（#145）。 */}
+              {mode.kind === "full" ? (
+                full && renderBudget < full.visibleTasks.length ? (
+                  <div className="graph-note">
+                    正在补齐剩余 {full.visibleTasks.length - renderBudget} 个节点，画布已可缩放、拖动与返回；
+                    数据量较大时可按 O、KR 或人员缩小范围
+                  </div>
+                ) : null
+              ) : (
+                <div className="graph-note">
+                  {mode.kind === "kr" && krLayer ? (
+                    `${krLayer.kr.code} 任务关系层：硬前置加粗、关键路径最粗、互锁红色虚线、反馈紫色虚线`
+                  ) : mode.kind === "focus" && focusLayer ? (
+                    <>
+                      以「{focusLayer.origin.name}」为起点逐层展开：点任一相邻节点继续展开下一层，
+                      当前 {focusLayer.visibleTasks.length} 个任务在画布上
+                      {expanded.size > 1 && (
+                        <Button
+                          size="small"
+                          type="link"
+                          style={{ padding: "0 6px" }}
+                          onClick={() => {
+                            // CR §6.2：已展开节点要有明确的「收起」控制，不靠双击这类隐藏手势。
+                            setExpanded(new Set([focusLayer.origin.id]));
+                            setSelectedTask(focusLayer.origin.id);
+                            setSelectedEdge(null);
+                          }}
+                        >
+                          收起到起点
+                        </Button>
+                      )}
+                    </>
+                  ) : (
+                    "默认只显示 O、KR 与层级连线（不可点击）；点击 O 聚焦下属 KR，点击 KR 进入任务关系层"
+                  )}
+                </div>
+              )}
+              {mode.kind === "kr" && krLayer && krLayer.inKr.length === 0 && krLayer.neighbors.length === 0 && (
+                <div className="graph-empty">
+                  {krLayer.hiddenCompleted > 0
+                    ? "该 KR 下的任务已全部完成，打开「显示已完成」查看"
+                    : "该 KR 下还没有任务"}
+                </div>
+              )}
+              {/* 小地图（PRD §6.4，原型 cp-minimap）：内容全貌＋当前视口框。 */}
+              <div className="graph-minimap" aria-hidden>
+                <svg viewBox={`0 0 ${stageSize.w} ${stageSize.h}`} preserveAspectRatio="xMidYMid meet">
+                  {mmLines.map((l, i) => (
+                    <line key={i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} />
+                  ))}
+                  {mmDots.map((d, i) => (
+                    <circle key={i} cx={d.x} cy={d.y} r={mmDotR} className={d.cls} />
+                  ))}
+                  <rect
+                    className="mm-view"
+                    x={-pan.x / zoom}
+                    y={-pan.y / zoom}
+                    width={viewportSize.w / zoom}
+                    height={viewportSize.h / zoom}
+                  />
+                </svg>
               </div>
             </div>
           </div>
