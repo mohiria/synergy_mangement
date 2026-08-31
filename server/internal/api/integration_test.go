@@ -2359,6 +2359,11 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 	if detailB.Inputs[0].CurrentFileId == nil {
 		t.Fatalf("边上应关联当前交付物: %+v", detailB.Inputs[0])
 	}
+	// 裁决 J1（#142）：类型与大小由服务端派生，关系列表「当前交付物」列直接消费。
+	if detailB.Inputs[0].CurrentFileTypeLabel == nil || *detailB.Inputs[0].CurrentFileTypeLabel == "" ||
+		detailB.Inputs[0].CurrentFileSize == nil || *detailB.Inputs[0].CurrentFileSize <= 0 {
+		t.Fatalf("边上应带当前内容的类型文案与大小: %+v", detailB.Inputs[0])
+	}
 	if detailB.Task.Status != api.TaskStatusNotStarted {
 		t.Fatalf("输入就绪后应回未开始显示: %+v", detailB.Task.Status)
 	}

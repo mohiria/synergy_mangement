@@ -3491,6 +3491,20 @@ components:
           type: integer
           format: int64
           description: 第一步返回的内容记录 id
+    EdgeCurrentFile:
+      type: object
+      description: 关系列表「当前交付物」列的来源任务当前内容摘要（裁决 J1，#142）
+      required: [fileName, fileTypeLabel, fileSize]
+      properties:
+        fileName:
+          type: string
+        fileTypeLabel:
+          type: string
+          description: 文件类型显示文案（派生字段）
+        fileSize:
+          type: integer
+          format: int64
+          description: 文件大小（字节）
     DeliverableEdgeRef:
       type: object
       description: 交付物承接的关系边引用（词汇表「交付物边」）：本交付物是这条边的来源内容
@@ -3827,6 +3841,21 @@ components:
           description: 已生效当前内容（可下载；派生字段）
         currentFileName:
           type: string
+        currentFileSize:
+          type: integer
+          format: int64
+          description: 已生效当前内容的文件大小（字节；与 currentFileName 同源，裁决 J1）
+        currentFileTypeLabel:
+          type: string
+          description: 已生效当前内容的文件类型显示文案（派生字段，裁决 J1；前端不按扩展名自己算）
+        sourceCurrentFiles:
+          type: array
+          description: >-
+            来源任务全部已生效当前内容（裁决 J1）：边未绑定具体交付物项时，
+            关系列表「当前交付物」列按此显示——一项显示「类型 · 大小」，
+            多项显示「N 项」并悬停列出各项「文件名 · 大小」
+          items:
+            $ref: "#/components/schemas/EdgeCurrentFile"
         ready:
           type: boolean
           description: 关系就绪状态（AC-48）：仅当前内容生效时就绪；候选不提前满足输入

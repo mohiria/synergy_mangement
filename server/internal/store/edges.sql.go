@@ -126,6 +126,45 @@ func (q *Queries) GetEdgeInProject(ctx context.Context, arg GetEdgeInProjectPara
 	return i, err
 }
 
+const listCurrentFilesByProjectTask = `-- name: ListCurrentFilesByProjectTask :many
+SELECT d.task_id, df.file_name, df.file_size
+FROM deliverable_files df
+JOIN deliverables d ON d.id = df.deliverable_id
+JOIN tasks t ON t.id = d.task_id
+JOIN key_results k ON k.id = t.key_result_id
+JOIN objectives o ON o.id = k.objective_id
+WHERE o.project_id = $1 AND df.state = 'current'
+ORDER BY df.id
+`
+
+type ListCurrentFilesByProjectTaskRow struct {
+	TaskID   int64
+	FileName string
+	FileSize int64
+}
+
+// 裁决 J1（#142）：关系列表「当前交付物」列——项目内各任务全部已生效当前内容，
+// 供边未绑定具体交付物项时按来源任务归组展示。
+func (q *Queries) ListCurrentFilesByProjectTask(ctx context.Context, projectID int64) ([]ListCurrentFilesByProjectTaskRow, error) {
+	rows, err := q.db.Query(ctx, listCurrentFilesByProjectTask, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCurrentFilesByProjectTaskRow
+	for rows.Next() {
+		var i ListCurrentFilesByProjectTaskRow
+		if err := rows.Scan(&i.TaskID, &i.FileName, &i.FileSize); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listEdgeRefsByDeliverableTask = `-- name: ListEdgeRefsByDeliverableTask :many
 SELECT e.id, e.deliverable_id, e.name, e.edge_type, e.target_task_id,
     tt.name AS target_task_name
@@ -229,7 +268,7 @@ SELECT e.id, e.target_task_id, e.source_task_id, e.source_user_id, e.deliverable
     mu.display_name AS source_user_name,
     tt.name AS target_task_name, tt.owner_id AS target_owner_id, tt.created_by AS target_created_by,
     d.name AS deliverable_name,
-    cf.id AS current_file_id, cf.file_name AS current_file_name,
+    cf.id AS current_file_id, cf.file_name AS current_file_name, cf.file_size AS current_file_size,
     EXISTS (
         SELECT 1 FROM deliverable_files df
         WHERE df.deliverable_id = e.deliverable_id AND df.state = 'candidate'
@@ -270,6 +309,7 @@ type ListEdgesByProjectRow struct {
 	DeliverableName  pgtype.Text
 	CurrentFileID    pgtype.Int8
 	CurrentFileName  pgtype.Text
+	CurrentFileSize  pgtype.Int8
 	HasCandidate     bool
 }
 
@@ -306,6 +346,7 @@ func (q *Queries) ListEdgesByProject(ctx context.Context, projectID int64) ([]Li
 			&i.DeliverableName,
 			&i.CurrentFileID,
 			&i.CurrentFileName,
+			&i.CurrentFileSize,
 			&i.HasCandidate,
 		); err != nil {
 			return nil, err

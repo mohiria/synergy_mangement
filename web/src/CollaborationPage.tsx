@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Alert, AutoComplete, Button, Input, Select, Spin, Switch } from "antd";
 import { client } from "./api/client";
+import { formatFileSize } from "./FileUploadField";
 import type { components } from "./api/schema";
 import Icon from "./icons";
 import ProjectShell from "./ProjectShell";
@@ -42,6 +43,37 @@ type Mode =
   | { kind: "full" };
 
 type NodePos = { x: number; y: number; w: number; h: number };
+
+// 关系列表「当前交付物」列（裁决 J1，#142）：显示「类型 · 大小」，类型文案由服务端派生；
+// 边未绑定具体交付物项且来源任务有多项当前内容时显示「N 项」，悬停列出各项「文件名 · 大小」。
+function edgeCurrentFiles(e: DeliverableEdge): { fileName: string; fileTypeLabel: string; fileSize: number }[] {
+  if (e.currentFileName) {
+    return [
+      {
+        fileName: e.currentFileName,
+        fileTypeLabel: e.currentFileTypeLabel ?? "文件",
+        fileSize: e.currentFileSize ?? 0,
+      },
+    ];
+  }
+  return e.sourceCurrentFiles ?? [];
+}
+
+function edgeCurrentCell(e: DeliverableEdge): string | null {
+  const files = edgeCurrentFiles(e);
+  if (files.length === 0) return null;
+  if (files.length > 1) return `${files.length} 项`;
+  const f = files[0];
+  return f.fileSize > 0 ? `${f.fileTypeLabel} · ${formatFileSize(f.fileSize)}` : f.fileTypeLabel;
+}
+
+function edgeCurrentTitle(e: DeliverableEdge): string {
+  const files = edgeCurrentFiles(e);
+  if (files.length === 0) return "暂无";
+  return files
+    .map((f) => (f.fileSize > 0 ? `${f.fileName} · ${formatFileSize(f.fileSize)}` : f.fileName))
+    .join("\n");
+}
 
 // 协作关系（AC-08/09/27）：O／KR 层级树 → KR 任务关系层 → 全局展开。
 // 全局展开保留 O/KR 分组骨架、真实交付物边（环形/多中心/跨层级不转树）、缩放与筛选淡化。
@@ -606,7 +638,8 @@ export default function CollaborationPage({
       // CR §5.2：图谱与关系列表共享搜索词，切视图不丢输入。
       const q = searchText.trim().toLowerCase();
       if (q) {
-        const hay = `${e.name}${e.sourceTaskName ?? ""}${e.targetTaskName ?? ""}${e.inputRequest?.providerName ?? ""}`.toLowerCase();
+        // 裁决 J1（#142）：「交付物边」列已删，搜索匹配不再含边名，保留任务名与成员名。
+        const hay = `${e.sourceTaskName ?? ""}${e.targetTaskName ?? ""}${e.inputRequest?.providerName ?? ""}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
@@ -1094,7 +1127,6 @@ export default function CollaborationPage({
                   <thead>
                     <tr>
                       <th>来源任务／成员</th>
-                      <th>交付物边</th>
                       <th style={{ width: 110 }}>类型</th>
                       <th style={{ width: 70 }}>必要性</th>
                       <th style={{ width: 150 }}>当前交付物</th>
@@ -1108,7 +1140,7 @@ export default function CollaborationPage({
                   <tbody>
                     {listRows.length === 0 && (
                       <tr>
-                        <td colSpan={10}>
+                        <td colSpan={9}>
                           <div className="empty">没有匹配的协作关系</div>
                         </td>
                       </tr>
@@ -1118,16 +1150,13 @@ export default function CollaborationPage({
                         <td title={e.sourceTaskName ?? e.inputRequest?.providerName ?? "—"}>
                           {e.sourceTaskName ?? e.inputRequest?.providerName ?? "—"}
                         </td>
-                        <td title={e.name}>{e.name}</td>
                         <td title={e.edgeTypeLabel}>{e.edgeTypeLabel}</td>
                         <td>{e.necessity === "required" ? "必要" : "参考"}</td>
-                        {/* 候选提示与文件名同排一行（#91），行高不随内容变化。 */}
-                        <td
-                          title={
-                            (e.currentFileName ?? "暂无") + (e.hasCandidate ? " · 候选审核中" : "")
-                          }
-                        >
-                          {e.currentFileName ?? <span className="muted">暂无</span>}
+                        {/* 裁决 J1（#142）：「当前交付物」列显示「类型 · 大小」（类型由服务端派生），
+                            来源任务多项时显示「N 项」并悬停列出各项「文件名 · 大小」；
+                            候选提示与内容同排一行（#91），行高不随内容变化。 */}
+                        <td title={edgeCurrentTitle(e) + (e.hasCandidate ? " · 候选审核中" : "")}>
+                          {edgeCurrentCell(e) ?? <span className="muted">暂无</span>}
                           {e.hasCandidate && <span className="muted"> · 候选审核中</span>}
                         </td>
                         <td title={e.targetTaskName}>{e.targetTaskName}</td>

@@ -1817,6 +1817,17 @@ export interface components {
              */
             fileId: number;
         };
+        /** @description 关系列表「当前交付物」列的来源任务当前内容摘要（裁决 J1，#142） */
+        EdgeCurrentFile: {
+            fileName: string;
+            /** @description 文件类型显示文案（派生字段） */
+            fileTypeLabel: string;
+            /**
+             * Format: int64
+             * @description 文件大小（字节）
+             */
+            fileSize: number;
+        };
         /** @description 交付物承接的关系边引用（词汇表「交付物边」）：本交付物是这条边的来源内容 */
         DeliverableEdgeRef: {
             /** Format: int64 */
@@ -2038,6 +2049,15 @@ export interface components {
              */
             currentFileId?: number;
             currentFileName?: string;
+            /**
+             * Format: int64
+             * @description 已生效当前内容的文件大小（字节；与 currentFileName 同源，裁决 J1）
+             */
+            currentFileSize?: number;
+            /** @description 已生效当前内容的文件类型显示文案（派生字段，裁决 J1；前端不按扩展名自己算） */
+            currentFileTypeLabel?: string;
+            /** @description 来源任务全部已生效当前内容（裁决 J1）：边未绑定具体交付物项时， 关系列表「当前交付物」列按此显示——一项显示「类型 · 大小」， 多项显示「N 项」并悬停列出各项「文件名 · 大小」 */
+            sourceCurrentFiles?: components["schemas"]["EdgeCurrentFile"][];
             /** @description 关系就绪状态（AC-48）：仅当前内容生效时就绪；候选不提前满足输入 */
             ready: boolean;
             /** @description 审核期间存在候选更新（不改变原有就绪状态） */

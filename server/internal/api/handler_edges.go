@@ -271,6 +271,20 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 	for _, rv := range reviewerRows {
 		reviewerNamesByTask[rv.TaskID] = append(reviewerNamesByTask[rv.TaskID], rv.DisplayName)
 	}
+	// 裁决 J1（#142）：「当前交付物」列显示类型与大小；边未绑定具体交付物项时
+	// 按来源任务列出全部已生效当前内容（一项显示「类型 · 大小」，多项显示「N 项」）。
+	currentFileRows, err := s.q.ListCurrentFilesByProjectTask(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	currentFilesByTask := make(map[int64][]EdgeCurrentFile)
+	for _, f := range currentFileRows {
+		currentFilesByTask[f.TaskID] = append(currentFilesByTask[f.TaskID], EdgeCurrentFile{
+			FileName:      f.FileName,
+			FileTypeLabel: domain.FileTypeLabel(f.FileName),
+			FileSize:      f.FileSize,
+		})
+	}
 	hardEdges := []domain.HardEdge{}
 	for _, e := range rows {
 		if e.EdgeType == domain.EdgeHardPrerequisite && e.SourceTaskID.Valid {
@@ -326,6 +340,13 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 		if e.CurrentFileID.Valid {
 			item.CurrentFileId = &e.CurrentFileID.Int64
 			item.CurrentFileName = fromPgText(e.CurrentFileName)
+			item.CurrentFileSize = &e.CurrentFileSize.Int64
+			label := domain.FileTypeLabel(e.CurrentFileName.String)
+			item.CurrentFileTypeLabel = &label
+		} else if e.SourceTaskID.Valid {
+			if files := currentFilesByTask[e.SourceTaskID.Int64]; len(files) > 0 {
+				item.SourceCurrentFiles = &files
+			}
 		}
 		item.ExpectedDate = fromPgDate(e.ExpectedDate)
 		if e.EdgeType == domain.EdgeHardPrerequisite {
