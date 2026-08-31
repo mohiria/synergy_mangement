@@ -17,14 +17,6 @@ import ProjectShell from "./ProjectShell";
 import TreeTransfer from "./TreeTransfer";
 import TaskImportModal from "./TaskImportModal";
 import TaskDrawerHost from "./task-drawer";
-import { CancelTaskModal, PoolRejectModal, ProgressModal } from "./task-drawer/modals";
-import {
-  cancelTask as apiCancelTask,
-  decidePoolReview,
-  saveProgress as apiSaveProgress,
-  startTask as apiStartTask,
-  submitPoolReview,
-} from "./task-drawer/actions";
 import {
   STATUS_CLASS,
   fmtDate,
@@ -170,17 +162,7 @@ export default function ProjectTasksPage({
     return `${taskCode.get(t.id)}${t.name}${t.ownerName}`.toLowerCase().includes(q);
   });
 
-  // 列表行的几个单任务动作与抽屉共用同一份实现（#109）：这里只负责刷新自己的列表。
-  const startTask = (task: Task) => apiStartTask(projectId, task, load);
-  const submitPool = (task: Task) => submitPoolReview(projectId, task, load);
-  const decidePool = (task: Task, decision: "approved" | "rejected", opinion?: string) =>
-    decidePoolReview(projectId, task, decision, opinion, load);
-  const doCancelTask = (task: Task, reason: string) => apiCancelTask(projectId, task, reason, load);
-  const saveProgress = (task: Task, progress: number | null) =>
-    apiSaveProgress(projectId, task, progress, load);
-
-  const [rejectTask, setRejectTask] = useState<Task | null>(null);
-  const [rejectOpinion, setRejectOpinion] = useState("");
+  // #118：行级动作全部收进任务抽屉，列表只负责打开抽屉；退回／进度／取消弹窗由抽屉持有（#109）。
   const [importOpen, setImportOpen] = useState(false);
   const [drawerTaskId, setDrawerTaskId] = useState<number | null>(null);
 
@@ -228,18 +210,13 @@ export default function ProjectTasksPage({
 
 
 
-  const [cancelTask, setCancelTask] = useState<Task | null>(null);
-  const [cancelReason, setCancelReason] = useState("");
-  const [progressTask, setProgressTask] = useState<Task | null>(null);
-  const [progressValue, setProgressValue] = useState<number | null>(null);
-
   const groups = krList
     .map((kr) => ({ kr, list: filtered.filter((t) => t.keyResultId === kr.id) }))
     .filter((g) => g.list.length > 0);
 
   const rows = groups.flatMap(({ kr, list }) => [
     <tr key={`kr-${kr.id}`} className="table-group">
-      <td colSpan={9}>
+      <td colSpan={8}>
         <div className="task-group-label">
           <span title={`${kr.code} ${kr.description}`}>
             <b>{kr.code}</b>
@@ -327,59 +304,6 @@ export default function ProjectTasksPage({
           ) : (
             <span className="muted">—</span>
           )}
-        </td>
-        <td>
-          <div className="row-actions">
-            {t.canStart && (
-              <Button size="small" onClick={() => startTask(t)}>
-                开始
-              </Button>
-            )}
-            {t.canUpdateProgress && (
-              <Button
-                size="small"
-                onClick={() => {
-                  setProgressTask(t);
-                  setProgressValue(t.progress ?? null);
-                }}
-              >
-                进度
-              </Button>
-            )}
-            {t.canCancel && (
-              <Button
-                size="small"
-                onClick={() => {
-                  setCancelTask(t);
-                  setCancelReason("");
-                }}
-              >
-                申请取消
-              </Button>
-            )}
-            {t.canSubmitPoolReview && (
-              <Button size="small" onClick={() => submitPool(t)}>
-                提交入池
-              </Button>
-            )}
-            {t.canDecidePoolReview && (
-              <>
-                <Button size="small" type="primary" onClick={() => decidePool(t, "approved")}>
-                  通过
-                </Button>
-                <Button
-                  size="small"
-                  danger
-                  onClick={() => {
-                    setRejectTask(t);
-                    setRejectOpinion("");
-                  }}
-                >
-                  退回
-                </Button>
-              </>
-            )}
-          </div>
         </td>
       </tr>
     )),
@@ -519,7 +443,6 @@ export default function ProjectTasksPage({
                   <th style={{ width: 70 }}>开始</th>
                   <th style={{ width: 70 }}>截止</th>
                   <th style={{ width: 190 }}>预期交付物</th>
-                  <th style={{ width: 190 }} />
                 </tr>
               </thead>
               <tbody>
@@ -527,7 +450,7 @@ export default function ProjectTasksPage({
                   rows
                 ) : (
                   <tr>
-                    <td colSpan={9}>
+                    <td colSpan={8}>
                       <div className="empty">没有匹配任务</div>
                     </td>
                   </tr>
@@ -590,28 +513,6 @@ export default function ProjectTasksPage({
           if (focusTaskId) setSearchParams({}, { replace: true });
         }}
         onChanged={load}
-      />
-      {/* 列表行的退回／进度／取消弹窗与抽屉共用同一组组件（#109），状态各自持有。 */}
-      <PoolRejectModal
-        task={rejectTask}
-        opinion={rejectOpinion}
-        onOpinionChange={setRejectOpinion}
-        onClose={() => setRejectTask(null)}
-        onSubmit={(t, opinion) => decidePool(t, "rejected", opinion)}
-      />
-      <ProgressModal
-        task={progressTask}
-        value={progressValue}
-        onValueChange={setProgressValue}
-        onClose={() => setProgressTask(null)}
-        onSubmit={saveProgress}
-      />
-      <CancelTaskModal
-        task={cancelTask}
-        reason={cancelReason}
-        onReasonChange={setCancelReason}
-        onClose={() => setCancelTask(null)}
-        onSubmit={doCancelTask}
       />
     </ProjectShell>
   );
