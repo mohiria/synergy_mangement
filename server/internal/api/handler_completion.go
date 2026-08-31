@@ -164,25 +164,36 @@ func (s *Server) DecideCompletion(w http.ResponseWriter, r *http.Request, projec
 		return
 	}
 	// 中间或签阶段（AC-14/24/37）：仅或签组成员可处理。
+	// 裁决 C2（#136）：或签组含 KR 负责人时其通过＝终审通过——decideIntermediate 落或签留痕后
+	// 返回 merged，继续走下方同一条终审通过路径（覆盖当前、删旧文件、接收、进度、审计不复制第二份）。
+	merged := false
 	if review.State == domain.CompletionIntermediate {
-		s.decideIntermediate(w, r, tx, qtx, projectId, taskId, review, facts, uid, actor, approve, opinion)
-		return
-	}
-	if review.State != domain.CompletionPendingFinal {
+		if !s.decideIntermediate(w, r, tx, qtx, projectId, taskId, review, facts, uid, actor, approve, opinion) {
+			return
+		}
+		merged = true
+	} else if review.State != domain.CompletionPendingFinal {
 		writeJSON(w, http.StatusConflict, Error{Code: "review_state_conflict", Message: domain.ErrCompletionNotPending.Error()})
 		return
 	}
-	newStatus, err := domain.DecideCompletionRule(actor, facts, uid, approve, opinion)
-	if err != nil {
-		switch {
-		case errors.Is(err, domain.ErrCompletionNotPending):
-			writeJSON(w, http.StatusConflict, Error{Code: "review_state_conflict", Message: err.Error()})
-		case errors.Is(err, domain.ErrRejectOpinionRequired):
-			writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "opinion_required", Message: err.Error()})
-		default:
-			writeJSON(w, http.StatusForbidden, Error{Code: "forbidden", Message: err.Error()})
+	var newStatus string
+	if merged {
+		// 合并路径：规则已在或签环节判定为终审通过（成果更新同样落在已完成上）。
+		newStatus = domain.TaskCompleted
+	} else {
+		var err error
+		newStatus, err = domain.DecideCompletionRule(actor, facts, uid, approve, opinion)
+		if err != nil {
+			switch {
+			case errors.Is(err, domain.ErrCompletionNotPending):
+				writeJSON(w, http.StatusConflict, Error{Code: "review_state_conflict", Message: err.Error()})
+			case errors.Is(err, domain.ErrRejectOpinionRequired):
+				writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "opinion_required", Message: err.Error()})
+			default:
+				writeJSON(w, http.StatusForbidden, Error{Code: "forbidden", Message: err.Error()})
+			}
+			return
 		}
-		return
 	}
 	items, err := qtx.ListCompletionReviewItems(r.Context(), reviewId)
 	if err != nil {
@@ -281,14 +292,16 @@ func (s *Server) DecideCompletion(w http.ResponseWriter, r *http.Request, projec
 }
 
 // decideIntermediate 或签处理：任一人通过→待 KR 终审（留痕）；任一人退回→整体退回并删除候选。
+// 裁决 C2（#136）：KR 负责人在组内且通过时规则返回终审通过——本函数只落或签留痕后返回
+// merged=true，由调用方继续同一条终审通过路径；其余情形在本函数内完成响应并返回 false。
 func (s *Server) decideIntermediate(w http.ResponseWriter, r *http.Request, tx pgx.Tx, qtx *store.Queries,
 	projectId, taskId int64, review store.CompletionReview, facts domain.TaskFacts, uid int64, actor domain.Actor,
 	approve bool, opinion string,
-) {
+) (merged bool) {
 	reviewerRows, err := qtx.ListReviewReviewers(r.Context(), review.ID)
 	if err != nil {
 		writeInternalError(w, r, err)
-		return
+		return false
 	}
 	reviewerSet := make(map[int64]bool, len(reviewerRows))
 	for _, rv := range reviewerRows {
@@ -304,7 +317,7 @@ func (s *Server) decideIntermediate(w http.ResponseWriter, r *http.Request, tx p
 		default:
 			writeJSON(w, http.StatusForbidden, Error{Code: "forbidden", Message: err.Error()})
 		}
-		return
+		return false
 	}
 	var removeKeys []string
 	if approve {
@@ -312,7 +325,10 @@ func (s *Server) decideIntermediate(w http.ResponseWriter, r *http.Request, tx p
 			ID: review.ID, State: newReviewState, IntermediateBy: pgtype.Int8{Int64: uid, Valid: true}, IntermediateOpinion: opinion,
 		}); err != nil {
 			writeInternalError(w, r, err)
-			return
+			return false
+		}
+		if newReviewState == domain.CompletionApproved {
+			return true
 		}
 	} else {
 		// AC-24：整体退回——删除本次候选文件，原当前交付物保持不变。
@@ -342,22 +358,22 @@ func (s *Server) decideIntermediate(w http.ResponseWriter, r *http.Request, tx p
 			ID: review.ID, State: newReviewState, Opinion: opinion, DecidedBy: pgtype.Int8{Int64: uid, Valid: true},
 		}); err != nil {
 			writeInternalError(w, r, err)
-			return
+			return false
 		}
 	}
 	if _, err := qtx.UpdateTaskStatus(r.Context(), store.UpdateTaskStatusParams{ID: taskId, Status: newTaskStatus}); err != nil {
 		writeInternalError(w, r, err)
-		return
+		return false
 	}
 	// AC-66：或签退回即整体退回，成果更新进程随之结束；或签通过时申请仍在审，进程保持不变。
 	if !approve {
 		if err := s.closeResultUpdate(r, w, qtx, taskId, facts); err != nil {
-			return
+			return false
 		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
 		writeInternalError(w, r, err)
-		return
+		return false
 	}
 	for _, key := range removeKeys {
 		s.removeObject(r.Context(), key)
@@ -368,6 +384,7 @@ func (s *Server) decideIntermediate(w http.ResponseWriter, r *http.Request, tx p
 		s.actionActivity(r.Context(), taskId, domain.ActivityCompletionRejected, uid, opinion)
 	}
 	s.writeTask(w, r, projectId, taskId, uid, actor)
+	return false
 }
 
 // SetTaskReviewers 调整任务级成果审核人配置（非关键字段，直接调整；§5.2.B）。

@@ -62,6 +62,11 @@ func DecideIntermediateRule(a Actor, t TaskFacts, actorID int64, isReviewer func
 		return "", "", ErrNotReviewer
 	}
 	if approve {
+		// 裁决 C2（#136）：或签组包含所属 KR 负责人时，KR 负责人通过即视同终审通过，
+		// 一次点击闭环（handler 同时落 intermediateBy 与 decidedBy，审批记录可读出合并）。
+		if t.KrOwnerID != nil && actorID == *t.KrOwnerID {
+			return TaskCompleted, CompletionApproved, nil
+		}
 		if inResultUpdate {
 			return TaskCompleted, CompletionPendingFinal, nil
 		}
