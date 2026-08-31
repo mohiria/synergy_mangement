@@ -390,35 +390,65 @@ export default function CollaborationPage({
   }, [mode, expanded, edges, taskById, isTaskVisible]);
 
   // —— 全局展开布局（AC-09）：O/KR 分组骨架 + 全部任务 + 关系相关项目成员 ——
+  // 全局展开（#123）：按原型 fullModel 重做为 O→KR→任务链路图——O、KR 是真实节点，
+  // owns 层级连线（O→KR 正交、KR→任务直线）绘于关系边之下；每个 O 一列，列内 KR 纵排、
+  // 任务 2 列网格；成员节点按原型放底部横排。淡化在渲染层按筛选实时算，布局不依赖筛选。
   const full = useMemo(() => {
     if (mode.kind !== "full") return null;
     const visibleTasks = tasks.filter(isTaskVisible);
     const visibleIds = new Set(visibleTasks.map((t) => t.id));
     const nodeW = 240;
     const nodeH = 62;
+    const gapX = 14;
+    const colPad = 14;
+    const colW = 2 * nodeW + gapX + colPad * 2;
+    const colGap = 36;
+    const oW = 220;
+    const oH = 58;
+    const krW = 280;
+    const krH = 64;
     const positions = new Map<number, NodePos>();
-    const groups: { key: string; label: string; pos: NodePos; isO: boolean }[] = [];
-    let y = 16;
-    const groupX = 24;
-    const groupW = 2 * (nodeW + 14) + 28;
-    for (const o of objectives) {
-      groups.push({ key: `o-${o.id}`, label: o.title, pos: { x: groupX, y, w: groupW, h: 30 }, isO: true });
-      y += 38;
-      for (const k of krList.filter((k) => k.objectiveId === o.id)) {
+    const oNodes: { id: number; title: string; krCount: number; pos: NodePos }[] = [];
+    const krNodes: { id: number; pos: NodePos }[] = [];
+    const ownsLines: { d: string; krId: number; taskId?: number }[] = [];
+    let maxY = 0;
+    objectives.forEach((o, oi) => {
+      const colX = 24 + oi * (colW + colGap);
+      const innerX = colX + colPad;
+      const krs = krList.filter((k) => k.objectiveId === o.id);
+      const oPos = { x: colX + (colW - oW) / 2, y: 16, w: oW, h: oH };
+      oNodes.push({ id: o.id, title: o.title, krCount: krs.length, pos: oPos });
+      const oCx = oPos.x + oW / 2;
+      const spineX = colX + 5;
+      let y = 16 + oH + 30;
+      for (const k of krs) {
         const krTasks = visibleTasks.filter((t) => t.keyResultId === k.id);
-        const rows = Math.max(1, Math.ceil(krTasks.length / 2));
-        const boxH = rows * (nodeH + 12) + 40;
-        groups.push({ key: `kr-${k.id}`, label: `${k.code} ${k.description}`, pos: { x: groupX, y, w: groupW, h: boxH }, isO: false });
-        krTasks.forEach((t, i) => {
-          const cx = groupX + 14 + (i % 2) * (nodeW + 14);
-          const cy = y + 32 + Math.floor(i / 2) * (nodeH + 12);
-          positions.set(t.id, { x: cx, y: cy, w: nodeW, h: nodeH });
+        const krPos = { x: colX + (colW - krW) / 2, y, w: krW, h: krH };
+        krNodes.push({ id: k.id, pos: krPos });
+        const krCx = krPos.x + krW / 2;
+        const krCy = y + krH / 2;
+        // O→KR：原型的正交连线（V-H-V），沿列左侧走线不穿下方节点。
+        ownsLines.push({
+          d: `M ${oCx} ${oPos.y + oH} V ${oPos.y + oH + 12} H ${spineX} V ${krCy} H ${krPos.x}`,
+          krId: k.id,
         });
-        y += boxH + 14;
+        krTasks.forEach((t, i) => {
+          const tx = innerX + (i % 2) * (nodeW + gapX);
+          const ty = y + krH + 18 + Math.floor(i / 2) * (nodeH + 12);
+          positions.set(t.id, { x: tx, y: ty, w: nodeW, h: nodeH });
+          // KR→任务：owns 直线绘于节点层之下，端点隐入节点（原型同法）。
+          ownsLines.push({
+            d: `M ${krCx} ${krCy} L ${tx + nodeW / 2} ${ty + nodeH / 2}`,
+            krId: k.id,
+            taskId: t.id,
+          });
+        });
+        const rows = Math.ceil(krTasks.length / 2);
+        y += krH + (rows > 0 ? 18 + rows * (nodeH + 12) : 0) + 26;
       }
-      y += 10;
-    }
-    // 关系相关项目成员节点（词汇表）：承担输入责任的成员。
+      maxY = Math.max(maxY, y);
+    });
+    // 关系相关项目成员节点（词汇表）：承担输入责任的成员，底部横排。
     const memberEdges = edges.filter((e) => e.sourceTaskId == null && e.inputRequest && visibleIds.has(e.targetTaskId));
     const memberByProvider = new Map<number, { name: string; edgeIds: number[] }>();
     for (const e of memberEdges) {
@@ -429,19 +459,21 @@ export default function CollaborationPage({
     }
     const memberNodes: { providerId: number; name: string; pos: NodePos; edgeIds: number[] }[] = [];
     let mi = 0;
+    const memberY = maxY + 24;
     for (const [pid, entry] of memberByProvider) {
-      const pos = { x: groupX + 14 + (mi % 2) * (nodeW + 14), y: y + 8 + Math.floor(mi / 2) * 56, w: 200, h: 44 };
+      const pos = { x: 24 + mi * 216, y: memberY, w: 200, h: 44 };
       memberNodes.push({ providerId: pid, name: entry.name, pos, edgeIds: entry.edgeIds });
       for (const eid of entry.edgeIds) positions.set(-eid, pos);
       mi++;
     }
-    if (memberNodes.length > 0) y += Math.ceil(memberNodes.length / 2) * 56 + 24;
     const visibleEdges = edges.filter((e) => {
       const targetOK = visibleIds.has(e.targetTaskId);
       const sourceOK = e.sourceTaskId != null ? visibleIds.has(e.sourceTaskId) : positions.has(-e.id);
       return targetOK && sourceOK;
     });
-    return { visibleTasks, positions, groups, memberNodes, visibleEdges, height: y + 30, width: groupX + groupW + 40 };
+    const height = (memberNodes.length > 0 ? memberY + 44 : maxY) + 40;
+    const width = Math.max(24 + objectives.length * (colW + colGap), 24 + mi * 216) + 20;
+    return { visibleTasks, positions, oNodes, krNodes, ownsLines, memberNodes, visibleEdges, height, width };
   }, [mode, tasks, edges, objectives, krList, isTaskVisible]);
 
   // 筛选淡化（AC-09；细化 AC-45 随 #20）：O/KR/人员不匹配 → 淡化保留上下文。
@@ -1384,6 +1416,24 @@ export default function CollaborationPage({
                   >
                     <svg className="graph-svg" width={full.width} height={full.height}>
                       {arrowDefs}
+                      {/* O→KR→任务层级连线（#123）：owns 边灰色无箭头，绘于关系边之下。 */}
+                      {full.ownsLines.map((l, i) => {
+                        const dim =
+                          hasFilter &&
+                          (l.taskId != null
+                            ? !taskMatchesFilter(taskById.get(l.taskId)!)
+                            : !tasks.some((t) => t.keyResultId === l.krId && taskMatchesFilter(t)));
+                        return (
+                          <path
+                            key={`owns-${i}`}
+                            d={l.d}
+                            fill="none"
+                            stroke="#b8c4ce"
+                            strokeWidth={1.6}
+                            opacity={dim ? 0.15 : 1}
+                          />
+                        );
+                      })}
                       {full.visibleEdges.map((e) => {
                         const fromBase = e.sourceTaskId != null ? full.positions.get(e.sourceTaskId) : full.positions.get(-e.id);
                         const toBase = full.positions.get(e.targetTaskId);
@@ -1431,40 +1481,42 @@ export default function CollaborationPage({
                         );
                       })}
                     </svg>
-                    {full.groups.map((g) =>
-                      g.isO ? (
+                    {/* O／KR 真实节点（#123）：视觉与层级树同一套（gnode-o／gnode-kr + krNodeContent），
+                        点击下钻到对应层级；筛选下无匹配后代任务即淡化。 */}
+                    {full.oNodes.map((n) => {
+                      const dim =
+                        hasFilter &&
+                        !tasks.some(
+                          (t) => krById.get(t.keyResultId)?.objectiveId === n.id && taskMatchesFilter(t),
+                        );
+                      return (
                         <div
-                          key={g.key}
-                          style={{
-                            position: "absolute",
-                            left: g.pos.x,
-                            top: g.pos.y,
-                            width: g.pos.w,
-                            fontWeight: 700,
-                            color: "var(--navy)",
-                            fontSize: 14,
-                          }}
+                          key={`fo-${n.id}`}
+                          className={`gnode gnode-o ${dim ? "dimmed" : ""}`}
+                          style={{ left: n.pos.x, top: n.pos.y, width: n.pos.w, height: n.pos.h }}
+                          onClick={() => enter({ kind: "o", objectiveId: n.id })}
                         >
-                          {g.label}
+                          <b>{n.title}</b>
+                          <small>{n.krCount} 个 KR</small>
                         </div>
-                      ) : (
+                      );
+                    })}
+                    {full.krNodes.map((n) => {
+                      const dim =
+                        hasFilter && !tasks.some((t) => t.keyResultId === n.id && taskMatchesFilter(t));
+                      return (
                         <div
-                          key={g.key}
-                          style={{
-                            position: "absolute",
-                            left: g.pos.x,
-                            top: g.pos.y,
-                            width: g.pos.w,
-                            height: g.pos.h,
-                            border: "1px dashed #c3cdd8",
-                            borderRadius: 10,
-                            background: "rgba(255,255,255,0.35)",
-                          }}
+                          key={`fk-${n.id}`}
+                          className={`gnode gnode-kr ${dim ? "dimmed" : ""} ${
+                            krVisualState(n.id) !== "normal" ? `risk-${krVisualState(n.id)}` : ""
+                          }`}
+                          style={{ left: n.pos.x, top: n.pos.y, width: n.pos.w, height: n.pos.h }}
+                          onClick={() => enter({ kind: "kr", krId: n.id })}
                         >
-                          <div className="muted" style={{ fontSize: 12, padding: "6px 10px" }}>{g.label}</div>
+                          {krNodeContent(n.id)}
                         </div>
-                      ),
-                    )}
+                      );
+                    })}
                     {full.visibleTasks.slice(0, renderBudget).map((t) => {
                       const pos = full.positions.get(t.id);
                       return pos ? taskNode(t, pos) : null;
