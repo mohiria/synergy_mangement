@@ -140,7 +140,7 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 			v := f.UploadedAt.Time
 			uploadedAt = &v
 		}
-		if !domain.InArchiveWindow(uploadedAt, from, to) {
+		if !domain.InArchiveWindow(uploadedAt, from, to, time.Local) {
 			continue
 		}
 		taskFilesByTask[f.TaskID] = append(taskFilesByTask[f.TaskID], toTaskFile(store.TaskFile{
@@ -195,7 +195,7 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 		}
 		fillContentState(&item, pendingReviewByTask[d.TaskID])
 		// 「时间」维：交付物比对内容状态时间（有当前内容取生效时刻，否则取候选提交时刻）。
-		if !domain.InArchiveWindow(item.ContentStateAt, from, to) {
+		if !domain.InArchiveWindow(item.ContentStateAt, from, to, time.Local) {
 			continue
 		}
 		agg.task.Deliverables = append(agg.task.Deliverables, item)
