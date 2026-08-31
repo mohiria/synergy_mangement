@@ -208,6 +208,14 @@ export default function ProjectTasksPage({
   const krList = useMemo(() => objectives.flatMap((o) => o.keyResults.map((k) => ({ ...k }))), [objectives]);
   // 编号是持久字段（AC-64）：跨页一致、增删任务后不位移，前端只取不算。
   const taskCode = useMemo(() => new Map(tasks.map((t) => [t.id, t.code])), [tasks]);
+  // 任务详情页头只显示 O／KR 编号（#99、AC-50），按 KR id 取这两个持久编号。
+  const okrCode = useMemo(() => {
+    const m = new Map<number, string>();
+    objectives.forEach((o) =>
+      o.keyResults.forEach((k) => m.set(k.id, `${o.code} / ${k.code}`)),
+    );
+    return m;
+  }, [objectives]);
 
   const filtered = tasks.filter((t) => {
     if (krFilter !== "all" && t.keyResultId !== krFilter) return false;
@@ -866,6 +874,7 @@ export default function ProjectTasksPage({
         task={tasks.find((t) => t.id === drawerTaskId) ?? null}
         code={drawerTaskId != null ? taskCode.get(drawerTaskId) : undefined}
         taskCode={taskCode}
+        okrCode={okrCode}
         members={members}
         initialTab={drawerTaskId === Number(focusTaskId) ? focusTab : "overview"}
         source={drawerTaskId === Number(focusTaskId) ? focusSource : ""}
@@ -1523,6 +1532,7 @@ function TaskDrawer({
   task,
   code,
   taskCode,
+  okrCode,
   members,
   initialTab,
   source,
@@ -1533,6 +1543,8 @@ function TaskDrawer({
   task: Task | null;
   code?: string;
   taskCode: Map<number, string>;
+  /** KR id → 「O 编号 / KR 编号」；页头只显编号，不展开标题（#99、AC-50）。 */
+  okrCode: Map<number, string>;
   members: ProjectMember[];
   initialTab?: string;
   source?: string;
@@ -2647,14 +2659,20 @@ function TaskDrawer({
       onClose={onClose}
       // 基线 §7：任务详情抽屉宽 min(740px, 100vw)。
       width="min(740px, 100vw)"
+      // 关闭图标顶格在右上角、与标题分离（#99、AC-50）；命中区在 .task-drawer 里放大到 32×32。
+      className="task-drawer"
+      closable={false}
+      extra={
+        <button type="button" className="drawer-close" onClick={onClose} aria-label="关闭任务详情">
+          <Icon name="close" size={16} />
+        </button>
+      }
       title={
         <div>
           {code} · {task.name}
-          <div className="drawer-sub">
-            所属 O／KR：{detail ? `${detail.objectiveTitle} / ${detail.krDescription}` : "—"}
-            <span className="drawer-sub-sep">·</span>
-            更新于 {fmtTime(task.updatedAt)}
-          </div>
+          {/* 所属 O／KR 只显编号：展开标题会把页头挤满，更新时间是任务的、
+              放在这里容易被误读成 O／KR 的更新时间（#99）。 */}
+          <div className="drawer-sub">所属 O／KR：{okrCode.get(task.keyResultId) ?? "—"}</div>
         </div>
       }
       footer={
