@@ -73,7 +73,9 @@ func TestCanManageTaskFiles(t *testing.T) {
 		want  bool
 	}{
 		{"负责人可管理", Actor{Role: RoleMember}, 5, facts, true},
-		{"创建人可管理", Actor{Role: RoleMember}, 3, facts, true},
+		// 裁决 D2（#137）：创建人只在草稿期保留编辑权。
+		{"创建人草稿期可管理", Actor{Role: RoleMember}, 3, TaskFacts{Status: TaskDraft, CreatorID: 3, OwnerID: 5}, true},
+		{"创建人入池后不可管理", Actor{Role: RoleMember}, 3, facts, false},
 		{"管理员可管理", Actor{Role: RoleAdmin}, 9, facts, true},
 		{"无关成员不可管理", Actor{Role: RoleMember}, 9, facts, false},
 		{"访客不可管理", Actor{Role: RoleViewer}, 5, facts, false},

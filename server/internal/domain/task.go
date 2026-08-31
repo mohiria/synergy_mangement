@@ -59,6 +59,22 @@ type TaskFacts struct {
 	ResultUpdate string
 }
 
+// CanEditTaskConfig 任务编辑权限的统一口径（裁决 D2，#137）：
+// 草稿期＝负责人／创建人／可编辑项目者；入池后＝负责人／所属 KR 负责人／可编辑项目者
+// （创建人只在草稿期保留编辑权）。各配置判定在此之上叠加各自的状态守卫。
+func CanEditTaskConfig(a Actor, userID int64, t TaskFacts) bool {
+	if !CanWriteProject(a) {
+		return false
+	}
+	if userID == t.OwnerID || CanEditProject(a) {
+		return true
+	}
+	if t.Status == TaskDraft {
+		return userID == t.CreatorID
+	}
+	return t.KrOwnerID != nil && userID == *t.KrOwnerID
+}
+
 // ValidateNewTask 校验任务草稿最小骨架（PRD §9.1：名称、负责人、开始／截止时间）。
 func ValidateNewTask(n NewTask, roleOf func(int64) string) error {
 	name := strings.TrimSpace(n.Name)

@@ -89,10 +89,10 @@ func FieldChangeRoute(a Actor, userID int64, t TaskFacts, hasPending bool) (Fiel
 	if !CanWriteProject(a) {
 		return 0, ErrChangeForbidden
 	}
-	editorAllowed := userID == t.CreatorID || userID == t.OwnerID || CanEditProject(a)
 	switch t.Status {
 	case TaskDraft:
-		if !editorAllowed {
+		// 裁决 D2（#137）：创建人只在草稿期保留编辑权。
+		if userID != t.CreatorID && userID != t.OwnerID && !CanEditProject(a) {
 			return 0, ErrChangeForbidden
 		}
 		return FieldChangeDirect, nil
@@ -103,7 +103,8 @@ func FieldChangeRoute(a Actor, userID int64, t TaskFacts, hasPending bool) (Fiel
 		if t.KrOwnerID != nil && *t.KrOwnerID == userID {
 			return FieldChangeExempt, nil
 		}
-		if !editorAllowed {
+		// 入池后：负责人／可编辑项目者（KR 负责人已在上方免审路径）。
+		if userID != t.OwnerID && !CanEditProject(a) {
 			return 0, ErrChangeForbidden
 		}
 		return FieldChangePending, nil

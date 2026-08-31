@@ -42,10 +42,11 @@ func ValidateDeliverableName(name string) error {
 
 // CanManageDeliverables 判定能否配置任务输出：负责人／创建人／可编辑项目者，终态不可（§3.4 配置输出）。
 func CanManageDeliverables(a Actor, userID int64, t TaskFacts) bool {
-	if !CanWriteProject(a) || t.Status == TaskCompleted || t.Status == TaskCancelled {
+	if t.Status == TaskCompleted || t.Status == TaskCancelled {
 		return false
 	}
-	return userID == t.OwnerID || userID == t.CreatorID || CanEditProject(a)
+	// 裁决 D2（#137）：四角色口径，创建人仅草稿期。
+	return CanEditTaskConfig(a, userID, t)
 }
 
 // CanUploadCandidate 判定能否登记候选内容：任务负责人（管理员纠错），执行类状态；

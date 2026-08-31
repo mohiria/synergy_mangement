@@ -88,10 +88,11 @@ func TaskFileKindLabel(kind string) string {
 // 已完成任务仍可补录——这两类文件不进审批、不影响就绪与任何派生判定，
 // 补一份过程文件或外部材料不改变任何既成事实。
 func CanManageTaskFiles(a Actor, userID int64, t TaskFacts) bool {
-	if !CanWriteProject(a) || t.Status == TaskCancelled {
+	if t.Status == TaskCancelled {
 		return false
 	}
-	return userID == t.OwnerID || userID == t.CreatorID || CanEditProject(a)
+	// 裁决 D2（#137）：四角色口径，创建人仅草稿期。
+	return CanEditTaskConfig(a, userID, t)
 }
 
 // ValidateTaskFileNote 校验背景说明：选填，上限 500 字。

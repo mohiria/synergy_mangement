@@ -52,10 +52,11 @@ func ValidateNewEdge(e NewEdge) error {
 
 // CanConfigureInputs 判定能否配置任务输入（§3.4）：负责人／创建人／可编辑项目者，终态不可。
 func CanConfigureInputs(a Actor, userID int64, t TaskFacts) bool {
-	if !CanWriteProject(a) || t.Status == TaskCompleted || t.Status == TaskCancelled {
+	if t.Status == TaskCompleted || t.Status == TaskCancelled {
 		return false
 	}
-	return userID == t.OwnerID || userID == t.CreatorID || CanEditProject(a)
+	// 裁决 D2（#137）：四角色口径，创建人仅草稿期。
+	return CanEditTaskConfig(a, userID, t)
 }
 
 // EdgeReady 关系就绪状态（AC-48）：只有已生效的当前内容使关系就绪；候选不提前满足输入，
