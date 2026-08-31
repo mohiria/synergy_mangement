@@ -1189,6 +1189,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/import-tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 任务批量导入（AC-02b）：向已有 KR 下生成任务草稿（仅项目管理员／项目负责人；整批一个事务）
+         * @description 与 O／KR 导入器分开的第二个导入器（裁决 B1）：只导任务，所属 KR 必须已存在。
+         *     字段映射、人员匹配与结构预览在前端完成，此处接收结构化结果；规则复用创建任务的同一份校验。
+         */
+        post: operations["importTasks"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/tasks/batch-pool-submit": {
         parameters: {
             query?: never;
@@ -2128,6 +2151,24 @@ export interface components {
             resultLabel: string;
             /** @description 失败摘要；成功时为空 */
             failureSummary?: string;
+        };
+        /** @description 任务批量导入（AC-02b）：按所属 KR 分组提交，整批一个事务 */
+        ImportTasksRequest: {
+            items: components["schemas"]["ImportTaskGroup"][];
+            /** @description 源文件名，随导入记录留存（AC-68） */
+            sourceFileName?: string;
+        };
+        ImportTaskGroup: {
+            /**
+             * Format: int64
+             * @description 所属 KR；前端按 KR 编号定位后传 id，编号不存在的行不会到这里
+             */
+            keyResultId: number;
+            tasks: components["schemas"]["ImportTaskItem"][];
+        };
+        ImportTasksResult: {
+            /** @description 本次生成的任务草稿（按 KR 批量提交入池，AC-25） */
+            tasks: components["schemas"]["Task"][];
         };
         ImportResult: {
             objectives: components["schemas"]["Objective"][];
@@ -4722,6 +4763,36 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ImportResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    importTasks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportTasksRequest"];
+            };
+        };
+        responses: {
+            /** @description 导入成功 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportTasksResult"];
                 };
             };
             401: components["responses"]["Unauthorized"];

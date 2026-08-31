@@ -437,3 +437,132 @@ func (s *Server) ListImportRecords(w http.ResponseWriter, r *http.Request, proje
 	}
 	writeJSON(w, http.StatusOK, out)
 }
+
+// ImportTasks 任务批量导入（AC-02b、#107）：只导任务，所属 KR 必须已存在。
+// 与 O／KR 导入分开的第二个导入器（裁决 B1），入口只对项目负责人与项目管理员开放。
+func (s *Server) ImportTasks(w http.ResponseWriter, r *http.Request, projectId int64) {
+	var req ImportTasksRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Items) == 0 {
+		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_request", Message: "请求内容无法解析或为空"})
+		return
+	}
+	proj, ok := s.fetchProject(w, r, projectId)
+	if !ok {
+		return
+	}
+	uid := currentUser(r).ID
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	if !domain.CanImportTasks(actor) {
+		writeForbidden(w)
+		return
+	}
+	sourceFileName := ""
+	if req.SourceFileName != nil {
+		sourceFileName = strings.TrimSpace(*req.SourceFileName)
+	}
+	failImport := func(status int, code, msg string) {
+		s.recordImportFailure(r.Context(), projectId, uid, sourceFileName, msg)
+		writeJSON(w, status, Error{Code: code, Message: msg})
+	}
+	failImportInternal := func(err error) {
+		s.recordImportFailure(r.Context(), projectId, uid, sourceFileName, "服务端错误，导入未生效")
+		writeInternalError(w, r, err)
+	}
+	members, err := s.q.ListProjectMembers(r.Context(), projectId)
+	if err != nil {
+		failImportInternal(err)
+		return
+	}
+	roleByID := make(map[int64]string, len(members))
+	for _, m := range members {
+		roleByID[m.UserID] = m.Role
+	}
+	roleOf := func(id int64) string { return roleByID[id] }
+
+	groups := make([]domain.TaskImportGroup, 0, len(req.Items))
+	for _, g := range req.Items {
+		dg := domain.TaskImportGroup{KeyResultID: g.KeyResultId}
+		for _, tk := range g.Tasks {
+			it := domain.ImportedTask{
+				Task: domain.NewTask{
+					Name:    strings.TrimSpace(tk.Name),
+					OwnerID: tk.OwnerId,
+					Start:   tk.StartDate.Time,
+					End:     tk.EndDate.Time,
+				},
+			}
+			if tk.ExpectedDeliverable != nil {
+				it.ExpectedDeliverable = strings.TrimSpace(*tk.ExpectedDeliverable)
+			}
+			dg.Tasks = append(dg.Tasks, it)
+		}
+		groups = append(groups, dg)
+	}
+	if err := domain.ValidateTaskImport(groups, roleOf); err != nil {
+		failImport(http.StatusUnprocessableEntity, "invalid_task", err.Error())
+		return
+	}
+	// 所属 KR 必须在本项目内：跨项目的 KR id 不能借这条路径写进来。
+	for _, g := range groups {
+		if _, err := s.q.GetKeyResultInProject(r.Context(), store.GetKeyResultInProjectParams{ID: g.KeyResultID, ProjectID: projectId}); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				failImport(http.StatusUnprocessableEntity, "invalid_key_result", "所属 KR 不存在")
+				return
+			}
+			failImportInternal(err)
+			return
+		}
+	}
+
+	tx, err := s.db.Begin(r.Context())
+	if err != nil {
+		failImportInternal(err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	qtx := s.q.WithTx(tx)
+	counts := domain.ImportCounts{}
+	for _, g := range groups {
+		for _, it := range g.Tasks {
+			task, err := qtx.CreateTask(r.Context(), store.CreateTaskParams{
+				KeyResultID: g.KeyResultID,
+				Name:        it.Task.Name,
+				OwnerID:     it.Task.OwnerID,
+				StartDate:   pgtype.Date{Time: it.Task.Start, Valid: true},
+				EndDate:     pgtype.Date{Time: it.Task.End, Valid: true},
+				Status:      domain.TaskDraft,
+				CreatedBy:   uid,
+			})
+			if err != nil {
+				failImportInternal(err)
+				return
+			}
+			counts.Tasks++
+			if it.ExpectedDeliverable != "" {
+				if _, err := qtx.CreateDeliverable(r.Context(), store.CreateDeliverableParams{TaskID: task.ID, Name: it.ExpectedDeliverable, CreatedBy: uid}); err != nil {
+					failImportInternal(err)
+					return
+				}
+			}
+		}
+	}
+	// AC-68：与导入同事务，回滚则记录不留。
+	if _, err := qtx.CreateImportRecord(r.Context(), store.CreateImportRecordParams{
+		ProjectID: projectId, OperatorID: uid, SourceFileName: sourceFileName,
+		ObjectiveCount: 0, KeyResultCount: 0,
+		TaskCount: int32(counts.Tasks), Result: domain.DeriveImportOutcome(counts, ""),
+	}); err != nil {
+		failImportInternal(err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		failImportInternal(err)
+		return
+	}
+	tasks, err := s.taskList(r.Context(), projectId, uid, actor)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, ImportTasksResult{Tasks: tasks})
+}

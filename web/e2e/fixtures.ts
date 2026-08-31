@@ -13,7 +13,7 @@ export const DEMO = {
   activeTask: { code: "T1.2.2", name: "完成资金模块驱动切换与连接池调优" },
 } as const;
 
-export async function login(page: Page, username = DEMO.admin.username) {
+export async function login(page: Page, username: string = DEMO.admin.username) {
   await page.goto("/");
   await page.getByPlaceholder("请输入用户名").fill(username);
   await page.getByPlaceholder("请输入口令").fill(DEMO.password);

@@ -21,6 +21,7 @@ import Icon from "./icons";
 import ProjectShell from "./ProjectShell";
 import TreeTransfer from "./TreeTransfer";
 import type { TreeTransferItem } from "./TreeTransfer";
+import TaskImportModal from "./TaskImportModal";
 import FileUploadField, { fileTypeLabel, formatFileSize } from "./FileUploadField";
 import DateRangeField from "./DateRangeField";
 
@@ -255,6 +256,7 @@ export default function ProjectTasksPage({
 
   const [rejectTask, setRejectTask] = useState<Task | null>(null);
   const [rejectOpinion, setRejectOpinion] = useState("");
+  const [importOpen, setImportOpen] = useState(false);
   const [drawerTaskId, setDrawerTaskId] = useState<number | null>(null);
   const [drawerTab, setDrawerTab] = useState("overview");
   // 从输入源或协作关系点进来源任务时压栈；关闭时逐级返回上一个任务详情并回到当时的 Tab（#101）。
@@ -723,6 +725,11 @@ export default function ProjectTasksPage({
               <p>按 O / KR 组织三级任务；任务创建后先提交入池审批，通过后进入执行池。</p>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
+              {/* 任务批量导入（AC-02b、#107）：入口只对项目负责人与项目管理员开放，
+                  显隐取 project.canEdit 这个派生字段，规则本身在域层 CanImportTasks。 */}
+              {project?.canEdit && (
+                <Button onClick={() => setImportOpen(true)}>批量导入任务</Button>
+              )}
               {canInvite && (
                 <Button onClick={() => setInviteModalOpen(true)}>邀请负责人完善</Button>
               )}
@@ -859,6 +866,17 @@ export default function ProjectTasksPage({
         onSaved={() => {
           setModalOpen(false);
           setRespondingInvite(null);
+          load();
+        }}
+      />
+      <TaskImportModal
+        open={importOpen}
+        projectId={projectId}
+        members={members}
+        krList={krList}
+        onClose={() => setImportOpen(false)}
+        onImported={() => {
+          setImportOpen(false);
           load();
         }}
       />

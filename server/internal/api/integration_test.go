@@ -4043,6 +4043,66 @@ func TestImportAndBatchPool(t *testing.T) {
 		t.Fatalf("操作人与时间未留存: %+v", success)
 	}
 
+	// AC-02b（#107）：任务导入器只导任务，所属 KR 必须已存在；入口只对负责人／管理员开放。
+	importTasksURL := fmt.Sprintf("%s/projects/%d/import-tasks", base, created.Id)
+	kr1ID := result.Objectives[0].KeyResults[0].Id
+	// 项目成员 403
+	resp = doJSON(t, carol, http.MethodPost, importTasksURL, api.ImportTasksRequest{
+		Items: []api.ImportTaskGroup{{KeyResultId: kr1ID, Tasks: []api.ImportTaskItem{
+			{Name: "越权任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
+		}}},
+	})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	// 所属 KR 不在本项目内 422
+	resp = doJSON(t, alice, http.MethodPost, importTasksURL, api.ImportTasksRequest{
+		Items: []api.ImportTaskGroup{{KeyResultId: 999999, Tasks: []api.ImportTaskItem{
+			{Name: "野 KR 任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
+		}}},
+	})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	if e := decodeBody[api.Error](t, resp); e.Code != "invalid_key_result" {
+		t.Fatalf("code = %q, want invalid_key_result", e.Code)
+	}
+	// 管理员导入两条任务草稿，带预期交付物
+	resp = doJSON(t, alice, http.MethodPost, importTasksURL, api.ImportTasksRequest{
+		SourceFileName: sp("任务批量导入.xlsx"),
+		Items: []api.ImportTaskGroup{{KeyResultId: kr1ID, Tasks: []api.ImportTaskItem{
+			{Name: "导入任务四", OwnerId: carolUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("方案四")},
+			{Name: "导入任务五", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
+		}}},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	taskResult := decodeBody[api.ImportTasksResult](t, resp)
+	if len(taskResult.Tasks) != 5 {
+		t.Fatalf("任务导入后项目内应有 5 项任务: %d", len(taskResult.Tasks))
+	}
+	imported := map[string]api.Task{}
+	for _, task := range taskResult.Tasks {
+		imported[task.Name] = task
+	}
+	four, ok := imported["导入任务四"]
+	if !ok || four.Status != api.TaskStatusDraft || four.KeyResultId != kr1ID {
+		t.Fatalf("导入任务四异常: %+v", four)
+	}
+	if _, ok := imported["导入任务五"]; !ok {
+		t.Fatalf("导入任务五未落库")
+	}
+	// AC-68：任务导入同样留记录，计数只算任务
+	resp = doJSON(t, alice, http.MethodGet, recordsURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	afterTaskImport := decodeBody[[]api.ImportRecord](t, resp)
+	if len(afterTaskImport) != 4 {
+		t.Fatalf("任务导入的成功与失败各应再留一条: %d", len(afterTaskImport))
+	}
+	latest := afterTaskImport[0]
+	if latest.Result != api.Success || latest.TaskCount != 2 || latest.ObjectiveCount != 0 || latest.KeyResultCount != 0 {
+		t.Fatalf("任务导入记录异常: %+v", latest)
+	}
+	if latest.SourceFileName == nil || *latest.SourceFileName != "任务批量导入.xlsx" {
+		t.Fatalf("任务导入源文件名未留存: %+v", latest.SourceFileName)
+	}
+
 	// AC-25：按 KR1 批量提交（任务一、二）
 	kr1Tasks := []int64{}
 	for _, task := range result.Tasks {
