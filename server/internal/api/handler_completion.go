@@ -16,7 +16,7 @@ import (
 
 // 完成申请与 KR 终审（AC-13、AC-15、AC-38～40）。业务规则在 domain，handler 仅编排。
 
-// SubmitCompletion 提交完成申请：纳入任务全部候选内容，无中间审核直接进入待 KR 终审（AC-13）。
+// SubmitCompletion 提交完成申请：纳入任务全部候选内容，无成果审核直接进入待 KR 终审（AC-13）。
 func (s *Server) SubmitCompletion(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64) {
 	var req SubmitCompletionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -75,7 +75,7 @@ func (s *Server) SubmitCompletion(w http.ResponseWriter, r *http.Request, projec
 	}
 	// AC-66：成果更新走同一道审批链，但任务状态保持已完成，进程转为「在审」。
 	resultUpdate := locked.ResultUpdate == domain.ResultUpdateOpen
-	// AC-13/14：无中间审核人直接待 KR 终审；配置了则进入中间或签（配置快照进申请）。
+	// AC-13/14：无成果审核人直接待 KR 终审；配置了则进入中间或签（配置快照进申请）。
 	reviewState, taskStatus := domain.SubmitCompletionOutcome(len(reviewers), resultUpdate)
 	review, err := qtx.CreateCompletionReview(r.Context(), store.CreateCompletionReviewParams{
 		TaskID: taskId, SubmittedBy: uid, Note: note, State: reviewState,
@@ -370,7 +370,7 @@ func (s *Server) decideIntermediate(w http.ResponseWriter, r *http.Request, tx p
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 
-// SetTaskReviewers 调整任务级中间审核人配置（非关键字段，直接调整；§5.2.B）。
+// SetTaskReviewers 调整任务级成果审核人配置（非关键字段，直接调整；§5.2.B）。
 func (s *Server) SetTaskReviewers(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64) {
 	var req SetReviewersRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -390,7 +390,7 @@ func (s *Server) SetTaskReviewers(w http.ResponseWriter, r *http.Request, projec
 	if !domain.CanManageReviewers(actor, uid, facts) {
 		switch facts.Status {
 		case domain.TaskPendingIntermediateReview, domain.TaskPendingFinalReview, domain.TaskCompleted, domain.TaskCancelled:
-			writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: "审核期间或终态不能调整中间审核人"})
+			writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: "审核期间或终态不能调整成果审核人"})
 		default:
 			writeForbidden(w)
 		}

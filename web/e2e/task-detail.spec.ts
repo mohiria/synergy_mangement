@@ -53,7 +53,13 @@ test.describe("任务详情抽屉", () => {
       els.map((el) => el.getAttribute("data-focus")),
     );
     // 协作关系 Tab 的区块也带 data-focus，只取概况面板里的那几块。
-    expect(order.filter((k) => OVERVIEW_BLOCKS.includes(k!))).toEqual(OVERVIEW_BLOCKS);
+    // #135 后接收方配置并入基础信息，「交付物接收方」区块只在有待接收项／接收记录时出现：
+    // 断言改为「出现的区块按固定顺序排列」，且基础三块必在。
+    const present = order.filter((k) => OVERVIEW_BLOCKS.includes(k!));
+    expect(present).toEqual(OVERVIEW_BLOCKS.filter((k) => present.includes(k)));
+    for (const must of ["basic", "inputs", "deliverables"]) {
+      expect(present).toContain(must);
+    }
   });
 
   // F-06：文案漂移过一次（实现写成「尚无当前内容」），冒烟只断言区块顺序没拦住，这里补上。

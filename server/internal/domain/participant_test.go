@@ -47,7 +47,7 @@ func TestNormalizeParticipants(t *testing.T) {
 	}
 }
 
-// 配置权限与交付物项、中间审核人同口径：负责人／创建人／可编辑项目者，终态不可。
+// 配置权限与交付物项、成果审核人同口径：负责人／创建人／可编辑项目者，终态不可。
 func TestCanManageParticipants(t *testing.T) {
 	facts := TaskFacts{Status: TaskInProgress, CreatorID: 3, OwnerID: 5}
 	cases := []struct {

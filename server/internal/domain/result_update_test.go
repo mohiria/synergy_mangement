@@ -91,10 +91,10 @@ func TestSubmitCompletionUnderResultUpdate(t *testing.T) {
 		wantReview   string
 		wantStatus   string
 	}{
-		{"首次定稿无中间审核", 0, false, CompletionPendingFinal, TaskPendingFinalReview},
-		{"首次定稿有中间审核", 2, false, CompletionIntermediate, TaskPendingIntermediateReview},
-		{"成果更新无中间审核仍为已完成", 0, true, CompletionPendingFinal, TaskCompleted},
-		{"成果更新有中间审核仍为已完成", 2, true, CompletionIntermediate, TaskCompleted},
+		{"首次定稿无成果审核", 0, false, CompletionPendingFinal, TaskPendingFinalReview},
+		{"首次定稿有成果审核", 2, false, CompletionIntermediate, TaskPendingIntermediateReview},
+		{"成果更新无成果审核仍为已完成", 0, true, CompletionPendingFinal, TaskCompleted},
+		{"成果更新有成果审核仍为已完成", 2, true, CompletionIntermediate, TaskCompleted},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

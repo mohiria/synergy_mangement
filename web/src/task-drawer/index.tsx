@@ -7,9 +7,6 @@ import FileUploadField from "../FileUploadField";
 import TaskDrawer from "./TaskDrawer";
 import FieldChangeModal from "./FieldChangeModal";
 import ConfigureInputModal from "./ConfigureInputModal";
-import ReviewersModal from "./ReviewersModal";
-import ParticipantsModal from "./ParticipantsModal";
-import ReceiversModal from "./ReceiversModal";
 import { CancelTaskModal, PoolRejectModal } from "./modals";
 import { cancelTask as apiCancelTask, decidePoolReview, saveProgress as apiSaveProgress, startTask as apiStartTask, submitPoolReview } from "./actions";
 import { structureMessage, type KrOption } from "./shared";
@@ -94,9 +91,6 @@ export default function TaskDrawerHost({
   const [fcReject, setFcReject] = useState<{ task: Task; changeId: number } | null>(null);
   const [fcRejectOpinion, setFcRejectOpinion] = useState("");
   const [inputTask, setInputTask] = useState<Task | null>(null);
-  const [reviewerTask, setReviewerTask] = useState<Task | null>(null);
-  const [receiverTask, setReceiverTask] = useState<Task | null>(null);
-  const [participantTask, setParticipantTask] = useState<Task | null>(null);
   const [provideReq, setProvideReq] = useState<number | null>(null);
   const [provideText, setProvideText] = useState("");
   const [provideFile, setProvideFile] = useState<File | null>(null);
@@ -360,9 +354,43 @@ export default function TaskDrawerHost({
             setCrRejectOpinion("");
           },
           openConfigureInput: (t) => setInputTask(t),
-          openReviewers: (t) => setReviewerTask(t),
-          openReceivers: (t) => setReceiverTask(t),
-          openParticipants: (t) => setParticipantTask(t),
+          // #135：参与人／接收方／成果审核人改就地多选，宿主直接落库后刷新。
+          saveReviewers: async (t, userIds) => {
+            const res = await client.PUT("/projects/{projectId}/tasks/{taskId}/reviewers", {
+              params: { path: { projectId, taskId: t.id } },
+              body: { userIds },
+            });
+            if (res.data) {
+              message.success("成果审核人已调整");
+              refresh();
+            } else {
+              message.error(res.error?.message ?? "保存失败");
+            }
+          },
+          saveReceivers: async (t, scope, userIds) => {
+            const res = await client.PUT("/projects/{projectId}/tasks/{taskId}/receivers", {
+              params: { path: { projectId, taskId: t.id } },
+              body: { scope, userIds },
+            });
+            if (res.data) {
+              message.success(structureMessage(res.data, "接收方配置已保存"));
+              refresh();
+            } else {
+              message.error(res.error?.message ?? "保存失败");
+            }
+          },
+          saveParticipants: async (t, userIds) => {
+            const res = await client.PUT("/projects/{projectId}/tasks/{taskId}/participants", {
+              params: { path: { projectId, taskId: t.id } },
+              body: { userIds },
+            });
+            if (res.data) {
+              message.success("参与人已更新");
+              refresh();
+            } else {
+              message.error(res.error?.message ?? "保存失败");
+            }
+          },
           confirmReceipt,
           startResultUpdate,
           acceptInput,
@@ -397,36 +425,6 @@ export default function TaskDrawerHost({
         onClose={() => setInputTask(null)}
         onSaved={() => {
           setInputTask(null);
-          refresh();
-        }}
-      />
-      <ReviewersModal
-        projectId={projectId}
-        task={reviewerTask}
-        members={members}
-        onClose={() => setReviewerTask(null)}
-        onSaved={() => {
-          setReviewerTask(null);
-          refresh();
-        }}
-      />
-      <ReceiversModal
-        projectId={projectId}
-        task={receiverTask}
-        members={members}
-        onClose={() => setReceiverTask(null)}
-        onSaved={() => {
-          setReceiverTask(null);
-          refresh();
-        }}
-      />
-      <ParticipantsModal
-        projectId={projectId}
-        task={participantTask}
-        members={members}
-        onClose={() => setParticipantTask(null)}
-        onSaved={() => {
-          setParticipantTask(null);
           refresh();
         }}
       />
@@ -472,7 +470,7 @@ export default function TaskDrawerHost({
         }}
       >
         <p className="muted" style={{ marginTop: 0 }}>
-          本次全部候选交付物整体提交；已配置中间审核人时进入多人或签，否则直接进入待 KR 终审。
+          本次全部候选交付物整体提交；已配置成果审核人时进入多人或签，否则直接进入待 KR 终审。
         </p>
         <Input.TextArea
           rows={3}

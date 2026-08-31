@@ -2411,7 +2411,7 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 	}
 }
 
-// 中间审核或签与退回（#11，AC-14/24/37；MW-07／MW-18）：配置或签组→提交进入中间审核→任一人通过进待终审
+// 成果审核或签与退回（#11，AC-14/24/37；MW-07／MW-18）：配置或签组→提交进入成果审核→任一人通过进待终审
 // 且其余待办关闭→终审闭环；退回路径删除候选、意见保留、任务回进行中可重新提交完整流程。
 func TestIntermediateReviewOrSign(t *testing.T) {
 	q, pool := setupDB(t)
@@ -2482,7 +2482,7 @@ func TestIntermediateReviewOrSign(t *testing.T) {
 		t.Fatalf("或签组配置异常: %+v", got)
 	}
 
-	// 开始执行、上传候选、提交 → 进入中间审核
+	// 开始执行、上传候选、提交 → 进入成果审核
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, taskID),
 		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
 	wantStatus(t, resp, http.StatusOK)
@@ -2498,7 +2498,7 @@ func TestIntermediateReviewOrSign(t *testing.T) {
 	submitted := decodeBody[api.Task](t, resp)
 	// 或签组为 dave（赵六）、erin（钱七）：多人取首位加人数。
 	if submitted.Status != api.TaskStatusPendingIntermediateReview || submitted.CurrentStage != "待赵六等2人审批" {
-		t.Fatalf("提交后应进入中间审核: %+v", submitted)
+		t.Fatalf("提交后应进入成果审核: %+v", submitted)
 	}
 
 	// 审核中不可再调整或签组 409

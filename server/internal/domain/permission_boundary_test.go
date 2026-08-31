@@ -7,7 +7,7 @@ import (
 
 // S2／§3.4：职责只在「当前仍是非只读项目成员」时才生效。
 // 被移出项目（Role 为空）或被降为只读的人，即便还挂着任务负责人、KR 负责人、
-// 中间审核人的身份，也不得再编辑或审批；确认接收是访客唯一的写操作（AC-62）。
+// 成果审核人的身份，也不得再编辑或审批；确认接收是访客唯一的写操作（AC-62）。
 func TestWriteActionsRequireNonViewerMembership(t *testing.T) {
 	me := int64(5)
 	facts := TaskFacts{Status: TaskInProgress, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
@@ -57,7 +57,7 @@ func TestWriteActionsRequireNonViewerMembership(t *testing.T) {
 				t.Fatal("不应可提交完成申请")
 			}
 			if CanManageReviewers(actor, me, facts) {
-				t.Fatal("不应可调整中间审核人")
+				t.Fatal("不应可调整成果审核人")
 			}
 			if CanAbandonFieldChange(actor, me, me, FieldChangeRejectedState, false) {
 				t.Fatal("不应可放弃变更单")
@@ -79,7 +79,7 @@ func TestWriteActionsRequireNonViewerMembership(t *testing.T) {
 			}
 			if _, _, err := DecideIntermediateRule(actor, intermediate, me,
 				func(int64) bool { return true }, true, ""); !errors.Is(err, ErrNotReviewer) {
-				t.Fatalf("不应可中间审核: %v", err)
+				t.Fatalf("不应可成果审核: %v", err)
 			}
 			// AC-62：确认接收是访客唯一保留的写操作，不受本前置约束。
 			if err := CanConfirmReceipt(actor, me, ReceiptFact{ID: 1, TaskID: 1, UserID: me}); err != nil {

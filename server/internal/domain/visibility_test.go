@@ -95,7 +95,7 @@ func TestImplicitViewerReadsAllButWritesNothing(t *testing.T) {
 		{"配置交付物项", CanManageDeliverables(implicit, me, facts)},
 		{"登记候选内容", CanUploadCandidate(implicit, me, facts)},
 		{"提交完成申请", CanSubmitCompletion(implicit, me, facts, 1)},
-		{"调整中间审核人", CanManageReviewers(implicit, me, facts)},
+		{"调整成果审核人", CanManageReviewers(implicit, me, facts)},
 		{"编辑项目", CanEditProject(implicit)},
 		{"管理成员", CanManageMembers(implicit)},
 		{"创建成果包", CanCreatePackage(implicit)},
@@ -126,7 +126,7 @@ func TestImplicitViewerReadsAllButWritesNothing(t *testing.T) {
 	}
 	if _, _, err := DecideIntermediateRule(implicit, intermediate, me,
 		func(int64) bool { return true }, true, ""); !errors.Is(err, ErrNotReviewer) {
-		t.Fatalf("隐式访客不应可中间审核: %v", err)
+		t.Fatalf("隐式访客不应可成果审核: %v", err)
 	}
 	// 确认接收是显式访客唯一的写操作（AC-62），隐式访客连这一条也没有——它不落成员表，不能被指定为接收方。
 	receipt := ReceiptFact{ID: 1, TaskID: 1, UserID: me}

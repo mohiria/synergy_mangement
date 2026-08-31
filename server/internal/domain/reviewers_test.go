@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// §5.4：中间审核人配置——非只读项目成员；配置调整在审核中与终态不可。
+// §5.4：成果审核人配置——非只读项目成员；配置调整在审核中与终态不可。
 func TestValidateReviewers(t *testing.T) {
 	roles := map[int64]string{3: RoleMember, 4: RoleAdmin, 5: RoleViewer}
 	roleOf := func(id int64) string { return roles[id] }
@@ -13,7 +13,7 @@ func TestValidateReviewers(t *testing.T) {
 		t.Fatalf("合法配置被拒: %v", err)
 	}
 	if err := ValidateReviewers(nil, roleOf); err != nil {
-		t.Fatalf("空配置（不设中间审核）应合法: %v", err)
+		t.Fatalf("空配置（不设成果审核）应合法: %v", err)
 	}
 	if err := ValidateReviewers([]int64{5}, roleOf); !errors.Is(err, ErrReviewerNotEligible) {
 		t.Fatalf("访客应被拒: %v", err)
@@ -26,7 +26,7 @@ func TestValidateReviewers(t *testing.T) {
 func TestCanManageReviewers(t *testing.T) {
 	facts := TaskFacts{Status: TaskInProgress, CreatorID: 3, OwnerID: 5}
 	if !CanManageReviewers(Actor{Role: RoleMember}, 5, facts) {
-		t.Fatal("负责人应可配置中间审核人")
+		t.Fatal("负责人应可配置成果审核人")
 	}
 	if !CanManageReviewers(Actor{Role: RoleAdmin}, 9, facts) {
 		t.Fatal("管理员应可配置")
@@ -42,7 +42,7 @@ func TestCanManageReviewers(t *testing.T) {
 	}
 }
 
-// AC-13／AC-14 路由：无中间审核人直接待 KR 终审，有则进入中间或签。
+// AC-13／AC-14 路由：无成果审核人直接待 KR 终审，有则进入中间或签。
 func TestSubmitCompletionOutcome(t *testing.T) {
 	state, status := SubmitCompletionOutcome(0, false)
 	if state != CompletionPendingFinal || status != TaskPendingFinalReview {
@@ -75,7 +75,7 @@ func TestDecideIntermediateRule(t *testing.T) {
 		{"退回意见必填", facts, 11, false, " ", "", "", ErrRejectOpinionRequired},
 		{"KR 负责人非组员不可处理", facts, 7, true, "", "", "", ErrNotReviewer},
 		{"任务负责人非组员不可处理", facts, 5, true, "", "", "", ErrNotReviewer},
-		{"非中间审核状态冲突", TaskFacts{Status: TaskPendingFinalReview, KrOwnerID: i64(7)}, 11, true, "", "", "", ErrCompletionNotIntermediate},
+		{"非成果审核状态冲突", TaskFacts{Status: TaskPendingFinalReview, KrOwnerID: i64(7)}, 11, true, "", "", "", ErrCompletionNotIntermediate},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

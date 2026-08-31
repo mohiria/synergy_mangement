@@ -148,7 +148,7 @@ func ValidateObjectiveUpdate(u ObjectiveUpdate) error {
 type MemberDuties struct {
 	KeyResults     []string // 仍在担任负责人的 KR 描述
 	Tasks          []string // 仍在担任负责人的任务名
-	Reviewers      []string // 仍在中间审核组里的任务名
+	Reviewers      []string // 仍在成果审核组里的任务名
 	Receivers      []string // 仍是接收方的任务名
 	InputProviders []string // 仍是输入对接人的输入名
 }
@@ -177,7 +177,7 @@ func MemberDutiesSummary(d MemberDuties) string {
 	}
 	add("KR 负责人", d.KeyResults)
 	add("任务负责人", d.Tasks)
-	add("中间审核人", d.Reviewers)
+	add("成果审核人", d.Reviewers)
 	add("接收方", d.Receivers)
 	add("输入对接人", d.InputProviders)
 	return strings.Join(parts, "；")

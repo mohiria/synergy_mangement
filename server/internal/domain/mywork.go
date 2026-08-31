@@ -242,10 +242,10 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 				if rv == me {
 					days, overdue := waitingDays(cr.SubmittedAt)
 					g.Approvals = append(g.Approvals, WorkItem{
-						Kind: "intermediate_review", Title: "[中间审核] " + cr.TaskName,
+						Kind: "intermediate_review", Title: "[成果审核] " + cr.TaskName,
 						TaskID: tid(cr.TaskID), TaskName: cr.TaskName, RefID: tid(cr.ID),
 						Due: cr.TaskEnd, WaitingDays: days, Overdue: overdue,
-						Stage: "中间或签审核", DrawerTab: "audit",
+						Stage: "成果审核（或签）", DrawerTab: "audit",
 					})
 					break
 				}
@@ -589,7 +589,7 @@ func singleApprover(id *int64) []int64 {
 
 // workResponsibilityOrder 职责显示顺序：从项目级到事项级，横排一行读得下来。
 var workResponsibilityOrder = []string{
-	"项目负责人", "KR 负责人", "任务负责人", "中间审核人", "接收方", "输入对接人", "被邀请人",
+	"项目负责人", "KR 负责人", "任务负责人", "成果审核人", "接收方", "输入对接人", "被邀请人",
 }
 
 // WorkResponsibilities 派生当前用户在本项目承担的职责标签（读时派生，不落库）。
@@ -598,7 +598,7 @@ func WorkResponsibilities(d MemberDuties, isProjectOwner, hasPendingInvite bool)
 		"项目负责人":  isProjectOwner,
 		"KR 负责人": len(d.KeyResults) > 0,
 		"任务负责人":  len(d.Tasks) > 0,
-		"中间审核人":  len(d.Reviewers) > 0,
+		"成果审核人":  len(d.Reviewers) > 0,
 		"接收方":    len(d.Receivers) > 0,
 		"输入对接人":  len(d.InputProviders) > 0,
 		"被邀请人":   hasPendingInvite,

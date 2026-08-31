@@ -36,7 +36,7 @@ func TestCancelRoute(t *testing.T) {
 		{"已完成不可取消", Actor{Role: RoleMember}, 5, facts(TaskCompleted), false, 0, ErrCannotCancel},
 		{"已关闭不可再取消", Actor{Role: RoleMember}, 5, facts(TaskCancelled), false, 0, ErrCannotCancel},
 		{"入池审批中互斥", Actor{Role: RoleMember}, 5, facts(TaskPendingPoolReview), false, 0, ErrCancelPendingExists},
-		{"中间审核中互斥", Actor{Role: RoleMember}, 5, facts(TaskPendingIntermediateReview), false, 0, ErrCancelPendingExists},
+		{"成果审核中互斥", Actor{Role: RoleMember}, 5, facts(TaskPendingIntermediateReview), false, 0, ErrCancelPendingExists},
 		{"终审中互斥", Actor{Role: RoleMember}, 5, facts(TaskPendingFinalReview), false, 0, ErrCancelPendingExists},
 		{"有待审批变更单互斥", Actor{Role: RoleMember}, 5, facts(TaskInProgress), true, 0, ErrCancelPendingExists},
 		{"未决审批优先于免审", Actor{Role: RoleMember}, 7, facts(TaskInProgress), true, 0, ErrCancelPendingExists},

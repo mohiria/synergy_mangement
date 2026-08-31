@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Drawer, Input, Mentions, Modal, Slider, Tabs, message } from "antd";
+import { Button, Drawer, Input, Mentions, Modal, Select, Slider, Tabs, message } from "antd";
 import { client } from "../api/client";
 import FileUploadField, { fileTypeLabel, formatFileSize } from "../FileUploadField";
+import PeopleSelect from "./PeopleSelect";
 import Icon from "../icons";
 import type { components } from "../api/schema";
 import { ACTIVITY_PREVIEW, STATUS_CLASS, fmtTime, pendingStructureChange } from "./shared";
@@ -57,9 +58,9 @@ export default function TaskDrawer({
     approveCompletion: (t: Task, reviewId: number, intermediate?: boolean) => void;
     openCrReject: (t: Task, reviewId: number) => void;
     openConfigureInput: (t: Task) => void;
-    openReviewers: (t: Task) => void;
-    openReceivers: (t: Task) => void;
-    openParticipants: (t: Task) => void;
+    saveReviewers: (t: Task, userIds: number[]) => void;
+    saveReceivers: (t: Task, scope: "none" | "members" | "all", userIds: number[]) => void;
+    saveParticipants: (t: Task, userIds: number[]) => void;
     confirmReceipt: (t: Task) => void;
     startResultUpdate: (t: Task) => void;
     acceptInput: (requestId: number) => void;
@@ -74,6 +75,37 @@ export default function TaskDrawer({
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const drawerRef = useRef<HTMLDivElement>(null);
   const [progressDraft, setProgressDraft] = useState<number | null>(null);
+  // #135：接收方就地多选——「所有项目成员」用固定首项（哨兵 -1）表达，
+  // 选中即清空并禁用逐人选择；下拉收起时一次保存。
+  const ALL_RECEIVERS = -1;
+  const [receiverDraft, setReceiverDraft] = useState<number[]>([]);
+  useEffect(() => {
+    setReceiverDraft(
+      task?.receiverScope === "all"
+        ? [ALL_RECEIVERS]
+        : (task?.receivers ?? []).map((r) => r.userId),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task?.id, task?.receiverScope, (task?.receivers ?? []).map((r) => r.userId).join(",")]);
+  const commitReceivers = () => {
+    if (!task) return;
+    const current =
+      task.receiverScope === "all"
+        ? [ALL_RECEIVERS]
+        : (task.receivers ?? []).map((r) => r.userId);
+    if ([...receiverDraft].sort().join(",") === [...current].sort().join(",")) return;
+    if (receiverDraft.includes(ALL_RECEIVERS)) actions.saveReceivers(task, "all", []);
+    else if (receiverDraft.length === 0) actions.saveReceivers(task, "none", []);
+    else actions.saveReceivers(task, "members", receiverDraft);
+  };
+  const memberOption = (m: ProjectMember) => (
+    <span className="owner-cell">
+      <span className="avatar">{m.displayName.slice(0, 1)}</span>
+      <span className="cell-text">
+        {m.displayName}（{m.username}）
+      </span>
+    </span>
+  );
   const [addingDeliverable, setAddingDeliverable] = useState(false);
   const [newDeliverableFile, setNewDeliverableFile] = useState<File | null>(null);
   const [newDeliverableBusy, setNewDeliverableBusy] = useState(false);
@@ -425,19 +457,80 @@ export default function TaskDrawer({
           </div>
           {/* 参与人（PRD §9.2 按需字段）：空名单按 AC-50「空字段不显示」隐藏，
               但本人可配置时保留该行，否则首次添加没有入口。 */}
+          {/* #135：参与人／接收方／成果审核人并列基础信息，就地多选保存（无弹窗）。 */}
           {(participants.length > 0 || task.canManageParticipants) && (
             <div className="task-info-row">
               <span>参与人</span>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              {task.canManageParticipants ? (
+                <PeopleSelect
+                  value={participants.map((p) => p.userId)}
+                  options={members.filter((m) => m.userId !== task.ownerId)}
+                  placeholder="未设置"
+                  onSave={(ids) => actions.saveParticipants(task, ids)}
+                />
+              ) : (
                 <strong className={participants.length ? "" : "muted"}>
-                  {participants.length ? participants.map((p) => p.displayName).join("、") : "未设置"}
+                  {participants.map((p) => p.displayName).join("、") || "未设置"}
                 </strong>
-                {task.canManageParticipants && (
-                  <Button size="small" onClick={() => actions.openParticipants(task)}>
-                    调整
-                  </Button>
-                )}
-              </div>
+              )}
+            </div>
+          )}
+          {(task.receiverScope !== "none" || task.canManageReceivers) && (
+            <div className="task-info-row">
+              <span>接收方</span>
+              {task.canManageReceivers ? (
+                <Select
+                  mode="multiple"
+                  size="small"
+                  style={{ minWidth: 220, maxWidth: 420, flex: 1 }}
+                  placeholder="未配置：选择成员或「所有项目成员」"
+                  value={receiverDraft}
+                  onChange={(ids: number[]) => {
+                    if (ids.includes(ALL_RECEIVERS) && !receiverDraft.includes(ALL_RECEIVERS)) {
+                      setReceiverDraft([ALL_RECEIVERS]);
+                    } else {
+                      setReceiverDraft(ids.filter((v) => v !== ALL_RECEIVERS));
+                    }
+                  }}
+                  onDropdownVisibleChange={(o) => {
+                    if (!o) commitReceivers();
+                  }}
+                  optionFilterProp="label"
+                  options={[
+                    { value: ALL_RECEIVERS, label: "所有项目成员" },
+                    ...members.map((m) => ({
+                      value: m.userId,
+                      label: `${m.displayName}（${m.username}）`,
+                      disabled: receiverDraft.includes(ALL_RECEIVERS),
+                    })),
+                  ]}
+                  optionRender={(opt) => {
+                    const m = members.find((c) => c.userId === opt.value);
+                    return m ? memberOption(m) : opt.label;
+                  }}
+                />
+              ) : (
+                <strong className={task.receiverScope === "none" ? "muted" : ""}>
+                  {receiverLabel}
+                </strong>
+              )}
+            </div>
+          )}
+          {(reviewers.length > 0 || task.canManageReviewers) && (
+            <div className="task-info-row">
+              <span>成果审核人</span>
+              {task.canManageReviewers ? (
+                <PeopleSelect
+                  value={reviewers.map((r) => r.userId)}
+                  options={members.filter((m) => m.role !== "viewer")}
+                  placeholder="未配置（或签：任一人通过即进入待 KR 终审）"
+                  onSave={(ids) => actions.saveReviewers(task, ids)}
+                />
+              ) : (
+                <strong className={reviewers.length ? "" : "muted"}>
+                  {reviewers.map((r) => r.displayName).join("、") || "未配置"}
+                </strong>
+              )}
             </div>
           )}
           <div className="task-info-row">
@@ -751,21 +844,11 @@ export default function TaskDrawer({
       )}
       {/* 交付物接收方（词汇表「接收方」「接收记录」；模块 PRD §8.6、MW-09）：
           未配置接收方且本人无配置权限时整块不显示；确认接收只对接收方本人显示，接收方无审核权、不提供退回。 */}
-      {(task.receiverScope !== "none" || task.canManageReceivers) && (
+      {/* #135：接收方配置移入基础信息栏，本区块只保留待接收项／接收记录与确认动作。 */}
+      {(receipts.length > 0 || task.canConfirmReceipt) && (
         <section className="drawer-section" data-focus="receipts">
           <h3>交付物接收方</h3>
           <div className="task-info-list">
-            <div className="task-info-row">
-              <span>接收方</span>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <strong className={task.receiverScope === "none" ? "muted" : ""}>{receiverLabel}</strong>
-                {task.canManageReceivers && (
-                  <Button size="small" onClick={() => actions.openReceivers(task)}>
-                    调整
-                  </Button>
-                )}
-              </div>
-            </div>
             {receipts.map((rc) => (
               <div key={rc.id} className="task-info-row">
                 <span>{rc.displayName}</span>
@@ -972,22 +1055,7 @@ export default function TaskDrawer({
 
   const audit = (
     <div style={{ paddingTop: 4 }}>
-      {/* 中间审核人配置（§5.4）：审核类动作归「审核」Tab，任务概况只读。 */}
-      <div className="task-info-list" style={{ marginBottom: 12 }}>
-        <div className="task-info-row">
-          <span>中间审核（或签）</span>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <strong className={reviewers.length ? "" : "muted"}>
-              {reviewers.length ? reviewers.map((r) => r.displayName).join("、") : "未配置"}
-            </strong>
-            {task.canManageReviewers && (
-              <Button size="small" onClick={() => actions.openReviewers(task)}>
-                调整
-              </Button>
-            )}
-          </div>
-        </div>
-      </div>
+      {/* #135：成果审核人配置移入基础信息栏，审核 Tab 只保留审核记录。 */}
       {(detail?.poolReviews ?? []).length === 0 &&
         (detail?.fieldChanges ?? []).length === 0 &&
         (detail?.completionReviews ?? []).length === 0 && (
@@ -1032,7 +1100,7 @@ export default function TaskDrawer({
             {cr.intermediateByName && (
               <div className="handled-fact" style={{ marginTop: 6 }}>
                 <b>
-                  中间或签通过 · {cr.intermediateByName}
+                  或签通过 · {cr.intermediateByName}
                   {cr.intermediateAt ? ` · ${fmtTime(cr.intermediateAt)}` : ""}
                 </b>
                 <div>{cr.intermediateOpinion || "未填写意见"}</div>

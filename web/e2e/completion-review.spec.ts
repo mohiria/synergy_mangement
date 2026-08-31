@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { gotoPage, login } from "./fixtures";
 
-// #116：配置了中间审核人（或签）的任务，审核人要能在抽屉「审核」Tab 看到并处理
+// #116：配置了成果审核人（或签）的任务，审核人要能在抽屉「审核」Tab 看到并处理
 // 通过／退回；此前动作行漏掉了 intermediate_review 状态，按钮不渲染。
 // 种子坐标：任务「补齐适配后的回归用例并跑通两轮」负责人孙鹏（sunpeng），进行中，
 // 且留有被退回后未清的候选内容——正好走「配置审核人 → 提交 → 审核人处理」全链路。
@@ -18,20 +18,26 @@ async function openAuditTab(page: import("@playwright/test").Page) {
 }
 
 test("配置审核人 → 提交完成申请 → 审核人在抽屉或签通过（#116）", async ({ page }) => {
-  // 1) 负责人配置中间审核人
+  // 1) 负责人在基础信息栏就地多选配置成果审核人（#135：无弹窗，下拉收起即保存）
   await login(page, "sunpeng");
-  await openAuditTab(page);
-  // antd 会在两个汉字间插空格（「调 整」），按正则匹配。
-  await page.getByRole("button", { name: /调\s*整/ }).click();
-  const reviewersModal = page.locator(".ant-modal-content", { hasText: "中间审核（或签）" });
-  await reviewersModal.locator(".ant-select").click();
+  await gotoPage(page, "/tasks");
+  await expect(page.locator(".page h1").first()).toHaveText("全部任务");
+  await page.getByText(TASK_NAME).first().click();
+  const drawer = page.locator(".ant-drawer-content");
+  await expect(drawer).toBeVisible();
+  const reviewerRow = drawer.locator(".task-info-row", { hasText: "成果审核人" });
+  await reviewerRow.locator(".ant-select").click();
   await page
     .locator(".ant-select-dropdown .ant-select-item", { hasText: REVIEWER.displayName })
     .click();
-  await page.keyboard.press("Escape"); // 只收起下拉，不关弹窗
-  await reviewersModal.getByRole("button", { name: "保存配置" }).click();
-  await expect(reviewersModal).toBeHidden();
-  await expect(page.getByText(REVIEWER.displayName).first()).toBeVisible();
+  await page.keyboard.press("Escape"); // 收起下拉即保存
+  // antd Select 有隐藏的 aria-live span，getByText 会先命中它；断言可见的选中标签。
+  await expect(
+    reviewerRow.locator(".ant-select-selection-item", { hasText: REVIEWER.displayName }),
+  ).toBeVisible();
+  // #135：审核 Tab 不再有配置行
+  await page.locator(".task-drawer-tabs .ant-tabs-tab", { hasText: "审核" }).click();
+  await expect(drawer.getByRole("button", { name: /调\s*整/ })).toHaveCount(0);
 
   // 2) 负责人提交完成申请
   await page.getByRole("button", { name: "提交完成申请" }).click();
@@ -55,7 +61,7 @@ test("配置审核人 → 提交完成申请 → 审核人在抽屉或签通过�
 
   // 或签通过：留痕显示处理人，进入待 KR 终审，审核人自己不再有处理按钮
   await expect(
-    page.locator(".audit-card", { hasText: "完成申请" }).getByText(`中间或签通过 · ${REVIEWER.displayName}`),
+    page.locator(".audit-card", { hasText: "完成申请" }).getByText(`或签通过 · ${REVIEWER.displayName}`),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "通过（进入 KR 终审）" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "通过 / 闭环" })).toHaveCount(0);

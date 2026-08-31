@@ -101,7 +101,7 @@ const (
 	StageNotStarted         = "待开始执行"
 	StageWaitingInput       = "等待输入"
 	StageInProgress         = "任务执行"
-	StageIntermediateReview = "中间或签审核"
+	StageIntermediateReview = "成果审核（或签）"
 	StageFinalReview        = "KR 终审"
 	StageCompleted          = "已闭环"
 	StageCancelled          = "已关闭"

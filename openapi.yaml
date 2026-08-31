@@ -347,7 +347,7 @@ paths:
     delete:
       operationId: removeProjectMember
       tags: [projects]
-      summary: 将成员移出项目（仅项目管理员／项目负责人；此人仍在担任 KR 负责人、任务负责人、中间审核人、接收方或输入对接人时返回 409 并列出待交接项，AC-61）
+      summary: 将成员移出项目（仅项目管理员／项目负责人；此人仍在担任 KR 负责人、任务负责人、成果审核人、接收方或输入对接人时返回 409 并列出待交接项，AC-61）
       responses:
         "204":
           description: 已移出
@@ -1481,7 +1481,7 @@ paths:
     put:
       operationId: setTaskReviewers
       tags: [tasks]
-      summary: 调整中间审核人配置（非关键字段可直接调整，§5.2.B；审核中与终态不可）
+      summary: 调整成果审核人配置（非关键字段可直接调整，§5.2.B；审核中与终态不可）
       requestBody:
         required: true
         content:
@@ -1525,7 +1525,7 @@ paths:
     post:
       operationId: submitCompletion
       tags: [tasks]
-      summary: 提交完成申请（AC-13；无中间审核时直接进入待 KR 终审；含全部候选交付物与提交说明）
+      summary: 提交完成申请（AC-13；未配置成果审核人时直接进入待 KR 终审；含全部候选交付物与提交说明）
       requestBody:
         required: true
         content:
@@ -3147,7 +3147,7 @@ components:
           description: 当前用户能否提交完成申请（派生字段；负责人，进行中且有候选内容）
         canManageReviewers:
           type: boolean
-          description: 当前用户能否调整中间审核人配置（派生字段；负责人／创建人／可编辑项目者，审核中与终态不可）
+          description: 当前用户能否调整成果审核人配置（派生字段；负责人／创建人／可编辑项目者，审核中与终态不可）
         openBlockerCount:
           type: integer
           description: 当前派生卡点数量（派生字段）
@@ -3298,7 +3298,7 @@ components:
             $ref: "#/components/schemas/CompletionReview"
         reviewers:
           type: array
-          description: 任务级中间审核人配置（或签组；提交完成申请时快照进申请）
+          description: 任务级成果审核人配置（或签组；提交完成申请时快照进申请）
           items:
             $ref: "#/components/schemas/ReviewerInfo"
         blockers:
@@ -4519,7 +4519,7 @@ components:
           description: 阻塞原因
         actionOwnerIds:
           type: array
-          description: 当前待行动人（或签中间审核、互锁环内 KR 负责人可为多人）
+          description: 当前待行动人（成果审核（或签）、互锁环内 KR 负责人可为多人）
           items:
             type: integer
             format: int64
@@ -4723,7 +4723,7 @@ components:
       properties:
         userIds:
           type: array
-          description: 中间审核人（或签组；可为空表示不配置）；须为非只读项目成员
+          description: 成果审核人（或签组；可为空表示不配置）；须为非只读项目成员
           items:
             type: integer
             format: int64
@@ -4762,7 +4762,7 @@ components:
           format: date-time
         reviewers:
           type: array
-          description: 中间审核组快照（或签；AC-14）
+          description: 成果审核组快照（或签；AC-14）
           items:
             $ref: "#/components/schemas/ReviewerInfo"
         intermediateByName:
@@ -4775,7 +4775,7 @@ components:
           type: string
         canDecide:
           type: boolean
-          description: 当前用户能否处理本申请（派生字段；中间审核中为或签组成员，待 KR 终审时仅所属 KR 负责人，AC-37）
+          description: 当前用户能否处理本申请（派生字段；成果审核中为或签组成员，待 KR 终审时仅所属 KR 负责人，AC-37）
     SubmitCompletionRequest:
       type: object
       required: [note]

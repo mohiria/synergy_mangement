@@ -191,7 +191,7 @@ func TestDeriveBlockersActionOwners(t *testing.T) {
 		{"任务超期指向任务负责人", func(f *BlockerFacts) {
 			f.Tasks[0].EndDate = blockerDay(-1)
 		}, "task_overdue:1", []string{"王五"}},
-		{"或签中间审核指向全部未处理审核人", func(f *BlockerFacts) {
+		{"成果审核（或签）指向全部未处理审核人", func(f *BlockerFacts) {
 			f.Approvals = []BlockerApprovalFact{{
 				Kind: "intermediate_review", RefID: 40, TaskID: 1,
 				StageSince:  blockerNow.Add(-4 * 24 * time.Hour),

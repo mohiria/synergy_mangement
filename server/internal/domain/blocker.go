@@ -101,7 +101,7 @@ type Blocker struct {
 var approvalStageLabels = map[string]string{
 	"pool_review":         "入池审批",
 	"field_change":        "关键字段变更审批",
-	"intermediate_review": "中间审核",
+	"intermediate_review": "成果审核",
 	"final_review":        "KR 终审",
 }
 

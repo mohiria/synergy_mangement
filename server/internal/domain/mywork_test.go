@@ -276,9 +276,9 @@ func TestWorkResponsibilities(t *testing.T) {
 			pendingInvite: true,
 			want: []string{
 				"项目负责人", "KR 负责人", "任务负责人",
-				"中间审核人", "接收方", "输入对接人", "被邀请人",
+				"成果审核人", "接收方", "输入对接人", "被邀请人",
 			},
-			wantLabel: "项目负责人、KR 负责人、任务负责人、中间审核人、接收方、输入对接人、被邀请人",
+			wantLabel: "项目负责人、KR 负责人、任务负责人、成果审核人、接收方、输入对接人、被邀请人",
 		},
 		{
 			name:          "只有待处理邀请也算一项职责",

@@ -183,7 +183,7 @@ export interface paths {
         /** 调整成员角色（仅项目管理员／项目负责人） */
         put: operations["updateProjectMemberRole"];
         post?: never;
-        /** 将成员移出项目（仅项目管理员／项目负责人；此人仍在担任 KR 负责人、任务负责人、中间审核人、接收方或输入对接人时返回 409 并列出待交接项，AC-61） */
+        /** 将成员移出项目（仅项目管理员／项目负责人；此人仍在担任 KR 负责人、任务负责人、成果审核人、接收方或输入对接人时返回 409 并列出待交接项，AC-61） */
         delete: operations["removeProjectMember"];
         options?: never;
         head?: never;
@@ -710,7 +710,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** 调整中间审核人配置（非关键字段可直接调整，§5.2.B；审核中与终态不可） */
+        /** 调整成果审核人配置（非关键字段可直接调整，§5.2.B；审核中与终态不可） */
         put: operations["setTaskReviewers"];
         post?: never;
         delete?: never;
@@ -731,7 +731,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 提交完成申请（AC-13；无中间审核时直接进入待 KR 终审；含全部候选交付物与提交说明） */
+        /** 提交完成申请（AC-13；未配置成果审核人时直接进入待 KR 终审；含全部候选交付物与提交说明） */
         post: operations["submitCompletion"];
         delete?: never;
         options?: never;
@@ -1631,7 +1631,7 @@ export interface components {
             canManageDeliverables?: boolean;
             /** @description 当前用户能否提交完成申请（派生字段；负责人，进行中且有候选内容） */
             canSubmitCompletion?: boolean;
-            /** @description 当前用户能否调整中间审核人配置（派生字段；负责人／创建人／可编辑项目者，审核中与终态不可） */
+            /** @description 当前用户能否调整成果审核人配置（派生字段；负责人／创建人／可编辑项目者，审核中与终态不可） */
             canManageReviewers?: boolean;
             /** @description 当前派生卡点数量（派生字段） */
             openBlockerCount?: number;
@@ -1701,7 +1701,7 @@ export interface components {
             discussions: components["schemas"]["Discussion"][];
             /** @description 完成申请记录，最新在前（AC-13／AC-15／AC-38～40） */
             completionReviews: components["schemas"]["CompletionReview"][];
-            /** @description 任务级中间审核人配置（或签组；提交完成申请时快照进申请） */
+            /** @description 任务级成果审核人配置（或签组；提交完成申请时快照进申请） */
             reviewers: components["schemas"]["ReviewerInfo"][];
             /** @description 本任务当前派生的结构化卡点（AC-11） */
             blockers: components["schemas"]["Blocker"][];
@@ -2418,7 +2418,7 @@ export interface components {
             missing: string;
             /** @description 阻塞原因 */
             reason: string;
-            /** @description 当前待行动人（或签中间审核、互锁环内 KR 负责人可为多人） */
+            /** @description 当前待行动人（成果审核（或签）、互锁环内 KR 负责人可为多人） */
             actionOwnerIds: number[];
             actionOwnerNames: string[];
             /** @description 按事实严重度派生的预警或高风险（结构化卡点不使用 normal） */
@@ -2552,7 +2552,7 @@ export interface components {
             userIds: number[];
         };
         SetReviewersRequest: {
-            /** @description 中间审核人（或签组；可为空表示不配置）；须为非只读项目成员 */
+            /** @description 成果审核人（或签组；可为空表示不配置）；须为非只读项目成员 */
             userIds: number[];
         };
         /** @description 完成申请（词汇表）；整体通过或整体退回 */
@@ -2573,14 +2573,14 @@ export interface components {
             submittedAt?: string;
             /** Format: date-time */
             decidedAt?: string;
-            /** @description 中间审核组快照（或签；AC-14） */
+            /** @description 成果审核组快照（或签；AC-14） */
             reviewers?: components["schemas"]["ReviewerInfo"][];
             /** @description 或签通过的处理人姓名（派生字段） */
             intermediateByName?: string;
             /** Format: date-time */
             intermediateAt?: string;
             intermediateOpinion?: string;
-            /** @description 当前用户能否处理本申请（派生字段；中间审核中为或签组成员，待 KR 终审时仅所属 KR 负责人，AC-37） */
+            /** @description 当前用户能否处理本申请（派生字段；成果审核中为或签组成员，待 KR 终审时仅所属 KR 负责人，AC-37） */
             canDecide?: boolean;
         };
         SubmitCompletionRequest: {
