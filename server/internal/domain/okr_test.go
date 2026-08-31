@@ -75,6 +75,15 @@ func TestValidateOkrBatch(t *testing.T) {
 			Title:      "提升产品体验",
 			KeyResults: []NewKeyResult{kr(func(k *NewKeyResult) { k.OwnerID = i64(99) })},
 		}}, ErrKrOwnerNotEligible},
+		// #95：访客担任 KR 负责人会让入池、关键字段变更与完成终审无人可推进。
+		{"KR 负责人是访客", []OkrBatchItem{{
+			Title:      "提升产品体验",
+			KeyResults: []NewKeyResult{kr(func(k *NewKeyResult) { k.OwnerID = i64(8) })},
+		}}, ErrKrOwnerNotEligible},
+		{"KR 负责人是项目管理员", []OkrBatchItem{{
+			Title:      "提升产品体验",
+			KeyResults: []NewKeyResult{kr(func(k *NewKeyResult) { k.OwnerID = i64(2) })},
+		}}, nil},
 		{"KR 负责人可不指定", []OkrBatchItem{{
 			Title:      "提升产品体验",
 			KeyResults: []NewKeyResult{kr(func(k *NewKeyResult) { k.OwnerID = nil })},

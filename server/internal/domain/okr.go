@@ -17,7 +17,7 @@ var (
 	ErrKrDescriptionEmpty    = errors.New("KR 描述不能为空")
 	ErrKrDescriptionTooLong  = errors.New("KR 描述不能超过 200 字")
 	ErrKrMetricTooLong       = errors.New("量化指标不能超过 100 字")
-	ErrKrOwnerNotEligible    = errors.New("KR 负责人必须是非只读的项目成员")
+	ErrKrOwnerNotEligible    = errors.New("KR 负责人必须是项目管理员或项目成员，访客不可")
 	ErrKrPeriodInverted      = errors.New("KR 截止日期不能早于开始日期")
 )
 
@@ -46,7 +46,7 @@ func eligibleOwner(role string) bool {
 }
 
 // ValidateOkrBatch 校验整批 O／KR 创建输入（AC-01）。
-// roleOf 返回某用户在本项目的角色，用于 KR 负责人校验（§7.2 匹配现有项目成员；§3.4 排除只读）。
+// roleOf 返回某用户在本项目的角色，用于 KR 负责人校验（§7.2 匹配现有项目成员；§3.4 排除访客）。
 func ValidateOkrBatch(items []OkrBatchItem, roleOf func(int64) string) error {
 	if len(items) == 0 {
 		return ErrOkrBatchEmpty
