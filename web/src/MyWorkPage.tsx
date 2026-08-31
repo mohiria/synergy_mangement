@@ -4,6 +4,7 @@ import { Alert, Spin, Tabs, message } from "antd";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import ProjectShell from "./ProjectShell";
+import TaskDrawerHost from "./task-drawer";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
@@ -112,16 +113,16 @@ export default function MyWorkPage({
   const taskCode = useMemo(() => new Map(tasks.map((t) => [t.id, t.code])), [tasks]);
   const taskById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
 
-  // 卡片只负责定位：一律打开任务详情抽屉，并带上来源分组供抽屉落位（模块 PRD §6.2）。
+  // 卡片只负责定位：在本页原地打开任务详情抽屉，并带上来源分组供抽屉落位（模块 PRD §6.2、#110）。
+  // 抽屉是与全部任务页同一个组件（#109），动作集合完全一致，不另做只读视图。
+  const [drawer, setDrawer] = useState<{ taskId: number; tab: string; source: string } | null>(null);
   const openItem = (item: WorkItem, source: string) => {
     if (!item.taskId) {
+      // 没有关联任务的事项（任务创建邀请）仍去全部任务页处理。
       navigate(`/projects/${projectId}/tasks`);
       return;
     }
-    navigate(
-      `/projects/${projectId}/tasks?task=${item.taskId}` +
-        `&tab=${item.drawerTab ?? "overview"}&from=${source}`,
-    );
+    setDrawer({ taskId: item.taskId, tab: item.drawerTab ?? "overview", source });
   };
 
   const remind = async (item: WorkItem) => {
@@ -233,6 +234,15 @@ export default function MyWorkPage({
               {work.identity.responsibilitiesLabel}
             </p>
           </section>
+          {/* 处理完关闭即回到我的工作；抽屉内动作落库后回调刷新，五组归类与计数随之更新。 */}
+          <TaskDrawerHost
+            projectId={projectId}
+            taskId={drawer?.taskId ?? null}
+            initialTab={drawer?.tab}
+            source={drawer?.source}
+            onClose={() => setDrawer(null)}
+            onChanged={load}
+          />
           <div className="work-board">
             <Tabs
               className="work-tabs"
