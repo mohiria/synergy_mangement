@@ -10,6 +10,7 @@
 | `my-work.spec.ts` | 五分组顺序、计数 pill 徽标与徽标口径、身份卡三要素（AC-16、MW-16） |
 | `graph-completed-toggle.spec.ts` | 「显示已完成」开关在 KR 层／聚焦层／全局展开层／关系列表四处一致（AC-45、AC-46） |
 | `list-truncation.spec.ts` | 各列表字段单行截断：行高恒定、单元格不换行、页面无横向滚动（#91；1440／1920／2560 三档） |
+| `member-zones.spec.ts` | 项目设置成员分两区：角色不混排、跨区转换、无权限时只读（#108） |
 | `task-import.spec.ts` | 任务批量导入：入口权限（负责人／管理员可见、项目成员不可见）、所属 KR 按编号定位、编号不存在时在预览阶段报错（#107） |
 | `okr-batch-groups.spec.ts` | 新增 O / KR 弹窗按所属 O 分组：每组就地加 KR、改归属后行移动、删 O 行后 KR 不丢（#104） |
 | `input-source.spec.ts` | 输入源区块：区块名、单行事实与 title、点行进来源任务、逐级返回回到原来的 Tab（#101） |

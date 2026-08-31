@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Alert, Button, Dropdown, Input, InputNumber, Modal, Select, Spin, message } from "antd";
+import type { MenuProps } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import DateRangeField from "./DateRangeField";
 import { client } from "./api/client";
@@ -62,6 +63,8 @@ const ROLE_LABEL: Record<MemberRole, string> = {
 };
 
 const ROLE_ORDER: MemberRole[] = ["admin", "member", "viewer"];
+// 成员管理区里可以互相切换的两档；访客的进出走「转为访客／转为项目成员」（#108）。
+const WORKING_ROLES: MemberRole[] = ["admin", "member"];
 
 const roleOptions = ROLE_ORDER.map((r) => ({ value: r, label: ROLE_LABEL[r] }));
 
@@ -307,8 +310,34 @@ export default function ProjectSettingsPage({
     .filter((u) => !members.some((m) => m.userId === u.id))
     .map((u) => ({ value: u.id, label: `${u.displayName}（${u.username}）` }));
 
-  const sortedMembers = [...members].sort(
-    (a, b) => ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role),
+  // 两区各自排序：成员管理区按 管理员 → 项目成员，查看项目区只有访客（#108）。
+  const workingMembers = members
+    .filter((m) => m.role !== "viewer")
+    .sort((a, b) => ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role));
+  const viewers = members.filter((m) => m.role === "viewer");
+
+  // 两区共用同一张卡，只有「更多」菜单不同。
+  const renderMemberCard = (m: ProjectMember, items: MenuProps["items"]) => (
+    <div key={m.userId} className="member-card">
+      <span className="avatar">{m.displayName.slice(0, 1)}</span>
+      <div className="member-card-text">
+        <b title={m.displayName}>{m.displayName}</b>
+        <span title={`${m.roleLabel ?? ""} · ${m.username}`}>
+          {m.roleLabel ?? ""} · {m.username}
+        </span>
+      </div>
+      {canManage && (
+        <Dropdown trigger={["click"]} placement="bottomRight" menu={{ items }}>
+          <button
+            className="icon-btn member-card-more"
+            type="button"
+            aria-label={`管理成员 ${m.displayName}`}
+          >
+            <Icon name="more" size={16} />
+          </button>
+        </Dropdown>
+      )}
+    </div>
   );
 
   return (
@@ -657,12 +686,15 @@ export default function ProjectSettingsPage({
                 </>
               ) : (
                 <>
+                  {/* 成员分两区（裁决 C1、#108）：「成员管理」放项目管理员与项目成员，
+                      「查看项目」放访客；角色不混排，跨区调整用明确的转换动作。 */}
                   <div className="settings-panel-head">
                     <div>
                       <h2>成员与职责</h2>
                       <span className="muted">
                         成员角色决定编辑结构与配置的系统权限；KR
                         负责人等工作职责在 OKR 与任务中指定。
+                        {!canManage && "（你没有成员管理权限，以下为只读展示）"}
                       </span>
                     </div>
                     {canManage && (
@@ -672,56 +704,68 @@ export default function ProjectSettingsPage({
                     )}
                   </div>
                   <div className="settings-panel-body">
-                    <div className="member-grid">
-                      {sortedMembers.map((m) => (
-                        <div key={m.userId} className="member-card">
-                          <span className="avatar">{m.displayName.slice(0, 1)}</span>
-                          <div className="member-card-text">
-                            <b>{m.displayName}</b>
-                            <span>
-                              {m.roleLabel ?? ""} · {m.username}
-                            </span>
-                          </div>
-                          {canManage && (
-                            <Dropdown
-                              trigger={["click"]}
-                              placement="bottomRight"
-                              menu={{
-                                items: [
-                                  {
-                                    key: "role",
-                                    type: "group",
-                                    label: "调整角色",
-                                    children: ROLE_ORDER.map((r) => ({
-                                      key: r,
-                                      label: ROLE_LABEL[r],
-                                      disabled: r === m.role,
-                                      onClick: () => changeRole(m.userId, r),
-                                    })),
-                                  },
-                                  { type: "divider" as const, key: "d" },
-                                  {
-                                    key: "remove",
-                                    label: "移出项目",
-                                    danger: true,
-                                    onClick: () => remove(m.userId),
-                                  },
-                                ],
-                              }}
-                            >
-                              <button
-                                className="icon-btn member-card-more"
-                                type="button"
-                                aria-label={`管理成员 ${m.displayName}`}
-                              >
-                                <Icon name="more" size={16} />
-                              </button>
-                            </Dropdown>
-                          )}
-                        </div>
-                      ))}
+                    <div className="member-zone">
+                      <h3>
+                        成员管理 <span className="section-count">{workingMembers.length} 人</span>
+                      </h3>
+                      <p className="muted">项目管理员与项目成员：可编辑项目事实并承担工作职责。</p>
+                      <div className="member-grid">
+                        {workingMembers.map((m) =>
+                          renderMemberCard(m, [
+                            {
+                              key: "role",
+                              type: "group",
+                              label: "调整角色",
+                              children: WORKING_ROLES.map((r) => ({
+                                key: r,
+                                label: ROLE_LABEL[r],
+                                disabled: r === m.role,
+                                onClick: () => changeRole(m.userId, r),
+                              })),
+                            },
+                            { type: "divider" as const, key: "d1" },
+                            {
+                              key: "to-viewer",
+                              label: "转为访客",
+                              onClick: () => changeRole(m.userId, "viewer"),
+                            },
+                            { type: "divider" as const, key: "d2" },
+                            {
+                              key: "remove",
+                              label: "移出项目",
+                              danger: true,
+                              onClick: () => remove(m.userId),
+                            },
+                          ]),
+                        )}
+                      </div>
+                      {workingMembers.length === 0 && <div className="empty compact-empty">暂无成员</div>}
                     </div>
-                    {members.length === 0 && <div className="empty">暂无成员</div>}
+                    <div className="member-zone">
+                      <h3>
+                        查看项目 <span className="section-count">{viewers.length} 人</span>
+                      </h3>
+                      <p className="muted">访客：可看可下载，被指定为接收方时可确认接收，此外没有写入口。</p>
+                      <div className="member-grid">
+                        {viewers.map((m) =>
+                          renderMemberCard(m, [
+                            {
+                              key: "to-member",
+                              label: "转为项目成员",
+                              onClick: () => changeRole(m.userId, "member"),
+                            },
+                            { type: "divider" as const, key: "d" },
+                            {
+                              key: "remove",
+                              label: "移出项目",
+                              danger: true,
+                              onClick: () => remove(m.userId),
+                            },
+                          ]),
+                        )}
+                      </div>
+                      {viewers.length === 0 && <div className="empty compact-empty">暂无访客</div>}
+                    </div>
                   </div>
                 </>
               )}

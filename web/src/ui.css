@@ -839,6 +839,10 @@ body {
 .settings-panel-head h2 { margin: 0 0 4px; font-size: var(--type-title); font-weight: 650; }
 .settings-panel-head .muted { display: block; font-size: var(--type-aux); }
 .settings-panel-body { padding: 16px; }
+/* 成员分区（#108）：成员管理与查看项目各自成块，视觉沿用 member-grid / member-card。 */
+.member-zone + .member-zone { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+.member-zone h3 { margin: 0 0 2px; font-size: var(--type-title); font-weight: 650; color: #364257; }
+.member-zone > p.muted { margin: 0 0 10px; font-size: var(--type-aux); }
 .member-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .member-card {
   min-height: 62px; padding: 11px 12px; display: flex; align-items: center; gap: 9px;
