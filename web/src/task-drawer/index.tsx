@@ -29,6 +29,7 @@ export default function TaskDrawerHost({
   source,
   onClose,
   onChanged,
+  onOpenInGraph,
 }: {
   projectId: number;
   /** 要打开的任务；null 表示关闭 */
@@ -40,6 +41,8 @@ export default function TaskDrawerHost({
   onClose: () => void;
   /** 抽屉内任何动作落库后回调，宿主刷新自己的列表 */
   onChanged: () => void;
+  /** #121：宿主自定义「在关系图谱中查看」行为（协作关系页内改为关抽屉并聚焦）；缺省跳图谱页 */
+  onOpenInGraph?: (taskId: number) => void;
 }) {
   const navigate = useNavigate();
   const [objectives, setObjectives] = useState<Objective[]>([]);
@@ -379,7 +382,8 @@ export default function TaskDrawerHost({
             setCurrent(id);
             setTab("overview");
           },
-          openInGraph: (id) => navigate(`/projects/${projectId}/graph?task=${id}`),
+          openInGraph: (id) =>
+            onOpenInGraph ? onOpenInGraph(id) : navigate(`/projects/${projectId}/graph?task=${id}`),
         }}
       />
       <ConfigureInputModal

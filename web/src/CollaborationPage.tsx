@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Alert, AutoComplete, Button, Input, Select, Spin, Switch } from "antd";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import Icon from "./icons";
 import ProjectShell from "./ProjectShell";
+import TaskDrawerHost from "./task-drawer";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
@@ -53,7 +54,6 @@ export default function CollaborationPage({
 }) {
   const { projectId: projectIdParam } = useParams();
   const projectId = Number(projectIdParam);
-  const navigate = useNavigate();
 
   const [project, setProject] = useState<Project | null>(null);
   const [objectives, setObjectives] = useState<Objective[]>([]);
@@ -81,6 +81,8 @@ export default function CollaborationPage({
   const [dragOffsets, setDragOffsets] = useState<Map<number, { dx: number; dy: number }>>(new Map());
   const [searchText, setSearchText] = useState("");
   const [viewMode, setViewMode] = useState<"graph" | "list">("graph");
+  // #121：任务详情在本页抽屉打开，关闭后图谱层级与筛选不丢。
+  const [drawerTaskId, setDrawerTaskId] = useState<number | null>(null);
   const [listSort, setListSort] = useState<"id" | "ready" | "type">("id");
   const [searchParams] = useSearchParams();
 
@@ -726,7 +728,7 @@ export default function CollaborationPage({
           }
           setSelectedTask((prev) => (prev === t.id ? null : t.id));
         }}
-        onDoubleClick={() => navigate(`/projects/${projectId}/tasks?task=${t.id}&tab=overview`)}
+        onDoubleClick={() => setDrawerTaskId(t.id)}
       >
         <b>{t.name}</b>
         <small>
@@ -788,21 +790,11 @@ export default function CollaborationPage({
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {selectedEdgeObj.sourceTaskId != null && (
-            <Button
-              size="small"
-              onClick={() =>
-                navigate(`/projects/${projectId}/tasks?task=${selectedEdgeObj.sourceTaskId}&tab=overview`)
-              }
-            >
+            <Button size="small" onClick={() => setDrawerTaskId(selectedEdgeObj.sourceTaskId ?? null)}>
               打开来源任务
             </Button>
           )}
-          <Button
-            size="small"
-            onClick={() =>
-              navigate(`/projects/${projectId}/tasks?task=${selectedEdgeObj.targetTaskId}&tab=overview`)
-            }
-          >
+          <Button size="small" onClick={() => setDrawerTaskId(selectedEdgeObj.targetTaskId)}>
             打开目标任务
           </Button>
         </div>
@@ -874,10 +866,7 @@ export default function CollaborationPage({
           <Button size="small" type={impactMode ? "primary" : "default"} onClick={() => setImpactMode((v) => !v)}>
             {impactMode ? "退出影响路径" : "查看影响路径"}
           </Button>
-          <Button
-            size="small"
-            onClick={() => navigate(`/projects/${projectId}/tasks?task=${selectedTask}&tab=overview`)}
-          >
+          <Button size="small" onClick={() => setDrawerTaskId(selectedTask)}>
             打开任务详情
           </Button>
         </div>
@@ -1090,13 +1079,7 @@ export default function CollaborationPage({
                         </td>
                         <td>{e.expectedDate ?? "—"}</td>
                         <td>
-                          <Button
-                            type="link"
-                            size="small"
-                            onClick={() =>
-                              navigate(`/projects/${projectId}/tasks?task=${e.targetTaskId}&tab=overview`)
-                            }
-                          >
+                          <Button type="link" size="small" onClick={() => setDrawerTaskId(e.targetTaskId)}>
                             跳转任务
                           </Button>
                           <Button
@@ -1534,6 +1517,25 @@ export default function CollaborationPage({
           )}
         </>
       )}
+      {/* #121：任务抽屉在本页打开；动作落库后刷新图谱数据（边、卡点、任务状态）。
+          抽屉内「在关系图谱中查看」在本页改为关闭抽屉并聚焦该任务，不再跳页。 */}
+      <TaskDrawerHost
+        projectId={projectId}
+        taskId={drawerTaskId}
+        onClose={() => setDrawerTaskId(null)}
+        onChanged={load}
+        onOpenInGraph={(id) => {
+          setDrawerTaskId(null);
+          const t = taskById.get(id);
+          if (t) {
+            setMode({ kind: "kr", krId: t.keyResultId });
+            setViewStack([]);
+            setSelectedTask(id);
+            setSelectedEdge(null);
+            setImpactMode(false);
+          }
+        }}
+      />
     </ProjectShell>
   );
 }
