@@ -140,7 +140,7 @@ func TestMyWorkApprovalTimeoutFromProjectSettings(t *testing.T) {
 	}
 }
 
-// AC-62（Q4 裁决）：被指定为接收方的只读成员在「待我接收」看到待接收项并可确认接收，
+// AC-62（Q4 裁决）：被指定为接收方的访客在「待我接收」看到待接收项并可确认接收，
 // 这是其唯一写操作；接收方无审核权，因此不提供退回。
 func TestMyWorkViewerReceiptStaysVisible(t *testing.T) {
 	now := time.Date(2026, 8, 28, 10, 0, 0, 0, time.UTC)
@@ -152,13 +152,13 @@ func TestMyWorkViewerReceiptStaysVisible(t *testing.T) {
 		},
 	})
 	if len(g.Receipts) != 1 {
-		t.Fatalf("只读成员待我接收 = %d 条，期望 1 条", len(g.Receipts))
+		t.Fatalf("访客待我接收 = %d 条，期望 1 条", len(g.Receipts))
 	}
 	if g.Receipts[0].ActionLabel != WorkActionHandle {
 		t.Fatalf("ActionLabel = %q，期望 %q", g.Receipts[0].ActionLabel, WorkActionHandle)
 	}
 	if err := CanConfirmReceipt(me, ReceiptFact{ID: 11, UserID: me}); err != nil {
-		t.Fatalf("只读成员确认接收应放行，得到 %v", err)
+		t.Fatalf("访客确认接收应放行，得到 %v", err)
 	}
 }
 

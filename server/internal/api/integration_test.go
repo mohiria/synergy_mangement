@@ -543,7 +543,7 @@ func TestProjectMembersAndPermissions(t *testing.T) {
 		t.Fatalf("创建人应为唯一管理员成员: %+v", members)
 	}
 
-	// 管理员把 carol 加为只读成员
+	// 管理员把 carol 加为访客
 	resp = doJSON(t, alice, http.MethodPost, membersURL, api.AddProjectMemberRequest{UserId: carolUser.ID, Role: api.Viewer})
 	wantStatus(t, resp, http.StatusCreated)
 	added := decodeBody[api.ProjectMember](t, resp)
@@ -551,7 +551,7 @@ func TestProjectMembersAndPermissions(t *testing.T) {
 		t.Fatalf("加入成员返回异常: %+v", added)
 	}
 
-	// 只读成员既不能管理成员也不能编辑项目 → 403
+	// 访客既不能管理成员也不能编辑项目 → 403
 	resp = doJSON(t, carol, http.MethodPost, membersURL, api.AddProjectMemberRequest{UserId: bobUser.ID, Role: api.Member})
 	wantStatus(t, resp, http.StatusForbidden)
 	resp.Body.Close()
@@ -567,7 +567,7 @@ func TestProjectMembersAndPermissions(t *testing.T) {
 	resp = doJSON(t, carol, http.MethodGet, base+"/projects", nil)
 	wantStatus(t, resp, http.StatusOK)
 	if list := decodeBody[[]api.Project](t, resp); list[0].CanEdit || list[0].CanManageMembers {
-		t.Fatalf("只读成员派生字段异常: %+v", list[0])
+		t.Fatalf("访客派生字段异常: %+v", list[0])
 	}
 
 	// 项目负责人 bob 非成员，但享有与管理员同等权限（V4.4.2）：可编辑项目、可调整成员角色
@@ -593,7 +593,7 @@ func TestProjectMembersAndPermissions(t *testing.T) {
 		t.Fatalf("code = %q, want invalid_request 或 invalid_member_role", e.Code)
 	}
 
-	// 普通成员仍不能管理成员 → 403
+	// 项目成员仍不能管理成员 → 403
 	resp = doJSON(t, carol, http.MethodPost, membersURL, api.AddProjectMemberRequest{UserId: bobUser.ID, Role: api.Member})
 	wantStatus(t, resp, http.StatusForbidden)
 	resp.Body.Close()
@@ -663,7 +663,7 @@ func TestOkrTableBatchCreate(t *testing.T) {
 
 	sp := func(s string) *string { return &s }
 
-	// alice 创建项目并任负责人，bob 加为普通成员
+	// alice 创建项目并任负责人，bob 加为项目成员
 	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "OKR 试点", OwnerId: aliceUser.ID})
 	wantStatus(t, resp, http.StatusCreated)
 	created := decodeBody[api.Project](t, resp)
@@ -676,7 +676,7 @@ func TestOkrTableBatchCreate(t *testing.T) {
 	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/projects/%d", base, created.Id), nil)
 	wantStatus(t, resp, http.StatusOK)
 	if p := decodeBody[api.Project](t, resp); p.Id != created.Id || p.CanEdit {
-		t.Fatalf("普通成员的项目详情派生字段异常: %+v", p)
+		t.Fatalf("项目成员的项目详情派生字段异常: %+v", p)
 	}
 
 	okrURL := fmt.Sprintf("%s/projects/%d/objectives", base, created.Id)
@@ -727,14 +727,14 @@ func TestOkrTableBatchCreate(t *testing.T) {
 		t.Fatalf("追加 KR 异常: %+v", list)
 	}
 
-	// 普通成员读取层级列表 200
+	// 项目成员读取层级列表 200
 	resp = doJSON(t, bob, http.MethodGet, okrURL, nil)
 	wantStatus(t, resp, http.StatusOK)
 	if got := decodeBody[[]api.Objective](t, resp); len(got) != 2 {
 		t.Fatalf("成员读取 O／KR 列表异常: %+v", got)
 	}
 
-	// 普通成员批量创建 403（编辑项目结构需管理员／负责人）
+	// 项目成员批量创建 403（编辑项目结构需管理员／负责人）
 	resp = doJSON(t, bob, http.MethodPost, okrURL, api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{{Title: sp("越权 O")}}})
 	wantStatus(t, resp, http.StatusForbidden)
 	resp.Body.Close()
@@ -774,7 +774,7 @@ func TestOkrTableBatchCreate(t *testing.T) {
 func sp2int64(v int64) *int64 { return &v }
 
 // 任务创建、入池审批与免审（#4，AC-04／AC-26）：
-// 普通成员提交任务→待入池审批→KR 负责人通过→未开始；退回→草稿可重新提交；
+// 项目成员提交任务→待入池审批→KR 负责人通过→未开始；退回→草稿可重新提交；
 // KR 负责人本人创建免审直接未开始并记录免审原因；管理员不能替代 KR 负责人审批。
 func TestTaskCreateAndPoolReview(t *testing.T) {
 	q, pool := setupDB(t)
@@ -799,7 +799,7 @@ func TestTaskCreateAndPoolReview(t *testing.T) {
 
 	sp := func(s string) *string { return &s }
 
-	// alice（管理员/负责人）建项目，bob、carol 为普通成员；bob 任 KR 负责人
+	// alice（管理员/负责人）建项目，bob、carol 为项目成员；bob 任 KR 负责人
 	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "任务试点", OwnerId: aliceUser.ID})
 	wantStatus(t, resp, http.StatusCreated)
 	created := decodeBody[api.Project](t, resp)
@@ -823,7 +823,7 @@ func TestTaskCreateAndPoolReview(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-12"), openapiDate(t, "2026-09-21")
 
-	// AC-04：普通成员 carol 创建并提交，任务进入待入池审批
+	// AC-04：项目成员 carol 创建并提交，任务进入待入池审批
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
@@ -833,7 +833,7 @@ func TestTaskCreateAndPoolReview(t *testing.T) {
 	wantStatus(t, resp, http.StatusCreated)
 	list := decodeBody[[]api.Task](t, resp)
 	if len(list) != 1 || list[0].Status != api.TaskStatusPendingPoolReview {
-		t.Fatalf("普通成员提交后应为待入池审批: %+v", list)
+		t.Fatalf("项目成员提交后应为待入池审批: %+v", list)
 	}
 	taskID := list[0].Id
 	if list[0].PoolReview == nil || list[0].PoolReview.Status != api.PoolReviewStatusPending || list[0].PoolReview.Exempt {
@@ -963,7 +963,7 @@ func TestTaskCreateAndPoolReview(t *testing.T) {
 		t.Fatalf("code = %q, want invalid_task", e.Code)
 	}
 
-	// 只读成员不能创建任务 → 403
+	// 访客不能创建任务 → 403
 	daveUser := seedUser(t, q, "dave", "赵六", "dave-pass")
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
 		api.AddProjectMemberRequest{UserId: daveUser.ID, Role: api.Viewer})
@@ -980,7 +980,7 @@ func TestTaskCreateAndPoolReview(t *testing.T) {
 	wantStatus(t, resp, http.StatusForbidden)
 	resp.Body.Close()
 
-	// 只读成员可查看任务列表
+	// 访客可查看任务列表
 	resp = doJSON(t, dave, http.MethodGet, tasksURL, nil)
 	wantStatus(t, resp, http.StatusOK)
 	if got := decodeBody[[]api.Task](t, resp); len(got) != 3 {
@@ -989,7 +989,7 @@ func TestTaskCreateAndPoolReview(t *testing.T) {
 }
 
 // 任务创建邀请（#5，AC-03；MW-19）：KR 负责人邀请成员→受邀人通过邀请创建并提交任务入池→邀请完成；
-// 撤回后不可再响应；无关任务不使邀请结束；普通成员不可发邀请。
+// 撤回后不可再响应；无关任务不使邀请结束；项目成员不可发邀请。
 func TestTaskInviteLifecycle(t *testing.T) {
 	q, pool := setupDB(t)
 	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
@@ -1013,7 +1013,7 @@ func TestTaskInviteLifecycle(t *testing.T) {
 
 	sp := func(s string) *string { return &s }
 
-	// alice 建项目；bob、carol 普通成员；bob 任 KR1 负责人，另建无负责人的 KR2
+	// alice 建项目；bob、carol 项目成员；bob 任 KR1 负责人，另建无负责人的 KR2
 	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "邀请试点", OwnerId: aliceUser.ID})
 	wantStatus(t, resp, http.StatusCreated)
 	created := decodeBody[api.Project](t, resp)
@@ -1037,7 +1037,7 @@ func TestTaskInviteLifecycle(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-12"), openapiDate(t, "2026-09-21")
 
-	// 普通成员 carol（非 KR 负责人）发邀请 403
+	// 项目成员 carol（非 KR 负责人）发邀请 403
 	resp = doJSON(t, carol, http.MethodPost, invitesURL, api.CreateTaskInvitesRequest{KeyResultId: kr1, InviteeIds: []int64{bobUser.ID}})
 	wantStatus(t, resp, http.StatusForbidden)
 	resp.Body.Close()
@@ -1186,7 +1186,7 @@ func TestTaskInviteLifecycle(t *testing.T) {
 	wantStatus(t, resp, http.StatusConflict)
 	resp.Body.Close()
 
-	// 邀请自己 422；邀请只读成员 422
+	// 邀请自己 422；邀请访客 422
 	daveUser := seedUser(t, q, "dave", "赵六", "dave-pass")
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
 		api.AddProjectMemberRequest{UserId: daveUser.ID, Role: api.Viewer})
@@ -1447,7 +1447,7 @@ func TestTaskDetail(t *testing.T) {
 		t.Fatalf("当前环节/待行动人派生异常: %+v", tasks[0])
 	}
 
-	// 只读成员 dave 可查看详情（AC-34），但无任何动作标志
+	// 访客 dave 可查看详情（AC-34），但无任何动作标志
 	detailURL := fmt.Sprintf("%s/%d", tasksURL, taskID)
 	resp = doJSON(t, dave, http.MethodGet, detailURL, nil)
 	wantStatus(t, resp, http.StatusOK)
@@ -1459,7 +1459,7 @@ func TestTaskDetail(t *testing.T) {
 		t.Fatalf("审核记录异常: %+v", detail.PoolReviews)
 	}
 	if detail.Task.CanDecidePoolReview || detail.Task.CanSubmitPoolReview || detail.Task.CanStart || detail.Task.CanCancel {
-		t.Fatalf("只读成员不应有任何动作标志: %+v", detail.Task)
+		t.Fatalf("访客不应有任何动作标志: %+v", detail.Task)
 	}
 
 	// KR 负责人 bob 视角出现审批动作（AC-34 操作按钮按权限出现）
@@ -1812,7 +1812,7 @@ func TestDeliverablesAndFiles(t *testing.T) {
 	resp.Body.Close()
 }
 
-// 任务讨论与定向通知（#9，AC-35/AC-36）：只读成员可提交意见并 @ 成员；
+// 任务讨论与定向通知（#9，AC-35/AC-36）：访客可提交意见并 @ 成员；
 // 意见不可改删（无端点）；通知只发任务负责人与被 @ 成员并可直达讨论 Tab。
 func TestDiscussionsAndNotifications(t *testing.T) {
 	q, pool := setupDB(t)
@@ -1839,7 +1839,7 @@ func TestDiscussionsAndNotifications(t *testing.T) {
 
 	sp := func(s string) *string { return &s }
 
-	// alice 建项目；bob 成员并任 KR 负责人与任务负责人；carol 只读成员；dave 非成员
+	// alice 建项目；bob 成员并任 KR 负责人与任务负责人；carol 访客；dave 非成员
 	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "讨论试点", OwnerId: aliceUser.ID})
 	wantStatus(t, resp, http.StatusCreated)
 	created := decodeBody[api.Project](t, resp)
@@ -1871,7 +1871,7 @@ func TestDiscussionsAndNotifications(t *testing.T) {
 	taskID := tasks[0].Id
 	discussURL := fmt.Sprintf("%s/%d/discussions", tasksURL, taskID)
 
-	// AC-35：只读成员 carol 提交意见并 @ alice
+	// AC-35：访客 carol 提交意见并 @ alice
 	resp = doJSON(t, carol, http.MethodPost, discussURL,
 		api.CreateDiscussionRequest{Content: "建议补充断链回退场景。", MentionUserIds: &[]int64{aliceUser.ID}})
 	wantStatus(t, resp, http.StatusCreated)
@@ -1914,7 +1914,7 @@ func TestDiscussionsAndNotifications(t *testing.T) {
 	}
 
 	// 详情讨论 Tab 数据；已提交意见无编辑/删除路径（契约不存在对应端点）
-	// 用只读成员 carol 读取：非成员 dave 已无读权限（读边界收口，PRD §3.3）
+	// 用访客 carol 读取：非成员 dave 已无读权限（读边界收口，PRD §3.3）
 	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
 	wantStatus(t, resp, http.StatusOK)
 	detail := decodeBody[api.TaskDetail](t, resp)
@@ -2413,7 +2413,7 @@ func TestIntermediateReviewOrSign(t *testing.T) {
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
 
-	// carol 配置或签组（dave、erin）；只读成员会被拒
+	// carol 配置或签组（dave、erin）；访客会被拒
 	reviewersURL := fmt.Sprintf("%s/%d/reviewers", tasksURL, taskID)
 	resp = doJSON(t, carol, http.MethodPut, reviewersURL, api.SetReviewersRequest{UserIds: []int64{daveUser.ID, erinUser.ID}})
 	wantStatus(t, resp, http.StatusOK)
@@ -3172,7 +3172,7 @@ func TestMyWorkFiveGroups(t *testing.T) {
 	}
 	// 身份卡（#69）：身份文案与当前职责随事实派生；bob 是 KR 负责人。
 	if id := bobWork.Identity; id.UserId != bobUser.ID || id.DisplayName != "李四" ||
-		id.RoleLabel != "普通成员" || id.ResponsibilitiesLabel != "KR 负责人" {
+		id.RoleLabel != "项目成员" || id.ResponsibilitiesLabel != "KR 负责人" {
 		t.Fatalf("身份卡异常: %+v", bobWork.Identity)
 	}
 	resp = doJSON(t, carol, http.MethodGet, myWorkURL, nil)
@@ -3602,7 +3602,7 @@ func TestArtifactsAndPackages(t *testing.T) {
 		t.Fatalf("明天之后没有任何内容，应筛空: 交付物=%d 文件=%d", d, f)
 	}
 
-	// AC-18：普通成员不能建包；管理员勾选当前成果生成
+	// AC-18：项目成员不能建包；管理员勾选当前成果生成
 	pkgURL := fmt.Sprintf("%s/projects/%d/packages", base, created.Id)
 	resp = doJSON(t, bob, http.MethodPost, pkgURL, api.CreatePackageRequest{Name: "联调成果", DeliverableIds: []int64{dA}})
 	wantStatus(t, resp, http.StatusForbidden)
@@ -3947,7 +3947,7 @@ func TestImportAndBatchPool(t *testing.T) {
 	importURL := fmt.Sprintf("%s/projects/%d/import", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
-	// 普通成员导入 403
+	// 项目成员导入 403
 	badReq := api.ImportRequest{Items: []api.ImportItem{{Title: sp("越权 O")}}}
 	resp = doJSON(t, carol, http.MethodPost, importURL, badReq)
 	wantStatus(t, resp, http.StatusForbidden)
@@ -4136,7 +4136,7 @@ func TestUnifiedPermissionsAcrossIdentities(t *testing.T) {
 
 	sp := func(s string) *string { return &s }
 
-	// alice 管理员/项目负责人；bob KR 负责人（普通成员）；carol 普通成员；dave 只读成员
+	// alice 管理员/项目负责人；bob KR 负责人（项目成员）；carol 项目成员；dave 访客
 	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "权限验收", OwnerId: aliceUser.ID})
 	wantStatus(t, resp, http.StatusCreated)
 	created := decodeBody[api.Project](t, resp)
@@ -4214,10 +4214,10 @@ func TestUnifiedPermissionsAcrossIdentities(t *testing.T) {
 		t.Fatalf("管理员不能替代 KR 负责人审批: %+v", ft)
 	}
 	if ft := flagsOf(dave); ft.CanDecidePoolReview || ft.CanProposeFieldChange {
-		t.Fatalf("只读成员不应有业务动作标志: %+v", ft)
+		t.Fatalf("访客不应有业务动作标志: %+v", ft)
 	}
 
-	// 只读成员：不能建任务/建 OKR，但可讨论、可查看下载（§3.4）
+	// 访客：不能建任务/建 OKR，但可讨论、可查看下载（§3.4）
 	resp = doJSON(t, dave, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		SubmitForReview: false,
 		Items: []api.CreateTaskItem{
@@ -4232,7 +4232,7 @@ func TestUnifiedPermissionsAcrossIdentities(t *testing.T) {
 	resp.Body.Close()
 	taskID := ref[0].Id
 	resp = doJSON(t, dave, http.MethodPost, fmt.Sprintf("%s/%d/discussions", tasksURL, taskID),
-		api.CreateDiscussionRequest{Content: "只读成员也可以提意见"})
+		api.CreateDiscussionRequest{Content: "访客也可以提意见"})
 	wantStatus(t, resp, http.StatusCreated)
 	resp.Body.Close()
 
@@ -4251,10 +4251,10 @@ func TestUnifiedPermissionsAcrossIdentities(t *testing.T) {
 		t.Fatalf("提交人的分组异常: 审批 %d 等待 %d", len(w.Approvals), len(w.Waiting))
 	}
 	if w := getWork(dave); len(w.Pending)+len(w.Approvals)+len(w.Waiting)+len(w.Blockers) != 0 {
-		t.Fatalf("只读成员不应有行动事项: %+v", w)
+		t.Fatalf("访客不应有行动事项: %+v", w)
 	}
 
-	// AC-22：外部传递不产生外部账号——对接人必须是项目内非只读成员；
+	// AC-22：外部传递不产生外部账号——对接人必须是项目内非访客；
 	// 外部材料由内部协调人（成员）代为接收与提交。
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, taskID),
 		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
@@ -4964,7 +4964,7 @@ func TestOkrEditHandoverAndMemberRemoval(t *testing.T) {
 		resp.Body.Close()
 	}
 
-	// dave 降为只读，后面用来验证「只读成员不能被任命为负责人」（S2）
+	// dave 降为只读，后面用来验证「访客不能被任命为负责人」（S2）
 	resp = doJSON(t, alice, http.MethodPut, fmt.Sprintf("%s/%d", membersURL, daveUser.ID),
 		api.UpdateProjectMemberRoleRequest{Role: api.Viewer})
 	wantStatus(t, resp, http.StatusOK)
@@ -4979,7 +4979,7 @@ func TestOkrEditHandoverAndMemberRemoval(t *testing.T) {
 	okr := decodeBody[[]api.Objective](t, resp)
 	objectiveID, kr1 := okr[0].Id, okr[0].KeyResults[0].Id
 
-	// 只读成员不能被任命为 KR 负责人（创建路径）
+	// 访客不能被任命为 KR 负责人（创建路径）
 	resp = doJSON(t, alice, http.MethodPost, objectivesURL,
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
 			{Title: sp("只读负责人"), KeyResults: &[]api.CreateKeyResultInput{{Description: "不该建成", OwnerId: &daveUser.ID}}},
@@ -5007,7 +5007,7 @@ func TestOkrEditHandoverAndMemberRemoval(t *testing.T) {
 		t.Fatalf("KR 描述未更新: %+v", got)
 	}
 
-	// AC-61：负责人不可置空；只读成员不能接任
+	// AC-61：负责人不可置空；访客不能接任
 	resp = doJSON(t, alice, http.MethodPatch, krURL, map[string]any{"ownerId": nil})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
@@ -5119,7 +5119,7 @@ func TestOkrEditHandoverAndMemberRemoval(t *testing.T) {
 		t.Fatalf("管理员应可编辑 KR: %+v", target.CanEdit)
 	}
 
-	// 空 O 可删（管理员），普通成员不可删
+	// 空 O 可删（管理员），项目成员不可删
 	resp = doJSON(t, alice, http.MethodPost, objectivesURL,
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{{Title: sp("待删除的 O")}}})
 	wantStatus(t, resp, http.StatusCreated)
@@ -5842,10 +5842,10 @@ func TestProjectSettingsThresholds(t *testing.T) {
 	resp = doJSON(t, bob, http.MethodGet, settingsURL, nil)
 	wantStatus(t, resp, http.StatusOK)
 	if g := decodeBody[api.ProjectSettings](t, resp); g.CanEdit {
-		t.Fatalf("普通成员不应可改规则设置: %+v", g)
+		t.Fatalf("项目成员不应可改规则设置: %+v", g)
 	}
 
-	// 普通成员改不动；取值越界 422
+	// 项目成员改不动；取值越界 422
 	resp = doJSON(t, bob, http.MethodPut, settingsURL, api.UpdateProjectSettingsRequest{
 		ApprovalTimeoutDays: 1, DueSoonDays: 3, RemindDailyLimit: 1,
 	})
@@ -6054,7 +6054,7 @@ func TestTaskParticipants(t *testing.T) {
 		t.Fatalf("参与人不应获得任何写权限: %+v", seen)
 	}
 	if seen.CanManageParticipants != nil && *seen.CanManageParticipants {
-		t.Fatalf("只读成员即使是参与人也不能改名单: %+v", seen)
+		t.Fatalf("访客即使是参与人也不能改名单: %+v", seen)
 	}
 	resp = doJSON(t, dave, http.MethodGet, fmt.Sprintf("%s/projects/%d/my-work", base, created.Id), nil)
 	wantStatus(t, resp, http.StatusOK)
@@ -6168,7 +6168,7 @@ func TestResultUpdateFlow(t *testing.T) {
 	if done.ResultUpdate == nil || *done.ResultUpdate != api.ResultUpdateStateNone {
 		t.Fatalf("尚未发起成果更新: %+v", done.ResultUpdate)
 	}
-	// 派生入口按身份区分：任务负责人可发起，KR 负责人（普通成员）不可代发起
+	// 派生入口按身份区分：任务负责人可发起，KR 负责人（项目成员）不可代发起
 	resp = doJSON(t, carol, http.MethodGet, detailURL, nil)
 	wantStatus(t, resp, http.StatusOK)
 	detail = decodeBody[api.TaskDetail](t, resp)

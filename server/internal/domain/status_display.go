@@ -168,8 +168,8 @@ func ProjectStatusLabel(status string) string {
 
 var memberRoleLabels = map[string]string{
 	RoleAdmin:  "项目管理员",
-	RoleMember: "普通成员",
-	RoleViewer: "只读成员",
+	RoleMember: "项目成员",
+	RoleViewer: "访客",
 }
 
 // MemberRoleLabel 成员角色显示文案。

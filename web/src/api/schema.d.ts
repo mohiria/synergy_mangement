@@ -1326,7 +1326,7 @@ export interface components {
          */
         ProjectStatus: "not_started" | "in_progress" | "completed" | "archived";
         /**
-         * @description 成员角色（项目管理员／普通成员／只读成员），见词汇表「成员角色」
+         * @description 成员角色（项目管理员／项目成员／访客），见词汇表「成员角色」
          * @enum {string}
          */
         MemberRole: "admin" | "member" | "viewer";

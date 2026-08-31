@@ -28,7 +28,7 @@ func TestStructureChangeRoute(t *testing.T) {
 		{"已入池负责人进审批", Actor{Role: RoleMember}, 5, facts(TaskInProgress), false, FieldChangePending, nil},
 		{"未开始也进审批", Actor{Role: RoleMember}, 5, facts(TaskNotStarted), false, FieldChangePending, nil},
 		{"项目管理员进审批", Actor{Role: RoleAdmin}, 9, facts(TaskInProgress), false, FieldChangePending, nil},
-		{"只读成员禁止", Actor{Role: RoleViewer}, 9, facts(TaskInProgress), false, 0, ErrChangeForbidden},
+		{"访客禁止", Actor{Role: RoleViewer}, 9, facts(TaskInProgress), false, 0, ErrChangeForbidden},
 		{"已有待审批单互斥", Actor{Role: RoleMember}, 5, facts(TaskInProgress), true, 0, ErrChangePendingExists},
 		{"待入池审批期间不可改", Actor{Role: RoleMember}, 5, facts(TaskPendingPoolReview), false, 0, ErrChangeNotAllowed},
 		{"终审中不可改", Actor{Role: RoleMember}, 5, facts(TaskPendingFinalReview), false, 0, ErrChangeNotAllowed},

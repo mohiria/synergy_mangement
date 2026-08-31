@@ -26,7 +26,7 @@ func TestValidateKeyFieldChanges(t *testing.T) {
 		{"草稿完善可不填原因", KeyFieldChanges{Name: sptr("新名")}, "", false, nil},
 		{"新名称为空", KeyFieldChanges{Name: sptr("   ")}, "x", true, ErrTaskNameEmpty},
 		{"新负责人非成员", KeyFieldChanges{OwnerID: i64(99)}, "x", true, ErrTaskOwnerNotEligible},
-		{"新负责人是只读成员", KeyFieldChanges{OwnerID: i64(8)}, "x", true, ErrTaskOwnerNotEligible},
+		{"新负责人是访客", KeyFieldChanges{OwnerID: i64(8)}, "x", true, ErrTaskOwnerNotEligible},
 		{"新截止早于开始", KeyFieldChanges{EndDate: day("2026-08-20")}, "x", true, ErrTaskPeriodInverted},
 		{"新截止合法", KeyFieldChanges{EndDate: day("2026-09-15")}, "x", true, nil},
 	}

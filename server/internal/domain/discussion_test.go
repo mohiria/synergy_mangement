@@ -14,8 +14,8 @@ func TestCanDiscuss(t *testing.T) {
 		want  bool
 	}{
 		{"管理员可讨论", Actor{Role: RoleAdmin}, true},
-		{"普通成员可讨论", Actor{Role: RoleMember}, true},
-		{"只读成员可讨论", Actor{Role: RoleViewer}, true},
+		{"项目成员可讨论", Actor{Role: RoleMember}, true},
+		{"访客可讨论", Actor{Role: RoleViewer}, true},
 		{"项目负责人非成员可讨论", Actor{IsOwner: true}, true},
 		{"非成员不可讨论", Actor{}, false},
 	}

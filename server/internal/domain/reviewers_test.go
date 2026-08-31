@@ -16,7 +16,7 @@ func TestValidateReviewers(t *testing.T) {
 		t.Fatalf("空配置（不设中间审核）应合法: %v", err)
 	}
 	if err := ValidateReviewers([]int64{5}, roleOf); !errors.Is(err, ErrReviewerNotEligible) {
-		t.Fatalf("只读成员应被拒: %v", err)
+		t.Fatalf("访客应被拒: %v", err)
 	}
 	if err := ValidateReviewers([]int64{99}, roleOf); !errors.Is(err, ErrReviewerNotEligible) {
 		t.Fatalf("非成员应被拒: %v", err)

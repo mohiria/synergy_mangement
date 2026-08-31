@@ -72,7 +72,7 @@ func TestCanRemind(t *testing.T) {
 		t.Fatal("无关成员不应可提醒")
 	}
 	if CanRemind(Actor{Role: RoleViewer}, 5, target) {
-		t.Fatal("只读成员不应可提醒")
+		t.Fatal("访客不应可提醒")
 	}
 }
 

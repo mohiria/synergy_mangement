@@ -26,7 +26,7 @@ func CanEditObjective(a Actor) bool {
 }
 
 // CanEditKeyResult 判定能否编辑 KR（AC-65、§7.2）：项目管理员，或本 KR 的负责人。
-// 只读成员即便还挂着负责人身份也不行（S2：职责以非只读成员身份为前置）。
+// 访客即便还挂着负责人身份也不行（S2：职责以非访客身份为前置）。
 func CanEditKeyResult(a Actor, userID int64, krOwnerID *int64) bool {
 	if !CanWriteProject(a) {
 		return false

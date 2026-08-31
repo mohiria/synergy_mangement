@@ -76,7 +76,7 @@ func TestCanManageTaskFiles(t *testing.T) {
 		{"创建人可管理", Actor{Role: RoleMember}, 3, facts, true},
 		{"管理员可管理", Actor{Role: RoleAdmin}, 9, facts, true},
 		{"无关成员不可管理", Actor{Role: RoleMember}, 9, facts, false},
-		{"只读成员不可管理", Actor{Role: RoleViewer}, 5, facts, false},
+		{"访客不可管理", Actor{Role: RoleViewer}, 5, facts, false},
 		{"草稿可管理", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskDraft, OwnerID: 5}, true},
 		{"已完成仍可补录", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCompleted, OwnerID: 5}, true},
 		{"已取消不可管理", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCancelled, OwnerID: 5}, false},

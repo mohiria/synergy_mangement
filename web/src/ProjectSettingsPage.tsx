@@ -56,8 +56,8 @@ function toBasicDraft(p: Project): BasicDraft {
 // 已有成员的角色显示一律取后端的 roleLabel（F1）。
 const ROLE_LABEL: Record<MemberRole, string> = {
   admin: "项目管理员",
-  member: "普通成员",
-  viewer: "只读成员",
+  member: "项目成员",
+  viewer: "访客",
 };
 
 const ROLE_ORDER: MemberRole[] = ["admin", "member", "viewer"];
@@ -70,7 +70,7 @@ const RESPONSIBILITY_NOTES: [string, string][] = [
   ["总推进人", "项目录入、维护、协调与报告"],
   ["KR 负责人", "入池、关键字段变更和完成终审"],
   ["任务负责人／参与人", "执行、提交成果和处理输入"],
-  ["只读成员", "查看完整上下文，不可修改"],
+  ["访客", "查看完整上下文，不可修改"],
 ];
 
 // 规则设置三项（主 PRD §7.9、我的工作 PRD §8.8；AC-60）：均有默认值，仅项目管理员可改。
@@ -322,7 +322,7 @@ export default function ProjectSettingsPage({
             <div>
               <h1>项目设置</h1>
               <p>
-                配置同一项目中的职责与操作权限；只读成员仍可查看完整上下文。
+                配置同一项目中的职责与操作权限；访客仍可查看完整上下文。
                 {!canManage && "（你没有成员管理权限，以下为只读展示）"}
               </p>
             </div>

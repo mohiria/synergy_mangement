@@ -24,7 +24,7 @@ func TestValidateNewTask(t *testing.T) {
 		{"名称为空", func(n *NewTask) { n.Name = "   " }, ErrTaskNameEmpty},
 		{"名称超长", func(n *NewTask) { n.Name = string(make([]rune, 0)) + repeat("长", 201) }, ErrTaskNameTooLong},
 		{"负责人不是项目成员", func(n *NewTask) { n.OwnerID = 99 }, ErrTaskOwnerNotEligible},
-		{"负责人是只读成员", func(n *NewTask) { n.OwnerID = 8 }, ErrTaskOwnerNotEligible},
+		{"负责人是访客", func(n *NewTask) { n.OwnerID = 8 }, ErrTaskOwnerNotEligible},
 		{"截止早于开始", func(n *NewTask) { n.End = date("2026-09-01") }, ErrTaskPeriodInverted},
 	}
 	for _, tc := range cases {
@@ -46,7 +46,7 @@ func repeat(s string, n int) string {
 	return out
 }
 
-// 权限矩阵 §3.4：创建任务——管理员／负责人／普通成员可建，只读成员与非成员不可。
+// 权限矩阵 §3.4：创建任务——管理员／负责人／项目成员可建，访客与非成员不可。
 func TestCanCreateTask(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -55,8 +55,8 @@ func TestCanCreateTask(t *testing.T) {
 	}{
 		{"项目管理员", Actor{Role: RoleAdmin}, true},
 		{"项目负责人非成员", Actor{IsOwner: true}, true},
-		{"普通成员", Actor{Role: RoleMember}, true},
-		{"只读成员", Actor{Role: RoleViewer}, false},
+		{"项目成员", Actor{Role: RoleMember}, true},
+		{"访客", Actor{Role: RoleViewer}, false},
 		{"非成员", Actor{}, false},
 	}
 	for _, tc := range cases {
@@ -78,7 +78,7 @@ func TestTaskCreationOutcome(t *testing.T) {
 		wantExempt bool
 	}{
 		{"KR 负责人本人创建免审", 7, i64(7), TaskNotStarted, true},
-		{"普通成员创建为草稿", 3, i64(7), TaskDraft, false},
+		{"项目成员创建为草稿", 3, i64(7), TaskDraft, false},
 		{"KR 未指定负责人时创建为草稿", 7, nil, TaskDraft, false},
 	}
 	for _, tc := range cases {

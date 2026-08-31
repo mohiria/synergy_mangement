@@ -7,7 +7,7 @@ import (
 
 // S2／§3.4：职责只在「当前仍是非只读项目成员」时才生效。
 // 被移出项目（Role 为空）或被降为只读的人，即便还挂着任务负责人、KR 负责人、
-// 中间审核人的身份，也不得再编辑或审批；确认接收是只读成员唯一的写操作（AC-62）。
+// 中间审核人的身份，也不得再编辑或审批；确认接收是访客唯一的写操作（AC-62）。
 func TestWriteActionsRequireNonViewerMembership(t *testing.T) {
 	me := int64(5)
 	facts := TaskFacts{Status: TaskInProgress, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
@@ -18,7 +18,7 @@ func TestWriteActionsRequireNonViewerMembership(t *testing.T) {
 	intermediate := TaskFacts{Status: TaskPendingIntermediateReview, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
 
 	for _, actor := range []Actor{{Role: RoleViewer}, {Role: ""}} {
-		name := "只读成员"
+		name := "访客"
 		if actor.Role == "" {
 			name = "已被移出项目"
 		}
@@ -81,24 +81,24 @@ func TestWriteActionsRequireNonViewerMembership(t *testing.T) {
 				func(int64) bool { return true }, true, ""); !errors.Is(err, ErrNotReviewer) {
 				t.Fatalf("不应可中间审核: %v", err)
 			}
-			// AC-62：确认接收是只读成员唯一保留的写操作，不受本前置约束。
+			// AC-62：确认接收是访客唯一保留的写操作，不受本前置约束。
 			if err := CanConfirmReceipt(me, ReceiptFact{ID: 1, TaskID: 1, UserID: me}); err != nil {
 				t.Fatalf("被指定为接收方时应可确认接收: %v", err)
 			}
 		})
 	}
 
-	// 反向对照：同样的职责在普通成员身上照常生效。
+	// 反向对照：同样的职责在项目成员身上照常生效。
 	member := Actor{Role: RoleMember}
 	if !CanStartTask(member, me, notStarted) || !CanUpdateProgress(member, me, facts) {
-		t.Fatal("普通成员的任务负责人职责应照常生效")
+		t.Fatal("项目成员的任务负责人职责应照常生效")
 	}
 	if _, err := DecidePoolReview(member, poolPending, me, true, ""); err != nil {
-		t.Fatalf("普通成员任 KR 负责人应可审批入池: %v", err)
+		t.Fatalf("项目成员任 KR 负责人应可审批入池: %v", err)
 	}
 }
 
-// S2／§3.4：只读成员不能被任命为任务负责人或 KR 负责人。
+// S2／§3.4：访客不能被任命为任务负责人或 KR 负责人。
 func TestViewerCannotBeAppointedOwner(t *testing.T) {
 	roleOf := func(id int64) string {
 		switch id {
@@ -111,12 +111,12 @@ func TestViewerCannotBeAppointedOwner(t *testing.T) {
 	}
 	base := NewTask{Name: "联调验证", OwnerID: 5, Start: date("2026-09-01"), End: date("2026-09-30")}
 	if err := ValidateNewTask(base, roleOf); err != nil {
-		t.Fatalf("普通成员应可任任务负责人: %v", err)
+		t.Fatalf("项目成员应可任任务负责人: %v", err)
 	}
 	viewerOwned := base
 	viewerOwned.OwnerID = 9
 	if err := ValidateNewTask(viewerOwned, roleOf); !errors.Is(err, ErrTaskOwnerNotEligible) {
-		t.Fatalf("只读成员不应可任任务负责人: %v", err)
+		t.Fatalf("访客不应可任任务负责人: %v", err)
 	}
 	strangerOwned := base
 	strangerOwned.OwnerID = 77
@@ -126,10 +126,10 @@ func TestViewerCannotBeAppointedOwner(t *testing.T) {
 
 	items := []OkrBatchItem{{Title: "提升交付质量", KeyResults: []NewKeyResult{{Description: "上线自动验收", OwnerID: i64(9)}}}}
 	if err := ValidateOkrBatch(items, roleOf); !errors.Is(err, ErrKrOwnerNotEligible) {
-		t.Fatalf("只读成员不应可任 KR 负责人: %v", err)
+		t.Fatalf("访客不应可任 KR 负责人: %v", err)
 	}
 	items[0].KeyResults[0].OwnerID = i64(5)
 	if err := ValidateOkrBatch(items, roleOf); err != nil {
-		t.Fatalf("普通成员应可任 KR 负责人: %v", err)
+		t.Fatalf("项目成员应可任 KR 负责人: %v", err)
 	}
 }

@@ -38,7 +38,7 @@ test.describe("我的工作", () => {
     await expect(card.locator("b")).toHaveText("赵文琪");
     // 权限与职责都是 API 派生字段，这里只断言非空且不是枚举原文。
     const role = await card.locator("b + span").innerText();
-    expect(role).toMatch(/项目管理员|普通成员|只读成员|项目负责人/);
+    expect(role).toMatch(/项目管理员|项目成员|访客|项目负责人/);
     const duties = await card.locator("p").innerText();
     expect(duties).toContain("当前职责");
     expect(duties.replace("当前职责", "").trim().length).toBeGreaterThan(0);

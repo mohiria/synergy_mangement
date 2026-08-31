@@ -12,8 +12,8 @@ func TestValidateMemberRole(t *testing.T) {
 		wantErr error
 	}{
 		{"项目管理员", "admin", nil},
-		{"普通成员", "member", nil},
-		{"只读成员", "viewer", nil},
+		{"项目成员", "member", nil},
+		{"访客", "viewer", nil},
 		{"空角色", "", ErrMemberRoleInvalid},
 		{"未知角色", "superuser", ErrMemberRoleInvalid},
 		{"大小写不匹配", "Admin", ErrMemberRoleInvalid},
@@ -38,9 +38,9 @@ func TestCanManageMembers(t *testing.T) {
 	}{
 		{"项目管理员成员", Actor{Role: RoleAdmin}, true},
 		{"项目负责人（非成员）享有同等权限", Actor{IsOwner: true}, true},
-		{"项目负责人兼只读成员：负责人权限不因成员角色降级", Actor{IsOwner: true, Role: RoleViewer}, true},
-		{"普通成员", Actor{Role: RoleMember}, false},
-		{"只读成员", Actor{Role: RoleViewer}, false},
+		{"项目负责人兼访客：负责人权限不因成员角色降级", Actor{IsOwner: true, Role: RoleViewer}, true},
+		{"项目成员", Actor{Role: RoleMember}, false},
+		{"访客", Actor{Role: RoleViewer}, false},
 		{"非成员且非负责人", Actor{}, false},
 	}
 	for _, tc := range cases {
@@ -60,8 +60,8 @@ func TestCanEditProject(t *testing.T) {
 	}{
 		{"项目管理员成员", Actor{Role: RoleAdmin}, true},
 		{"项目负责人（非成员）", Actor{IsOwner: true}, true},
-		{"普通成员", Actor{Role: RoleMember}, false},
-		{"只读成员", Actor{Role: RoleViewer}, false},
+		{"项目成员", Actor{Role: RoleMember}, false},
+		{"访客", Actor{Role: RoleViewer}, false},
 		{"非成员且非负责人", Actor{}, false},
 	}
 	for _, tc := range cases {
@@ -82,8 +82,8 @@ func TestCanReadProject(t *testing.T) {
 		want  bool
 	}{
 		{"项目管理员成员", Actor{Role: RoleAdmin}, true},
-		{"普通成员", Actor{Role: RoleMember}, true},
-		{"只读成员", Actor{Role: RoleViewer}, true},
+		{"项目成员", Actor{Role: RoleMember}, true},
+		{"访客", Actor{Role: RoleViewer}, true},
 		{"项目负责人（未登记为成员）", Actor{IsOwner: true}, true},
 		{"非成员且非负责人", Actor{}, false},
 		{"角色为未知值时不放行", Actor{Role: "superuser"}, false},

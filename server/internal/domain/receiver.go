@@ -52,7 +52,7 @@ type ReceiptFact struct {
 }
 
 // ValidateReceivers 校验接收方配置：范围合法；指定成员时至少一人且均为项目成员。
-// 接收方只查看、下载与确认接收，不拥有审核权（主 PRD §3.1），因此只读成员也可以是接收方。
+// 接收方只查看、下载与确认接收，不拥有审核权（主 PRD §3.1），因此访客也可以是接收方。
 func ValidateReceivers(scope string, ids []int64, isMember func(int64) bool) error {
 	switch scope {
 	case ReceiverScopeNone, ReceiverScopeAll:

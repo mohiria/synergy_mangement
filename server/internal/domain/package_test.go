@@ -41,7 +41,7 @@ func TestCanCreatePackage(t *testing.T) {
 		t.Fatal("管理员/项目负责人应可创建成果包")
 	}
 	if CanCreatePackage(Actor{Role: RoleMember}) || CanCreatePackage(Actor{Role: RoleViewer}) {
-		t.Fatal("普通/只读成员只可查看下载")
+		t.Fatal("普通/访客只可查看下载")
 	}
 }
 

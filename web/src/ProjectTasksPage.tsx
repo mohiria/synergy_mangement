@@ -112,8 +112,8 @@ const ACTIVITY_PREVIEW = 5;
 // 故按角色分组；团队字段补齐后改为按团队分组即可，组件本身不变。
 const MEMBER_GROUP_LABEL: Record<MemberRole, string> = {
   admin: "项目管理员",
-  member: "普通成员",
-  viewer: "只读成员",
+  member: "项目成员",
+  viewer: "访客",
 };
 const MEMBER_GROUP_ORDER: MemberRole[] = ["admin", "member", "viewer"];
 
@@ -3329,7 +3329,7 @@ function ParticipantsModal({
   }, [task?.id]);
 
   if (!task) return null;
-  // 负责人已单列在基础信息里，不再作为可选参与人；只读成员可以是参与人——参与人不带写权限。
+  // 负责人已单列在基础信息里，不再作为可选参与人；访客可以是参与人——参与人不带写权限。
   const options = members
     .filter((m) => m.userId !== task.ownerId)
     .map((m) => ({ value: m.userId, label: `${m.displayName}（${m.username}）` }));
@@ -3414,7 +3414,7 @@ function ReceiversModal({
   }, [task?.id]);
 
   if (!task) return null;
-  // 接收方只查看、下载与确认接收，不拥有审核权，因此只读成员也可以是接收方。
+  // 接收方只查看、下载与确认接收，不拥有审核权，因此访客也可以是接收方。
   const options = members.map((m) => ({
     value: m.userId,
     label: `${m.displayName}（${m.username}）`,

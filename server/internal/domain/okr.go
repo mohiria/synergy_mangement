@@ -40,7 +40,7 @@ type OkrBatchItem struct {
 	KeyResults  []NewKeyResult
 }
 
-// eligibleOwner 报告某个项目角色能否承担负责人职责：只读成员与非成员不可（§3.4、S2）。
+// eligibleOwner 报告某个项目角色能否承担负责人职责：访客与非成员不可（§3.4、S2）。
 func eligibleOwner(role string) bool {
 	return role == RoleAdmin || role == RoleMember
 }

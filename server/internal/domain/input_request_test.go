@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// AC-29／§9.1：指定项目成员输入——对接人须为非只读成员，所需内容与期望时间必填。
+// AC-29／§9.1：指定项目成员输入——对接人须为非访客，所需内容与期望时间必填。
 func TestValidateMemberInput(t *testing.T) {
 	roles := map[int64]string{3: RoleMember, 4: RoleAdmin, 5: RoleViewer}
 	roleOf := func(id int64) string { return roles[id] }
@@ -17,7 +17,7 @@ func TestValidateMemberInput(t *testing.T) {
 	}{
 		{"合法请求", func(*MemberInput) {}, nil},
 		{"名称为空", func(m *MemberInput) { m.Name = " " }, ErrEdgeNameEmpty},
-		{"对接人只读成员", func(m *MemberInput) { m.ProviderID = 5 }, ErrProviderNotEligible},
+		{"对接人访客", func(m *MemberInput) { m.ProviderID = 5 }, ErrProviderNotEligible},
 		{"对接人非成员", func(m *MemberInput) { m.ProviderID = 99 }, ErrProviderNotEligible},
 		{"所需内容必填", func(m *MemberInput) { m.ContentNote = "  " }, ErrContentNoteRequired},
 		{"期望时间必填", func(m *MemberInput) { m.HasExpectedDate = false }, ErrExpectedDateRequired},
@@ -93,7 +93,7 @@ func TestValidateMemberInputs(t *testing.T) {
 		{"单对接人合法", func(m *MemberInputs) { m.ProviderIDs = []int64{3} }, nil},
 		{"未选对接人", func(m *MemberInputs) { m.ProviderIDs = nil }, ErrProvidersEmpty},
 		{"对接人重复", func(m *MemberInputs) { m.ProviderIDs = []int64{3, 4, 3} }, ErrProviderDuplicated},
-		{"含只读成员", func(m *MemberInputs) { m.ProviderIDs = []int64{3, 5} }, ErrProviderNotEligible},
+		{"含访客", func(m *MemberInputs) { m.ProviderIDs = []int64{3, 5} }, ErrProviderNotEligible},
 		{"含非成员", func(m *MemberInputs) { m.ProviderIDs = []int64{3, 99} }, ErrProviderNotEligible},
 		{"所需内容必填", func(m *MemberInputs) { m.ContentNote = " " }, ErrContentNoteRequired},
 		{"期望时间必填", func(m *MemberInputs) { m.HasExpectedDate = false }, ErrExpectedDateRequired},

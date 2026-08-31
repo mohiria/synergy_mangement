@@ -22,7 +22,7 @@ func TestStartResultUpdateRule(t *testing.T) {
 		{"管理员可代发起", Actor{Role: RoleAdmin}, 9, completed, false, nil},
 		{"项目负责人可代发起", Actor{IsOwner: true}, 9, completed, false, nil},
 		{"无关成员不可发起", Actor{Role: RoleMember}, 9, completed, false, ErrResultUpdateForbidden},
-		{"只读成员不可发起", Actor{Role: RoleViewer}, 5, completed, false, ErrResultUpdateForbidden},
+		{"访客不可发起", Actor{Role: RoleViewer}, 5, completed, false, ErrResultUpdateForbidden},
 		{"创建人不是负责人也不可发起", Actor{Role: RoleMember}, 3, completed, false, ErrResultUpdateForbidden},
 		{"进行中任务不可发起", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskInProgress, OwnerID: 5, KrOwnerID: &krOwner}, false, ErrResultUpdateNotCompleted},
 		{"已取消任务不可发起", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCancelled, OwnerID: 5, KrOwnerID: &krOwner}, false, ErrResultUpdateNotCompleted},

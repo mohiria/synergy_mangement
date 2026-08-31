@@ -17,8 +17,8 @@ func TestCanInviteForKr(t *testing.T) {
 		{"KR 负责人可邀请", Actor{Role: RoleMember}, 7, i64(7), true},
 		{"项目管理员可邀请", Actor{Role: RoleAdmin}, 9, i64(7), true},
 		{"项目负责人可邀请", Actor{IsOwner: true}, 9, i64(7), true},
-		{"普通成员不可邀请", Actor{Role: RoleMember}, 9, i64(7), false},
-		{"只读成员不可邀请", Actor{Role: RoleViewer}, 9, i64(7), false},
+		{"项目成员不可邀请", Actor{Role: RoleMember}, 9, i64(7), false},
+		{"访客不可邀请", Actor{Role: RoleViewer}, 9, i64(7), false},
 		{"KR 无负责人时管理员仍可邀请", Actor{Role: RoleAdmin}, 9, nil, true},
 	}
 	for _, tc := range cases {
@@ -42,7 +42,7 @@ func TestValidateInvitees(t *testing.T) {
 	}{
 		{"合法多人邀请", 7, []int64{3, 4}, nil},
 		{"邀请自己", 3, []int64{3}, ErrInviteSelf},
-		{"邀请只读成员", 7, []int64{5}, ErrInviteeNotEligible},
+		{"邀请访客", 7, []int64{5}, ErrInviteeNotEligible},
 		{"邀请非成员", 7, []int64{99}, ErrInviteeNotEligible},
 		{"空列表", 7, nil, ErrInviteesEmpty},
 	}

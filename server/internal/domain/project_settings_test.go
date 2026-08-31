@@ -71,8 +71,8 @@ func TestCanEditProjectSettings(t *testing.T) {
 	}{
 		{"项目管理员可改", Actor{Role: RoleAdmin}, true},
 		{"项目负责人可改", Actor{IsOwner: true, Role: RoleMember}, true},
-		{"普通成员不可改", Actor{Role: RoleMember}, false},
-		{"只读成员不可改", Actor{Role: RoleViewer}, false},
+		{"项目成员不可改", Actor{Role: RoleMember}, false},
+		{"访客不可改", Actor{Role: RoleViewer}, false},
 		{"非成员不可改", Actor{}, false},
 	}
 	for _, tc := range cases {

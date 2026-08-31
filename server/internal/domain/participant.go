@@ -15,8 +15,8 @@ var (
 )
 
 // ValidateParticipants 校验参与人名单：须为项目成员，且不含任务负责人本人。
-// 空名单合法，表示不配置或清空。只读成员可以是参与人——参与人不带任何写权限，
-// 与「只读成员可确认接收」同理（Q4／Q8 裁决）。
+// 空名单合法，表示不配置或清空。访客可以是参与人——参与人不带任何写权限，
+// 与「访客可确认接收」同理（Q4／Q8 裁决）。
 func ValidateParticipants(ownerID int64, userIDs []int64, isMember func(int64) bool) error {
 	for _, id := range userIDs {
 		if id == ownerID {

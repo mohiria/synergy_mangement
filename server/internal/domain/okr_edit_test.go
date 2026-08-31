@@ -17,7 +17,7 @@ func TestOkrEditPermissions(t *testing.T) {
 		t.Fatal("项目管理员与项目负责人应可编辑 O")
 	}
 	if CanEditObjective(member) || CanEditObjective(viewer) {
-		t.Fatal("普通成员与只读成员不应可编辑 O")
+		t.Fatal("项目成员与访客不应可编辑 O")
 	}
 	if !CanEditKeyResult(admin, 9, &krOwner) {
 		t.Fatal("项目管理员应可编辑任意 KR")
@@ -26,10 +26,10 @@ func TestOkrEditPermissions(t *testing.T) {
 		t.Fatal("KR 负责人应可编辑本人负责的 KR")
 	}
 	if CanEditKeyResult(member, 9, &krOwner) {
-		t.Fatal("非本人负责的 KR 普通成员不应可编辑")
+		t.Fatal("非本人负责的 KR 项目成员不应可编辑")
 	}
 	if CanEditKeyResult(viewer, krOwner, &krOwner) {
-		t.Fatal("只读成员即便挂着 KR 负责人也不应可编辑")
+		t.Fatal("访客即便挂着 KR 负责人也不应可编辑")
 	}
 }
 
@@ -45,7 +45,7 @@ func TestOkrDeleteRules(t *testing.T) {
 		t.Fatal("O 下有 KR 时不应可删")
 	}
 	if CanDeleteObjective(member, 0) {
-		t.Fatal("普通成员不应可删 O")
+		t.Fatal("项目成员不应可删 O")
 	}
 	if !CanDeleteKeyResult(admin, 0) {
 		t.Fatal("管理员应可删除没有任务的 KR")
@@ -54,7 +54,7 @@ func TestOkrDeleteRules(t *testing.T) {
 		t.Fatal("KR 下有任务（含已完成、已取消）时不应可删")
 	}
 	if CanDeleteKeyResult(member, 0) {
-		t.Fatal("普通成员不应可删 KR")
+		t.Fatal("项目成员不应可删 KR")
 	}
 	if err := DeleteObjectiveRule(admin, 2); !errors.Is(err, ErrObjectiveHasKeyResults) {
 		t.Fatalf("O 下有 KR 应给出可读原因: %v", err)
@@ -88,11 +88,11 @@ func TestValidateKeyResultUpdate(t *testing.T) {
 	}
 	newOwner := int64(7)
 	if err := ValidateKeyResultUpdate(KeyResultUpdate{OwnerID: &newOwner}, roleOf); err != nil {
-		t.Fatalf("换成普通成员应通过: %v", err)
+		t.Fatalf("换成项目成员应通过: %v", err)
 	}
 	viewer := int64(9)
 	if err := ValidateKeyResultUpdate(KeyResultUpdate{OwnerID: &viewer}, roleOf); !errors.Is(err, ErrKrOwnerNotEligible) {
-		t.Fatalf("不能把只读成员任命为 KR 负责人: %v", err)
+		t.Fatalf("不能把访客任命为 KR 负责人: %v", err)
 	}
 	if err := ValidateKeyResultUpdate(KeyResultUpdate{ClearOwner: true}, roleOf); !errors.Is(err, ErrKrOwnerRequired) {
 		t.Fatalf("KR 负责人不可置空: %v", err)

@@ -164,7 +164,7 @@ func TestEnumLabels(t *testing.T) {
 		{ProjectStatusLabel("archived"), "已归档"},
 		{ProjectStatusLabel("unknown"), "未开始"},
 		{MemberRoleLabel(RoleAdmin), "项目管理员"},
-		{MemberRoleLabel(RoleViewer), "只读成员"},
+		{MemberRoleLabel(RoleViewer), "访客"},
 	}
 	for _, tc := range cases {
 		if tc.got != tc.want {

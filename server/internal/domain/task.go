@@ -77,7 +77,7 @@ func ValidateNewTask(n NewTask, roleOf func(int64) string) error {
 	return nil
 }
 
-// CanCreateTask 判定能否创建任务：管理员、项目负责人与普通成员可建，只读成员不可（PRD §3.4）。
+// CanCreateTask 判定能否创建任务：管理员、项目负责人与项目成员可建，访客不可（PRD §3.4）。
 func CanCreateTask(a Actor) bool {
 	return CanWriteProject(a)
 }

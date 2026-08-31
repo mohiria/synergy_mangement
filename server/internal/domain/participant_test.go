@@ -22,7 +22,7 @@ func TestValidateParticipants(t *testing.T) {
 		{"不配置参与人", nil, nil},
 		{"空名单等于清空", []int64{}, nil},
 		{"若干项目成员", []int64{1, 3}, nil},
-		{"只读成员也可以是参与人", []int64{2}, nil},
+		{"访客也可以是参与人", []int64{2}, nil},
 		{"参与人不是项目成员", []int64{1, 9}, ErrParticipantNotMember},
 		{"负责人不再列为参与人", []int64{1, ownerID}, ErrParticipantIsOwner},
 	}
@@ -61,7 +61,7 @@ func TestCanManageParticipants(t *testing.T) {
 		{"创建人可配置", Actor{Role: RoleMember}, 3, facts, true},
 		{"可编辑项目者可配置", Actor{Role: RoleAdmin}, 9, facts, true},
 		{"无关成员不可配置", Actor{Role: RoleMember}, 9, facts, false},
-		{"只读成员不可配置", Actor{Role: RoleViewer}, 5, facts, false},
+		{"访客不可配置", Actor{Role: RoleViewer}, 5, facts, false},
 		{"已完成任务不可配置", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCompleted, CreatorID: 3, OwnerID: 5}, false},
 		{"已取消任务不可配置", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCancelled, CreatorID: 3, OwnerID: 5}, false},
 		{"审核中仍可配置（不属关键字段，不影响审批）", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskPendingFinalReview, CreatorID: 3, OwnerID: 5}, true},

@@ -314,8 +314,8 @@ func TestWorkIdentityRoleLabel(t *testing.T) {
 		want    string
 	}{
 		{RoleAdmin, false, "项目管理员"},
-		{RoleMember, false, "普通成员"},
-		{RoleViewer, true, "只读成员"},
+		{RoleMember, false, "项目成员"},
+		{RoleViewer, true, "访客"},
 		{"", true, "项目负责人"},
 		{"", false, "非项目成员"},
 	}

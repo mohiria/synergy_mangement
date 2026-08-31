@@ -32,7 +32,7 @@ func TestCancelRoute(t *testing.T) {
 		{"未开始也可发起", Actor{Role: RoleMember}, 5, facts(TaskNotStarted), false, FieldChangePending, nil},
 		{"草稿也可发起", Actor{Role: RoleMember}, 5, facts(TaskDraft), false, FieldChangePending, nil},
 		{"创建人不是发起人", Actor{Role: RoleMember}, 3, facts(TaskInProgress), false, 0, ErrCancelForbidden},
-		{"只读成员不可发起", Actor{Role: RoleViewer}, 9, facts(TaskInProgress), false, 0, ErrCancelForbidden},
+		{"访客不可发起", Actor{Role: RoleViewer}, 9, facts(TaskInProgress), false, 0, ErrCancelForbidden},
 		{"已完成不可取消", Actor{Role: RoleMember}, 5, facts(TaskCompleted), false, 0, ErrCannotCancel},
 		{"已取消不可再取消", Actor{Role: RoleMember}, 5, facts(TaskCancelled), false, 0, ErrCannotCancel},
 		{"入池审批中互斥", Actor{Role: RoleMember}, 5, facts(TaskPendingPoolReview), false, 0, ErrCancelPendingExists},
