@@ -276,7 +276,7 @@ export default function ArtifactsPage({
         params: { path: { projectId, fileId } },
       },
     );
-    if (res.data) window.open(res.data.url, "_blank");
+    if (res.data) window.location.assign(res.data.url);
     else message.error(res.error?.message ?? "获取下载地址失败");
   };
 
@@ -285,7 +285,7 @@ export default function ArtifactsPage({
     const res = await client.GET("/projects/{projectId}/task-files/{fileId}/download-url", {
       params: { path: { projectId, fileId } },
     });
-    if (res.data) window.open(res.data.url, "_blank");
+    if (res.data) window.location.assign(res.data.url);
     else message.error(res.error?.message ?? "获取下载地址失败");
   };
 

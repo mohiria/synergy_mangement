@@ -221,7 +221,7 @@ export default function TaskDrawerHost({
     const res = await client.GET("/projects/{projectId}/input-requests/{requestId}/file-url", {
       params: { path: { projectId, requestId } },
     });
-    if (res.data) window.open(res.data.url, "_blank");
+    if (res.data) window.location.assign(res.data.url);
   };
 
   const removeEdge = async (edgeId: number) => {

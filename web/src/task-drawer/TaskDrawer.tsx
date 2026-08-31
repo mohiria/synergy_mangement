@@ -164,7 +164,9 @@ export default function TaskDrawer({
       params: { path: { projectId, fileId } },
     });
     if (res.data) {
-      window.open(res.data.url, "_blank");
+      // #117：预签名地址一律带 attachment，同页跳转即触发下载；
+      // 不用 window.open——await 之后再开新窗会被部分浏览器当弹窗拦截。
+      window.location.assign(res.data.url);
     } else {
       message.error(res.error?.message ?? "获取下载地址失败");
     }
@@ -229,7 +231,7 @@ export default function TaskDrawer({
     const res = await client.GET("/projects/{projectId}/task-files/{fileId}/download-url", {
       params: { path: { projectId, fileId } },
     });
-    if (res.data) window.open(res.data.url, "_blank");
+    if (res.data) window.location.assign(res.data.url);
     else message.error(res.error?.message ?? "获取下载地址失败");
   };
 
