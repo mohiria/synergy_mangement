@@ -199,10 +199,13 @@ export default function ProjectTasksPage({
   const focusSource = searchParams.get("from") ?? "";
   useEffect(() => {
     if (focusTaskId && !loading) {
+      // 直达是一次新的进入：清掉返回栈，Tab 按链接指定落位（#101）。
+      setDrawerStack([]);
       setDrawerTaskId(Number(focusTaskId));
+      setDrawerTab(focusTab);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusTaskId, loading]);
+  }, [focusTaskId, focusTab, loading]);
 
   // O／KR／任务编号都是持久字段（AC-64），前端只取不算。
   const krList = useMemo(() => objectives.flatMap((o) => o.keyResults.map((k) => ({ ...k }))), [objectives]);
@@ -253,6 +256,9 @@ export default function ProjectTasksPage({
   const [rejectTask, setRejectTask] = useState<Task | null>(null);
   const [rejectOpinion, setRejectOpinion] = useState("");
   const [drawerTaskId, setDrawerTaskId] = useState<number | null>(null);
+  const [drawerTab, setDrawerTab] = useState("overview");
+  // 从输入源或协作关系点进来源任务时压栈；关闭时逐级返回上一个任务详情并回到当时的 Tab（#101）。
+  const [drawerStack, setDrawerStack] = useState<{ taskId: number; tab: string }[]>([]);
   const [editTask, setEditTask] = useState<Task | null>(null);
   const [fcReject, setFcReject] = useState<{ task: Task; changeId: number } | null>(null);
   const [fcRejectOpinion, setFcRejectOpinion] = useState("");
@@ -876,10 +882,20 @@ export default function ProjectTasksPage({
         taskCode={taskCode}
         okrCode={okrCode}
         members={members}
-        initialTab={drawerTaskId === Number(focusTaskId) ? focusTab : "overview"}
+        activeTab={drawerTab}
+        onTabChange={setDrawerTab}
+        canGoBack={drawerStack.length > 0}
         source={drawerTaskId === Number(focusTaskId) ? focusSource : ""}
         onClose={() => {
+          const prev = drawerStack[drawerStack.length - 1];
+          if (prev) {
+            setDrawerStack((st) => st.slice(0, -1));
+            setDrawerTaskId(prev.taskId);
+            setDrawerTab(prev.tab);
+            return;
+          }
           setDrawerTaskId(null);
+          setDrawerStack([]);
           if (focusTaskId) setSearchParams({}, { replace: true });
         }}
         actions={{
@@ -930,7 +946,14 @@ export default function ProjectTasksPage({
           openInputFile,
           remindBlocker,
           removeEdge,
-          openTask: (id) => setDrawerTaskId(id),
+          openTask: (id) => {
+            if (id === drawerTaskId) return;
+            if (drawerTaskId != null) {
+              setDrawerStack((st) => [...st, { taskId: drawerTaskId, tab: drawerTab }]);
+            }
+            setDrawerTaskId(id);
+            setDrawerTab("overview");
+          },
           openInGraph: (id) => navigate(`/projects/${projectId}/graph?task=${id}`),
         }}
       />
@@ -1535,7 +1558,9 @@ function TaskDrawer({
   taskCode,
   okrCode,
   members,
-  initialTab,
+  activeTab,
+  onTabChange,
+  canGoBack,
   source,
   onClose,
   actions,
@@ -1547,7 +1572,11 @@ function TaskDrawer({
   /** KR id → 「O 编号 / KR 编号」；页头只显编号，不展开标题（#99、AC-50）。 */
   okrCode: Map<number, string>;
   members: ProjectMember[];
-  initialTab?: string;
+  /** 当前 Tab 由页面持有：逐级返回时要回到点开下一级之前的那个 Tab（#101）。 */
+  activeTab: string;
+  onTabChange: (key: string) => void;
+  /** 栈里还有上一级任务详情时，关闭按钮读作「返回」。 */
+  canGoBack: boolean;
   source?: string;
   onClose: () => void;
   actions: {
@@ -1995,12 +2024,14 @@ function TaskDrawer({
           )}
         </div>
       </section>
-      {/* 任务输入（§7.5）：必要与参考同区块展示，合并只合展示不合语义——
-          只有必要输入未就绪才派生卡点与「等待他人」，参考输入永远只提示，故每行必须标出类别。 */}
+      {/* 输入源（§7.5、#101）：必要与参考同区块展示，合并只合展示不合语义——
+          只有必要输入未就绪才派生卡点与「等待他人」，参考输入永远只提示，故每行必须标出类别。
+          每条输入是一行事实：来源为已有任务时读作「编号 · 标题 · 提供人 · 关系类型」并可点开来源任务；
+          来源为指定项目成员时没有来源任务，保留「对接人 · 所需内容」的读法。 */}
       {inputs.length > 0 && (
         <section className="drawer-section" data-focus="inputs">
           <h3>
-            任务输入{" "}
+            输入源{" "}
             <span className="section-count">
               必要 {requiredInputs.length} 项 · 参考 {referenceInputs.length} 项
             </span>
@@ -2009,26 +2040,38 @@ function TaskDrawer({
             const required = e.necessity === "required";
             // 未就绪的必要输入才补缺失原因与待行动人，取同一条边派生的上游未就绪卡点。
             const blocker = required && !e.ready ? inputBlockers.get(e.id) : undefined;
+            const fact = e.inputRequest
+              ? `对接人 ${e.inputRequest.providerName}` +
+                (e.inputRequest.contentNote ? ` · ${e.inputRequest.contentNote}` : "")
+              : [
+                  e.sourceTaskCode,
+                  e.sourceTaskName,
+                  e.sourceOwnerName ? `提供人 ${e.sourceOwnerName}` : "",
+                  e.edgeTypeLabel ?? "",
+                ]
+                  .filter(Boolean)
+                  .join(" · ");
+            const openSource = e.sourceTaskId ? () => actions.openTask(e.sourceTaskId!) : undefined;
             return (
-              <div key={e.id} className="fact-card fact-card-aux">
-                <div>
-                  <b>
-                    <span className={`necessity-tag ${required ? "required" : "reference"}`}>
-                      {required ? "必要" : "参考"}
-                    </span>
-                    {e.name}
-                  </b>
-                  <small>
-                    {(e.inputRequest
-                      ? `指定项目成员提供 · 对接人 ${e.inputRequest.providerName}` +
-                        (e.inputRequest.contentNote ? ` · ${e.inputRequest.contentNote}` : "")
-                      : `已有任务 · ${e.sourceTaskName ?? "—"}` +
-                        (e.deliverableName ? ` · ${e.deliverableName}` : "") +
-                        (e.sourceOwnerName ? ` · 提供人 ${e.sourceOwnerName}` : "")) +
-                      ` · ${e.edgeTypeLabel ?? ""}`}
-                  </small>
+              <div key={e.id} className="fact-card fact-card-aux input-row">
+                <div className="input-row-text">
+                  {openSource ? (
+                    <button type="button" className="input-row-main is-link" onClick={openSource} title={fact}>
+                      <span className={`necessity-tag ${required ? "required" : "reference"}`}>
+                        {required ? "必要" : "参考"}
+                      </span>
+                      <span className="cell-text">{fact}</span>
+                    </button>
+                  ) : (
+                    <div className="input-row-main" title={fact}>
+                      <span className={`necessity-tag ${required ? "required" : "reference"}`}>
+                        {required ? "必要" : "参考"}
+                      </span>
+                      <span className="cell-text">{fact}</span>
+                    </div>
+                  )}
                   {e.inputRequest?.state === "provided" && (
-                    <small>
+                    <small className="input-row-note">
                       已提供:{e.inputRequest.providedText || ""}
                       {e.inputRequest.providedFileName && (
                         <span
@@ -2042,7 +2085,10 @@ function TaskDrawer({
                     </small>
                   )}
                   {blocker && (
-                    <small>
+                    <small
+                      className="input-row-note"
+                      title={`缺失原因:${blocker.reason} · 待行动人 ${blocker.actionOwnerNames.join("、") || "—"}`}
+                    >
                       缺失原因:{blocker.reason} · 待行动人 {blocker.actionOwnerNames.join("、") || "—"}
                     </small>
                   )}
@@ -2666,8 +2712,14 @@ function TaskDrawer({
       className="task-drawer"
       closable={false}
       extra={
-        <button type="button" className="drawer-close" onClick={onClose} aria-label="关闭任务详情">
-          <Icon name="close" size={16} />
+        <button
+          type="button"
+          className="drawer-close"
+          onClick={onClose}
+          aria-label={canGoBack ? "返回上一个任务详情" : "关闭任务详情"}
+          title={canGoBack ? "返回上一个任务详情" : "关闭任务详情"}
+        >
+          <Icon name={canGoBack ? "back" : "close"} size={16} />
         </button>
       }
       title={
@@ -2711,7 +2763,8 @@ function TaskDrawer({
       <Tabs
         key={task.id}
         className="task-drawer-tabs"
-        defaultActiveKey={initialTab ?? "overview"}
+        activeKey={activeTab}
+        onChange={onTabChange}
         items={[
           { key: "overview", label: "任务概况", children: overview },
           { key: "relations", label: `协作关系 ${relationCount}`, children: relations },

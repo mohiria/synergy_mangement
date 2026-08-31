@@ -73,6 +73,7 @@ const GLYPHS = {
     </>
   ),
   close: <path d="M6 6l12 12M18 6 6 18" />,
+  back: <path d="M15 6 9 12l6 6" />,
   more: (
     <>
       <circle cx="5" cy="12" r="1" />

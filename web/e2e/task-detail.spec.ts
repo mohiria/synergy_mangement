@@ -47,7 +47,7 @@ test.describe("任务详情抽屉", () => {
     labels.forEach((label, i) => expect(label.trim()).toContain(TAB_ORDER[i]));
   });
 
-  test("任务概况按 基础信息／任务输入／交付物／接收方／当前卡点 顺序排列", async ({ page }) => {
+  test("任务概况按 基础信息／输入源／交付物／接收方／当前卡点 顺序排列", async ({ page }) => {
     const blocks = page.locator(".ant-drawer-content [data-focus]");
     const order = await blocks.evaluateAll((els) =>
       els.map((el) => el.getAttribute("data-focus")),

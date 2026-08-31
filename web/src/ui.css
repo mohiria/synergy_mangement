@@ -501,6 +501,22 @@ body {
 .fact-card-link:hover { border-color: #aeb9c7; background: #f8f9fc; }
 /* 区块小标题右侧的计数与口径注记。 */
 .section-count { font-weight: 400; font-size: 12px; color: var(--muted); }
+/* 输入源行（#101）：一行事实——「编号 · 标题 · 提供人 · 关系类型」，
+   超长按行宽截断、悬停看全称；有来源任务时整行可点，打开该任务的详情。 */
+.input-row-text { min-width: 0; flex: 1 1 auto; }
+.input-row-main {
+  width: 100%; display: flex; align-items: center; gap: 8px;
+  padding: 0; border: 0; background: transparent; font: inherit; color: inherit; text-align: left;
+}
+.input-row-main.is-link { cursor: pointer; }
+.input-row-main.is-link:hover .cell-text { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.input-row-main .necessity-tag { flex: none; }
+.input-row-main .cell-text { flex: 1 1 auto; min-width: 0; }
+.input-row-note {
+  display: block; margin-top: 2px; color: var(--muted); font-size: 12px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
 /* 任务输入行的必要／参考徽标。 */
 .necessity-tag {
   display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: var(--radius);

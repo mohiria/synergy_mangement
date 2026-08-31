@@ -10,6 +10,7 @@
 | `my-work.spec.ts` | 五分组顺序、计数 pill 徽标与徽标口径、身份卡三要素（AC-16、MW-16） |
 | `graph-completed-toggle.spec.ts` | 「显示已完成」开关在 KR 层／聚焦层／全局展开层／关系列表四处一致（AC-45、AC-46） |
 | `list-truncation.spec.ts` | 各列表字段单行截断：行高恒定、单元格不换行、页面无横向滚动（#91；1440／1920／2560 三档） |
+| `input-source.spec.ts` | 输入源区块：区块名、单行事实与 title、点行进来源任务、逐级返回回到原来的 Tab（#101） |
 | `long-title.spec.ts` | 长 O／KR 标题不撑破配置输入弹窗：弹窗与两侧面板无横向滚动、分组标题截断且带全称（#100；1440／1920 两档） |
 | `import-csv.spec.ts` | 表格导入的 CSV 读取：UTF-8／UTF-8 BOM／GB18030 编码、引号包裹字段、按首行判定分隔符、全空行剔除（#97；fixture 在 `e2e/fixtures/`） |
 

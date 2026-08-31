@@ -241,8 +241,11 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 	}
 	durations := make(map[int64]int, len(taskRows))
 	krOwnerNameByTask := make(map[int64]string, len(taskRows))
+	// 来源任务编号（#101）：编号是持久字段，由 O／KR／任务三级序号拼出，前端不再自己拼。
+	codeByTask := make(map[int64]string, len(taskRows))
 	for _, t := range taskRows {
 		krOwnerNameByTask[t.ID] = t.KrOwnerName.String
+		codeByTask[t.ID] = domain.TaskCode(int(t.ObjectiveCodeSeq), int(t.KrCodeSeq), int(t.CodeSeq))
 		if t.StartDate.Valid && t.EndDate.Valid {
 			d := int(t.EndDate.Time.Sub(t.StartDate.Time).Hours()/24) + 1
 			if d < 1 {
@@ -288,6 +291,11 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 		item.TargetTaskName = optString(e.TargetTaskName)
 		item.SourceTaskId = fromPgInt8(e.SourceTaskID)
 		item.SourceTaskName = fromPgText(e.SourceTaskName)
+		if e.SourceTaskID.Valid {
+			if code := codeByTask[e.SourceTaskID.Int64]; code != "" {
+				item.SourceTaskCode = &code
+			}
+		}
 		if e.SourceTaskStatus.Valid {
 			st := TaskStatus(e.SourceTaskStatus.String)
 			item.SourceTaskStatus = &st

@@ -1568,7 +1568,7 @@ export interface components {
             id: number;
             /** Format: int64 */
             keyResultId: number;
-            /** @description 任务展示编号，形如 1.1.1（AC-64；创建时分配并持久保存，删除同级任务后不重排） */
+            /** @description 任务展示编号，形如 T1.1.1（AC-64；创建时分配并持久保存，删除同级任务后不重排） */
             code: string;
             name: string;
             /**
@@ -2013,6 +2013,8 @@ export interface components {
              */
             sourceTaskId?: number;
             sourceTaskName?: string;
+            /** @description 来源任务编号（派生字段，形如 T1.1.1）；来源为指定项目成员时缺省，与 sourceTaskId 同缺省 */
+            sourceTaskCode?: string;
             sourceTaskStatus?: components["schemas"]["TaskStatus"];
             /** @description 来源任务状态显示文案（AC-04；派生字段，与 sourceTaskStatus 同缺省） */
             sourceTaskStatusLabel?: string;
@@ -2211,7 +2213,7 @@ export interface components {
         ArtifactTask: {
             /** Format: int64 */
             taskId: number;
-            /** @description 任务展示编号，形如 1.1.1（AC-64；派生字段） */
+            /** @description 任务展示编号，形如 T1.1.1（AC-64；派生字段） */
             code: string;
             name: string;
             /** @description 任务负责人姓名（派生字段） */
