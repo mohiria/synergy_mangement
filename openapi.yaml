@@ -3558,13 +3558,11 @@ components:
     DeliverableEdgeRef:
       type: object
       description: 交付物承接的关系边引用（词汇表「交付物边」）：本交付物是这条边的来源内容
-      required: [edgeId, name, edgeType, edgeTypeLabel, targetTaskId, targetTaskName]
+      required: [edgeId, edgeType, edgeTypeLabel, targetTaskId, targetTaskName]
       properties:
         edgeId:
           type: integer
           format: int64
-        name:
-          type: string
         edgeType:
           $ref: "#/components/schemas/EdgeType"
         edgeTypeLabel:
@@ -3838,7 +3836,9 @@ components:
           format: int64
         name:
           type: string
-          description: 输入／交付物名称
+          description: |
+            输入源的可读标识（派生字段，裁决 F1）：来源是已有任务时为「编号 · 任务名」，
+            来源是指定项目成员时为「所需内容」摘要。读时现算，不由客户端提供。
         edgeType:
           $ref: "#/components/schemas/EdgeType"
         edgeTypeLabel:
@@ -3904,14 +3904,11 @@ components:
           description: 位于硬前置关键路径上（派生字段，AC-10）；日期不足时不派生（此时仅硬依赖链）
     CreateTaskInputRequest:
       type: object
-      description: 新增输入要求（来源＝系统内已有任务，AC-28；可一次多选来源任务，AC-53）
-      required: [name, necessity, edgeType, sourceTaskIds]
+      description: |
+        新增输入要求（来源＝系统内已有任务，AC-28；可一次多选来源任务，AC-53）。
+        不收输入名称：输入源的可读标识由来源任务派生（裁决 F1），见 DeliverableEdge.name。
+      required: [necessity, edgeType, sourceTaskIds]
       properties:
-        name:
-          type: string
-          minLength: 1
-          maxLength: 100
-          description: 输入名称
         necessity:
           $ref: "#/components/schemas/Necessity"
         edgeType:
@@ -4644,13 +4641,11 @@ components:
           description: 当前用户能否提交内容（派生字段；对接人本人且已接收）
     CreateMemberInputRequest:
       type: object
-      description: 新增输入要求（来源＝指定项目成员，AC-29；可一次多选对接人，AC-53）
-      required: [name, necessity, providerIds, contentNote, expectedDate]
+      description: |
+        新增输入要求（来源＝指定项目成员，AC-29；可一次多选对接人，AC-53）。
+        不收输入名称：输入源的可读标识取「所需内容」摘要（裁决 F1），见 DeliverableEdge.name。
+      required: [necessity, providerIds, contentNote, expectedDate]
       properties:
-        name:
-          type: string
-          minLength: 1
-          maxLength: 100
         necessity:
           $ref: "#/components/schemas/Necessity"
         providerIds:

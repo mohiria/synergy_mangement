@@ -44,7 +44,6 @@ func (s *Server) CreateMemberInput(w http.ResponseWriter, r *http.Request, proje
 		roleByID[m.UserID] = m.Role
 	}
 	input := domain.MemberInputs{
-		Name:            strings.TrimSpace(req.Name),
 		Necessity:       string(req.Necessity),
 		ProviderIDs:     req.ProviderIds,
 		ContentNote:     strings.TrimSpace(req.ContentNote),
@@ -77,7 +76,8 @@ func (s *Server) CreateMemberInput(w http.ResponseWriter, r *http.Request, proje
 		Op:       domain.StructureAddMemberInput,
 		Label:    domain.StructureFieldLabel(domain.StructureAddMemberInput),
 		OldValue: "—",
-		NewValue: fmt.Sprintf("新增「%s」，对接人：%s", input.Name, strings.Join(providerNames, "、")),
+		NewValue: fmt.Sprintf("新增输入源「%s」，对接人：%s",
+			domain.EdgeDisplayName("", "", input.ContentNote), strings.Join(providerNames, "、")),
 		Request:  raw,
 	}
 	if !s.commitStructureChange(w, r, projectId, taskId, uid, outcome, payload, payload.NewValue) {

@@ -1852,7 +1852,6 @@ export interface components {
         DeliverableEdgeRef: {
             /** Format: int64 */
             edgeId: number;
-            name: string;
             edgeType: components["schemas"]["EdgeType"];
             /** @description 交付物边类型显示文案（派生字段） */
             edgeTypeLabel: string;
@@ -2024,7 +2023,10 @@ export interface components {
         DeliverableEdge: {
             /** Format: int64 */
             id: number;
-            /** @description 输入／交付物名称 */
+            /**
+             * @description 输入源的可读标识（派生字段，裁决 F1）：来源是已有任务时为「编号 · 任务名」，
+             *     来源是指定项目成员时为「所需内容」摘要。读时现算，不由客户端提供。
+             */
             name: string;
             edgeType: components["schemas"]["EdgeType"];
             /** @description 交付物边类型显示文案（派生字段；前端不按枚举拼文案） */
@@ -2076,10 +2078,11 @@ export interface components {
             /** @description 位于硬前置关键路径上（派生字段，AC-10）；日期不足时不派生（此时仅硬依赖链） */
             onCriticalPath?: boolean;
         };
-        /** @description 新增输入要求（来源＝系统内已有任务，AC-28；可一次多选来源任务，AC-53） */
+        /**
+         * @description 新增输入要求（来源＝系统内已有任务，AC-28；可一次多选来源任务，AC-53）。
+         *     不收输入名称：输入源的可读标识由来源任务派生（裁决 F1），见 DeliverableEdge.name。
+         */
         CreateTaskInputRequest: {
-            /** @description 输入名称 */
-            name: string;
             necessity: components["schemas"]["Necessity"];
             edgeType: components["schemas"]["EdgeType"];
             /** @description 来源任务（AC-53 多选）；确认后按选择顺序分别建立「来源任务 → 目标任务」交付物边，不可重复 */
@@ -2489,9 +2492,11 @@ export interface components {
             /** @description 当前用户能否提交内容（派生字段；对接人本人且已接收） */
             canProvide?: boolean;
         };
-        /** @description 新增输入要求（来源＝指定项目成员，AC-29；可一次多选对接人，AC-53） */
+        /**
+         * @description 新增输入要求（来源＝指定项目成员，AC-29；可一次多选对接人，AC-53）。
+         *     不收输入名称：输入源的可读标识取「所需内容」摘要（裁决 F1），见 DeliverableEdge.name。
+         */
         CreateMemberInputRequest: {
-            name: string;
             necessity: components["schemas"]["Necessity"];
             /** @description 对接人（非只读项目成员，AC-53 多选）；每人分别建边并生成输入请求与通知，不可重复 */
             providerIds: number[];

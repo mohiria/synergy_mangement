@@ -232,7 +232,7 @@ export default function ArtifactsPage({
         title={
           d.edges.length === 0
             ? undefined
-            : d.edges.map((e) => `${e.name}（${e.edgeTypeLabel} → ${e.targetTaskName}）`).join("；")
+            : d.edges.map((e) => `${e.edgeTypeLabel} → ${e.targetTaskName}`).join("；")
         }
       >
         {d.edges.length === 0 ? (
@@ -249,7 +249,7 @@ export default function ArtifactsPage({
                   )
                 }
               >
-                {e.name}
+                {e.targetTaskName}
               </span>
             </span>
           ))

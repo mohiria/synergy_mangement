@@ -169,8 +169,8 @@ _Avoid_: 已同意接收、已上传草稿
 _Avoid_: 单选列表、平铺成员卡片、不同尺寸复选框
 
 **交付物边**：
-从来源任务或实际承担输入责任的项目成员指向下游任务的有向协作关系，记录交付物名称、关系类型、必要性、提供方、接收方和就绪状态；当前交付物与候选交付物关联在这条边上，不形成独立图谱节点。API 用 edge（DeliverableEdge），类型 edgeType 取值 hard_prerequisite／information／handover／feedback（硬前置交付／信息输入／正式成果接收／迭代反馈），必要性 necessity 取值 required／reference（必要／参考），就绪用 ready（派生字段）。
-_Avoid_: 交付物节点、孤立文件节点、无方向关系
+从来源任务或实际承担输入责任的项目成员指向下游任务的有向协作关系，记录关系类型、必要性、提供方、接收方和就绪状态；当前交付物与候选交付物关联在这条边上，不形成独立图谱节点。API 用 edge（DeliverableEdge），类型 edgeType 取值 hard_prerequisite／information／handover／feedback（硬前置交付／信息输入／正式成果接收／迭代反馈），必要性 necessity 取值 required／reference（必要／参考），就绪用 ready（派生字段）。可读标识 name 也是派生字段（裁决 F1）：来源是已有任务时取「任务编号 · 任务名」，来源是指定项目成员时取「所需内容」摘要，用户不再单独填「输入名称」。
+_Avoid_: 交付物节点、孤立文件节点、无方向关系、用户自填的输入名称
 
 **O／KR 层级视图**：
 只表达项目中 O 与下属 KR 的归属结构，不承载 KR 之间或 O 之间的任务协作关系；风险通过节点事实和风险队列表达。

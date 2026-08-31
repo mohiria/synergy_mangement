@@ -1,10 +1,6 @@
 package domain
 
-import (
-	"errors"
-	"strings"
-	"unicode/utf8"
-)
+import "errors"
 
 // 交付物边类型与必要性（词汇表「交付物边」；PRD §4.3）。
 const (
@@ -18,17 +14,14 @@ const (
 )
 
 var (
-	ErrEdgeNameEmpty     = errors.New("输入名称不能为空")
-	ErrEdgeNameTooLong   = errors.New("输入名称不能超过 100 字")
 	ErrEdgeTypeInvalid   = errors.New("交付物边类型不合法")
 	ErrNecessityInvalid  = errors.New("必要性不合法")
 	ErrEdgeSelfLoop      = errors.New("不能以任务自身作为输入来源")
 	ErrEdgeSourceMissing = errors.New("必须指定来源任务或对接成员")
 )
 
-// NewEdge 待建立的交付物边输入。
+// NewEdge 待建立的交付物边输入。名称不在这里——它由已有事实派生（EdgeDisplayName、#112）。
 type NewEdge struct {
-	Name         string
 	EdgeType     string
 	Necessity    string
 	SourceTaskID *int64
@@ -38,13 +31,6 @@ type NewEdge struct {
 
 // ValidateNewEdge 校验交付物边输入（AC-28、§4.4）；循环关系经多任务表达，自环禁止。
 func ValidateNewEdge(e NewEdge) error {
-	name := strings.TrimSpace(e.Name)
-	if name == "" {
-		return ErrEdgeNameEmpty
-	}
-	if utf8.RuneCountInString(name) > 100 {
-		return ErrEdgeNameTooLong
-	}
 	switch e.EdgeType {
 	case EdgeHardPrerequisite, EdgeInformation, EdgeHandover, EdgeFeedback:
 	default:
@@ -95,7 +81,6 @@ var (
 
 // NewTaskInputs 一次配置产生的多条「来源任务 → 目标任务」输入（AC-53：来源任务可多选）。
 type NewTaskInputs struct {
-	Name           string
 	EdgeType       string
 	Necessity      string
 	SourceTaskIDs  []int64
@@ -119,7 +104,7 @@ func ValidateNewTaskInputs(in NewTaskInputs) error {
 		}
 		seen[id] = struct{}{}
 		if err := ValidateNewEdge(NewEdge{
-			Name: in.Name, EdgeType: in.EdgeType, Necessity: in.Necessity,
+			EdgeType: in.EdgeType, Necessity: in.Necessity,
 			SourceTaskID: &id, TargetTaskID: in.TargetTaskID,
 		}); err != nil {
 			return err

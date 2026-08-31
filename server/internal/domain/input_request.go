@@ -3,7 +3,6 @@ package domain
 import (
 	"errors"
 	"strings"
-	"unicode/utf8"
 )
 
 // 输入请求状态（词汇表「输入请求」）。
@@ -30,22 +29,15 @@ var (
 
 // MemberInput 指定项目成员输入的请求输入（§9.1）。
 type MemberInput struct {
-	Name            string
 	Necessity       string
 	ProviderID      int64
 	ContentNote     string
 	HasExpectedDate bool
 }
 
-// ValidateMemberInput 校验指定项目成员输入（AC-29、§9.1：名称、必要性、对接人、所需内容、期望时间必填）。
+// ValidateMemberInput 校验指定项目成员输入（AC-29、§9.1：必要性、对接人、所需内容、期望时间必填）。
+// 名称不再由用户填写，它由「所需内容」摘要派生（EdgeDisplayName、#112）。
 func ValidateMemberInput(m MemberInput, roleOf func(int64) string) error {
-	name := strings.TrimSpace(m.Name)
-	if name == "" {
-		return ErrEdgeNameEmpty
-	}
-	if utf8.RuneCountInString(name) > 100 {
-		return ErrEdgeNameTooLong
-	}
 	switch m.Necessity {
 	case NecessityRequired, NecessityReference:
 	default:
@@ -107,7 +99,6 @@ var (
 
 // MemberInputs 一次配置产生的多条「项目成员 → 目标任务」输入（AC-53：对接人可多选）。
 type MemberInputs struct {
-	Name            string
 	Necessity       string
 	ProviderIDs     []int64
 	ContentNote     string
@@ -127,7 +118,7 @@ func ValidateMemberInputs(m MemberInputs, roleOf func(int64) string) error {
 		}
 		seen[id] = struct{}{}
 		if err := ValidateMemberInput(MemberInput{
-			Name: m.Name, Necessity: m.Necessity, ProviderID: id,
+			Necessity: m.Necessity, ProviderID: id,
 			ContentNote: m.ContentNote, HasExpectedDate: m.HasExpectedDate,
 		}, roleOf); err != nil {
 			return err

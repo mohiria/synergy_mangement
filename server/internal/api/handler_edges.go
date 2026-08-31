@@ -21,8 +21,10 @@ import (
 // 同一任务的多条输入（AC-53 多来源）各自独立判定，任一必要输入未就绪即等待输入。
 func unreadyRequiredInputs(edges []store.ListEdgesByProjectRow, requests []store.ListInputRequestsByProjectRow) map[int64]string {
 	stateByEdge := make(map[int64]string, len(requests))
+	noteByEdge := make(map[int64]string, len(requests))
 	for _, ir := range requests {
 		stateByEdge[ir.EdgeID] = ir.State
+		noteByEdge[ir.EdgeID] = ir.ContentNote
 	}
 	targets := []int64{}
 	byTarget := map[int64][]domain.InputEdgeState{}
@@ -34,8 +36,12 @@ func unreadyRequiredInputs(edges []store.ListEdgesByProjectRow, requests []store
 		if _, seen := byTarget[e.TargetTaskID]; !seen {
 			targets = append(targets, e.TargetTaskID)
 		}
+		// 缺哪一项按派生标识说（#112）：注记里不带任务编号，读作「缺 <来源任务>」或「缺 <所需内容摘要>」。
 		byTarget[e.TargetTaskID] = append(byTarget[e.TargetTaskID],
-			domain.InputEdgeState{Name: e.Name, Necessity: e.Necessity, Ready: ready})
+			domain.InputEdgeState{
+				Name:      domain.EdgeDisplayName("", e.SourceTaskName.String, noteByEdge[e.ID]),
+				Necessity: e.Necessity, Ready: ready,
+			})
 	}
 	notes := map[int64]string{}
 	for _, taskID := range targets {
@@ -78,7 +84,6 @@ func (s *Server) CreateTaskInput(w http.ResponseWriter, r *http.Request, project
 		return
 	}
 	inputs := domain.NewTaskInputs{
-		Name:           strings.TrimSpace(req.Name),
 		EdgeType:       string(req.EdgeType),
 		Necessity:      string(req.Necessity),
 		SourceTaskIDs:  req.SourceTaskIds,
@@ -128,7 +133,7 @@ func (s *Server) CreateTaskInput(w http.ResponseWriter, r *http.Request, project
 		Op:       domain.StructureAddTaskInput,
 		Label:    domain.StructureFieldLabel(domain.StructureAddTaskInput),
 		OldValue: "—",
-		NewValue: fmt.Sprintf("新增「%s」，来源任务：%s", inputs.Name, strings.Join(sourceNames, "、")),
+		NewValue: fmt.Sprintf("新增输入源，来源任务：%s", strings.Join(sourceNames, "、")),
 		Request:  raw,
 	}
 	if !s.commitStructureChange(w, r, projectId, taskId, uid, outcome, payload, payload.NewValue) {
@@ -231,8 +236,11 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 		return nil, err
 	}
 	requestByEdge := make(map[int64]store.ListInputRequestsByProjectRow, len(requestRows))
+	// 成员来源的输入源标识取「所需内容」摘要（#112），按边先索引一份。
+	noteByEdge := make(map[int64]string, len(requestRows))
 	for _, ir := range requestRows {
 		requestByEdge[ir.EdgeID] = ir
+		noteByEdge[ir.EdgeID] = ir.ContentNote
 	}
 	// 硬依赖分析（AC-10）：循环互锁与关键路径。工期取任务计划天数（截止-开始+1）。
 	taskRows, err := s.q.ListProjectTasks(ctx, projectID)
@@ -291,11 +299,16 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 		item.TargetTaskName = optString(e.TargetTaskName)
 		item.SourceTaskId = fromPgInt8(e.SourceTaskID)
 		item.SourceTaskName = fromPgText(e.SourceTaskName)
+		sourceCode := ""
 		if e.SourceTaskID.Valid {
 			if code := codeByTask[e.SourceTaskID.Int64]; code != "" {
+				sourceCode = code
 				item.SourceTaskCode = &code
 			}
 		}
+		// 输入源标识读时现算（裁决 F1、#112）：库里的 name 只是建边当时的快照，
+		// 来源任务改名后要跟着变，成员来源则取「所需内容」摘要。
+		item.Name = domain.EdgeDisplayName(sourceCode, e.SourceTaskName.String, noteByEdge[e.ID])
 		if e.SourceTaskStatus.Valid {
 			st := TaskStatus(e.SourceTaskStatus.String)
 			item.SourceTaskStatus = &st

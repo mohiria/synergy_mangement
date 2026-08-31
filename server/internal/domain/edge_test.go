@@ -12,13 +12,12 @@ func TestValidateNewEdge(t *testing.T) {
 		e    NewEdge
 		want error
 	}{
-		{"合法硬前置", NewEdge{Name: "现场数据包", EdgeType: EdgeHardPrerequisite, Necessity: NecessityRequired, SourceTaskID: i64(2), TargetTaskID: 1}, nil},
-		{"合法参考信息输入", NewEdge{Name: "行业报告", EdgeType: EdgeInformation, Necessity: NecessityReference, SourceTaskID: i64(2), TargetTaskID: 1}, nil},
-		{"名称为空", NewEdge{Name: " ", EdgeType: EdgeInformation, Necessity: NecessityRequired, SourceTaskID: i64(2), TargetTaskID: 1}, ErrEdgeNameEmpty},
-		{"类型非法", NewEdge{Name: "x", EdgeType: "loop", Necessity: NecessityRequired, SourceTaskID: i64(2), TargetTaskID: 1}, ErrEdgeTypeInvalid},
-		{"必要性非法", NewEdge{Name: "x", EdgeType: EdgeInformation, Necessity: "optional", SourceTaskID: i64(2), TargetTaskID: 1}, ErrNecessityInvalid},
-		{"自环禁止", NewEdge{Name: "x", EdgeType: EdgeInformation, Necessity: NecessityRequired, SourceTaskID: i64(1), TargetTaskID: 1}, ErrEdgeSelfLoop},
-		{"无来源禁止", NewEdge{Name: "x", EdgeType: EdgeInformation, Necessity: NecessityRequired, TargetTaskID: 1}, ErrEdgeSourceMissing},
+		{"合法硬前置", NewEdge{EdgeType: EdgeHardPrerequisite, Necessity: NecessityRequired, SourceTaskID: i64(2), TargetTaskID: 1}, nil},
+		{"合法参考信息输入", NewEdge{EdgeType: EdgeInformation, Necessity: NecessityReference, SourceTaskID: i64(2), TargetTaskID: 1}, nil},
+		{"类型非法", NewEdge{EdgeType: "loop", Necessity: NecessityRequired, SourceTaskID: i64(2), TargetTaskID: 1}, ErrEdgeTypeInvalid},
+		{"必要性非法", NewEdge{EdgeType: EdgeInformation, Necessity: "optional", SourceTaskID: i64(2), TargetTaskID: 1}, ErrNecessityInvalid},
+		{"自环禁止", NewEdge{EdgeType: EdgeInformation, Necessity: NecessityRequired, SourceTaskID: i64(1), TargetTaskID: 1}, ErrEdgeSelfLoop},
+		{"无来源禁止", NewEdge{EdgeType: EdgeInformation, Necessity: NecessityRequired, TargetTaskID: 1}, ErrEdgeSourceMissing},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -89,7 +88,7 @@ func TestDeriveDisplayStatus(t *testing.T) {
 
 // AC-53：一次配置可多选来源任务——至少一个、不可重复、逐条沿用单边校验；指定交付物项时只能单选。
 func TestValidateNewTaskInputs(t *testing.T) {
-	base := NewTaskInputs{Name: "现场数据包", EdgeType: EdgeHardPrerequisite, Necessity: NecessityRequired, SourceTaskIDs: []int64{2, 3, 4}, TargetTaskID: 1}
+	base := NewTaskInputs{EdgeType: EdgeHardPrerequisite, Necessity: NecessityRequired, SourceTaskIDs: []int64{2, 3, 4}, TargetTaskID: 1}
 	cases := []struct {
 		name string
 		mut  func(*NewTaskInputs)
@@ -100,7 +99,6 @@ func TestValidateNewTaskInputs(t *testing.T) {
 		{"未选来源", func(in *NewTaskInputs) { in.SourceTaskIDs = nil }, ErrEdgeSourceMissing},
 		{"来源重复", func(in *NewTaskInputs) { in.SourceTaskIDs = []int64{2, 3, 2} }, ErrEdgeSourceDuplicated},
 		{"含自身", func(in *NewTaskInputs) { in.SourceTaskIDs = []int64{2, 1} }, ErrEdgeSelfLoop},
-		{"名称为空", func(in *NewTaskInputs) { in.Name = "  " }, ErrEdgeNameEmpty},
 		{"类型非法", func(in *NewTaskInputs) { in.EdgeType = "loop" }, ErrEdgeTypeInvalid},
 		{"必要性非法", func(in *NewTaskInputs) { in.Necessity = "optional" }, ErrNecessityInvalid},
 		{"单来源可指定交付物项", func(in *NewTaskInputs) { in.SourceTaskIDs = []int64{2}; in.HasDeliverable = true }, nil},

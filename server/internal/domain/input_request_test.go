@@ -9,14 +9,13 @@ import (
 func TestValidateMemberInput(t *testing.T) {
 	roles := map[int64]string{3: RoleMember, 4: RoleAdmin, 5: RoleViewer}
 	roleOf := func(id int64) string { return roles[id] }
-	base := MemberInput{Name: "接口规范说明", Necessity: NecessityRequired, ProviderID: 3, ContentNote: "请提供最新接口字段口径", HasExpectedDate: true}
+	base := MemberInput{Necessity: NecessityRequired, ProviderID: 3, ContentNote: "请提供最新接口字段口径", HasExpectedDate: true}
 	cases := []struct {
 		name string
 		mut  func(*MemberInput)
 		want error
 	}{
 		{"合法请求", func(*MemberInput) {}, nil},
-		{"名称为空", func(m *MemberInput) { m.Name = " " }, ErrEdgeNameEmpty},
 		{"对接人访客", func(m *MemberInput) { m.ProviderID = 5 }, ErrProviderNotEligible},
 		{"对接人非成员", func(m *MemberInput) { m.ProviderID = 99 }, ErrProviderNotEligible},
 		{"所需内容必填", func(m *MemberInput) { m.ContentNote = "  " }, ErrContentNoteRequired},
@@ -83,7 +82,7 @@ func TestMemberEdgeReady(t *testing.T) {
 func TestValidateMemberInputs(t *testing.T) {
 	roles := map[int64]string{3: RoleMember, 4: RoleAdmin, 5: RoleViewer}
 	roleOf := func(id int64) string { return roles[id] }
-	base := MemberInputs{Name: "接口规范说明", Necessity: NecessityRequired, ProviderIDs: []int64{3, 4}, ContentNote: "请提供最新接口字段口径", HasExpectedDate: true}
+	base := MemberInputs{Necessity: NecessityRequired, ProviderIDs: []int64{3, 4}, ContentNote: "请提供最新接口字段口径", HasExpectedDate: true}
 	cases := []struct {
 		name string
 		mut  func(*MemberInputs)

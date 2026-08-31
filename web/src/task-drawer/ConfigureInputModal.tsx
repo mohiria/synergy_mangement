@@ -40,7 +40,6 @@ export default function ConfigureInputModal({
   const [sourceTaskIds, setSourceTaskIds] = useState<number[]>([]);
   const [sourceDeliverables, setSourceDeliverables] = useState<{ id: number; name: string }[]>([]);
   const [deliverableId, setDeliverableId] = useState<number | undefined>(undefined);
-  const [name, setName] = useState("");
   const [edgeType, setEdgeType] = useState<EdgeType>("hard_prerequisite");
   const [necessity, setNecessity] = useState<"required" | "reference">("required");
   const [expectedDate, setExpectedDate] = useState<Dayjs | null>(null);
@@ -55,7 +54,6 @@ export default function ConfigureInputModal({
       setSourceTaskIds([]);
       setSourceDeliverables([]);
       setDeliverableId(undefined);
-      setName("");
       setEdgeType("hard_prerequisite");
       setNecessity("required");
       setExpectedDate(null);
@@ -133,10 +131,6 @@ export default function ConfigureInputModal({
   const providerItems = memberTreeItems(members.filter((m) => m.role !== "viewer"));
 
   const save = async () => {
-    if (!name.trim()) {
-      setError("请填写输入名称");
-      return;
-    }
     if (mode === "member") {
       if (providerIds.length === 0) {
         setError("请至少选择一名对接人");
@@ -155,7 +149,6 @@ export default function ConfigureInputModal({
       const res = await client.POST("/projects/{projectId}/tasks/{taskId}/member-inputs", {
         params: { path: { projectId, taskId: task.id } },
         body: {
-          name: name.trim(),
           necessity,
           providerIds,
           contentNote: contentNote.trim(),
@@ -182,7 +175,6 @@ export default function ConfigureInputModal({
     const res = await client.POST("/projects/{projectId}/tasks/{taskId}/inputs", {
       params: { path: { projectId, taskId: task.id } },
       body: {
-        name: name.trim(),
         necessity,
         edgeType,
         sourceTaskIds,
@@ -285,19 +277,11 @@ export default function ConfigureInputModal({
             disabled={sourceTaskIds.length !== 1}
             placeholder="选择来源任务的交付物项"
             value={deliverableId}
-            onChange={(v) => {
-              setDeliverableId(v);
-              const d = sourceDeliverables.find((x) => x.id === v);
-              if (d && !name.trim()) setName(d.name);
-            }}
+            onChange={setDeliverableId}
             options={sourceDeliverables.map((d) => ({ value: d.id, label: d.name }))}
           />
         </div>
         )}
-        <div>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>输入名称</div>
-          <Input maxLength={100} value={name} onChange={(e) => setName(e.target.value)} />
-        </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
           <div>
             <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>关系类型</div>

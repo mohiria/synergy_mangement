@@ -327,7 +327,9 @@ func projectEdges(t *testing.T, c *http.Client, base string, projectID int64) []
 func edgeOf(t *testing.T, c *http.Client, base string, projectID, targetTaskID int64, name string) api.DeliverableEdge {
 	t.Helper()
 	for _, e := range projectEdges(t, c, base, projectID) {
-		if e.TargetTaskId == targetTaskID && e.Name == name {
+		// name 是派生标识（#112）：任务来源为「编号 · 任务名」，成员来源为「所需内容」摘要，
+		// 用例给出的定位串按包含匹配即可。
+		if e.TargetTaskId == targetTaskID && strings.Contains(e.Name, name) {
 			return e
 		}
 	}
@@ -2228,7 +2230,7 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 	// 输入与输入源是关键字段（AC-23），已入池任务先进所属 KR 负责人审批，通过后边才建立
 	inputsURL := func(id int64) string { return fmt.Sprintf("%s/%d/inputs", tasksURL, id) }
 	resp = doJSON(t, carol, http.MethodPost, inputsURL(taskB.Id), api.CreateTaskInputRequest{
-		Name: "现场数据包", Necessity: api.Required, EdgeType: api.HardPrerequisite,
+		Necessity: api.Required, EdgeType: api.HardPrerequisite,
 		SourceTaskIds: []int64{taskA.Id}, DeliverableId: &dA,
 	})
 	pendingEdge := wantStructureAccepted(t, resp)
@@ -2236,14 +2238,14 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 		t.Fatal("待审批期间不应先建边")
 	}
 	approveStructureChange(t, bob, base, created.Id, taskB.Id, pendingEdge)
-	edge := edgeOf(t, carol, base, created.Id, taskB.Id, "现场数据包")
+	edge := edgeOf(t, carol, base, created.Id, taskB.Id, "采集现场数据")
 	if edge.Ready || edge.SourceTaskName == nil || *edge.SourceTaskName != "采集现场数据" {
 		t.Fatalf("新建边应未就绪且含来源信息: %+v", edge)
 	}
 
 	// AC-07：反向再建一条反馈边（双向/循环关系保留真实连线）；bob 是 KR 负责人，免审即时生效
 	resp = doJSON(t, bob, http.MethodPost, inputsURL(taskA.Id), api.CreateTaskInputRequest{
-		Name: "回归问题清单", Necessity: api.Reference, EdgeType: api.Feedback, SourceTaskIds: []int64{taskB.Id},
+		Necessity: api.Reference, EdgeType: api.Feedback, SourceTaskIds: []int64{taskB.Id},
 	})
 	wantStructureAccepted(t, resp)
 	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/projects/%d/edges", base, created.Id), nil)
@@ -2267,7 +2269,7 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 
 	// 自环 422；无关成员建边 403
 	resp = doJSON(t, carol, http.MethodPost, inputsURL(taskB.Id), api.CreateTaskInputRequest{
-		Name: "自环", Necessity: api.Required, EdgeType: api.Information, SourceTaskIds: []int64{taskB.Id},
+		Necessity: api.Required, EdgeType: api.Information, SourceTaskIds: []int64{taskB.Id},
 	})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
@@ -2594,7 +2596,7 @@ func TestMemberInputRequests(t *testing.T) {
 	expected := openapiDate(t, "2026-09-10")
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/member-inputs", tasksURL, taskID),
 		api.CreateMemberInputRequest{
-			Name: "接口字段口径", Necessity: api.Required, ProviderIds: []int64{daveUser.ID},
+			Necessity: api.Required, ProviderIds: []int64{daveUser.ID},
 			ContentNote: "请提供最新接口字段口径说明", ExpectedDate: expected,
 		})
 	// 草稿任务的结构变更直接生效，不生成变更单（AC-23）
@@ -2611,9 +2613,9 @@ func TestMemberInputRequests(t *testing.T) {
 	}
 
 	// 期望时间必填 422
-	bad := api.CreateMemberInputRequest{Name: "缺期望时间", Necessity: api.Required, ProviderIds: []int64{daveUser.ID}, ContentNote: "x"}
+	bad := api.CreateMemberInputRequest{Necessity: api.Required, ProviderIds: []int64{daveUser.ID}, ContentNote: "x"}
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/member-inputs", tasksURL, taskID), map[string]any{
-		"name": bad.Name, "necessity": bad.Necessity, "providerIds": bad.ProviderIds, "contentNote": bad.ContentNote,
+		"necessity": bad.Necessity, "providerIds": bad.ProviderIds, "contentNote": bad.ContentNote,
 	})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
@@ -2780,14 +2782,14 @@ func TestMultiSourceInputs(t *testing.T) {
 	// AC-53：一次选择两个来源任务 → 分别建立两条边，各自独立未就绪
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, taskC),
 		api.CreateTaskInputRequest{
-			Name: "上游材料", Necessity: api.Required, EdgeType: api.HardPrerequisite,
+			Necessity: api.Required, EdgeType: api.HardPrerequisite,
 			SourceTaskIds: []int64{taskA, taskB2},
 		})
 	pendingMulti := wantStructureAccepted(t, resp)
 	approveStructureChange(t, bob, base, created.Id, taskC, pendingMulti)
 	multi := []api.DeliverableEdge{}
 	for _, e := range projectEdges(t, carol, base, created.Id) {
-		if e.TargetTaskId == taskC && e.Name == "上游材料" {
+		if e.TargetTaskId == taskC {
 			multi = append(multi, e)
 		}
 	}
@@ -2808,10 +2810,10 @@ func TestMultiSourceInputs(t *testing.T) {
 	wantStatus(t, resp, http.StatusOK)
 	dA := decodeBody[api.TaskDetail](t, resp).Deliverables[0].Id
 	for _, bad := range []api.CreateTaskInputRequest{
-		{Name: "重复来源", Necessity: api.Required, EdgeType: api.Information, SourceTaskIds: []int64{taskA, taskA}},
-		{Name: "多选带交付物项", Necessity: api.Required, EdgeType: api.Information, SourceTaskIds: []int64{taskA, taskB2}, DeliverableId: &dA},
-		{Name: "含自身", Necessity: api.Required, EdgeType: api.Information, SourceTaskIds: []int64{taskA, taskC}},
-		{Name: "空选", Necessity: api.Required, EdgeType: api.Information, SourceTaskIds: []int64{}},
+		{Necessity: api.Required, EdgeType: api.Information, SourceTaskIds: []int64{taskA, taskA}},
+		{Necessity: api.Required, EdgeType: api.Information, SourceTaskIds: []int64{taskA, taskB2}, DeliverableId: &dA},
+		{Necessity: api.Required, EdgeType: api.Information, SourceTaskIds: []int64{taskA, taskC}},
+		{Necessity: api.Required, EdgeType: api.Information, SourceTaskIds: []int64{}},
 	} {
 		resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, taskC), bad)
 		wantStatus(t, resp, http.StatusUnprocessableEntity)
@@ -2829,14 +2831,15 @@ func TestMultiSourceInputs(t *testing.T) {
 	expected := openapiDate(t, "2026-09-10")
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/member-inputs", tasksURL, taskD),
 		api.CreateMemberInputRequest{
-			Name: "外部厂商口径", Necessity: api.Required, ProviderIds: []int64{daveUser.ID, erinUser.ID},
+			Necessity: api.Required, ProviderIds: []int64{daveUser.ID, erinUser.ID},
 			ContentNote: "请各自提供本方口径说明", ExpectedDate: expected,
 		})
 	pendingMembers := wantStructureAccepted(t, resp)
 	approveStructureChange(t, bob, base, created.Id, taskD, pendingMembers)
 	memberEdges := []api.DeliverableEdge{}
 	for _, e := range projectEdges(t, carol, base, created.Id) {
-		if e.TargetTaskId == taskD && e.Name == "外部厂商口径" {
+		// 成员来源没有来源任务，标识取「所需内容」摘要（#112）。
+		if e.TargetTaskId == taskD && e.Name == "请各自提供本方口径说明" {
 			memberEdges = append(memberEdges, e)
 		}
 	}
@@ -2863,14 +2866,14 @@ func TestMultiSourceInputs(t *testing.T) {
 	}
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/member-inputs", tasksURL, taskD),
 		api.CreateMemberInputRequest{
-			Name: "重复对接人", Necessity: api.Required, ProviderIds: []int64{daveUser.ID, daveUser.ID},
+			Necessity: api.Required, ProviderIds: []int64{daveUser.ID, daveUser.ID},
 			ContentNote: "x", ExpectedDate: expected,
 		})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/member-inputs", tasksURL, taskD),
 		api.CreateMemberInputRequest{
-			Name: "空选对接人", Necessity: api.Required, ProviderIds: []int64{},
+			Necessity: api.Required, ProviderIds: []int64{},
 			ContentNote: "x", ExpectedDate: expected,
 		})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
@@ -2993,12 +2996,12 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 	upstreamDeliverable := decodeBody[api.TaskDetail](t, resp).Deliverables[0].Id
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, downstream.Id),
 		api.CreateTaskInputRequest{
-			Name: "现场数据包", Necessity: api.Required, EdgeType: api.HardPrerequisite,
+			Necessity: api.Required, EdgeType: api.HardPrerequisite,
 			SourceTaskIds: []int64{upstream.Id}, DeliverableId: &upstreamDeliverable,
 		})
 	pendingInput := wantStructureAccepted(t, resp)
 	approveStructureChange(t, bob, base, created.Id, downstream.Id, pendingInput)
-	edge := edgeOf(t, carol, base, created.Id, downstream.Id, "现场数据包")
+	edge := edgeOf(t, carol, base, created.Id, downstream.Id, "现场数据采集")
 
 	byKind := func(c *http.Client) map[string]api.Blocker {
 		t.Helper()
@@ -3337,16 +3340,17 @@ func TestInterlockAndCriticalPath(t *testing.T) {
 	for _, task := range tasks {
 		byName[task.Name] = task.Id
 	}
-	mkEdge := func(name string, src, dst int64, et api.EdgeType) api.DeliverableEdge {
+	mkEdge := func(srcName string, dst int64, et api.EdgeType) api.DeliverableEdge {
 		t.Helper()
 		resp := doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, dst), api.CreateTaskInputRequest{
-			Name: name, Necessity: api.Required, EdgeType: et, SourceTaskIds: []int64{src},
+			Necessity: api.Required, EdgeType: et, SourceTaskIds: []int64{byName[srcName]},
 		})
 		wantStructureAccepted(t, resp)
-		return edgeOf(t, bob, base, created.Id, dst, name)
+		// 输入源标识由来源任务派生（#112）：按来源任务名定位这条边。
+		return edgeOf(t, bob, base, created.Id, dst, srcName)
 	}
-	eAB := mkEdge("A产物", byName["任务A"], byName["任务B"], api.HardPrerequisite)
-	eBC := mkEdge("B产物", byName["任务B"], byName["任务C"], api.HardPrerequisite)
+	eAB := mkEdge("任务A", byName["任务B"], api.HardPrerequisite)
+	eBC := mkEdge("任务B", byName["任务C"], api.HardPrerequisite)
 	_ = eAB
 	_ = eBC
 
@@ -3364,8 +3368,8 @@ func TestInterlockAndCriticalPath(t *testing.T) {
 	}
 
 	// 加 C→B 硬前置构成循环，再加 B→A 反馈边
-	mkEdge("C回写", byName["任务C"], byName["任务B"], api.HardPrerequisite)
-	mkEdge("B反馈", byName["任务B"], byName["任务A"], api.Feedback)
+	mkEdge("任务C", byName["任务B"], api.HardPrerequisite)
+	mkEdge("任务B", byName["任务A"], api.Feedback)
 
 	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/projects/%d/edges", base, created.Id), nil)
 	wantStatus(t, resp, http.StatusOK)
@@ -3485,7 +3489,7 @@ func TestArtifactsAndPackages(t *testing.T) {
 	}
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, downstreamID),
 		api.CreateTaskInputRequest{
-			Name: "验收方案", Necessity: api.Required, EdgeType: api.HardPrerequisite,
+			Necessity: api.Required, EdgeType: api.HardPrerequisite,
 			SourceTaskIds: []int64{taskID}, DeliverableId: &dA,
 		})
 	wantStatus(t, resp, http.StatusOK)
@@ -3530,7 +3534,7 @@ func TestArtifactsAndPackages(t *testing.T) {
 	if len(adl.Edges) != 1 {
 		t.Fatalf("来源关系边异常: %+v", adl.Edges)
 	}
-	if e := adl.Edges[0]; e.Name != "验收方案" || e.TargetTaskId != downstreamID ||
+	if e := adl.Edges[0]; e.TargetTaskId != downstreamID ||
 		e.EdgeTypeLabel != "硬前置交付" || e.TargetTaskName != "按方案执行验收" {
 		t.Fatalf("来源关系边字段异常: %+v", e)
 	}
@@ -3797,7 +3801,7 @@ func TestProjectReport(t *testing.T) {
 
 	// B 挂一条来自 C 的必要输入边：C 未交付 ⇒ B 的必要输入未就绪（§5.1 等待输入）。
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, taskB.Id),
-		api.CreateTaskInputRequest{Name: "上游数据包", Necessity: api.Required, EdgeType: api.HardPrerequisite, SourceTaskIds: []int64{taskC.Id}})
+		api.CreateTaskInputRequest{Necessity: api.Required, EdgeType: api.HardPrerequisite, SourceTaskIds: []int64{taskC.Id}})
 	wantStructureAccepted(t, resp)
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, taskA.Id),
 		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
@@ -3854,7 +3858,7 @@ func TestProjectReport(t *testing.T) {
 		t.Fatalf("下一步显示状态异常: %+v", rep.NextSteps)
 	}
 	// 「等待输入」还要说清缺哪一项（与我的工作同一口径）。
-	if nextB.UnreadyNote == nil || *nextB.UnreadyNote != "上游未就绪：缺 上游数据包" {
+	if nextB.UnreadyNote == nil || *nextB.UnreadyNote != "上游未就绪：缺 上游未完成任务" {
 		t.Fatalf("下一步未就绪注记异常: %q", derefStr(nextB.UnreadyNote))
 	}
 
@@ -4335,12 +4339,12 @@ func TestUnifiedPermissionsAcrossIdentities(t *testing.T) {
 	resp.Body.Close()
 	expected := openapiDate(t, "2026-09-10")
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/member-inputs", tasksURL, taskID),
-		api.CreateMemberInputRequest{Name: "外部厂商接口说明", Necessity: api.Required, ProviderIds: []int64{daveUser.ID},
+		api.CreateMemberInputRequest{Necessity: api.Required, ProviderIds: []int64{daveUser.ID},
 			ContentNote: "外部材料需由内部协调人代录", ExpectedDate: expected})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/member-inputs", tasksURL, taskID),
-		api.CreateMemberInputRequest{Name: "外部厂商接口说明", Necessity: api.Required, ProviderIds: []int64{bobUser.ID},
+		api.CreateMemberInputRequest{Necessity: api.Required, ProviderIds: []int64{bobUser.ID},
 			ContentNote: "外部材料由协调人李四收集后代录", ExpectedDate: expected})
 	wantStructureAccepted(t, resp)
 }
@@ -5698,9 +5702,9 @@ func TestWritePathAudit(t *testing.T) {
 		}
 	}
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, down),
-		api.CreateTaskInputRequest{Name: "上游材料", Necessity: api.Required, EdgeType: api.HardPrerequisite, SourceTaskIds: []int64{up}})
+		api.CreateTaskInputRequest{Necessity: api.Required, EdgeType: api.HardPrerequisite, SourceTaskIds: []int64{up}})
 	wantStructureAccepted(t, resp)
-	edge := edgeOf(t, alice, base, created.Id, down, "上游材料")
+	edge := edgeOf(t, alice, base, created.Id, down, "上游")
 	resp = doJSON(t, alice, http.MethodDelete, fmt.Sprintf("%s/projects/%d/edges/%d", base, created.Id, edge.Id), nil)
 	wantStructureAccepted(t, resp)
 

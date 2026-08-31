@@ -108,7 +108,7 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 	refs := make([]edgeRefRow, 0, len(edgeRefRows))
 	for _, e := range edgeRefRows {
 		refs = append(refs, edgeRefRow{
-			ID: e.ID, DeliverableID: e.DeliverableID, Name: e.Name,
+			ID: e.ID, DeliverableID: e.DeliverableID,
 			EdgeType: e.EdgeType, TargetTaskID: e.TargetTaskID, TargetTaskName: e.TargetTaskName,
 		})
 	}

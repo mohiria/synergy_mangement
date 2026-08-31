@@ -140,7 +140,7 @@ func (s *Server) applyStructureChange(ctx context.Context, qtx *store.Queries,
 		if err := json.Unmarshal(p.Request, &req); err != nil {
 			return err
 		}
-		return applyAddTaskInput(ctx, qtx, taskID, uid, req)
+		return applyAddTaskInput(ctx, qtx, projectID, taskID, uid, req)
 	case domain.StructureAddMemberInput:
 		var req CreateMemberInputRequest
 		if err := json.Unmarshal(p.Request, &req); err != nil {
@@ -173,17 +173,22 @@ func (s *Server) applyStructureChange(ctx context.Context, qtx *store.Queries,
 	return applySetReceivers(ctx, qtx, taskID, req)
 }
 
-func applyAddTaskInput(ctx context.Context, qtx *store.Queries, taskID, uid int64, req CreateTaskInputRequest) error {
+func applyAddTaskInput(ctx context.Context, qtx *store.Queries, projectID, taskID, uid int64, req CreateTaskInputRequest) error {
 	deliverable := pgtype.Int8{}
 	if req.DeliverableId != nil {
 		deliverable = pgtype.Int8{Int64: *req.DeliverableId, Valid: true}
 	}
 	for _, sourceID := range req.SourceTaskIds {
+		// name 列保留（历史值不动），建边时写一份当时的快照；带编号的完整标识读时现算（#112）。
+		display := ""
+		if src, err := qtx.GetTaskInProject(ctx, store.GetTaskInProjectParams{ID: sourceID, ProjectID: projectID}); err == nil {
+			display = domain.EdgeDisplayName("", src.Name, "")
+		}
 		if _, err := qtx.CreateEdge(ctx, store.CreateEdgeParams{
 			TargetTaskID:  taskID,
 			SourceTaskID:  pgtype.Int8{Int64: sourceID, Valid: true},
 			DeliverableID: deliverable,
-			Name:          strings.TrimSpace(req.Name),
+			Name:          display,
 			EdgeType:      string(req.EdgeType),
 			Necessity:     string(req.Necessity),
 			ExpectedDate:  toPgDate(req.ExpectedDate),
@@ -202,8 +207,9 @@ func (s *Server) applyAddMemberInput(ctx context.Context, qtx *store.Queries, pr
 	}
 	// 草稿与待入池审批阶段不提前打扰对接人（§7.3）。
 	pooled := task.Status != domain.TaskDraft && task.Status != domain.TaskPendingPoolReview
-	name := strings.TrimSpace(req.Name)
 	note := strings.TrimSpace(req.ContentNote)
+	// 同上：写入当时派生的标识，读取现算（#112）。
+	name := domain.EdgeDisplayName("", "", note)
 	for _, providerID := range req.ProviderIds {
 		edge, err := qtx.CreateEdge(ctx, store.CreateEdgeParams{
 			TargetTaskID: taskID,

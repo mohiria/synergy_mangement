@@ -295,7 +295,7 @@ func (s *Server) deliverableList(ctx context.Context, taskID int64) ([]Deliverab
 	refs := make([]edgeRefRow, 0, len(edgeRows))
 	for _, e := range edgeRows {
 		refs = append(refs, edgeRefRow{
-			ID: e.ID, DeliverableID: e.DeliverableID, Name: e.Name,
+			ID: e.ID, DeliverableID: e.DeliverableID,
 			EdgeType: e.EdgeType, TargetTaskID: e.TargetTaskID, TargetTaskName: e.TargetTaskName,
 		})
 	}
@@ -344,7 +344,6 @@ func fillContentState(item *Deliverable, hasPendingReview bool) {
 type edgeRefRow struct {
 	ID             int64
 	DeliverableID  pgtype.Int8
-	Name           string
 	EdgeType       string
 	TargetTaskID   int64
 	TargetTaskName string
@@ -358,7 +357,6 @@ func edgeRefsByDeliverable(rows []edgeRefRow) map[int64][]DeliverableEdgeRef {
 		}
 		out[row.DeliverableID.Int64] = append(out[row.DeliverableID.Int64], DeliverableEdgeRef{
 			EdgeId:         row.ID,
-			Name:           row.Name,
 			EdgeType:       EdgeType(row.EdgeType),
 			EdgeTypeLabel:  domain.EdgeTypeLabel(row.EdgeType),
 			TargetTaskId:   row.TargetTaskID,
