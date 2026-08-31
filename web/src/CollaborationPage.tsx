@@ -290,21 +290,34 @@ export default function CollaborationPage({
     const krH = 62;
     let y = 20;
     const focusO = mode.kind === "o" ? mode.objectiveId : null;
+    // 裁决 K＝A（#114，F-11）：层级树也按工具栏筛选淡化——O 筛选淡化非选中 O 及其 KR，
+    // KR 筛选淡化非选中 KR，人员筛选按该 KR 下有无该人员的任务淡化；口径与另两层一致（AC-45）。
+    const filtering = oFilter !== "all" || krFilter !== "all" || personFilter !== "all";
+    const krPass = (k: (typeof krList)[number]) =>
+      (oFilter === "all" || k.objectiveId === oFilter) &&
+      (krFilter === "all" || k.id === krFilter) &&
+      (personFilter === "all" ||
+        tasks.some((t) => t.keyResultId === k.id && t.ownerId === personFilter));
     for (const o of objectives) {
       const krs = krList.filter((k) => k.objectiveId === o.id);
       const blockHeight = Math.max(krs.length * (krH + 18) - 18, oH);
       const oY = y + blockHeight / 2 - oH / 2;
-      const dimmed = focusO != null && focusO !== o.id;
-      nodes.push({ key: `o-${o.id}`, kind: "o", id: o.id, pos: { x: oX, y: oY, w: oW, h: oH }, dimmed });
+      const oPass =
+        !filtering ||
+        ((oFilter === "all" || o.id === oFilter) &&
+          (krFilter === "all" && personFilter === "all" ? true : krs.some(krPass)));
+      const oDimmed = (focusO != null && focusO !== o.id) || !oPass;
+      nodes.push({ key: `o-${o.id}`, kind: "o", id: o.id, pos: { x: oX, y: oY, w: oW, h: oH }, dimmed: oDimmed });
       krs.forEach((k, i) => {
         const kY = y + i * (krH + 18);
-        nodes.push({ key: `kr-${k.id}`, kind: "kr", id: k.id, pos: { x: krX, y: kY, w: krW, h: krH }, dimmed });
-        lines.push({ x1: oX + oW, y1: oY + oH / 2, x2: krX, y2: kY + krH / 2, dimmed });
+        const krDimmed = (focusO != null && focusO !== o.id) || (filtering && !krPass(k));
+        nodes.push({ key: `kr-${k.id}`, kind: "kr", id: k.id, pos: { x: krX, y: kY, w: krW, h: krH }, dimmed: krDimmed });
+        lines.push({ x1: oX + oW, y1: oY + oH / 2, x2: krX, y2: kY + krH / 2, dimmed: oDimmed || krDimmed });
       });
       y += blockHeight + 34;
     }
     return { nodes, lines, height: y + 20 };
-  }, [objectives, krList, mode]);
+  }, [objectives, krList, tasks, mode, oFilter, krFilter, personFilter]);
 
   // —— KR 任务关系层布局 ——
   const krLayer = useMemo(() => {
