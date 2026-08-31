@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Drawer, Input, Mentions, Modal, Select, Slider, Tabs, message } from "antd";
+import { Button, DatePicker, Drawer, Input, Mentions, Modal, Select, Slider, Tabs, message } from "antd";
+import dayjs from "dayjs";
 import { client } from "../api/client";
 import FileUploadField, { fileTypeLabel, formatFileSize } from "../FileUploadField";
 import PeopleSelect from "./PeopleSelect";
@@ -50,7 +51,7 @@ export default function TaskDrawer({
     openReject: (t: Task) => void;
     openCancel: (t: Task) => void;
     saveProgress: (t: Task, progress: number | null) => Promise<void>;
-    openEdit: (t: Task) => void;
+    submitFieldChange: (t: Task, changes: Record<string, unknown>, reason?: string) => Promise<boolean>;
     approveFieldChange: (t: Task, changeId: number) => void;
     openFcReject: (t: Task, changeId: number) => void;
     abandonFieldChange: (t: Task, changeId: number) => void;
@@ -105,6 +106,95 @@ export default function TaskDrawer({
         {m.displayName}（{m.username}）
       </span>
     </span>
+  );
+  // #138 就地编辑（裁决 E1）：字段点击进入编辑态；保存按 fieldEditMode 路由——
+  // direct/exempt 直接提交，approval 先弹一行「修改原因」（必填）；
+  // 已有待审变更单时全部字段锁定（后端 ErrChangePendingExists 同口径），逐字段标「审批中」。
+  const [editingField, setEditingField] = useState<
+    "name" | "description" | "completionCriteria" | "ownerId" | "endDate" | null
+  >(null);
+  const [editDraft, setEditDraft] = useState("");
+  const [reasonFor, setReasonFor] = useState<{ field: string; value: string } | null>(null);
+  const [editReason, setEditReason] = useState("");
+  const pendingChange = task?.fieldChange?.state === "pending" ? task.fieldChange : null;
+  const pendingFields = new Set((pendingChange?.changes ?? []).map((c) => c.field));
+  const canInlineEdit = !!task?.canProposeFieldChange && !pendingChange;
+  const submitField = async (field: string, value: string, reason?: string) => {
+    if (!task) return;
+    const changes: Record<string, unknown> = {
+      [field]: field === "ownerId" ? Number(value) : value,
+    };
+    const ok = await actions.submitFieldChange(task, changes, reason);
+    if (ok) {
+      setEditingField(null);
+      setReasonFor(null);
+      setEditReason("");
+      setRefreshTick((n) => n + 1);
+    }
+  };
+  const saveField = (field: string, value: string) => {
+    if (task?.fieldEditMode === "approval") {
+      setReasonFor({ field, value });
+      setEditReason("");
+    } else {
+      void submitField(field, value);
+    }
+  };
+  const beginEditField = (f: string) => {
+    if (!canInlineEdit || !task) return;
+    const current: Record<string, string> = {
+      name: task.name,
+      description: task.description ?? "",
+      completionCriteria: task.completionCriteria ?? "",
+      ownerId: String(task.ownerId),
+      endDate: task.endDate,
+    };
+    if (f in current) {
+      setEditingField(f as typeof editingField);
+      setEditDraft(current[f]);
+    }
+  };
+  const pendingTag = (field: string) =>
+    pendingFields.has(field) ? (
+      <span
+        className="status-pill warning"
+        style={{ marginLeft: 6 }}
+        title={`拟议值：${pendingChange?.changes.find((c) => c.field === field)?.newValue ?? ""}`}
+      >
+        审批中
+      </span>
+    ) : null;
+  // 文本类字段（说明／量化标准）的就地编辑行体。
+  const editableTextRow = (field: "description" | "completionCriteria", label: string, value: string) => (
+    <div className="task-info-row">
+      <span>{label}</span>
+      {editingField === field ? (
+        <div style={{ display: "flex", gap: 6, flex: 1, alignItems: "flex-start" }}>
+          <Input.TextArea
+            autoSize={{ minRows: 1, maxRows: 4 }}
+            maxLength={2000}
+            value={editDraft}
+            onChange={(e) => setEditDraft(e.target.value)}
+            style={{ flex: 1 }}
+          />
+          <Button size="small" type="primary" onClick={() => saveField(field, editDraft.trim())}>
+            保存
+          </Button>
+          <Button size="small" onClick={() => setEditingField(null)}>
+            取消
+          </Button>
+        </div>
+      ) : (
+        <strong
+          className={`${value ? "" : "muted"}${canInlineEdit && !pendingFields.has(field) ? " inline-editable" : ""}`}
+          onClick={() => !pendingFields.has(field) && beginEditField(field)}
+          title={canInlineEdit && !pendingFields.has(field) ? "点击编辑" : undefined}
+        >
+          {value || "未填写"}
+          {pendingTag(field)}
+        </strong>
+      )}
+    </div>
   );
   const [addingDeliverable, setAddingDeliverable] = useState(false);
   const [newDeliverableFile, setNewDeliverableFile] = useState<File | null>(null);
@@ -453,7 +543,33 @@ export default function TaskDrawer({
         <div className="task-info-list">
           <div className="task-info-row">
             <span>负责人</span>
-            <strong>{task.ownerName}</strong>
+            {editingField === "ownerId" ? (
+              <Select
+                size="small"
+                style={{ minWidth: 220 }}
+                showSearch
+                optionFilterProp="label"
+                autoFocus
+                defaultOpen
+                value={Number(editDraft)}
+                options={members
+                  .filter((m) => m.role !== "viewer")
+                  .map((m) => ({ value: m.userId, label: `${m.displayName}（${m.username}）` }))}
+                onChange={(v) => saveField("ownerId", String(v))}
+                onDropdownVisibleChange={(o) => {
+                  if (!o) setEditingField(null);
+                }}
+              />
+            ) : (
+              <strong
+                className={canInlineEdit && !pendingFields.has("ownerId") ? "inline-editable" : ""}
+                onClick={() => !pendingFields.has("ownerId") && beginEditField("ownerId")}
+                title={canInlineEdit && !pendingFields.has("ownerId") ? "点击编辑" : undefined}
+              >
+                {task.ownerName}
+                {pendingTag("ownerId")}
+              </strong>
+            )}
           </div>
           {/* 参与人（PRD §9.2 按需字段）：空名单按 AC-50「空字段不显示」隐藏，
               但本人可配置时保留该行，否则首次添加没有入口。 */}
@@ -535,9 +651,33 @@ export default function TaskDrawer({
           )}
           <div className="task-info-row">
             <span>周期</span>
-            <strong>
-              {task.startDate} — {task.endDate}
-            </strong>
+            {editingField === "endDate" ? (
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <strong>{task.startDate} —</strong>
+                <DatePicker
+                  size="small"
+                  autoFocus
+                  open
+                  value={editDraft ? dayjs(editDraft) : null}
+                  onChange={(d) => {
+                    if (d) saveField("endDate", d.format("YYYY-MM-DD"));
+                    else setEditingField(null);
+                  }}
+                  onOpenChange={(o) => {
+                    if (!o) setEditingField(null);
+                  }}
+                />
+              </div>
+            ) : (
+              <strong
+                className={canInlineEdit && !pendingFields.has("endDate") ? "inline-editable" : ""}
+                onClick={() => !pendingFields.has("endDate") && beginEditField("endDate")}
+                title={canInlineEdit && !pendingFields.has("endDate") ? "点击编辑截止时间" : undefined}
+              >
+                {task.startDate} — {task.endDate}
+                {pendingTag("endDate")}
+              </strong>
+            )}
           </div>
           <div className="task-info-row">
             <span>执行状态</span>
@@ -579,18 +719,11 @@ export default function TaskDrawer({
               </div>
             </div>
           )}
-          {task.description && (
-            <div className="task-info-row">
-              <span>任务说明</span>
-              <strong>{task.description}</strong>
-            </div>
-          )}
-          {task.completionCriteria && (
-            <div className="task-info-row">
-              <span>量化标准</span>
-              <strong>{task.completionCriteria}</strong>
-            </div>
-          )}
+          {/* #138：说明与量化标准可就地编辑；可编辑时空值也保留行，否则首次填写没有入口。 */}
+          {(task.description || canInlineEdit || pendingFields.has("description")) &&
+            editableTextRow("description", "任务说明", task.description ?? "")}
+          {(task.completionCriteria || canInlineEdit || pendingFields.has("completionCriteria")) &&
+            editableTextRow("completionCriteria", "量化标准", task.completionCriteria ?? "")}
         </div>
       </section>
       {/* 输入源（§7.5、#101）：必要与参考同区块展示，合并只合展示不合语义——
@@ -1207,7 +1340,15 @@ export default function TaskDrawer({
               <Button size="small" onClick={() => actions.abandonFieldChange(task, fc.id)}>
                 放弃本次变更
               </Button>
-              <Button size="small" type="primary" onClick={() => actions.openEdit(task)}>
+              <Button
+                size="small"
+                type="primary"
+                onClick={() => {
+                  // #138：退回后引导就地编辑——切回概况并进入第一处被退回字段的编辑态。
+                  onTabChange("overview");
+                  beginEditField(fc.changes[0]?.field ?? "name");
+                }}
+              >
                 修改并重提
               </Button>
             </div>
@@ -1279,7 +1420,35 @@ export default function TaskDrawer({
       }
       title={
         <div>
-          {code} · {task.name}
+          {editingField === "name" ? (
+            <span style={{ display: "inline-flex", gap: 6, width: "90%" }}>
+              <span>{code} ·</span>
+              <Input
+                size="small"
+                autoFocus
+                maxLength={200}
+                value={editDraft}
+                onChange={(e) => setEditDraft(e.target.value)}
+                onPressEnter={() => editDraft.trim() && saveField("name", editDraft.trim())}
+                style={{ flex: 1 }}
+              />
+              <Button size="small" type="primary" onClick={() => editDraft.trim() && saveField("name", editDraft.trim())}>
+                保存
+              </Button>
+              <Button size="small" onClick={() => setEditingField(null)}>
+                取消
+              </Button>
+            </span>
+          ) : (
+            <span
+              className={canInlineEdit && !pendingFields.has("name") ? "inline-editable" : ""}
+              onClick={() => !pendingFields.has("name") && beginEditField("name")}
+              title={canInlineEdit && !pendingFields.has("name") ? "点击编辑任务名称" : undefined}
+            >
+              {code} · {task.name}
+              {pendingTag("name")}
+            </span>
+          )}
           {/* 所属 O／KR 只显编号：展开标题会把页头挤满，更新时间是任务的、
               放在这里容易被误读成 O／KR 的更新时间（#99）。 */}
           <div className="drawer-sub">所属 O／KR：{okrCode.get(task.keyResultId) ?? "—"}</div>
@@ -1287,9 +1456,7 @@ export default function TaskDrawer({
       }
       footer={
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          {task.canProposeFieldChange && (
-            <Button onClick={() => actions.openEdit(task)}>编辑任务</Button>
-          )}
+          {/* #138：字段就地编辑，页脚不再有「编辑任务」，只保留动作类按钮。 */}
           {task.canManageDeliverables && (
             <Button onClick={() => actions.openConfigureInput(task)}>配置输入</Button>
           )}
@@ -1383,6 +1550,29 @@ export default function TaskDrawer({
             ? "外部材料由内部协调人代为录入：可作为输入证据，但不会把任何输入置为就绪，也不进入完成审批。"
             : "过程文件不进入完成审批，也不作为下游任务的正式输入；可按需选进成果包。"}
         </div>
+      </Modal>
+      {/* #138：approval 路由的就地保存——弹一行修改原因（必填）后生成关键字段变更单。 */}
+      <Modal
+        title="修改原因"
+        open={!!reasonFor}
+        okText="提交变更审批"
+        cancelText="取消"
+        okButtonProps={{ disabled: !editReason.trim() }}
+        onCancel={() => setReasonFor(null)}
+        onOk={() => {
+          if (reasonFor) void submitField(reasonFor.field, reasonFor.value, editReason.trim());
+        }}
+      >
+        <p className="muted" style={{ marginTop: 0 }}>
+          提交后由所属 KR 负责人审批；审批期间旧值继续生效，字段旁标「审批中」并锁定。
+        </p>
+        <Input.TextArea
+          rows={2}
+          maxLength={500}
+          placeholder="修改原因（必填）"
+          value={editReason}
+          onChange={(e) => setEditReason(e.target.value)}
+        />
       </Modal>
     </Drawer>
   );

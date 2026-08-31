@@ -56,6 +56,19 @@ const (
 	FieldChangePending
 )
 
+// FieldEditMode 就地编辑保存路由的对外表达（#138 裁决 E1）：direct／exempt／approval。
+func FieldEditMode(o FieldChangeOutcome) string {
+	switch o {
+	case FieldChangeDirect:
+		return "direct"
+	case FieldChangeExempt:
+		return "exempt"
+	case FieldChangePending:
+		return "approval"
+	}
+	return ""
+}
+
 // ValidateKeyFieldChanges 校验拟议值（§9.1：至少一项拟议值、修改原因；草稿直接完善不要求原因）。
 func ValidateKeyFieldChanges(c KeyFieldChanges, reason string, reasonRequired bool, roleOf func(int64) string, taskStart time.Time) error {
 	if c.Empty() {

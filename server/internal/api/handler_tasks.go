@@ -935,8 +935,13 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 				item.FieldChange = &view
 			}
 		}
-		_, routeErr := domain.FieldChangeRoute(actor, userID, facts, hasPending)
+		routeOutcome, routeErr := domain.FieldChangeRoute(actor, userID, facts, hasPending)
 		item.CanProposeFieldChange = routeErr == nil
+		// #138 就地编辑的保存路由（裁决 E1）：前端只消费，不复算规则。
+		if routeErr == nil {
+			mode := TaskFieldEditMode(domain.FieldEditMode(routeOutcome))
+			item.FieldEditMode = &mode
+		}
 		canDiscuss := domain.CanDiscuss(actor)
 		item.CanDiscuss = &canDiscuss
 		canManageDeliverables := domain.CanManageDeliverables(actor, userID, facts)

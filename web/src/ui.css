@@ -470,6 +470,9 @@ body {
 }
 .okr-level-tag.kr { background: #eef1ff; color: var(--primary); }
 .okr-row-action { color: var(--primary); font-size: var(--type-body); font-weight: 600; }
+/* #138 就地编辑：可点字段悬停给出编辑暗示。 */
+.inline-editable { cursor: pointer; border-bottom: 1px dashed transparent; }
+.inline-editable:hover { border-bottom-color: var(--primary); }
 /* 说明条挂在 graph-scroll 的顶部留白里（top 为负，落在 padding-top 区域），不压住第一排节点。 */
 .graph-note {
   position: absolute; top: -36px; left: 10px; z-index: 4; display: inline-block;

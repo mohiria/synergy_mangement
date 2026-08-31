@@ -1623,6 +1623,11 @@ export interface components {
             deliverableNames?: string[];
             /** @description 当前用户能否编辑任务／提交关键字段修改（派生字段） */
             canProposeFieldChange: boolean;
+            /**
+             * @description 就地编辑的保存路由（#138 裁决 E1；派生自 FieldChangeRoute，前端不复算规则）： direct=草稿直接生效；exempt=KR 负责人本人免审即时生效；approval=生成变更单进入审批 （保存时须填修改原因）。不可编辑时不返回（以 canProposeFieldChange 为准）
+             * @enum {string}
+             */
+            fieldEditMode?: "direct" | "exempt" | "approval";
             /** @description 本任务上未决审批单条数（派生字段；入池、关键字段变更／取消、完成申请合计，前端不再自行相加） */
             pendingReviewCount?: number;
             /** @description 当前用户能否提交任务讨论（派生字段；全体项目内成员含访客，公开项目的隐式访客不可，见词汇表「隐式访客」） */

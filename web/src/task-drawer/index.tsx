@@ -5,7 +5,6 @@ import { client } from "../api/client";
 import type { components } from "../api/schema";
 import FileUploadField from "../FileUploadField";
 import TaskDrawer from "./TaskDrawer";
-import FieldChangeModal from "./FieldChangeModal";
 import ConfigureInputModal from "./ConfigureInputModal";
 import { CancelTaskModal, PoolRejectModal } from "./modals";
 import { cancelTask as apiCancelTask, decidePoolReview, saveProgress as apiSaveProgress, startTask as apiStartTask, submitPoolReview } from "./actions";
@@ -87,7 +86,6 @@ export default function TaskDrawerHost({
 
   const [rejectTask, setRejectTask] = useState<Task | null>(null);
   const [rejectOpinion, setRejectOpinion] = useState("");
-  const [editTask, setEditTask] = useState<Task | null>(null);
   const [fcReject, setFcReject] = useState<{ task: Task; changeId: number } | null>(null);
   const [fcRejectOpinion, setFcRejectOpinion] = useState("");
   const [inputTask, setInputTask] = useState<Task | null>(null);
@@ -336,7 +334,26 @@ export default function TaskDrawerHost({
             setCancelReason("");
           },
           saveProgress,
-          openEdit: (t) => setEditTask(t),
+          // #138：字段就地编辑——路由与文案由后端派生（fieldEditMode / fieldChange.state）。
+          submitFieldChange: async (t, changes, reason) => {
+            const res = await client.POST("/projects/{projectId}/tasks/{taskId}/field-changes", {
+              params: { path: { projectId, taskId: t.id } },
+              body: { changes, reason },
+            });
+            if (res.data) {
+              message.success(
+                t.status === "draft"
+                  ? "草稿已更新"
+                  : res.data.fieldChange?.state === "pending"
+                    ? "已提交所属 KR 负责人审批，审批期间旧值继续生效"
+                    : "修改已生效",
+              );
+              refresh();
+              return true;
+            }
+            message.error(res.error?.message ?? "保存失败");
+            return false;
+          },
           approveFieldChange: (t, id) => decideFieldChange(t, id, "approved"),
           openFcReject: (t, id) => {
             setFcReject({ task: t, changeId: id });
@@ -505,16 +522,6 @@ export default function TaskDrawerHost({
           onChange={(e) => setCrRejectOpinion(e.target.value)}
         />
       </Modal>
-      <FieldChangeModal
-        task={editTask}
-        members={members}
-        onClose={() => setEditTask(null)}
-        onSaved={() => {
-          setEditTask(null);
-          refresh();
-        }}
-        projectId={projectId}
-      />
       <Modal
         title="退回关键字段修改"
         open={!!fcReject}
