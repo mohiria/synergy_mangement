@@ -432,6 +432,7 @@ type OkrRow = {
   title: string;
   objRef?: string; // KR 所属 O："new:<rowKey>" 或 "existing:<objectiveId>"
   description: string;
+  metric: string; // 量化指标（选填，#94）；O 行不用
   ownerId?: number;
   period?: [Dayjs | null, Dayjs | null] | null;
 };
@@ -460,13 +461,14 @@ function OkrBatchModal({
   useEffect(() => {
     if (open) {
       // 与原型一致：打开即预置一行 O 和一行归属该 O 的 KR。
-      const oRow: OkrRow = { key: ++rowSeq, kind: "O", title: "", description: "" };
+      const oRow: OkrRow = { key: ++rowSeq, kind: "O", title: "", description: "", metric: "" };
       const krRow: OkrRow = {
         key: ++rowSeq,
         kind: "KR",
         title: "",
         objRef: `new:${oRow.key}`,
         description: "",
+        metric: "",
       };
       setRows([oRow, krRow]);
       setError(null);
@@ -483,7 +485,7 @@ function OkrBatchModal({
             ? `existing:${objectives[objectives.length - 1].id}`
             : undefined
         : undefined;
-    return { key: ++rowSeq, kind, title: "", objRef: defaultRef, description: "" };
+    return { key: ++rowSeq, kind, title: "", objRef: defaultRef, description: "", metric: "" };
   };
 
   const patch = (key: number, p: Partial<OkrRow>) =>
@@ -553,6 +555,7 @@ function OkrBatchModal({
       }
       const kr = {
         description: r.description.trim(),
+        metric: r.metric.trim() || undefined,
         ownerId: r.ownerId,
         startDate: r.period?.[0]?.format("YYYY-MM-DD"),
         endDate: r.period?.[1]?.format("YYYY-MM-DD"),
@@ -598,7 +601,7 @@ function OkrBatchModal({
         </div>
       }
       open={open}
-      width={1080}
+      width={1160}
       confirmLoading={saving}
       onOk={save}
       onCancel={onClose}
@@ -612,6 +615,7 @@ function OkrBatchModal({
         <div className="okr-sheet-head">
           <span>目标 O</span>
           <span>关键结果 KR</span>
+          <span>量化指标</span>
           <span>所属 O</span>
           <span>负责人</span>
           <span>周期</span>
@@ -633,6 +637,9 @@ function OkrBatchModal({
               </div>
               <div className="okr-sheet-cell">
                 <span className="sheet-placeholder">该行用于创建 O</span>
+              </div>
+              <div className="okr-sheet-cell">
+                <span className="sheet-placeholder">在 KR 上填</span>
               </div>
               <div className="okr-sheet-cell">
                 <span className="sheet-placeholder">项目目标</span>
@@ -662,6 +669,14 @@ function OkrBatchModal({
                     onChange={(e) => patch(r.key, { description: e.target.value })}
                   />
                 </div>
+              </div>
+              <div className="okr-sheet-cell">
+                <Input
+                  maxLength={100}
+                  placeholder="量化指标（选填）"
+                  value={r.metric}
+                  onChange={(e) => patch(r.key, { metric: e.target.value })}
+                />
               </div>
               <div className="okr-sheet-cell">
                 <Select
