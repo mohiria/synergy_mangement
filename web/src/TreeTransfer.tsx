@@ -52,7 +52,8 @@ function buildTree(items: TreeTransferItem[], unit: string): DataNode[] {
   groups.forEach((entry) => {
     entry.node.title = (
       <span className={`tree-transfer-group tree-transfer-group-${entry.depth}`}>
-        <b>{entry.label}</b>
+        {/* 分组标题按面板宽度截断，全称看 title（#100）。 */}
+        <b title={entry.label}>{entry.label}</b>
         <span>
           {entry.count} {unit}
         </span>

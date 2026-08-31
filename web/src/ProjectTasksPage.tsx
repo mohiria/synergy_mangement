@@ -127,8 +127,8 @@ function memberTreeItems(members: ProjectMember[]): TreeTransferItem[] {
         <span className="tree-transfer-row">
           <span className="avatar">{m.displayName.slice(0, 1)}</span>
           <span className="tree-transfer-text">
-            <b>{m.displayName}</b>
-            <small>{m.username}</small>
+            <b title={m.displayName}>{m.displayName}</b>
+            <small title={m.username}>{m.username}</small>
           </span>
         </span>
       ),
@@ -1482,8 +1482,9 @@ function InviteOwnersModal({
       destroyOnHidden
     >
       {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
-      <div style={{ display: "grid", gap: 12 }}>
-        <div>
+      {/* 网格项默认 min-width: auto，会被树形穿梭框的 min-content 撑开、把弹窗顶宽（#100）。 */}
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 12 }}>
+        <div style={{ minWidth: 0 }}>
           <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
             邀请成员为哪个 KR 创建任务
           </div>
@@ -1856,10 +1857,12 @@ function TaskDrawer({
             onClick={() => actions.openTask(rel.taskId)}
           >
             <span>
-              <b>
+              <b title={`${taskCode.get(rel.taskId) ?? ""} · ${rel.taskName}`}>
                 {taskCode.get(rel.taskId) ?? ""} · {rel.taskName}
               </b>
-              <small>
+              <small
+                title={`${rel.krDescription} · ${rel.edgeTypeLabel ?? ""} · 负责人 ${rel.ownerName} · ${rel.taskStatusLabel}`}
+              >
                 {rel.krDescription} · {rel.edgeTypeLabel ?? ""} · 负责人 {rel.ownerName} ·{" "}
                 {rel.taskStatusLabel}
               </small>
@@ -2347,8 +2350,8 @@ function TaskDrawer({
               onClick={() => actions.openInGraph(task.id)}
             >
               <span>
-                <b>{it.krDescription}</b>
-                <small>所属 O：{it.objectiveTitle}</small>
+                <b title={it.krDescription}>{it.krDescription}</b>
+                <small title={it.objectiveTitle}>所属 O：{it.objectiveTitle}</small>
               </span>
               <span className="muted" style={{ fontSize: 12 }}>
                 展开影响路径 →
@@ -3009,8 +3012,12 @@ function ConfigureInputModal({
           <span className="tree-transfer-row">
             <span className="tree-transfer-code">{code}</span>
             <span className="tree-transfer-text">
-              <b>{t.name}</b>
-              <small>
+              <b title={t.name}>{t.name}</b>
+              <small
+                title={
+                  t.ownerName + (deliverables.length > 0 ? ` · ${deliverables.join("、")}` : "")
+                }
+              >
                 {t.ownerName}
                 {deliverables.length > 0 && ` · ${deliverables.join("、")}`}
               </small>
@@ -3110,8 +3117,9 @@ function ConfigureInputModal({
       destroyOnHidden
     >
       {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
-      <div style={{ display: "grid", gap: 12 }}>
-        <div>
+      {/* 同上（#100）：来源任务树在这个网格里，网格项必须允许收缩。 */}
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 12 }}>
+        <div style={{ minWidth: 0 }}>
           <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>来源模式（二选一）</div>
           <Select
             style={{ width: "100%" }}

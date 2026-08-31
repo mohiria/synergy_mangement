@@ -479,8 +479,12 @@ body {
   border: 1px solid var(--line); border-radius: var(--radius); background: #fff;
   padding: 10px 12px; margin-bottom: 8px;
 }
-.fact-card b { display: block; }
-.fact-card small { display: block; color: var(--muted); font-size: 12px; }
+/* 卡内文字一律单行截断（#100）：长 O／KR 标题不撑破抽屉，完整内容看 title。
+   多行内容（讨论意见）走 .fact-card-top，单独放开。 */
+.fact-card > span:first-child { min-width: 0; }
+.fact-card b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fact-card small { display: block; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fact-card-top b, .fact-card-top small { white-space: normal; }
 .fact-card .file-link { color: var(--accent); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; font-size: var(--type-aux); }
 .fact-card-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 /* 紧凑正文（输入、卡点等一行事实）。 */
@@ -545,7 +549,9 @@ body {
 .project-name-cell:hover strong { color: var(--accent); }
 
 /* 弹窗内的轻量表单栈（不需要 antd Form 校验时使用）。 */
-.form-stack { display: grid; gap: 14px; }
+/* 网格项默认 min-width: auto，宽内容（树、表格、长文本）会把整块顶宽（#100）。 */
+.form-stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.form-stack > * { min-width: 0; }
 .form-stack > label { display: grid; gap: 6px; }
 .form-stack > label > span { color: #536270; font-size: var(--type-aux); font-weight: 500; }
 
@@ -578,8 +584,16 @@ body {
 .tree-transfer .ant-transfer-list-body-customize-wrapper { padding: 6px; overflow: auto; }
 .tree-transfer .ant-checkbox .ant-checkbox-inner,
 .tree-transfer .ant-tree-checkbox .ant-tree-checkbox-inner { width: 16px; height: 16px; }
+/* antd Tree 的列表容器按内容 shrink-to-fit：子项写了 width: 100% 也只解析成内容宽度，
+   截断规则因此永远不触发，长 O／KR 标题反而把树横向撑宽、顶破面板（#100）。
+   给容器与节点一条明确的宽度约束，省略号才真正生效。 */
+.tree-transfer .ant-tree-list-holder-inner { width: 100%; align-items: stretch; }
 .tree-transfer .ant-tree-treenode { width: 100%; align-items: center; padding-bottom: 2px; }
-.tree-transfer .ant-tree-node-content-wrapper { min-width: 0; }
+.tree-transfer .ant-tree-node-content-wrapper { flex: 1 1 0; min-width: 0; }
+.tree-transfer .ant-tree-node-content-wrapper .ant-tree-title { display: block; min-width: 0; }
+/* 右侧已选列表同口径。 */
+.tree-transfer .ant-transfer-list-content-item { min-width: 0; }
+.tree-transfer .ant-transfer-list-content-item-text { min-width: 0; overflow: hidden; }
 .tree-transfer-group { width: 100%; display: flex; align-items: center; gap: 8px; padding: 0 6px; border-radius: var(--radius); }
 .tree-transfer-group-0 { background: var(--surface-3); }
 .tree-transfer-group b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
