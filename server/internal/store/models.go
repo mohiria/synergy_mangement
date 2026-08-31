@@ -8,24 +8,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type ArtifactPackage struct {
-	ID        int64
-	ProjectID int64
-	Name      string
-	CreatedBy int64
-	CreatedAt pgtype.Timestamptz
-}
-
-type ArtifactPackageItem struct {
-	PackageID      int64
-	DeliverableID  pgtype.Int8
-	ID             int64
-	TaskFileID     pgtype.Int8
-	SourceTaskName string
-	SourceFileName string
-	SourceFileKind string
-}
-
 type AuditLog struct {
 	ID         int64
 	ProjectID  int64

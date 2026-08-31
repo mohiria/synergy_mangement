@@ -8,7 +8,7 @@ import { gotoPage, login } from "./fixtures";
 const LIST_PAGES = [
   { path: "/okr", heading: "管理 O/KR" },
   { path: "/tasks", heading: "全部任务" },
-  { path: "/artifacts", heading: "成果与归档" },
+  { path: "/artifacts", heading: "成果归档" },
   { path: "/graph", heading: "协作关系" },
   { path: "/reports", heading: "项目报告" },
 ] as const;

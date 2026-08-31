@@ -17,7 +17,6 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 TRUNCATE TABLE
     sessions, notifications, discussion_mentions, discussions,
     task_activities, remind_logs,
-    artifact_package_items, artifact_packages,
     completion_review_items, completion_review_reviewers, completion_reviews,
     field_change_requests, input_requests, deliverable_edges,
     deliverable_files, deliverables,

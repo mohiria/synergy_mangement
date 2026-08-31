@@ -908,7 +908,7 @@ body {
 .property label { color: var(--muted); font-size: var(--type-aux); }
 .property strong { font-weight: 500; font-size: var(--type-body); }
 
-/* 成果与归档（原型 artifact-group / package-list）：一个 O 一张分组表，成果包用卡片网格。 */
+/* 成果归档（原型 artifact-group）：一个 KR 一张分组表；成果包相关样式随裁决 G1（#140）废弃留存不用。 */
 .artifact-group { margin-bottom: 12px; }
 .artifact-group-head {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;

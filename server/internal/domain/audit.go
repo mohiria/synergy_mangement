@@ -43,7 +43,6 @@ var auditActions = map[string]string{
 	"POST /projects/{projectId}/tasks/{taskId}/files":                "上传过程文件／外部材料",
 	"DELETE /projects/{projectId}/tasks/{taskId}/files/{fileId}":     "删除过程文件／外部材料",
 	"DELETE /projects/{projectId}/edges/{edgeId}":                    "解除交付物边",
-	"POST /projects/{projectId}/packages":                            "创建成果包",
 	"POST /projects/{projectId}/task-invites":                        "发出任务创建邀请",
 	"POST /projects/{projectId}/import":                              "导入 O／KR／任务",
 	"POST /projects/{projectId}/reminders":                           "一键提醒",

@@ -98,7 +98,6 @@ func TestImplicitViewerReadsAllButWritesNothing(t *testing.T) {
 		{"调整成果审核人", CanManageReviewers(implicit, me, facts)},
 		{"编辑项目", CanEditProject(implicit)},
 		{"管理成员", CanManageMembers(implicit)},
-		{"创建成果包", CanCreatePackage(implicit)},
 		{"发一键提醒", CanRemind(implicit, me, RemindTarget{TaskID: 1, ActionOwnerIDs: []int64{9}, TaskOwnerID: 9})},
 		// 发表讨论是隐式访客与显式访客唯一的差别：显式访客可以，隐式不行。
 		{"发表讨论", CanDiscuss(implicit)},

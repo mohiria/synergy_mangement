@@ -74,7 +74,7 @@ const PAGES: [string, string][] = [
   ["管理 O/KR", "/okr"],
   ["全部任务", "/tasks"],
   ["我的工作", "/my-work"],
-  ["成果与归档", "/artifacts"],
+  ["成果归档", "/artifacts"],
   ["协作关系", "/graph"],
   ["项目报告", "/reports"],
   ["项目设置", "/settings"],

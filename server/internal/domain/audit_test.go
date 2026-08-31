@@ -20,7 +20,6 @@ func TestAuditActionLabel(t *testing.T) {
 		{"PUT", "/projects/{projectId}/members/{userId}", "调整成员角色"},
 		{"DELETE", "/projects/{projectId}/members/{userId}", "移出项目成员"},
 		{"PATCH", "/projects/{projectId}", "修改项目信息"},
-		{"POST", "/projects/{projectId}/packages", "创建成果包"},
 		{"POST", "/projects/{projectId}/some-future-write", "项目内写操作"},
 	}
 	for _, tc := range cases {

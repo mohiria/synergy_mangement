@@ -5,7 +5,6 @@ package api_test
 // 无 Postgres 环境用 go test -short ./... 跳过。
 
 import (
-	"archive/zip"
 	"bytes"
 	"context"
 	"database/sql"
@@ -3448,7 +3447,7 @@ func TestInterlockAndCriticalPath(t *testing.T) {
 
 // 成果与归档、轻量成果包（#24，AC-17/18）：归档视角展示当前成果与审批记录数；
 // 勾选当前成果生成目录与来源清单；整包下载解析当前内容（需要 MinIO，不可达时跳过下载断言）。
-func TestArtifactsAndPackages(t *testing.T) {
+func TestArtifacts(t *testing.T) {
 	q, pool := setupDB(t)
 	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
 	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
@@ -3568,6 +3567,11 @@ func TestArtifactsAndPackages(t *testing.T) {
 	if at.OwnerName != "李四" || at.ReceiverLabel != "未配置" {
 		t.Fatalf("归档任务负责人／接收方异常: %q / %q", at.OwnerName, at.ReceiverLabel)
 	}
+	// 裁决 G1（#140）：文件状态两档——所属任务已完成→已发布。
+	if at.FileState == nil || string(*at.FileState) != "published" ||
+		at.FileStateLabel == nil || *at.FileStateLabel != "已发布" {
+		t.Fatalf("归档文件状态派生异常: %+v %+v", at.FileState, at.FileStateLabel)
+	}
 	// 内容状态与提交／生效时间读时派生：终审通过后是「已生效」，时间取生效时刻。
 	adl := at.Deliverables[0]
 	if adl.ContentState != api.DeliverableContentStateEffective || adl.ContentStateLabel != "已生效" {
@@ -3665,49 +3669,6 @@ func TestArtifactsAndPackages(t *testing.T) {
 		t.Fatalf("明天之后没有任何内容，应筛空: 交付物=%d 文件=%d", d, f)
 	}
 
-	// AC-18：项目成员不能建包；管理员勾选当前成果生成
-	pkgURL := fmt.Sprintf("%s/projects/%d/packages", base, created.Id)
-	resp = doJSON(t, bob, http.MethodPost, pkgURL, api.CreatePackageRequest{Name: "联调成果", DeliverableIds: []int64{dA}})
-	wantStatus(t, resp, http.StatusForbidden)
-	resp.Body.Close()
-	resp = doJSON(t, alice, http.MethodPost, pkgURL, api.CreatePackageRequest{
-		Name: "联调成果", DeliverableIds: []int64{dA}, TaskFileIds: &[]int64{processFile.Id},
-	})
-	wantStatus(t, resp, http.StatusCreated)
-	pkg := decodeBody[api.ArtifactPackage](t, resp)
-	if len(pkg.Items) != 2 || pkg.Items[0].FileName == nil || *pkg.Items[0].FileName != "验收方案V1.docx" {
-		t.Fatalf("成果包目录异常: %+v", pkg)
-	}
-	// AC-18：目录同时含当前成果与必要过程文件，两类目录项各自可辨。
-	fileItem := pkg.Items[1]
-	if fileItem.TaskFileId == nil || *fileItem.TaskFileId != processFile.Id || fileItem.DeliverableId != nil {
-		t.Fatalf("过程文件目录项异常: %+v", fileItem)
-	}
-	if fileItem.FileKind == nil || *fileItem.FileKind != api.Process || fileItem.DeliverableName != "联调记录.md" {
-		t.Fatalf("过程文件目录项字段异常: %+v", fileItem)
-	}
-
-	// 整包下载（zip）。对象不可读时整体失败：以前会把错误文本塞进包里再回 200（E1）。
-	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d/download", pkgURL, pkg.Id), nil)
-	wantStatus(t, resp, http.StatusOK)
-	if ct := resp.Header.Get("Content-Type"); ct != "application/zip" {
-		t.Fatalf("下载内容类型异常: %q", ct)
-	}
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if len(body) == 0 {
-		t.Fatalf("zip 内容为空")
-	}
-	if !bytes.Contains(body, []byte("acceptance-doc-bytes")) {
-		// zip 默认 Deflate 会压缩内容，改校验 zip 目录含文件名即可。
-		if !bytes.Contains(body, []byte(".docx")) {
-			t.Fatalf("zip 未包含当前内容条目")
-		}
-	}
-	if !bytes.Contains(body, []byte("联调记录.md")) {
-		t.Fatalf("zip 未包含选进包的过程文件")
-	}
-
 	// 删除任务文件：不进审批，直接生效（外部材料同理）。
 	resp = doJSON(t, bob, http.MethodDelete, fmt.Sprintf("%s/%d/files/%d", tasksURL, downstreamID, externalFile.Id), nil)
 	wantStatus(t, resp, http.StatusNoContent)
@@ -3718,65 +3679,22 @@ func TestArtifactsAndPackages(t *testing.T) {
 		t.Fatalf("删除后应只剩过程文件: %+v", left)
 	}
 
-	// F-10（#88）：删掉被成果包引用的过程文件——目录与来源清单保留条目并标注「来源文件已删除」，
-	// 包内不再放该文件。此前条目随来源级联消失，包从 2 项变 1 项、清单少一行（§7.7、AC-18）。
-	resp = doJSON(t, bob, http.MethodDelete, fmt.Sprintf("%s/%d/files/%d", tasksURL, downstreamID, processFile.Id), nil)
-	wantStatus(t, resp, http.StatusNoContent)
-	resp.Body.Close()
-
-	resp = doJSON(t, alice, http.MethodGet, pkgURL, nil)
+	// 裁决 G1（#140）：被删除的文件不出现在成果归档页。
+	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/artifacts", base, created.Id), nil)
 	wantStatus(t, resp, http.StatusOK)
-	pkgs := decodeBody[[]api.ArtifactPackage](t, resp)
-	if len(pkgs) != 1 || len(pkgs[0].Items) != 2 {
-		t.Fatalf("来源删除后目录项数应不变: %+v", pkgs)
-	}
-	gone := pkgs[0].Items[1]
-	if !gone.SourceDeleted {
-		t.Fatalf("来源已删除的条目应标注 sourceDeleted: %+v", gone)
-	}
-	if gone.DeliverableName != "联调记录.md" || gone.TaskFileId != nil || gone.FileId != nil {
-		t.Fatalf("来源已删除的条目应按快照保留名称、不再带内容: %+v", gone)
-	}
-	if gone.FileKind == nil || *gone.FileKind != api.Process {
-		t.Fatalf("来源已删除的条目应保留文件类型: %+v", gone)
-	}
-	if pkgs[0].Items[0].SourceDeleted {
-		t.Fatalf("交付物目录项的 sourceDeleted 恒为假: %+v", pkgs[0].Items[0])
-	}
-
-	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d/download", pkgURL, pkg.Id), nil)
-	wantStatus(t, resp, http.StatusOK)
-	body, _ = io.ReadAll(resp.Body)
-	resp.Body.Close()
-	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
-	if err != nil {
-		t.Fatalf("解包失败: %v", err)
-	}
-	var manifest string
-	names := make([]string, 0, len(zr.File))
-	for _, f := range zr.File {
-		names = append(names, f.Name)
-		if f.Name != "成果包目录.txt" {
-			continue
+	for _, o := range decodeBody[[]api.ArtifactObjective](t, resp) {
+		for _, k := range o.Krs {
+			for _, task := range k.Tasks {
+				if task.Files == nil {
+					continue
+				}
+				for _, f := range *task.Files {
+					if f.Id == externalFile.Id {
+						t.Fatalf("已删除文件不应出现在归档页: %+v", f)
+					}
+				}
+			}
 		}
-		rc, err := f.Open()
-		if err != nil {
-			t.Fatalf("读清单失败: %v", err)
-		}
-		raw, _ := io.ReadAll(rc)
-		rc.Close()
-		manifest = string(raw)
-	}
-	for _, n := range names {
-		if strings.Contains(n, "联调记录.md") {
-			t.Fatalf("来源已删除的文件不应进包: %v", names)
-		}
-	}
-	if !strings.Contains(manifest, "联调记录.md（过程文件） →（来源文件已删除）") {
-		t.Fatalf("来源清单未保留条目并标注已删除:\n%s", manifest)
-	}
-	if strings.Count(manifest, "\n") != 2 {
-		t.Fatalf("来源清单应仍有两行:\n%s", manifest)
 	}
 }
 
@@ -6555,7 +6473,7 @@ func TestPublicProjectImplicitViewer(t *testing.T) {
 		t.Fatalf("隐式访客派生字段异常: %+v", seen)
 	}
 	for _, path := range []string{
-		"", "/tasks", "/objectives", "/edges", "/blockers", "/artifacts", "/packages", "/report", "/my-work", "/members", "/settings",
+		"", "/tasks", "/objectives", "/edges", "/blockers", "/artifacts", "/report", "/my-work", "/members", "/settings",
 		fmt.Sprintf("/tasks/%d", taskID),
 	} {
 		resp = doJSON(t, dave, http.MethodGet, projectURL+path, nil)
@@ -6634,7 +6552,6 @@ func TestPublicProjectImplicitViewer(t *testing.T) {
 		// 提醒目标要先解析得出来才轮到权限判定：隐式访客在本项目里没有任何可提醒的目标，
 		// 这里落在 404；「隐式访客不可提醒」这条规则本身由 domain 的表驱动单测覆盖。
 		{"发提醒", http.MethodPost, "/reminders", api.RemindRequest{TargetKey: "wait:task:1"}},
-		{"建成果包", http.MethodPost, "/packages", api.CreatePackageRequest{Name: "插进来的包", DeliverableIds: []int64{deliverableID}}},
 		{"导入 O／KR", http.MethodPost, "/import", api.ImportRequest{
 			Items: []api.ImportItem{{Title: sp("插进来的 O"),
 				KeyResults: &[]api.ImportKrItem{{Description: "插进来的 KR"}}}}}},

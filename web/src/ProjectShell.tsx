@@ -20,7 +20,7 @@ const NAV_ITEMS: { key: string; label: string; path: string; icon: IconName }[] 
   { key: "tasks", label: "全部任务", path: "/tasks", icon: "list" },
   { key: "graph", label: "协作关系", path: "/graph", icon: "graph" },
   { key: "mywork", label: "我的工作", path: "/my-work", icon: "inbox" },
-  { key: "artifacts", label: "成果与归档", path: "/artifacts", icon: "archive" },
+  { key: "artifacts", label: "成果归档", path: "/artifacts", icon: "archive" },
   { key: "reports", label: "项目报告", path: "/reports", icon: "report" },
 ];
 

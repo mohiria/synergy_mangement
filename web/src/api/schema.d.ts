@@ -1068,46 +1068,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/projects/{projectId}/packages": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-            };
-            cookie?: never;
-        };
-        /** 成果包列表（目录与来源清单；全员可查看/下载） */
-        get: operations["listPackages"];
-        put?: never;
-        /** 勾选当前成果生成成果包（AC-18；仅项目管理员／项目负责人） */
-        post: operations["createPackage"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/projects/{projectId}/packages/{packageId}/download": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-                packageId: number;
-            };
-            cookie?: never;
-        };
-        /** 整包下载（AC-18）：按目录解析当前内容并流式打包为 zip */
-        get: operations["downloadPackage"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/projects/{projectId}/report": {
         parameters: {
             query?: {
@@ -2253,6 +2213,13 @@ export interface components {
             status: components["schemas"]["TaskStatus"];
             /** @description 状态显示文案（AC-04；派生字段） */
             statusLabel: string;
+            /**
+             * @description 归档文件状态两档（裁决 G1，#140；派生字段）：所属任务已完成＝已发布，其余＝未发布
+             * @enum {string}
+             */
+            fileState?: "published" | "unpublished";
+            /** @description 文件状态显示文案（派生字段） */
+            fileStateLabel?: string;
             /** @description 完成审核记录条数（详情在任务抽屉审核 Tab） */
             reviewCount: number;
             deliverables: components["schemas"]["Deliverable"][];
@@ -2279,52 +2246,6 @@ export interface components {
             code: string;
             title: string;
             krs: components["schemas"]["ArtifactKr"][];
-        };
-        /** @description 成果包目录项（AC-18）：二选一引用——交付物项（下载时解析为当前内容，不复制旧文件）， 或任务文件（过程文件／重要外部材料，§7.7「可以按需选择」）。 任务文件被删除后条目不消失：按快照保留名称与所属任务，sourceDeleted 为真、包内不放该文件 */
-        PackageItem: {
-            /**
-             * Format: int64
-             * @description 引用交付物项时给出
-             */
-            deliverableId?: number;
-            /**
-             * Format: int64
-             * @description 引用过程文件或重要外部材料时给出
-             */
-            taskFileId?: number;
-            /** @description 任务文件目录项的类型；交付物目录项不返回 */
-            fileKind?: components["schemas"]["TaskFileKind"];
-            /** @description 交付物项名称；任务文件目录项取文件名 */
-            deliverableName: string;
-            taskName: string;
-            /**
-             * Format: int64
-             * @description 当前内容（被覆盖后自动解析为新内容；无当前内容时缺省）
-             */
-            fileId?: number;
-            fileName?: string;
-            /** Format: date-time */
-            effectiveAt?: string;
-            /** @description 来源文件已删除（§7.7、AC-18；派生字段）。仅任务文件目录项可能为真—— 条目按快照保留在目录与来源清单里，但下载的包内不含该文件。交付物目录项恒为假 */
-            sourceDeleted: boolean;
-        };
-        /** @description 轻量成果包（词汇表「成果包」） */
-        ArtifactPackage: {
-            /** Format: int64 */
-            id: number;
-            name: string;
-            createdByName?: string;
-            /** Format: date-time */
-            createdAt: string;
-            items: components["schemas"]["PackageItem"][];
-        };
-        /** @description 两个勾选数组至少合计一项（AC-18：成果包可含当前成果与必要过程文件） */
-        CreatePackageRequest: {
-            name: string;
-            /** @description 勾选的当前成果（须有已生效当前内容的交付物项） */
-            deliverableIds: number[];
-            /** @description 勾选的过程文件或重要外部材料（§7.7「可以按需选择」；选填） */
-            taskFileIds?: number[];
         };
         /** @description 我的工作事项（词汇表「我的工作事项」）；卡片派生事实，动作在任务详情抽屉完成 */
         WorkItem: {
@@ -4576,94 +4497,6 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
-        };
-    };
-    listPackages: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 成果包列表 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ArtifactPackage"][];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    createPackage: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreatePackageRequest"];
-            };
-        };
-        responses: {
-            /** @description 已生成 */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ArtifactPackage"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    downloadPackage: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-                packageId: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description zip 文件 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/zip": string;
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-            /** @description 文件服务不可用 */
-            502: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
         };
     };
     getReport: {
