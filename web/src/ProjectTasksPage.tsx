@@ -14,13 +14,11 @@ import { client } from "./api/client";
 import type { components } from "./api/schema";
 import Icon from "./icons";
 import ProjectShell from "./ProjectShell";
-import TreeTransfer from "./TreeTransfer";
 import TaskImportModal from "./TaskImportModal";
 import TaskDrawerHost from "./task-drawer";
 import {
   STATUS_CLASS,
   fmtDate,
-  memberTreeItems,
   type KrOption,
 } from "./task-drawer/shared";
 import DateRangeField from "./DateRangeField";
@@ -758,7 +756,7 @@ function InviteOwnersModal({
   onSent: (latest: TaskInvite[]) => void;
 }) {
   const [keyResultId, setKeyResultId] = useState<number | undefined>(undefined);
-  const [selected, setSelected] = useState<string[]>([]);
+  const [selected, setSelected] = useState<number[]>([]);
   const [note, setNote] = useState("请结合你负责的工作，在该 KR 下补充需要推进的任务。");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -790,7 +788,7 @@ function InviteOwnersModal({
       params: { path: { projectId } },
       body: {
         keyResultId,
-        inviteeIds: selected.map(Number),
+        inviteeIds: selected,
         note: note.trim() || undefined,
       },
     });
@@ -820,7 +818,6 @@ function InviteOwnersModal({
       destroyOnHidden
     >
       {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
-      {/* 网格项默认 min-width: auto，会被树形穿梭框的 min-content 撑开、把弹窗顶宽（#100）。 */}
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 12 }}>
         <div style={{ minWidth: 0 }}>
           <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
@@ -838,14 +835,29 @@ function InviteOwnersModal({
           <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
             选择受邀成员（可多选）
           </div>
-          <TreeTransfer
-            items={memberTreeItems(candidates)}
-            targetKeys={selected}
+          {/* #126：不再按角色分组、不用树形穿梭框——扁平多选，一人一行「头像 姓名（用户名）」。 */}
+          <Select
+            mode="multiple"
+            style={{ width: "100%" }}
+            placeholder="搜索姓名或用户名"
+            value={selected}
             onChange={setSelected}
-            titles={["可选成员", "已选成员"]}
-            unit="人"
-            searchPlaceholder="搜索姓名、账号或分组"
-            listHeight={300}
+            optionFilterProp="label"
+            options={candidates.map((m) => ({
+              value: m.userId,
+              label: `${m.displayName}（${m.username}）`,
+            }))}
+            optionRender={(opt) => {
+              const m = candidates.find((c) => c.userId === opt.value);
+              return (
+                <span className="owner-cell">
+                  <span className="avatar">{m?.displayName.slice(0, 1)}</span>
+                  <span className="cell-text">
+                    {m?.displayName}（{m?.username}）
+                  </span>
+                </span>
+              );
+            }}
           />
         </div>
         <div>
