@@ -801,6 +801,10 @@ body {
   display: block; margin-top: 2px; color: var(--muted); font-size: var(--type-aux);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* 批量邀请的跳过名单（#93）：逐人一行，说明谁没加进来、为什么。 */
+.skipped-list { margin: 0; padding-left: 18px; }
+.skipped-list li { line-height: 1.7; }
+
 /* 更多操作：常态弱化，hover／键盘聚焦时显现，避免成员多时按钮阵列喧宾夺主。 */
 .member-card-more { width: 28px; height: 28px; opacity: 0; transition: opacity .12s ease; }
 .member-card:hover .member-card-more,

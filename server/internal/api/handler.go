@@ -15,7 +15,6 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3filter"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	nethttpmiddleware "github.com/oapi-codegen/nethttp-middleware"
@@ -407,8 +406,8 @@ func (s *Server) ListProjectMembers(w http.ResponseWriter, r *http.Request, proj
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (s *Server) AddProjectMember(w http.ResponseWriter, r *http.Request, projectId int64) {
-	var req AddProjectMemberRequest
+func (s *Server) AddProjectMembers(w http.ResponseWriter, r *http.Request, projectId int64) {
+	var req AddProjectMembersRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_request", Message: "请求内容无法解析"})
 		return
@@ -421,36 +420,80 @@ func (s *Server) AddProjectMember(w http.ResponseWriter, r *http.Request, projec
 		writeForbidden(w)
 		return
 	}
-	if err := domain.ValidateMemberRole(string(req.Role)); err != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_member_role", Message: err.Error()})
-		return
-	}
-	user, err := s.q.GetUserByID(r.Context(), req.UserId)
+	users, err := s.q.ListUsers(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_user", Message: "用户不存在"})
-		return
-	}
-	m, err := s.q.AddProjectMember(r.Context(), store.AddProjectMemberParams{
-		ProjectID: projectId,
-		UserID:    user.ID,
-		Role:      string(req.Role),
-	})
-	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			writeJSON(w, http.StatusConflict, Error{Code: "already_member", Message: "该用户已是项目成员"})
-			return
-		}
 		writeInternalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, ProjectMember{
-		UserId:      m.UserID,
-		Username:    user.Username,
-		DisplayName: user.DisplayName,
-		Role:        MemberRole(m.Role),
-		RoleLabel:   optString(domain.MemberRoleLabel(m.Role)),
-	})
+	known := make([]int64, 0, len(users))
+	nameOf := make(map[int64]store.ListUsersRow, len(users))
+	for _, u := range users {
+		known = append(known, u.ID)
+		nameOf[u.ID] = u
+	}
+	current, err := s.q.ListProjectMembers(r.Context(), projectId)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	existing := make([]int64, 0, len(current))
+	for _, m := range current {
+		existing = append(existing, m.UserID)
+	}
+	add, skipped, err := domain.PlanAddMembers(string(req.Role), req.UserIds, known, existing)
+	if err != nil {
+		code := "invalid_member_role"
+		if errors.Is(err, domain.ErrNoMembersSelected) {
+			code = "no_members_selected"
+		}
+		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: code, Message: err.Error()})
+		return
+	}
+	// 一批要么全建、要么全不建：部分写入会让「逐人结果」与库里的事实对不上。
+	tx, err := s.db.Begin(r.Context())
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	qtx := s.q.WithTx(tx)
+	added := make([]ProjectMember, 0, len(add))
+	for _, id := range add {
+		m, err := qtx.AddProjectMember(r.Context(), store.AddProjectMemberParams{
+			ProjectID: projectId,
+			UserID:    id,
+			Role:      string(req.Role),
+		})
+		if err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		u := nameOf[id]
+		added = append(added, ProjectMember{
+			UserId:      m.UserID,
+			Username:    u.Username,
+			DisplayName: u.DisplayName,
+			Role:        MemberRole(m.Role),
+			RoleLabel:   optString(domain.MemberRoleLabel(m.Role)),
+		})
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	out := make([]SkippedMember, 0, len(skipped))
+	for _, sk := range skipped {
+		item := SkippedMember{
+			UserId:      sk.UserID,
+			Reason:      SkippedMemberReason(sk.Reason),
+			ReasonLabel: domain.SkipReasonLabel(sk.Reason),
+		}
+		if u, ok := nameOf[sk.UserID]; ok {
+			item.DisplayName = optString(u.DisplayName)
+		}
+		out = append(out, item)
+	}
+	writeJSON(w, http.StatusCreated, AddProjectMembersResult{Added: added, Skipped: out})
 }
 
 func (s *Server) UpdateProjectMemberRole(w http.ResponseWriter, r *http.Request, projectId int64, userId int64) {

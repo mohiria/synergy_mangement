@@ -157,8 +157,12 @@ export interface paths {
         /** 项目成员列表（含成员角色） */
         get: operations["listProjectMembers"];
         put?: never;
-        /** 将用户加入项目并赋予成员角色（仅项目管理员／项目负责人） */
-        post: operations["addProjectMember"];
+        /**
+         * 将一名或多名用户加入项目并赋予同一成员角色（仅项目管理员／项目负责人）
+         * @description 一次提交建立全部成员关系并返回逐人结果：已在项目内或用户不存在的按人跳过，
+         *     不牵连名单里的其余人；名单为空或角色不合法整批拒绝。
+         */
+        post: operations["addProjectMembers"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1339,10 +1343,30 @@ export interface components {
             /** @description 成员角色显示文案（派生字段；前端不按枚举拼文案） */
             roleLabel?: string;
         };
-        AddProjectMemberRequest: {
+        AddProjectMembersRequest: {
+            /** @description 本次加入的用户 id 名单，全部赋予同一个成员角色；重复的 id 只算一次 */
+            userIds: number[];
+            role: components["schemas"]["MemberRole"];
+        };
+        /** @description 一次批量加入的逐人结果 */
+        AddProjectMembersResult: {
+            /** @description 本次新建立成员关系的人 */
+            added: components["schemas"]["ProjectMember"][];
+            /** @description 未加入的人及原因 */
+            skipped: components["schemas"]["SkippedMember"][];
+        };
+        SkippedMember: {
             /** Format: int64 */
             userId: number;
-            role: components["schemas"]["MemberRole"];
+            /** @description 用户姓名；用户不存在时缺省 */
+            displayName?: string;
+            /**
+             * @description 跳过原因枚举
+             * @enum {string}
+             */
+            reason: "already_member" | "user_not_found";
+            /** @description 跳过原因显示文案（派生字段；前端不按枚举拼文案） */
+            reasonLabel: string;
         };
         UpdateProjectMemberRoleRequest: {
             role: components["schemas"]["MemberRole"];
@@ -2997,7 +3021,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    addProjectMember: {
+    addProjectMembers: {
         parameters: {
             query?: never;
             header?: never;
@@ -3008,23 +3032,22 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AddProjectMemberRequest"];
+                "application/json": components["schemas"]["AddProjectMembersRequest"];
             };
         };
         responses: {
-            /** @description 已加入 */
+            /** @description 已处理（逐人结果见响应体，added 可能为空） */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProjectMember"];
+                    "application/json": components["schemas"]["AddProjectMembersResult"];
                 };
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
             422: components["responses"]["ValidationError"];
         };
     };

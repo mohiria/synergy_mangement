@@ -60,3 +60,71 @@ func CanReadProject(a Actor) bool {
 	_, ok := memberRoles[a.Role]
 	return ok
 }
+
+var ErrNoMembersSelected = errors.New("请先选择要加入的成员")
+
+// 批量加入时按人跳过的原因（#93）。
+const (
+	SkipAlreadyMember = "already_member"
+	SkipUserNotFound  = "user_not_found"
+)
+
+// SkippedMember 一次批量加入里被跳过的人及其原因。
+type SkippedMember struct {
+	UserID int64
+	Reason string
+}
+
+// PlanAddMembers 规划一次批量加入：给定申请名单、系统内已知用户与项目现有成员，
+// 分出真正要建立成员关系的名单与按人跳过的名单。
+// 名单为空或角色不合法时整批拒绝；已在项目内与用户不存在按人跳过，不牵连其余人。
+// 保持申请名单的先后次序，重复选中的同一人只算一次。
+func PlanAddMembers(role string, requested, known, existing []int64) ([]int64, []SkippedMember, error) {
+	if err := ValidateMemberRole(role); err != nil {
+		return nil, nil, err
+	}
+	if len(requested) == 0 {
+		return nil, nil, ErrNoMembersSelected
+	}
+	knownSet := make(map[int64]struct{}, len(known))
+	for _, id := range known {
+		knownSet[id] = struct{}{}
+	}
+	existingSet := make(map[int64]struct{}, len(existing))
+	for _, id := range existing {
+		existingSet[id] = struct{}{}
+	}
+	var add []int64
+	var skipped []SkippedMember
+	seen := make(map[int64]struct{}, len(requested))
+	for _, id := range requested {
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		_, isKnown := knownSet[id]
+		_, isMember := existingSet[id]
+		switch {
+		case !isKnown:
+			skipped = append(skipped, SkippedMember{UserID: id, Reason: SkipUserNotFound})
+		case isMember:
+			skipped = append(skipped, SkippedMember{UserID: id, Reason: SkipAlreadyMember})
+		default:
+			add = append(add, id)
+		}
+	}
+	return add, skipped, nil
+}
+
+var skipReasonLabels = map[string]string{
+	SkipAlreadyMember: "已在项目内",
+	SkipUserNotFound:  "用户不存在",
+}
+
+// SkipReasonLabel 跳过原因的显示文案。
+func SkipReasonLabel(reason string) string {
+	if label, ok := skipReasonLabels[reason]; ok {
+		return label
+	}
+	return reason
+}

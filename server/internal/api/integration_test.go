@@ -544,15 +544,16 @@ func TestProjectMembersAndPermissions(t *testing.T) {
 	}
 
 	// 管理员把 carol 加为访客
-	resp = doJSON(t, alice, http.MethodPost, membersURL, api.AddProjectMemberRequest{UserId: carolUser.ID, Role: api.Viewer})
+	resp = doJSON(t, alice, http.MethodPost, membersURL, api.AddProjectMembersRequest{UserIds: []int64{carolUser.ID}, Role: api.Viewer})
 	wantStatus(t, resp, http.StatusCreated)
-	added := decodeBody[api.ProjectMember](t, resp)
-	if added.DisplayName != "王五" || added.Role != api.Viewer {
-		t.Fatalf("加入成员返回异常: %+v", added)
+	result := decodeBody[api.AddProjectMembersResult](t, resp)
+	if len(result.Added) != 1 || result.Added[0].DisplayName != "王五" || result.Added[0].Role != api.Viewer ||
+		len(result.Skipped) != 0 {
+		t.Fatalf("加入成员返回异常: %+v", result)
 	}
 
 	// 访客既不能管理成员也不能编辑项目 → 403
-	resp = doJSON(t, carol, http.MethodPost, membersURL, api.AddProjectMemberRequest{UserId: bobUser.ID, Role: api.Member})
+	resp = doJSON(t, carol, http.MethodPost, membersURL, api.AddProjectMembersRequest{UserIds: []int64{bobUser.ID}, Role: api.Member})
 	wantStatus(t, resp, http.StatusForbidden)
 	resp.Body.Close()
 	resp = doJSON(t, carol, http.MethodPut, fmt.Sprintf("%s/projects/%d", base, created.Id), api.UpdateProjectRequest{
@@ -594,29 +595,41 @@ func TestProjectMembersAndPermissions(t *testing.T) {
 	}
 
 	// 项目成员仍不能管理成员 → 403
-	resp = doJSON(t, carol, http.MethodPost, membersURL, api.AddProjectMemberRequest{UserId: bobUser.ID, Role: api.Member})
+	resp = doJSON(t, carol, http.MethodPost, membersURL, api.AddProjectMembersRequest{UserIds: []int64{bobUser.ID}, Role: api.Member})
 	wantStatus(t, resp, http.StatusForbidden)
 	resp.Body.Close()
 
-	// 重复加入 409
-	resp = doJSON(t, alice, http.MethodPost, membersURL, api.AddProjectMemberRequest{UserId: carolUser.ID, Role: api.Member})
-	wantStatus(t, resp, http.StatusConflict)
-	if e := decodeBody[api.Error](t, resp); e.Code != "already_member" {
-		t.Fatalf("code = %q, want already_member", e.Code)
+	// #93 批量加入：重复的人与不存在的用户按人跳过，名单里其余人照加
+	resp = doJSON(t, alice, http.MethodPost, membersURL,
+		api.AddProjectMembersRequest{UserIds: []int64{carolUser.ID, 99999, bobUser.ID}, Role: api.Member})
+	wantStatus(t, resp, http.StatusCreated)
+	result = decodeBody[api.AddProjectMembersResult](t, resp)
+	if len(result.Added) != 1 || result.Added[0].UserId != bobUser.ID {
+		t.Fatalf("批量加入的 added 异常: %+v", result)
 	}
+	if len(result.Skipped) != 2 ||
+		result.Skipped[0].UserId != carolUser.ID || result.Skipped[0].Reason != api.AlreadyMember ||
+		result.Skipped[0].ReasonLabel != "已在项目内" || result.Skipped[0].DisplayName == nil ||
+		result.Skipped[1].UserId != 99999 || result.Skipped[1].Reason != api.UserNotFound {
+		t.Fatalf("批量加入的 skipped 异常: %+v", result.Skipped)
+	}
+	// bob 本轮已被加成员，后续用例仍按「项目负责人非成员」的口径断言，这里加完即撤
+	resp = doJSON(t, alice, http.MethodDelete, fmt.Sprintf("%s/%d", membersURL, bobUser.ID), nil)
+	wantStatus(t, resp, http.StatusNoContent)
+	resp.Body.Close()
 
 	// 非法角色 422（契约校验先拦，见上方说明）
-	resp = doJSON(t, alice, http.MethodPost, membersURL, map[string]any{"userId": bobUser.ID, "role": "boss"})
+	resp = doJSON(t, alice, http.MethodPost, membersURL, map[string]any{"userIds": []int64{bobUser.ID}, "role": "boss"})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	if e := decodeBody[api.Error](t, resp); e.Code != "invalid_request" && e.Code != "invalid_member_role" {
 		t.Fatalf("code = %q, want invalid_request 或 invalid_member_role", e.Code)
 	}
 
-	// 用户不存在 422
-	resp = doJSON(t, alice, http.MethodPost, membersURL, api.AddProjectMemberRequest{UserId: 99999, Role: api.Member})
+	// 空名单 422
+	resp = doJSON(t, alice, http.MethodPost, membersURL, map[string]any{"userIds": []int64{}, "role": "member"})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
-	if e := decodeBody[api.Error](t, resp); e.Code != "invalid_user" {
-		t.Fatalf("code = %q, want invalid_user", e.Code)
+	if e := decodeBody[api.Error](t, resp); e.Code != "invalid_request" && e.Code != "no_members_selected" {
+		t.Fatalf("code = %q, want invalid_request 或 no_members_selected", e.Code)
 	}
 
 	// 调整非成员（bob）角色 404
@@ -668,7 +681,7 @@ func TestOkrTableBatchCreate(t *testing.T) {
 	wantStatus(t, resp, http.StatusCreated)
 	created := decodeBody[api.Project](t, resp)
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-		api.AddProjectMemberRequest{UserId: bobUser.ID, Role: api.Member})
+		api.AddProjectMembersRequest{UserIds: []int64{bobUser.ID}, Role: api.Member})
 	wantStatus(t, resp, http.StatusCreated)
 	resp.Body.Close()
 
@@ -805,7 +818,7 @@ func TestTaskCreateAndPoolReview(t *testing.T) {
 	created := decodeBody[api.Project](t, resp)
 	for _, uid := range []int64{bobUser.ID, carolUser.ID} {
 		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+			api.AddProjectMembersRequest{UserIds: []int64{uid}, Role: api.Member})
 		wantStatus(t, resp, http.StatusCreated)
 		resp.Body.Close()
 	}
@@ -966,7 +979,7 @@ func TestTaskCreateAndPoolReview(t *testing.T) {
 	// 访客不能创建任务 → 403
 	daveUser := seedUser(t, q, "dave", "赵六", "dave-pass")
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-		api.AddProjectMemberRequest{UserId: daveUser.ID, Role: api.Viewer})
+		api.AddProjectMembersRequest{UserIds: []int64{daveUser.ID}, Role: api.Viewer})
 	wantStatus(t, resp, http.StatusCreated)
 	resp.Body.Close()
 	dave := newClient(t)
@@ -1019,7 +1032,7 @@ func TestTaskInviteLifecycle(t *testing.T) {
 	created := decodeBody[api.Project](t, resp)
 	for _, uid := range []int64{bobUser.ID, carolUser.ID} {
 		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+			api.AddProjectMembersRequest{UserIds: []int64{uid}, Role: api.Member})
 		wantStatus(t, resp, http.StatusCreated)
 		resp.Body.Close()
 	}
@@ -1189,7 +1202,7 @@ func TestTaskInviteLifecycle(t *testing.T) {
 	// 邀请自己 422；邀请访客 422
 	daveUser := seedUser(t, q, "dave", "赵六", "dave-pass")
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-		api.AddProjectMemberRequest{UserId: daveUser.ID, Role: api.Viewer})
+		api.AddProjectMembersRequest{UserIds: []int64{daveUser.ID}, Role: api.Viewer})
 	wantStatus(t, resp, http.StatusCreated)
 	resp.Body.Close()
 	resp = doJSON(t, bob, http.MethodPost, invitesURL, api.CreateTaskInvitesRequest{KeyResultId: kr1, InviteeIds: []int64{bobUser.ID}})
@@ -1234,7 +1247,7 @@ func TestTaskStatusAndProgress(t *testing.T) {
 	created := decodeBody[api.Project](t, resp)
 	for _, uid := range []int64{bobUser.ID, carolUser.ID} {
 		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+			api.AddProjectMembersRequest{UserIds: []int64{uid}, Role: api.Member})
 		wantStatus(t, resp, http.StatusCreated)
 		resp.Body.Close()
 	}
@@ -1415,11 +1428,11 @@ func TestTaskDetail(t *testing.T) {
 	wantStatus(t, resp, http.StatusCreated)
 	created := decodeBody[api.Project](t, resp)
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-		api.AddProjectMemberRequest{UserId: bobUser.ID, Role: api.Member})
+		api.AddProjectMembersRequest{UserIds: []int64{bobUser.ID}, Role: api.Member})
 	wantStatus(t, resp, http.StatusCreated)
 	resp.Body.Close()
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-		api.AddProjectMemberRequest{UserId: daveUser.ID, Role: api.Viewer})
+		api.AddProjectMembersRequest{UserIds: []int64{daveUser.ID}, Role: api.Viewer})
 	wantStatus(t, resp, http.StatusCreated)
 	resp.Body.Close()
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
@@ -1525,7 +1538,7 @@ func TestFieldChangeApproval(t *testing.T) {
 	created := decodeBody[api.Project](t, resp)
 	for _, uid := range []int64{bobUser.ID, carolUser.ID} {
 		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+			api.AddProjectMembersRequest{UserIds: []int64{uid}, Role: api.Member})
 		wantStatus(t, resp, http.StatusCreated)
 		resp.Body.Close()
 	}
@@ -1698,7 +1711,7 @@ func TestDeliverablesAndFiles(t *testing.T) {
 	wantStatus(t, resp, http.StatusCreated)
 	created := decodeBody[api.Project](t, resp)
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-		api.AddProjectMemberRequest{UserId: bobUser.ID, Role: api.Member})
+		api.AddProjectMembersRequest{UserIds: []int64{bobUser.ID}, Role: api.Member})
 	wantStatus(t, resp, http.StatusCreated)
 	resp.Body.Close()
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
@@ -1844,11 +1857,11 @@ func TestDiscussionsAndNotifications(t *testing.T) {
 	wantStatus(t, resp, http.StatusCreated)
 	created := decodeBody[api.Project](t, resp)
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-		api.AddProjectMemberRequest{UserId: bobUser.ID, Role: api.Member})
+		api.AddProjectMembersRequest{UserIds: []int64{bobUser.ID}, Role: api.Member})
 	wantStatus(t, resp, http.StatusCreated)
 	resp.Body.Close()
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-		api.AddProjectMemberRequest{UserId: carolUser.ID, Role: api.Viewer})
+		api.AddProjectMembersRequest{UserIds: []int64{carolUser.ID}, Role: api.Viewer})
 	wantStatus(t, resp, http.StatusCreated)
 	resp.Body.Close()
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
@@ -1965,7 +1978,7 @@ func TestCompletionReviewFlow(t *testing.T) {
 	created := decodeBody[api.Project](t, resp)
 	for _, uid := range []int64{bobUser.ID, carolUser.ID} {
 		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+			api.AddProjectMembersRequest{UserIds: []int64{uid}, Role: api.Member})
 		wantStatus(t, resp, http.StatusCreated)
 		resp.Body.Close()
 	}
@@ -2169,7 +2182,7 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 	created := decodeBody[api.Project](t, resp)
 	for _, uid := range []int64{bobUser.ID, carolUser.ID} {
 		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+			api.AddProjectMembersRequest{UserIds: []int64{uid}, Role: api.Member})
 		wantStatus(t, resp, http.StatusCreated)
 		resp.Body.Close()
 	}
@@ -2385,7 +2398,7 @@ func TestIntermediateReviewOrSign(t *testing.T) {
 	created := decodeBody[api.Project](t, resp)
 	for _, uid := range []int64{bobUser.ID, carolUser.ID, daveUser.ID, erinUser.ID} {
 		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+			api.AddProjectMembersRequest{UserIds: []int64{uid}, Role: api.Member})
 		wantStatus(t, resp, http.StatusCreated)
 		resp.Body.Close()
 	}
@@ -2554,7 +2567,7 @@ func TestMemberInputRequests(t *testing.T) {
 	created := decodeBody[api.Project](t, resp)
 	for _, uid := range []int64{bobUser.ID, carolUser.ID, daveUser.ID} {
 		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+			api.AddProjectMembersRequest{UserIds: []int64{uid}, Role: api.Member})
 		wantStatus(t, resp, http.StatusCreated)
 		resp.Body.Close()
 	}
@@ -2733,7 +2746,7 @@ func TestMultiSourceInputs(t *testing.T) {
 	created := decodeBody[api.Project](t, resp)
 	for _, uid := range []int64{bobUser.ID, carolUser.ID, daveUser.ID, erinUser.ID} {
 		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+			api.AddProjectMembersRequest{UserIds: []int64{uid}, Role: api.Member})
 		wantStatus(t, resp, http.StatusCreated)
 		resp.Body.Close()
 	}
@@ -2938,7 +2951,7 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 	created := decodeBody[api.Project](t, resp)
 	for _, uid := range []int64{bobUser.ID, carolUser.ID} {
 		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+			api.AddProjectMembersRequest{UserIds: []int64{uid}, Role: api.Member})
 		wantStatus(t, resp, http.StatusCreated)
 		resp.Body.Close()
 	}
@@ -3138,7 +3151,7 @@ func TestMyWorkFiveGroups(t *testing.T) {
 	created := decodeBody[api.Project](t, resp)
 	for _, uid := range []int64{bobUser.ID, carolUser.ID} {
 		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+			api.AddProjectMembersRequest{UserIds: []int64{uid}, Role: api.Member})
 		wantStatus(t, resp, http.StatusCreated)
 		resp.Body.Close()
 	}
@@ -3296,7 +3309,7 @@ func TestInterlockAndCriticalPath(t *testing.T) {
 	wantStatus(t, resp, http.StatusCreated)
 	created := decodeBody[api.Project](t, resp)
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-		api.AddProjectMemberRequest{UserId: bobUser.ID, Role: api.Member})
+		api.AddProjectMembersRequest{UserIds: []int64{bobUser.ID}, Role: api.Member})
 	wantStatus(t, resp, http.StatusCreated)
 	resp.Body.Close()
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
@@ -3410,7 +3423,7 @@ func TestArtifactsAndPackages(t *testing.T) {
 	wantStatus(t, resp, http.StatusCreated)
 	created := decodeBody[api.Project](t, resp)
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-		api.AddProjectMemberRequest{UserId: bobUser.ID, Role: api.Member})
+		api.AddProjectMembersRequest{UserIds: []int64{bobUser.ID}, Role: api.Member})
 	wantStatus(t, resp, http.StatusCreated)
 	resp.Body.Close()
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
@@ -3743,7 +3756,7 @@ func TestProjectReport(t *testing.T) {
 	wantStatus(t, resp, http.StatusCreated)
 	created := decodeBody[api.Project](t, resp)
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-		api.AddProjectMemberRequest{UserId: bobUser.ID, Role: api.Member})
+		api.AddProjectMembersRequest{UserIds: []int64{bobUser.ID}, Role: api.Member})
 	wantStatus(t, resp, http.StatusCreated)
 	resp.Body.Close()
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
@@ -3939,7 +3952,7 @@ func TestImportAndBatchPool(t *testing.T) {
 	created := decodeBody[api.Project](t, resp)
 	for _, uid := range []int64{bobUser.ID, carolUser.ID} {
 		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+			api.AddProjectMembersRequest{UserIds: []int64{uid}, Role: api.Member})
 		wantStatus(t, resp, http.StatusCreated)
 		resp.Body.Close()
 	}
@@ -4142,7 +4155,7 @@ func TestUnifiedPermissionsAcrossIdentities(t *testing.T) {
 	created := decodeBody[api.Project](t, resp)
 	for uid, role := range map[int64]api.MemberRole{bobUser.ID: api.Member, carolUser.ID: api.Member, daveUser.ID: api.Viewer} {
 		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-			api.AddProjectMemberRequest{UserId: uid, Role: role})
+			api.AddProjectMembersRequest{UserIds: []int64{uid}, Role: role})
 		wantStatus(t, resp, http.StatusCreated)
 		resp.Body.Close()
 	}
@@ -4326,7 +4339,7 @@ func TestTaskActivity(t *testing.T) {
 	wantStatus(t, resp, http.StatusCreated)
 	created := decodeBody[api.Project](t, resp)
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-		api.AddProjectMemberRequest{UserId: bobUser.ID, Role: api.Member})
+		api.AddProjectMembersRequest{UserIds: []int64{bobUser.ID}, Role: api.Member})
 	wantStatus(t, resp, http.StatusCreated)
 	resp.Body.Close()
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
@@ -4474,7 +4487,7 @@ func TestReceiversAndReceipts(t *testing.T) {
 	created := decodeBody[api.Project](t, resp)
 	for _, uid := range []int64{bobUser.ID, carolUser.ID, daveUser.ID} {
 		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+			api.AddProjectMembersRequest{UserIds: []int64{uid}, Role: api.Member})
 		wantStatus(t, resp, http.StatusCreated)
 		resp.Body.Close()
 	}
@@ -4669,7 +4682,7 @@ func TestRemindWaitingTargets(t *testing.T) {
 	created := decodeBody[api.Project](t, resp)
 	for _, uid := range []int64{bobUser.ID, carolUser.ID} {
 		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+			api.AddProjectMembersRequest{UserIds: []int64{uid}, Role: api.Member})
 		wantStatus(t, resp, http.StatusCreated)
 		resp.Body.Close()
 	}
@@ -4781,7 +4794,7 @@ func TestTimeBlockerActivitySweep(t *testing.T) {
 	wantStatus(t, resp, http.StatusCreated)
 	created := decodeBody[api.Project](t, resp)
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-		api.AddProjectMemberRequest{UserId: bobUser.ID, Role: api.Member})
+		api.AddProjectMembersRequest{UserIds: []int64{bobUser.ID}, Role: api.Member})
 	wantStatus(t, resp, http.StatusCreated)
 	resp.Body.Close()
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
@@ -4959,7 +4972,7 @@ func TestOkrEditHandoverAndMemberRemoval(t *testing.T) {
 		id   int64
 		role api.MemberRole
 	}{{bobUser.ID, api.Member}, {carolUser.ID, api.Member}, {daveUser.ID, api.Member}} {
-		resp = doJSON(t, alice, http.MethodPost, membersURL, api.AddProjectMemberRequest{UserId: m.id, Role: m.role})
+		resp = doJSON(t, alice, http.MethodPost, membersURL, api.AddProjectMembersRequest{UserIds: []int64{m.id}, Role: m.role})
 		wantStatus(t, resp, http.StatusCreated)
 		resp.Body.Close()
 	}
@@ -5172,7 +5185,7 @@ func TestStructureChangeRejected(t *testing.T) {
 	created := decodeBody[api.Project](t, resp)
 	for _, uid := range []int64{bobUser.ID, carolUser.ID} {
 		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+			api.AddProjectMembersRequest{UserIds: []int64{uid}, Role: api.Member})
 		wantStatus(t, resp, http.StatusCreated)
 		resp.Body.Close()
 	}
@@ -5261,7 +5274,7 @@ func TestFieldChangeOnTerminalTask(t *testing.T) {
 	created := decodeBody[api.Project](t, resp)
 	for _, uid := range []int64{bobUser.ID, carolUser.ID} {
 		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+			api.AddProjectMembersRequest{UserIds: []int64{uid}, Role: api.Member})
 		wantStatus(t, resp, http.StatusCreated)
 		resp.Body.Close()
 	}
@@ -5556,13 +5569,13 @@ func TestWritePathAudit(t *testing.T) {
 	created := decodeBody[api.Project](t, resp)
 	membersURL := fmt.Sprintf("%s/projects/%d/members", base, created.Id)
 	for _, id := range []int64{bobUser.ID, carolUser.ID} {
-		resp = doJSON(t, alice, http.MethodPost, membersURL, api.AddProjectMemberRequest{UserId: id, Role: api.Member})
+		resp = doJSON(t, alice, http.MethodPost, membersURL, api.AddProjectMembersRequest{UserIds: []int64{id}, Role: api.Member})
 		wantStatus(t, resp, http.StatusCreated)
 		resp.Body.Close()
 	}
-	// 失败的写请求不留痕
-	resp = doJSON(t, alice, http.MethodPost, membersURL, api.AddProjectMemberRequest{UserId: bobUser.ID, Role: api.Member})
-	wantStatus(t, resp, http.StatusConflict)
+	// 失败的写请求不留痕（#93 后重复加入不再是失败，改用空名单这条真失败的请求）
+	resp = doJSON(t, alice, http.MethodPost, membersURL, map[string]any{"userIds": []int64{}, "role": "member"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 	// 没有职责占位的成员可以移出
 	resp = doJSON(t, alice, http.MethodDelete, fmt.Sprintf("%s/%d", membersURL, carolUser.ID), nil)
@@ -5826,7 +5839,7 @@ func TestProjectSettingsThresholds(t *testing.T) {
 		role api.MemberRole
 	}{{bobUser.ID, api.Member}, {carolUser.ID, api.Member}} {
 		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-			api.AddProjectMemberRequest{UserId: m.id, Role: m.role})
+			api.AddProjectMembersRequest{UserIds: []int64{m.id}, Role: m.role})
 		wantStatus(t, resp, http.StatusCreated)
 		resp.Body.Close()
 	}
@@ -5983,7 +5996,7 @@ func TestTaskParticipants(t *testing.T) {
 		role api.MemberRole
 	}{{bobUser.ID, api.Member}, {carolUser.ID, api.Member}, {daveUser.ID, api.Viewer}} {
 		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-			api.AddProjectMemberRequest{UserId: m.id, Role: m.role})
+			api.AddProjectMembersRequest{UserIds: []int64{m.id}, Role: m.role})
 		wantStatus(t, resp, http.StatusCreated)
 		resp.Body.Close()
 	}
@@ -6113,7 +6126,7 @@ func TestResultUpdateFlow(t *testing.T) {
 	created := decodeBody[api.Project](t, resp)
 	for _, uid := range []int64{bobUser.ID, carolUser.ID} {
 		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-			api.AddProjectMemberRequest{UserId: uid, Role: api.Member})
+			api.AddProjectMembersRequest{UserIds: []int64{uid}, Role: api.Member})
 		wantStatus(t, resp, http.StatusCreated)
 		resp.Body.Close()
 	}

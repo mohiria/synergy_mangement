@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Alert, Button, Dropdown, Input, InputNumber, Modal, Select, Spin } from "antd";
+import { Alert, Button, Dropdown, Input, InputNumber, Modal, Select, Spin, message } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import DateRangeField from "./DateRangeField";
 import { client } from "./api/client";
@@ -11,6 +11,7 @@ import Icon from "./icons";
 type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
 type ProjectMember = components["schemas"]["ProjectMember"];
+type SkippedMember = components["schemas"]["SkippedMember"];
 type AuditLog = components["schemas"]["AuditLog"];
 type ImportRecord = components["schemas"]["ImportRecord"];
 type MemberRole = components["schemas"]["MemberRole"];
@@ -139,7 +140,9 @@ export default function ProjectSettingsPage({
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
-  const [addUserId, setAddUserId] = useState<number | undefined>();
+  // 邀请成员一次可选多人（#93），本次选中的人共用同一个角色。
+  const [addUserIds, setAddUserIds] = useState<number[]>([]);
+  const [skipped, setSkipped] = useState<SkippedMember[]>([]);
   const [addRole, setAddRole] = useState<MemberRole>("member");
   const [saving, setSaving] = useState(false);
   const [settings, setSettings] = useState<ProjectSettings | null>(null);
@@ -184,24 +187,28 @@ export default function ProjectSettingsPage({
   const canManage = project?.canManageMembers ?? false;
 
   const openInvite = () => {
-    setAddUserId(undefined);
+    setAddUserIds([]);
     setAddRole("member");
+    setSkipped([]);
     setError(null);
     setInviteOpen(true);
   };
 
   const add = async () => {
-    if (addUserId == null) return;
+    if (addUserIds.length === 0) return;
     setSaving(true);
     setError(null);
     const res = await client.POST("/projects/{projectId}/members", {
       params: { path: { projectId } },
-      body: { userId: addUserId, role: addRole },
+      body: { userIds: addUserIds, role: addRole },
     });
     setSaving(false);
     if (res.data) {
-      setInviteOpen(false);
-      setAddUserId(undefined);
+      // 逐人结果由后端给出：全部加入才关弹窗，有人被跳过时留在弹窗里说明原因。
+      if (res.data.added.length > 0) message.success(`已加入 ${res.data.added.length} 人`);
+      setSkipped(res.data.skipped);
+      setAddUserIds([]);
+      if (res.data.skipped.length === 0) setInviteOpen(false);
       load();
     } else {
       setError(res.error?.message ?? "加入成员失败");
@@ -720,13 +727,15 @@ export default function ProjectSettingsPage({
               )}
             </section>
           </div>
+          {/* 邀请成员一次可选多人（#93）：候选列表已排除项目内成员，
+              选中的人共用同一个角色；提交后的逐人结果由后端返回，前端不自行判断。 */}
           <Modal
             title="邀请成员"
             open={inviteOpen}
             confirmLoading={saving}
-            okText="加入"
+            okText={addUserIds.length > 1 ? `加入 ${addUserIds.length} 人` : "加入"}
             cancelText="取消"
-            okButtonProps={{ disabled: addUserId == null }}
+            okButtonProps={{ disabled: addUserIds.length === 0 }}
             onOk={add}
             onCancel={() => setInviteOpen(false)}
             width={480}
@@ -734,16 +743,18 @@ export default function ProjectSettingsPage({
           >
             <div className="form-stack">
               <label>
-                <span>选择用户</span>
+                <span>选择用户（可多选）</span>
                 <Select
+                  mode="multiple"
                   style={{ width: "100%" }}
                   options={candidateOptions}
-                  value={addUserId}
-                  onChange={setAddUserId}
+                  value={addUserIds}
+                  onChange={setAddUserIds}
                   showSearch
                   optionFilterProp="label"
                   placeholder="搜索姓名或用户名"
                   notFoundContent="没有可加入的用户"
+                  maxTagCount="responsive"
                 />
               </label>
               <label>
@@ -755,6 +766,21 @@ export default function ProjectSettingsPage({
                   onChange={setAddRole}
                 />
               </label>
+              {skipped.length > 0 && (
+                <Alert
+                  type="warning"
+                  message={`${skipped.length} 人未加入`}
+                  description={
+                    <ul className="skipped-list">
+                      {skipped.map((sk) => (
+                        <li key={sk.userId}>
+                          {sk.displayName ?? `用户 #${sk.userId}`} · {sk.reasonLabel}
+                        </li>
+                      ))}
+                    </ul>
+                  }
+                />
+              )}
             </div>
           </Modal>
         </>

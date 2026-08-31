@@ -277,30 +277,31 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
     post:
-      operationId: addProjectMember
+      operationId: addProjectMembers
       tags: [projects]
-      summary: 将用户加入项目并赋予成员角色（仅项目管理员／项目负责人）
+      summary: 将一名或多名用户加入项目并赋予同一成员角色（仅项目管理员／项目负责人）
+      description: |
+        一次提交建立全部成员关系并返回逐人结果：已在项目内或用户不存在的按人跳过，
+        不牵连名单里的其余人；名单为空或角色不合法整批拒绝。
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/AddProjectMemberRequest"
+              $ref: "#/components/schemas/AddProjectMembersRequest"
       responses:
         "201":
-          description: 已加入
+          description: 已处理（逐人结果见响应体，added 可能为空）
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ProjectMember"
+                $ref: "#/components/schemas/AddProjectMembersResult"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-        "409":
-          $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/ValidationError"
 
@@ -2660,15 +2661,51 @@ components:
         roleLabel:
           type: string
           description: 成员角色显示文案（派生字段；前端不按枚举拼文案）
-    AddProjectMemberRequest:
+    AddProjectMembersRequest:
       type: object
-      required: [userId, role]
+      required: [userIds, role]
+      properties:
+        userIds:
+          type: array
+          minItems: 1
+          description: 本次加入的用户 id 名单，全部赋予同一个成员角色；重复的 id 只算一次
+          items:
+            type: integer
+            format: int64
+        role:
+          $ref: "#/components/schemas/MemberRole"
+    AddProjectMembersResult:
+      type: object
+      required: [added, skipped]
+      description: 一次批量加入的逐人结果
+      properties:
+        added:
+          type: array
+          description: 本次新建立成员关系的人
+          items:
+            $ref: "#/components/schemas/ProjectMember"
+        skipped:
+          type: array
+          description: 未加入的人及原因
+          items:
+            $ref: "#/components/schemas/SkippedMember"
+    SkippedMember:
+      type: object
+      required: [userId, reason, reasonLabel]
       properties:
         userId:
           type: integer
           format: int64
-        role:
-          $ref: "#/components/schemas/MemberRole"
+        displayName:
+          type: string
+          description: 用户姓名；用户不存在时缺省
+        reason:
+          type: string
+          description: 跳过原因枚举
+          enum: [already_member, user_not_found]
+        reasonLabel:
+          type: string
+          description: 跳过原因显示文案（派生字段；前端不按枚举拼文案）
     UpdateProjectMemberRoleRequest:
       type: object
       required: [role]
