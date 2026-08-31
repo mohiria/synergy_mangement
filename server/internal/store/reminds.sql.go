@@ -71,3 +71,42 @@ func (q *Queries) CreateRemindLog(ctx context.Context, arg CreateRemindLogParams
 	)
 	return i, err
 }
+
+const listRemindCountsToday = `-- name: ListRemindCountsToday :many
+SELECT recipient_id, task_id, count(*) AS n FROM remind_logs
+WHERE sender_id = $1 AND remind_date = $2
+GROUP BY recipient_id, task_id
+`
+
+type ListRemindCountsTodayParams struct {
+	SenderID   int64
+	RemindDate pgtype.Date
+}
+
+type ListRemindCountsTodayRow struct {
+	RecipientID int64
+	TaskID      int64
+	N           int64
+}
+
+// 当日配额显隐（#129）：一次取回该发起人今天对（被提醒人、任务）的全部计数，
+// 卡点列表与我的工作按目标逐个判定「任一待行动人未用完即显示按钮」。
+func (q *Queries) ListRemindCountsToday(ctx context.Context, arg ListRemindCountsTodayParams) ([]ListRemindCountsTodayRow, error) {
+	rows, err := q.db.Query(ctx, listRemindCountsToday, arg.SenderID, arg.RemindDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRemindCountsTodayRow
+	for rows.Next() {
+		var i ListRemindCountsTodayRow
+		if err := rows.Scan(&i.RecipientID, &i.TaskID, &i.N); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

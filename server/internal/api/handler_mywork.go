@@ -19,10 +19,18 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 	if !ok {
 		return
 	}
+	// 一键提醒当日配额（#129）：一次取回本人今天的提醒计数，canRemind 显隐把配额算进去。
+	remindCounts, err := s.remindCountsToday(ctx, uid)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
 	// 审批件超期标红的阈值取项目规则设置，与「审批超时」卡点同源（R12、AC-60）。
 	facts := domain.MyWorkFacts{
 		UserID: uid, Actor: projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility), Now: s.now(),
 		ApprovalTimeoutDays: projectSettingsOf(proj).ApprovalTimeoutDays,
+		RemindDailyLimit:    projectSettingsOf(proj).RemindDailyLimit,
+		RemindSentToday:     remindCounts,
 	}
 
 	// 交付物边与输入请求：上游事实、未就绪标记、对接人视角。

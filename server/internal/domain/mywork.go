@@ -97,6 +97,10 @@ type MyWorkFacts struct {
 	// ApprovalTimeoutDays 审批超时阈值 N，取项目规则设置（AC-60）；非正数时回落默认值。
 	// 与「审批超时」卡点同源，见 BlockerFacts.ApprovalTimeoutDays。
 	ApprovalTimeoutDays int
+	// 一键提醒当日配额（#129）：canRemind = 权限 && 任一待行动人配额未用完。
+	// RemindSentToday 返回（当前用户、被提醒人、任务）三元组今日已发次数；nil 按不限处理。
+	RemindDailyLimit int
+	RemindSentToday  func(recipientID, taskID int64) int
 	Tasks         []WorkTaskFact
 	PoolReviews   []WorkApprovalFact
 	FieldChanges  []WorkApprovalFact
@@ -182,7 +186,8 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		}
 		target := WaitRemindTarget(w)
 		item.RefKey = target.Key
-		item.CanRemind = CanRemind(f.Actor, me, target)
+		item.CanRemind = CanRemind(f.Actor, me, target) &&
+			RemindQuotaLeft(target, f.RemindDailyLimit, f.RemindSentToday)
 	}
 
 	timeoutDays := f.ApprovalTimeoutDays
@@ -538,7 +543,8 @@ func decorateWorkCards(f MyWorkFacts, g *MyWorkGroups) {
 	for i := range g.Blockers {
 		g.Blockers[i].ActionLabel = WorkActionView
 		if b, ok := byKey[g.Blockers[i].RefKey]; ok {
-			g.Blockers[i].CanRemind = CanRemindBlocker(f.Actor, f.UserID, b)
+			g.Blockers[i].CanRemind = CanRemindBlocker(f.Actor, f.UserID, b) &&
+				RemindQuotaLeft(BlockerRemindTarget(b, nil), f.RemindDailyLimit, f.RemindSentToday)
 		}
 	}
 }

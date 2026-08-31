@@ -220,3 +220,18 @@ func RemindAllowed(sentToday, limit int) bool {
 	}
 	return sentToday < limit
 }
+
+// RemindQuotaLeft 当日配额判定（#129）：该目标今天是否还有能提醒的待行动人——
+// 任一待行动人（当前发起人、该人、目标任务）三元组次数未用完即真，全部用完则假；
+// sentToday 为 nil 表示调用方未接入计数（按不限处理）。canRemind 的显隐 = 权限 && 本判定。
+func RemindQuotaLeft(t RemindTarget, limit int, sentToday func(recipientID, taskID int64) int) bool {
+	if sentToday == nil {
+		return true
+	}
+	for _, id := range dropZeroIDs(t.ActionOwnerIDs) {
+		if RemindAllowed(sentToday(id, t.TaskID), limit) {
+			return true
+		}
+	}
+	return false
+}

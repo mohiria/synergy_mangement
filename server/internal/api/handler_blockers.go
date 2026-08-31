@@ -27,7 +27,13 @@ func (s *Server) ListBlockers(w http.ResponseWriter, r *http.Request, projectId 
 		writeInternalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, blockerViews(blockers, actor, uid))
+	// #129：canRemind 显隐把当日配额算进去，任一待行动人还能提醒才显示按钮。
+	remindCounts, err := s.remindCountsToday(r.Context(), uid)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, blockerViews(blockers, actor, uid, projectSettingsOf(proj).RemindDailyLimit, remindCounts))
 }
 
 // CreateReminder 一键提醒当前待行动人（AC-11、MW-13）。
@@ -310,16 +316,18 @@ func approverIDs(tasks []store.ListProjectTasksRow, taskID int64) []int64 {
 	return nil
 }
 
-func blockerViews(bs []domain.Blocker, actor domain.Actor, userID int64) []Blocker {
+func blockerViews(bs []domain.Blocker, actor domain.Actor, userID int64, remindLimit int, remindCounts func(recipientID, taskID int64) int) []Blocker {
 	out := make([]Blocker, 0, len(bs))
 	for _, b := range bs {
-		out = append(out, blockerView(b, actor, userID))
+		out = append(out, blockerView(b, actor, userID, remindLimit, remindCounts))
 	}
 	return out
 }
 
-func blockerView(b domain.Blocker, actor domain.Actor, userID int64) Blocker {
-	canRemind := domain.CanRemindBlocker(actor, userID, b)
+func blockerView(b domain.Blocker, actor domain.Actor, userID int64, remindLimit int, remindCounts func(recipientID, taskID int64) int) Blocker {
+	// #129：权限之外再看当日配额，全部待行动人都用完就不显示按钮。
+	canRemind := domain.CanRemindBlocker(actor, userID, b) &&
+		domain.RemindQuotaLeft(domain.BlockerRemindTarget(b, nil), remindLimit, remindCounts)
 	item := Blocker{
 		Key:              b.Key,
 		Kind:             BlockerKind(b.Kind),
@@ -337,6 +345,23 @@ func blockerView(b domain.Blocker, actor domain.Actor, userID int64) Blocker {
 	}
 	item.ImpactNote = optString(b.ImpactNote)
 	return item
+}
+
+// remindCountsToday 当前用户今天的提醒计数（#129）：按（被提醒人、任务）寻址，
+// 一次查询取回，供卡点列表与我的工作的 canRemind 显隐判定。
+func (s *Server) remindCountsToday(ctx context.Context, senderID int64) (func(recipientID, taskID int64) int, error) {
+	rows, err := s.q.ListRemindCountsToday(ctx, store.ListRemindCountsTodayParams{
+		SenderID: senderID, RemindDate: pgtype.Date{Time: s.now(), Valid: true},
+	})
+	if err != nil {
+		return nil, err
+	}
+	type key struct{ recipient, task int64 }
+	m := make(map[key]int, len(rows))
+	for _, row := range rows {
+		m[key{row.RecipientID, row.TaskID}] = int(row.N)
+	}
+	return func(recipientID, taskID int64) int { return m[key{recipientID, taskID}] }, nil
 }
 
 func blockerRemindNotification(userID, projectID, taskID int64, content string) store.CreateNotificationParams {

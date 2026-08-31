@@ -538,10 +538,16 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		writeInternalError(w, r, err)
 		return
 	}
+	// #129：抽屉卡点行的提醒按钮显隐同样把当日配额算进去。
+	remindCounts, err := s.remindCountsToday(r.Context(), uid)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
 	taskBlockers := []Blocker{}
 	for _, b := range allBlockers {
 		if b.TaskID == taskId {
-			taskBlockers = append(taskBlockers, blockerView(b, actor, uid))
+			taskBlockers = append(taskBlockers, blockerView(b, actor, uid, projectSettingsOf(proj).RemindDailyLimit, remindCounts))
 		}
 	}
 	inputs, outputs := []DeliverableEdge{}, []DeliverableEdge{}
