@@ -1442,6 +1442,20 @@ export interface components {
             canEdit?: boolean;
             /** @description 当前用户能否删除本 KR（派生字段；仅项目管理员且 KR 下无任务，AC-65） */
             canDelete?: boolean;
+            topBlocker?: components["schemas"]["TopBlocker"];
+        };
+        /** @description KR 下风险最高的一条卡点（派生字段；#122 风险队列按 KR 聚合的副行）。挑选规则在域层： 等级高者优先，同级按等待更久（Since 更早）者优先。KR 下无卡点时不返回 */
+        TopBlocker: {
+            /** Format: int64 */
+            taskId: number;
+            /** @description 任务展示编号（如 T1.2.3） */
+            taskCode: string;
+            kind: components["schemas"]["BlockerKind"];
+            /** @description 卡点类型中文名（派生字段） */
+            kindLabel: string;
+            /** @description 一行摘要（与卡点 reason 同源） */
+            summary: string;
+            level: components["schemas"]["RiskLevel"];
         };
         /** @description 一条受影响的 O／KR（系统推导，协作关系 PRD §8.1） */
         ImpactedTarget: {

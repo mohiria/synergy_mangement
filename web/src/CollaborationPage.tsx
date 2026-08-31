@@ -1104,44 +1104,29 @@ export default function CollaborationPage({
             {mode.kind !== "full" && (
               <aside className="risk-queue">
                 <div className="risk-queue-head">风险队列</div>
-                {krList.filter((k) => k.riskLevel !== "normal").length === 0 && openBlockers.length === 0 && (
+                {/* #122：按 KR 聚合，每 KR 一条——编号 · 等级 · 卡点数，副行只显最高风险卡点
+                    （挑选规则在域层，前端只消费 topBlocker）；正常且无卡点的 KR 不出现。 */}
+                {krList.filter((k) => k.riskLevel !== "normal" || (k.openBlockerCount ?? 0) > 0)
+                  .length === 0 && (
                   <div className="muted" style={{ padding: 16, fontSize: 12 }}>
                     暂无需要关注的风险
                   </div>
                 )}
                 {krList
-                  .filter((k) => k.riskLevel !== "normal")
+                  .filter((k) => k.riskLevel !== "normal" || (k.openBlockerCount ?? 0) > 0)
                   .map((k) => (
                     <button key={`rk-${k.id}`} type="button" className="risk-queue-item" onClick={() => enter({ kind: "kr", krId: k.id })}>
                       <b>
                         {k.code} · {k.riskLevelLabel}
-                      </b>
-                      <small>{k.riskNote ?? k.description}</small>
-                    </button>
-                  ))}
-                {openBlockers.map((b) => {
-                  const krId = taskById.get(b.taskId)?.keyResultId;
-                  return (
-                    <button
-                      key={`rb-${b.key}`}
-                      type="button"
-                      className="risk-queue-item"
-                      onClick={() => {
-                        if (krId) {
-                          enter({ kind: "kr", krId });
-                          setSelectedTask(b.taskId);
-                        }
-                      }}
-                    >
-                      <b>
-                        {b.kindLabel} · {b.levelLabel ?? ""}
+                        {(k.openBlockerCount ?? 0) > 0 && ` · ${k.openBlockerCount} 个卡点`}
                       </b>
                       <small>
-                        {taskById.get(b.taskId)?.name ?? ""}：缺 {b.missing}
+                        {k.topBlocker
+                          ? `${k.topBlocker.taskCode} ${k.topBlocker.kindLabel}：${k.topBlocker.summary}`
+                          : (k.riskNote ?? k.description)}
                       </small>
                     </button>
-                  );
-                })}
+                  ))}
               </aside>
             )}
             <div className="graph-shell">

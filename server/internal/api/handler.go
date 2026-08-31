@@ -771,9 +771,11 @@ func (s *Server) okrList(ctx context.Context, projectID int64, actor domain.Acto
 		return nil, err
 	}
 	krByTask := make(map[int64]int64, len(taskRows))
+	codeByTask := make(map[int64]string, len(taskRows))
 	riskTasksByKr := make(map[int64][]domain.RiskTaskFact)
 	for _, t := range taskRows {
 		krByTask[t.ID] = t.KeyResultID
+		codeByTask[t.ID] = domain.TaskCode(int(t.ObjectiveCodeSeq), int(t.KrCodeSeq), int(t.CodeSeq))
 		riskTasksByKr[t.KeyResultID] = append(riskTasksByKr[t.KeyResultID], domain.RiskTaskFact{
 			ID:      t.ID,
 			Name:    t.Name,
@@ -837,6 +839,21 @@ func (s *Server) okrList(ctx context.Context, projectID int64, actor domain.Acto
 			TaskCount: intPtr(taskCounts[k.ID]),
 			CanEdit:   boolPtr(domain.CanEditKeyResult(actor, userID, fromPgInt8(k.OwnerID))),
 			CanDelete: boolPtr(domain.CanDeleteKeyResult(actor, taskCounts[k.ID])),
+			// 风险队列副行（#122）：KR 下风险最高的一条卡点，挑选规则在 domain。
+			TopBlocker: func() *TopBlocker {
+				b := domain.SelectTopBlocker(blockersByKr[k.ID])
+				if b == nil {
+					return nil
+				}
+				return &TopBlocker{
+					TaskId:    b.TaskID,
+					TaskCode:  codeByTask[b.TaskID],
+					Kind:      BlockerKind(b.Kind),
+					KindLabel: domain.BlockerKindLabel(b.Kind),
+					Summary:   b.Reason,
+					Level:     RiskLevel(b.Level),
+				}
+			}(),
 		})
 	}
 	resp := make([]Objective, 0, len(objectives))
