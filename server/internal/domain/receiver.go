@@ -19,7 +19,8 @@ const (
 
 // receiverScopeLabels 接收方范围的中文显示文案（变更单差异行与页面共用）。
 var receiverScopeLabels = map[string]string{
-	ReceiverScopeNone:    "不配置",
+	// #124：空接收方显示「未配置」（原「不配置」），归档列表与抽屉共用。
+	ReceiverScopeNone:    "未配置",
 	ReceiverScopeMembers: "指定成员",
 	ReceiverScopeAll:     "所有项目成员",
 }
@@ -29,7 +30,7 @@ func ReceiverScopeLabel(scope string) string {
 	if label, ok := receiverScopeLabels[scope]; ok {
 		return label
 	}
-	return "不配置"
+	return "未配置"
 }
 
 var (

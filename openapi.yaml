@@ -1292,6 +1292,14 @@ paths:
       operationId: getTaskFileDownloadUrl
       tags: [tasks]
       summary: 取得过程文件／外部材料的预签名下载地址（全体项目成员可查看、下载，§3.3）
+      parameters:
+        - name: disposition
+          in: query
+          required: false
+          description: 内容处置（#124）：attachment（默认，下载）或 inline（浏览器内联预览）
+          schema:
+            type: string
+            enum: [attachment, inline]
       responses:
         "200":
           description: 预签名地址
@@ -1322,6 +1330,14 @@ paths:
       operationId: getFileDownloadUrl
       tags: [tasks]
       summary: 取得交付物内容的预签名下载地址（全体项目成员可查看／下载当前与候选内容，§3.3）
+      parameters:
+        - name: disposition
+          in: query
+          required: false
+          description: 内容处置（#124）：attachment（默认，下载）或 inline（浏览器内联预览）
+          schema:
+            type: string
+            enum: [attachment, inline]
       responses:
         "200":
           description: 预签名地址
@@ -4298,7 +4314,7 @@ components:
           description: 任务负责人姓名（派生字段）
         receiverLabel:
           type: string
-          description: 接收方展示文案（词汇表「接收方」；未配置为「不配置」；派生字段）
+          description: 接收方展示文案（词汇表「接收方」；空接收方为「未配置」，#124；派生字段）
         status:
           $ref: "#/components/schemas/TaskStatus"
         statusLabel:

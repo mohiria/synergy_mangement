@@ -3937,7 +3937,10 @@ export interface operations {
     };
     getTaskFileDownloadUrl: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 内容处置（#124）：attachment（默认，下载）或 inline（浏览器内联预览） */
+                disposition?: "attachment" | "inline";
+            };
             header?: never;
             path: {
                 projectId: number;
@@ -3962,7 +3965,10 @@ export interface operations {
     };
     getFileDownloadUrl: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 内容处置（#124）：attachment（默认，下载）或 inline（浏览器内联预览） */
+                disposition?: "attachment" | "inline";
+            };
             header?: never;
             path: {
                 projectId: number;

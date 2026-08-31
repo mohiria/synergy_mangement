@@ -15,7 +15,7 @@ import (
 // Store 文件存取接口：预签名上传／下载、对象读取（成果包打包）与删除。
 type Store interface {
 	PresignPut(ctx context.Context, key string, expiry time.Duration) (string, error)
-	PresignGet(ctx context.Context, key, downloadName string, expiry time.Duration) (string, error)
+	PresignGet(ctx context.Context, key, downloadName string, inline bool, expiry time.Duration) (string, error)
 	Get(ctx context.Context, key string) (io.ReadCloser, error)
 	Stat(ctx context.Context, key string) (int64, error)
 	Put(ctx context.Context, key string, r io.Reader, size int64) error
@@ -68,10 +68,15 @@ func (m *Minio) PresignPut(ctx context.Context, key string, expiry time.Duration
 	return u.String(), nil
 }
 
-func (m *Minio) PresignGet(ctx context.Context, key, downloadName string, expiry time.Duration) (string, error) {
+// PresignGet 预签名下载地址；inline 为真时按浏览器内联预览下发（#124），否则强制下载。
+func (m *Minio) PresignGet(ctx context.Context, key, downloadName string, inline bool, expiry time.Duration) (string, error) {
 	params := url.Values{}
 	if downloadName != "" {
-		params.Set("response-content-disposition", fmt.Sprintf("attachment; filename=%q", downloadName))
+		disposition := "attachment"
+		if inline {
+			disposition = "inline"
+		}
+		params.Set("response-content-disposition", fmt.Sprintf("%s; filename=%q", disposition, downloadName))
 	}
 	u, err := m.presign.PresignedGetObject(ctx, m.bucket, key, expiry, params)
 	if err != nil {

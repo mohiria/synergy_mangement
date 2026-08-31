@@ -237,7 +237,7 @@ func (s *Server) GetInputRequestFileUrl(w http.ResponseWriter, r *http.Request, 
 		writeJSON(w, http.StatusNotFound, Error{Code: "file_not_found", Message: "文件不存在"})
 		return
 	}
-	url, err := s.files.PresignGet(r.Context(), ir.ObjectKey, ir.FileName, presignExpiry)
+	url, err := s.files.PresignGet(r.Context(), ir.ObjectKey, ir.FileName, false, presignExpiry)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return

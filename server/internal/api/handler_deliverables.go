@@ -258,7 +258,7 @@ func (s *Server) CommitCandidate(w http.ResponseWriter, r *http.Request, project
 	writeJSON(w, http.StatusOK, toDeliverableFile(f, currentUser(r).DisplayName))
 }
 
-func (s *Server) GetFileDownloadUrl(w http.ResponseWriter, r *http.Request, projectId int64, fileId int64) {
+func (s *Server) GetFileDownloadUrl(w http.ResponseWriter, r *http.Request, projectId int64, fileId int64, params GetFileDownloadUrlParams) {
 	if _, ok := s.fetchProject(w, r, projectId); !ok {
 		return
 	}
@@ -271,7 +271,9 @@ func (s *Server) GetFileDownloadUrl(w http.ResponseWriter, r *http.Request, proj
 		}
 		return
 	}
-	url, err := s.files.PresignGet(r.Context(), f.ObjectKey, f.FileName, presignExpiry)
+	// #124：预览（inline）或下载（attachment，默认）由调用方声明；预签名带对应 disposition。
+	inline := params.Disposition != nil && string(*params.Disposition) == "inline"
+	url, err := s.files.PresignGet(r.Context(), f.ObjectKey, f.FileName, inline, presignExpiry)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return

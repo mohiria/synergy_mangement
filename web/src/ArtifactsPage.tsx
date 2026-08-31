@@ -15,6 +15,7 @@ import DateRangeField, { type DateRange } from "./DateRangeField";
 import type { components } from "./api/schema";
 import Icon from "./icons";
 import ProjectShell from "./ProjectShell";
+import TaskDrawerHost from "./task-drawer";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
@@ -39,6 +40,10 @@ const CONTENT_STATE_CLASS: Record<ContentState, string> = {
   pending_submit: "archived",
   empty: "archived",
 };
+
+// 可内联预览的类型（#124）：浏览器原生能打开的 PDF／图片／纯文本；
+// Office 文档内网离线无法在线预览，一律按下载处理，界面不承诺预览。
+const PREVIEWABLE = new Set(["pdf", "png", "jpg", "jpeg", "gif", "webp", "txt"]);
 
 const KB = 1024;
 // 文件列展示「类型 · 大小」，与原型一致；大小只作展示换算。
@@ -87,6 +92,8 @@ export default function ArtifactsPage({
   const [kindFilter, setKindFilter] = useState<FileKind | "all">("all");
   // 「时间」筛选维（§7.7、#86）：服务端裁剪，改动后重新拉取，不在前端过滤。
   const [range, setRange] = useState<DateRange>(null);
+  // #124：来源任务点编号在本页开任务抽屉，不跳全部任务。
+  const [drawerTaskId, setDrawerTaskId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -186,15 +193,10 @@ export default function ArtifactsPage({
           )}
         </td>
       )}
-      <td title={d.name}>{d.name}</td>
+      {/* #124：来源任务只显编号，点击在本页开任务抽屉。 */}
       <td title={`${t.code} ${t.name}`}>
-        <span
-          className="file-link"
-          onClick={() =>
-            navigate(`/projects/${projectId}/tasks?task=${t.taskId}`)
-          }
-        >
-          {t.code} {t.name}
+        <span className="file-link" onClick={() => setDrawerTaskId(t.taskId)}>
+          {t.code}
         </span>
       </td>
       <td title={t.ownerName}>{t.ownerName}</td>
@@ -206,7 +208,10 @@ export default function ArtifactsPage({
         {d.current || d.candidate ? (
           <span
             className="file-link"
-            onClick={() => openFile((d.current ?? d.candidate)!.id)}
+            onClick={() => {
+              const f = (d.current ?? d.candidate)!;
+              openFile(f.id, f.fileType);
+            }}
           >
             {(d.current ?? d.candidate)!.fileName}
             <span className="muted">
@@ -223,7 +228,7 @@ export default function ArtifactsPage({
           {d.contentStateLabel}
         </span>
       </td>
-      <td className={t.receiverLabel === "不配置" ? "muted" : ""} title={t.receiverLabel}>
+      <td className={t.receiverLabel === "未配置" ? "muted" : ""} title={t.receiverLabel}>
         {t.receiverLabel}
       </td>
       <td className="task-date">{fmtTime(d.contentStateAt) || "—"}</td>
@@ -269,24 +274,41 @@ export default function ArtifactsPage({
     [artifacts],
   );
 
-  const openFile = async (fileId: number) => {
+  // #124：PDF／图片／纯文本在新标签内联预览（预签名带 inline），其余类型下载。
+  const openFile = async (fileId: number, fileType?: string) => {
+    const preview = !!fileType && PREVIEWABLE.has(fileType.toLowerCase());
     const res = await client.GET(
       "/projects/{projectId}/files/{fileId}/download-url",
       {
-        params: { path: { projectId, fileId } },
+        params: {
+          path: { projectId, fileId },
+          query: preview ? { disposition: "inline" } : {},
+        },
       },
     );
-    if (res.data) window.location.assign(res.data.url);
-    else message.error(res.error?.message ?? "获取下载地址失败");
+    if (!res.data) {
+      message.error(res.error?.message ?? "获取下载地址失败");
+      return;
+    }
+    if (preview) window.open(res.data.url, "_blank");
+    else window.location.assign(res.data.url);
   };
 
   // 过程文件与外部材料的下载走它们自己的入口（与交付物文件各自一套 id）。
-  const openTaskFile = async (fileId: number) => {
+  const openTaskFile = async (fileId: number, fileType?: string) => {
+    const preview = !!fileType && PREVIEWABLE.has(fileType.toLowerCase());
     const res = await client.GET("/projects/{projectId}/task-files/{fileId}/download-url", {
-      params: { path: { projectId, fileId } },
+      params: {
+        path: { projectId, fileId },
+        query: preview ? { disposition: "inline" } : {},
+      },
     });
-    if (res.data) window.location.assign(res.data.url);
-    else message.error(res.error?.message ?? "获取下载地址失败");
+    if (!res.data) {
+      message.error(res.error?.message ?? "获取下载地址失败");
+      return;
+    }
+    if (preview) window.open(res.data.url, "_blank");
+    else window.location.assign(res.data.url);
   };
 
   const toggle = (deliverableId: number) =>
@@ -437,11 +459,11 @@ export default function ArtifactsPage({
                 <table className="data-table artifact-table">
                   <thead>
                     <tr>
+                      {/* #124：去名称列；来源任务只显编号；「文件」列改名「交付物」（文件名 · 大小）。 */}
                       {canCreate && <th style={{ width: 40 }} />}
-                      <th style={{ width: 190 }}>交付物</th>
-                      <th style={{ width: 190 }}>来源任务</th>
+                      <th style={{ width: 90 }}>来源任务</th>
                       <th style={{ width: 100 }}>任务负责人</th>
-                      <th style={{ width: 170 }}>文件</th>
+                      <th>交付物</th>
                       <th style={{ width: 150 }}>内容状态</th>
                       <th style={{ width: 140 }}>接收方</th>
                       <th style={{ width: 140 }}>提交／生效时间</th>
@@ -462,24 +484,19 @@ export default function ArtifactsPage({
                               />
                             </td>
                           )}
-                          <td className="muted" title={row.file.kindLabel}>{row.file.kindLabel}</td>
                           <td title={`${row.task.code} ${row.task.name}`}>
                             <span
                               className="file-link"
-                              onClick={() =>
-                                navigate(
-                                  `/projects/${projectId}/tasks?task=${row.task.taskId}`,
-                                )
-                              }
+                              onClick={() => setDrawerTaskId(row.task.taskId)}
                             >
-                              {row.task.code} {row.task.name}
+                              {row.task.code}
                             </span>
                           </td>
                           <td title={row.task.ownerName}>{row.task.ownerName}</td>
                           <td title={`${row.file.fileName} · ${fmtSize(row.file.fileSize)}`}>
                             <span
                               className="file-link"
-                              onClick={() => openTaskFile(row.file.id)}
+                              onClick={() => openTaskFile(row.file.id, row.file.fileType)}
                             >
                               {row.file.fileName}
                               <span className="muted">
@@ -495,7 +512,7 @@ export default function ArtifactsPage({
                           </td>
                           <td
                             className={
-                              row.task.receiverLabel === "不配置" ? "muted" : ""
+                              row.task.receiverLabel === "未配置" ? "muted" : ""
                             }
                             title={row.task.receiverLabel}
                           >
@@ -643,6 +660,13 @@ export default function ArtifactsPage({
               ))}
             </div>
           </Modal>
+          {/* #124：来源任务在本页打开抽屉；动作落库后刷新归档数据。 */}
+          <TaskDrawerHost
+            projectId={projectId}
+            taskId={drawerTaskId}
+            onClose={() => setDrawerTaskId(null)}
+            onChanged={load}
+          />
         </>
       )}
     </ProjectShell>

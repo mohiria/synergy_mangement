@@ -159,7 +159,7 @@ func (s *Server) DeleteTaskFile(w http.ResponseWriter, r *http.Request, projectI
 }
 
 // GetTaskFileDownloadUrl 预签名下载：全体项目成员可查看、下载（§3.3）。
-func (s *Server) GetTaskFileDownloadUrl(w http.ResponseWriter, r *http.Request, projectId int64, fileId int64) {
+func (s *Server) GetTaskFileDownloadUrl(w http.ResponseWriter, r *http.Request, projectId int64, fileId int64, params GetTaskFileDownloadUrlParams) {
 	if _, ok := s.fetchProject(w, r, projectId); !ok {
 		return
 	}
@@ -172,7 +172,9 @@ func (s *Server) GetTaskFileDownloadUrl(w http.ResponseWriter, r *http.Request, 
 		}
 		return
 	}
-	url, err := s.files.PresignGet(r.Context(), f.ObjectKey, f.FileName, presignExpiry)
+	// #124：预览（inline）或下载（attachment，默认）由调用方声明；预签名带对应 disposition。
+	inline := params.Disposition != nil && string(*params.Disposition) == "inline"
+	url, err := s.files.PresignGet(r.Context(), f.ObjectKey, f.FileName, inline, presignExpiry)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
