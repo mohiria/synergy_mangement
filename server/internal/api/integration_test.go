@@ -458,12 +458,17 @@ func TestAuthAndProjectsEndToEnd(t *testing.T) {
 		t.Fatalf("code = %q, want invalid_project_plan", e.Code)
 	}
 
+	// 新建项目默认私有（AC-69）：可见性不由创建时指定，改开关走项目设置。
+	if created.Visibility != api.Private || created.VisibilityLabel != "私有项目" || created.ImplicitViewer {
+		t.Fatalf("新建项目应默认私有: %+v", created)
+	}
+
 	// 更新项目：改负责人、状态与计划周期
 	ps := openapiDate(t, "2026-09-01")
 	pe := openapiDate(t, "2026-12-31")
 	resp = doJSON(t, alice, http.MethodPut, fmt.Sprintf("%s/projects/%d", base, created.Id), api.UpdateProjectRequest{
 		Name: "协同管理试点", OwnerId: aliceUser.ID, Status: api.ProjectStatusInProgress,
-		PlannedStartDate: &ps, PlannedEndDate: &pe,
+		PlannedStartDate: &ps, PlannedEndDate: &pe, Visibility: api.Private,
 	})
 	wantStatus(t, resp, http.StatusOK)
 	updated := decodeBody[api.Project](t, resp)
@@ -479,7 +484,7 @@ func TestAuthAndProjectsEndToEnd(t *testing.T) {
 
 	// 更新不存在的项目 404
 	resp = doJSON(t, alice, http.MethodPut, base+"/projects/99999", api.UpdateProjectRequest{
-		Name: "任意", OwnerId: aliceUser.ID, Status: api.ProjectStatusNotStarted,
+		Name: "任意", OwnerId: aliceUser.ID, Status: api.ProjectStatusNotStarted, Visibility: api.Private,
 	})
 	wantStatus(t, resp, http.StatusNotFound)
 	resp.Body.Close()
@@ -559,7 +564,7 @@ func TestProjectMembersAndPermissions(t *testing.T) {
 	wantStatus(t, resp, http.StatusForbidden)
 	resp.Body.Close()
 	resp = doJSON(t, carol, http.MethodPut, fmt.Sprintf("%s/projects/%d", base, created.Id), api.UpdateProjectRequest{
-		Name: "成员试点", OwnerId: bobUser.ID, Status: api.ProjectStatusNotStarted,
+		Name: "成员试点", OwnerId: bobUser.ID, Status: api.ProjectStatusNotStarted, Visibility: api.Private,
 	})
 	wantStatus(t, resp, http.StatusForbidden)
 	if e := decodeBody[api.Error](t, resp); e.Code != "forbidden" {
@@ -6447,5 +6452,259 @@ func TestResultUpdateFlow(t *testing.T) {
 	resp.Body.Close()
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/result-update", tasksURL, cancelledID), nil)
 	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+}
+
+// AC-69：项目可见性开关。public 项目让系统内任何登录用户成为隐式访客——
+// 读全开、写全关，两件事在同一处判定（domain.ProjectIdentity），这里逐条验到端点上。
+func TestPublicProjectImplicitViewer(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	daveUser := seedUser(t, q, "dave", "赵六", "dave-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(c *http.Client, username, password string) {
+		t.Helper()
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	alice, bob, dave := newClient(t), newClient(t), newClient(t)
+	login(alice, "alice", "alice-pass")
+	login(bob, "bob", "bob-pass")
+	login(dave, "dave", "dave-pass")
+
+	sp := func(s string) *string { return &s }
+	ipt := func(v int) *int { return &v }
+
+	// alice 建项目并拉 bob 进来当项目成员；dave 始终不是本项目的任何成员。
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "公开可见性试点", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	projectURL := fmt.Sprintf("%s/projects/%d", base, created.Id)
+	resp = doJSON(t, alice, http.MethodPost, projectURL+"/members",
+		api.AddProjectMembersRequest{UserIds: []int64{bobUser.ID}, Role: api.Member})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPost, projectURL+"/objectives",
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	kr1 := decodeBody[[]api.Objective](t, resp)[0].KeyResults[0].Id
+	tasksURL := projectURL + "/tasks"
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true,
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: bobUser.ID, StartDate: start, EndDate: end,
+				ExpectedDeliverable: sp("验收方案")},
+			{KeyResultId: kr1, Name: "承接验收方案", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	tasks := decodeBody[[]api.Task](t, resp)
+	taskID, downstreamID := tasks[0].Id, tasks[1].Id
+
+	// 私有阶段：非成员一律 404，项目列表里也看不到（与现状一致）。
+	resp = doJSON(t, dave, http.MethodGet, projectURL, nil)
+	wantStatus(t, resp, http.StatusNotFound)
+	resp.Body.Close()
+	resp = doJSON(t, dave, http.MethodGet, tasksURL, nil)
+	wantStatus(t, resp, http.StatusNotFound)
+	resp.Body.Close()
+	resp = doJSON(t, dave, http.MethodGet, base+"/projects", nil)
+	wantStatus(t, resp, http.StatusOK)
+	for _, p := range decodeBody[[]api.Project](t, resp) {
+		if p.Id == created.Id {
+			t.Fatalf("私有项目不应出现在非成员的项目列表: %+v", p)
+		}
+	}
+
+	// 只有项目负责人与项目管理员能改这个开关：bob 是项目成员，403。
+	resp = doJSON(t, bob, http.MethodPut, projectURL, api.UpdateProjectRequest{
+		Name: created.Name, OwnerId: aliceUser.ID, Status: api.ProjectStatusNotStarted, Visibility: api.Public,
+	})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	// 非法取值 422：二值枚举在契约边界就被请求校验中间件挡下（与项目状态同一处理），
+	// domain.ValidateProjectVisibility 是同一条规则在域层的表述，兜住绕过中间件的调用。
+	resp = doJSON(t, alice, http.MethodPut, projectURL, map[string]any{
+		"name": created.Name, "ownerId": aliceUser.ID, "status": "not_started", "visibility": "internal",
+	})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+
+	// 切公开
+	resp = doJSON(t, alice, http.MethodPut, projectURL, api.UpdateProjectRequest{
+		Name: created.Name, OwnerId: aliceUser.ID, Status: api.ProjectStatusNotStarted, Visibility: api.Public,
+	})
+	wantStatus(t, resp, http.StatusOK)
+	if p := decodeBody[api.Project](t, resp); p.Visibility != api.Public || p.VisibilityLabel != "公开项目" || p.ImplicitViewer {
+		t.Fatalf("切公开后的项目字段异常: %+v", p)
+	}
+
+	// 读：dave 以隐式访客身份看得到全部读端点，派生字段标明他不是成员。
+	resp = doJSON(t, dave, http.MethodGet, projectURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	seen := decodeBody[api.Project](t, resp)
+	if !seen.ImplicitViewer || seen.CanEdit || seen.CanManageMembers {
+		t.Fatalf("隐式访客派生字段异常: %+v", seen)
+	}
+	for _, path := range []string{
+		"", "/tasks", "/objectives", "/edges", "/blockers", "/artifacts", "/packages", "/report", "/my-work", "/members", "/settings",
+		fmt.Sprintf("/tasks/%d", taskID),
+	} {
+		resp = doJSON(t, dave, http.MethodGet, projectURL+path, nil)
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	// 事实与成员看到的一致（AC-21 同一份事实）
+	factsOf := func(c *http.Client) []int64 {
+		t.Helper()
+		r := doJSON(t, c, http.MethodGet, tasksURL, nil)
+		wantStatus(t, r, http.StatusOK)
+		out := []int64{}
+		for _, task := range decodeBody[[]api.Task](t, r) {
+			out = append(out, task.Id)
+		}
+		return out
+	}
+	if len(factsOf(dave)) != len(factsOf(bob)) {
+		t.Fatalf("隐式访客看到的任务数量应与成员一致: %v vs %v", factsOf(dave), factsOf(bob))
+	}
+	// 项目列表里能拿到公开项目，且带着「我不是成员」的标记
+	resp = doJSON(t, dave, http.MethodGet, base+"/projects", nil)
+	wantStatus(t, resp, http.StatusOK)
+	var listed *api.Project
+	for _, p := range decodeBody[[]api.Project](t, resp) {
+		if p.Id == created.Id {
+			cp := p
+			listed = &cp
+		}
+	}
+	if listed == nil || !listed.ImplicitViewer {
+		t.Fatalf("公开项目应出现在非成员列表并标记 implicitViewer: %+v", listed)
+	}
+
+	// 下载：交付物文件的预签名地址照常发放（裁决 D 附「可看可下载全部」）。
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, taskID),
+		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	deliverableID := decodeBody[api.TaskDetail](t, resp).Deliverables[0].Id
+	file := uploadCandidate(t, bob, tasksURL, taskID, deliverableID,
+		api.UploadCandidateRequest{FileName: "验收方案.docx", FileType: sp("docx")}, "candidate-bytes")
+	resp = doJSON(t, dave, http.MethodGet, fmt.Sprintf("%s/files/%d/download-url", projectURL, file.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if u := decodeBody[api.DownloadUrlResponse](t, resp); u.Url == "" {
+		t.Fatal("隐式访客应能取到下载地址")
+	}
+
+	// 写：每一个写端点都拒绝。403 是权限判定的结果；少数端点先撞上「目标不属于我」的 404／409，
+	// 一并接受——要点是没有任何一个写动作成功。
+	writes := []struct {
+		name   string
+		method string
+		path   string
+		body   any
+	}{
+		{"编辑项目", http.MethodPut, "", api.UpdateProjectRequest{
+			Name: created.Name, OwnerId: aliceUser.ID, Status: api.ProjectStatusNotStarted, Visibility: api.Private}},
+		{"加成员", http.MethodPost, "/members", api.AddProjectMembersRequest{UserIds: []int64{daveUser.ID}, Role: api.Member}},
+		{"改规则设置", http.MethodPut, "/settings", api.UpdateProjectSettingsRequest{ApprovalTimeoutDays: 5, DueSoonDays: 5, RemindDailyLimit: 5}},
+		{"建 O／KR", http.MethodPost, "/objectives", api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{{Title: sp("插一脚")}}}},
+		{"建任务", http.MethodPost, "/tasks", api.CreateTaskBatchRequest{Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "插进来的任务", OwnerId: daveUser.ID, StartDate: start, EndDate: end}}}},
+		{"发讨论", http.MethodPost, fmt.Sprintf("/tasks/%d/discussions", taskID), api.CreateDiscussionRequest{Content: "路过说一句"}},
+		{"配置输入", http.MethodPost, fmt.Sprintf("/tasks/%d/inputs", downstreamID), api.CreateTaskInputRequest{
+			Necessity: api.Required, EdgeType: api.HardPrerequisite, SourceTaskIds: []int64{taskID}}},
+		{"新增交付物项", http.MethodPost, fmt.Sprintf("/tasks/%d/deliverables", taskID), api.CreateDeliverableRequest{FileName: "插进来的成果.docx"}},
+		{"登记候选内容", http.MethodPost, fmt.Sprintf("/tasks/%d/deliverables/%d/candidate", taskID, deliverableID),
+			api.UploadCandidateRequest{FileName: "覆盖.docx"}},
+		{"改进度", http.MethodPut, fmt.Sprintf("/tasks/%d/progress", taskID), api.UpdateTaskProgressRequest{Progress: ipt(80)}},
+		{"改状态", http.MethodPost, fmt.Sprintf("/tasks/%d/update-status", taskID),
+			api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress}},
+		{"确认接收", http.MethodPost, fmt.Sprintf("/tasks/%d/confirm-receipt", taskID), nil},
+		// 提醒目标要先解析得出来才轮到权限判定：隐式访客在本项目里没有任何可提醒的目标，
+		// 这里落在 404；「隐式访客不可提醒」这条规则本身由 domain 的表驱动单测覆盖。
+		{"发提醒", http.MethodPost, "/reminders", api.RemindRequest{TargetKey: "wait:task:1"}},
+		{"建成果包", http.MethodPost, "/packages", api.CreatePackageRequest{Name: "插进来的包", DeliverableIds: []int64{deliverableID}}},
+		{"导入 O／KR", http.MethodPost, "/import", api.ImportRequest{
+			Items: []api.ImportItem{{Title: sp("插进来的 O"),
+				KeyResults: &[]api.ImportKrItem{{Description: "插进来的 KR"}}}}}},
+		{"看导入记录", http.MethodGet, "/import-records", nil},
+		{"看操作审计", http.MethodGet, "/audit-logs", nil},
+	}
+	for _, wcase := range writes {
+		resp = doJSON(t, dave, wcase.method, projectURL+wcase.path, wcase.body)
+		if resp.StatusCode < 400 {
+			t.Fatalf("隐式访客不应可%s，实际 %d", wcase.name, resp.StatusCode)
+		}
+		if resp.StatusCode == http.StatusForbidden {
+			if e := decodeBody[api.Error](t, resp); e.Code == "" {
+				t.Fatalf("%s 的拒绝响应缺少错误码", wcase.name)
+			}
+			continue
+		}
+		resp.Body.Close()
+	}
+
+	// 不出现在成员列表，也不进人员选择器（成员列表就是选择器的数据源）。
+	resp = doJSON(t, dave, http.MethodGet, projectURL+"/members", nil)
+	wantStatus(t, resp, http.StatusOK)
+	for _, m := range decodeBody[[]api.ProjectMember](t, resp) {
+		if m.UserId == daveUser.ID {
+			t.Fatalf("隐式访客不应出现在成员列表: %+v", m)
+		}
+	}
+	// 不进我的工作的五组归类：他在本项目里没有任何职责。
+	resp = doJSON(t, dave, http.MethodGet, projectURL+"/my-work", nil)
+	wantStatus(t, resp, http.StatusOK)
+	mw := decodeBody[api.MyWork](t, resp)
+	if n := len(mw.Pending) + len(mw.Approvals) + len(mw.Receipts) + len(mw.Waiting) + len(mw.Blockers); n != 0 {
+		t.Fatalf("隐式访客的我的工作应为空: %+v", mw)
+	}
+	// 不收该项目的站内通知
+	resp = doJSON(t, dave, http.MethodGet, base+"/notifications", nil)
+	wantStatus(t, resp, http.StatusOK)
+	for _, n := range decodeBody[[]api.Notification](t, resp) {
+		if n.ProjectId != nil && *n.ProjectId == created.Id {
+			t.Fatalf("隐式访客不应收到该项目通知: %+v", n)
+		}
+	}
+
+	// 显式成员身份优先：把 dave 加成访客后，他不再是隐式身份，讨论也随之放开（AC-35）。
+	resp = doJSON(t, alice, http.MethodPost, projectURL+"/members",
+		api.AddProjectMembersRequest{UserIds: []int64{daveUser.ID}, Role: api.Viewer})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+	resp = doJSON(t, dave, http.MethodGet, projectURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	if p := decodeBody[api.Project](t, resp); p.ImplicitViewer {
+		t.Fatalf("显式成员身份应优先于隐式身份: %+v", p)
+	}
+	resp = doJSON(t, dave, http.MethodPost, fmt.Sprintf("%s/tasks/%d/discussions", projectURL, taskID),
+		api.CreateDiscussionRequest{Content: "作为显式访客说一句"})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+
+	// 切回私有：非成员重新 404（这次用另一个非成员验证，dave 已经是显式访客）。
+	resp = doJSON(t, alice, http.MethodPut, projectURL, api.UpdateProjectRequest{
+		Name: created.Name, OwnerId: aliceUser.ID, Status: api.ProjectStatusNotStarted, Visibility: api.Private,
+	})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	erin := newClient(t)
+	seedUser(t, q, "erin", "钱七", "erin-pass")
+	login(erin, "erin", "erin-pass")
+	resp = doJSON(t, erin, http.MethodGet, projectURL, nil)
+	wantStatus(t, resp, http.StatusNotFound)
 	resp.Body.Close()
 }

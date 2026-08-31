@@ -19,7 +19,12 @@ const (
 )
 
 // CanDiscuss 判定能否提交任务讨论：全体项目内成员（含只读）与项目负责人（AC-35、§3.3）。
+// 公开项目的隐式访客除外（#111）：它不落成员表，发言会在任务里留下一条项目外的人写的事实，
+// 这也是隐式访客与显式访客唯一的读写差别。
 func CanDiscuss(a Actor) bool {
+	if a.Implicit {
+		return false
+	}
 	return a.IsOwner || a.Role != ""
 }
 

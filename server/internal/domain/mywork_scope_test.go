@@ -157,7 +157,7 @@ func TestMyWorkViewerReceiptStaysVisible(t *testing.T) {
 	if g.Receipts[0].ActionLabel != WorkActionHandle {
 		t.Fatalf("ActionLabel = %q，期望 %q", g.Receipts[0].ActionLabel, WorkActionHandle)
 	}
-	if err := CanConfirmReceipt(me, ReceiptFact{ID: 11, UserID: me}); err != nil {
+	if err := CanConfirmReceipt(Actor{Role: RoleMember}, me, ReceiptFact{ID: 11, UserID: me}); err != nil {
 		t.Fatalf("访客确认接收应放行，得到 %v", err)
 	}
 }

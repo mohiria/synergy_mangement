@@ -21,7 +21,7 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 	}
 	// 审批件超期标红的阈值取项目规则设置，与「审批超时」卡点同源（R12、AC-60）。
 	facts := domain.MyWorkFacts{
-		UserID: uid, Actor: projectActor(uid, proj.OwnerID, proj.MyRole), Now: s.now(),
+		UserID: uid, Actor: projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility), Now: s.now(),
 		ApprovalTimeoutDays: projectSettingsOf(proj).ApprovalTimeoutDays,
 	}
 

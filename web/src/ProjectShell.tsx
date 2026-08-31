@@ -189,6 +189,12 @@ export default function ProjectShell({
             <span>{project?.name ?? "…"}</span>
             <span className="sep">/</span>
             <b>{pageLabel}</b>
+            {/* 隐式访客：说清「为什么这里什么都点不了」，派生字段直接消费（#111）。 */}
+            {project?.implicitViewer && (
+              <span className="status-pill" style={{ marginLeft: 8 }} title="公开项目：系统内任何登录用户都可只读浏览与下载，但不能编辑、审批或讨论">
+                {project.visibilityLabel} · 只读浏览
+              </span>
+            )}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <NotificationBell />

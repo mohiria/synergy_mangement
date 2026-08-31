@@ -31,7 +31,7 @@ func (s *Server) CreateDeliverable(w http.ResponseWriter, r *http.Request, proje
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	_, facts, ok := s.fetchTask(w, r, projectId, taskId)
 	if !ok {
 		return
@@ -85,7 +85,7 @@ func (s *Server) UploadCandidate(w http.ResponseWriter, r *http.Request, project
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	d, err := s.q.GetDeliverableInProject(r.Context(), store.GetDeliverableInProjectParams{ID: deliverableId, ID_2: taskId, ProjectID: projectId})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -186,7 +186,7 @@ func (s *Server) CommitCandidate(w http.ResponseWriter, r *http.Request, project
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	d, err := s.q.GetDeliverableInProject(r.Context(), store.GetDeliverableInProjectParams{ID: deliverableId, ID_2: taskId, ProjectID: projectId})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

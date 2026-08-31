@@ -186,7 +186,7 @@ func (s *Server) ListAuditLogs(w http.ResponseWriter, r *http.Request, projectId
 		return
 	}
 	uid := currentUser(r).ID
-	if !domain.CanEditProject(projectActor(uid, proj.OwnerID, proj.MyRole)) {
+	if !domain.CanEditProject(projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)) {
 		writeForbidden(w)
 		return
 	}

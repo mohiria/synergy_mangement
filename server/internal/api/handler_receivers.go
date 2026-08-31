@@ -28,7 +28,7 @@ func (s *Server) SetTaskReceivers(w http.ResponseWriter, r *http.Request, projec
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	task, facts, ok := s.fetchTask(w, r, projectId, taskId)
 	if !ok {
 		return
@@ -116,7 +116,7 @@ func (s *Server) ConfirmTaskReceipt(w http.ResponseWriter, r *http.Request, proj
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	if _, _, ok := s.fetchTask(w, r, projectId, taskId); !ok {
 		return
 	}
@@ -134,7 +134,7 @@ func (s *Server) ConfirmTaskReceipt(w http.ResponseWriter, r *http.Request, proj
 		at := row.ConfirmedAt.Time
 		fact.ConfirmedAt = &at
 	}
-	if err := domain.CanConfirmReceipt(uid, fact); err != nil {
+	if err := domain.CanConfirmReceipt(actor, uid, fact); err != nil {
 		switch {
 		case errors.Is(err, domain.ErrReceiptConfirmed):
 			writeJSON(w, http.StatusConflict, Error{Code: "receipt_confirmed", Message: err.Error()})

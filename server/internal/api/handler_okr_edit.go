@@ -30,7 +30,7 @@ func (s *Server) UpdateObjective(w http.ResponseWriter, r *http.Request, project
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	if !domain.CanEditObjective(actor) {
 		writeForbidden(w)
 		return
@@ -66,7 +66,7 @@ func (s *Server) DeleteObjective(w http.ResponseWriter, r *http.Request, project
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	if _, ok := s.fetchObjective(w, r, projectId, objectiveId); !ok {
 		return
 	}
@@ -124,7 +124,7 @@ func (s *Server) UpdateKeyResult(w http.ResponseWriter, r *http.Request, project
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	kr, ok := s.fetchKeyResult(w, r, projectId, keyResultId)
 	if !ok {
 		return
@@ -224,7 +224,7 @@ func (s *Server) DeleteKeyResult(w http.ResponseWriter, r *http.Request, project
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	if _, ok := s.fetchKeyResult(w, r, projectId, keyResultId); !ok {
 		return
 	}

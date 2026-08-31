@@ -962,6 +962,8 @@ export default function TaskDrawer({
             </div>
           </article>
         ))}
+        {/* 讨论输入按派生字段显隐：公开项目的隐式访客只读，连讨论也不发（#111）。 */}
+        {task.canDiscuss !== false && (
         <div style={{ marginTop: 12 }}>
           <Mentions
             rows={3}
@@ -993,6 +995,7 @@ export default function TaskDrawer({
             </Button>
           </div>
         </div>
+        )}
       </section>
     </div>
   );

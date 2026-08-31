@@ -310,7 +310,7 @@ func (s *Server) CreatePackage(w http.ResponseWriter, r *http.Request, projectId
 		return
 	}
 	uid := currentUser(r).ID
-	if !domain.CanCreatePackage(projectActor(uid, proj.OwnerID, proj.MyRole)) {
+	if !domain.CanCreatePackage(projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)) {
 		writeForbidden(w)
 		return
 	}

@@ -12,9 +12,11 @@ const (
 )
 
 // Actor 当前用户在某个项目内的身份事实：是否项目负责人、成员角色（非成员为空串）。
+// Implicit 标记这份身份来自公开项目的隐式访客（#111），不是成员表里的显式身份。
 type Actor struct {
-	IsOwner bool
-	Role    string
+	IsOwner  bool
+	Role     string
+	Implicit bool
 }
 
 var memberRoles = map[string]struct{}{

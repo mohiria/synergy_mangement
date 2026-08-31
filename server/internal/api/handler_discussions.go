@@ -26,7 +26,7 @@ func (s *Server) CreateDiscussion(w http.ResponseWriter, r *http.Request, projec
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	if !domain.CanDiscuss(actor) {
 		writeForbidden(w)
 		return

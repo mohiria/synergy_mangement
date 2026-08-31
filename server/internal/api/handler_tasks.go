@@ -22,7 +22,7 @@ func (s *Server) ListTasks(w http.ResponseWriter, r *http.Request, projectId int
 		return
 	}
 	uid := currentUser(r).ID
-	resp, err := s.taskList(r.Context(), projectId, uid, projectActor(uid, proj.OwnerID, proj.MyRole))
+	resp, err := s.taskList(r.Context(), projectId, uid, projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility))
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -56,7 +56,7 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	if !domain.CanCreateTask(actor) {
 		writeForbidden(w)
 		return
@@ -236,7 +236,7 @@ func (s *Server) SubmitTaskPoolReview(w http.ResponseWriter, r *http.Request, pr
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	task, facts, ok := s.fetchTask(w, r, projectId, taskId)
 	if !ok {
 		return
@@ -297,7 +297,7 @@ func (s *Server) DecideTaskPoolReview(w http.ResponseWriter, r *http.Request, pr
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	approve := req.Decision == PoolReviewDecisionRequestDecisionApproved
 	opinion := ""
 	if req.Opinion != nil {
@@ -376,7 +376,7 @@ func (s *Server) UpdateTaskStatus(w http.ResponseWriter, r *http.Request, projec
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	task, facts, ok := s.fetchTask(w, r, projectId, taskId)
 	if !ok {
 		return
@@ -415,7 +415,7 @@ func (s *Server) UpdateTaskProgress(w http.ResponseWriter, r *http.Request, proj
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	_, facts, ok := s.fetchTask(w, r, projectId, taskId)
 	if !ok {
 		return
@@ -466,7 +466,7 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	task, _, ok := s.fetchTask(w, r, projectId, taskId)
 	if !ok {
 		return
@@ -931,6 +931,8 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 		}
 		_, routeErr := domain.FieldChangeRoute(actor, userID, facts, hasPending)
 		item.CanProposeFieldChange = routeErr == nil
+		canDiscuss := domain.CanDiscuss(actor)
+		item.CanDiscuss = &canDiscuss
 		canManageDeliverables := domain.CanManageDeliverables(actor, userID, facts)
 		canUploadCandidate := domain.CanUploadCandidate(actor, userID, facts)
 		item.CanManageDeliverables = &canManageDeliverables

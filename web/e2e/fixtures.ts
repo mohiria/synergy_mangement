@@ -6,6 +6,9 @@ export const DEMO = {
   // 赵文琪：1 号项目的项目负责人，五分组与图谱都有内容。
   admin: { username: "zhaowenqi", displayName: "赵文琪" },
   projectId: 1,
+  projectName: "核心业务系统数据库国产化迁移",
+  // 林小雨只在 2 号项目里，1 号项目的成员表里没有她——用来验证公开项目的隐式访客（#111）。
+  outsider: { username: "linxiaoyu", displayName: "林小雨" },
   // KR1.1 下四项任务全部已完成，用来验证「显示已完成」开关。
   completedKrId: 1,
   completedTask: { code: "T1.1.1", name: "盘点三套核心库对象与不兼容项" },

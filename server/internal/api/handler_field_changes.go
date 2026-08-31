@@ -30,7 +30,7 @@ func (s *Server) SubmitFieldChange(w http.ResponseWriter, r *http.Request, proje
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	task, facts, ok := s.fetchTask(w, r, projectId, taskId)
 	if !ok {
 		return
@@ -133,7 +133,7 @@ func (s *Server) DecideFieldChange(w http.ResponseWriter, r *http.Request, proje
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	opinion := ""
 	if req.Opinion != nil {
 		opinion = strings.TrimSpace(*req.Opinion)
@@ -240,7 +240,7 @@ func (s *Server) AbandonFieldChange(w http.ResponseWriter, r *http.Request, proj
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	if _, _, ok := s.fetchTask(w, r, projectId, taskId); !ok {
 		return
 	}

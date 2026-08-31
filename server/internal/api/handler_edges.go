@@ -78,7 +78,7 @@ func (s *Server) CreateTaskInput(w http.ResponseWriter, r *http.Request, project
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	_, facts, ok := s.fetchTask(w, r, projectId, taskId)
 	if !ok {
 		return
@@ -148,7 +148,7 @@ func (s *Server) RemoveEdge(w http.ResponseWriter, r *http.Request, projectId in
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	edge, err := s.q.GetEdgeInProject(r.Context(), store.GetEdgeInProjectParams{ID: edgeId, ProjectID: projectId})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -194,7 +194,7 @@ func (s *Server) ListEdges(w http.ResponseWriter, r *http.Request, projectId int
 		return
 	}
 	uid := currentUser(r).ID
-	views, err := s.edgeViews(r.Context(), projectId, uid, projectActor(uid, proj.OwnerID, proj.MyRole))
+	views, err := s.edgeViews(r.Context(), projectId, uid, projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility))
 	if err != nil {
 		writeInternalError(w, r, err)
 		return

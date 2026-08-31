@@ -29,7 +29,7 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	if !domain.CanEditProject(actor) {
 		writeForbidden(w)
 		return
@@ -239,7 +239,7 @@ func (s *Server) BatchSubmitPool(w http.ResponseWriter, r *http.Request, project
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	type target struct{ id int64 }
 	targets := []target{}
 	for _, id := range req.TaskIds {
@@ -310,7 +310,7 @@ func (s *Server) BatchDecidePool(w http.ResponseWriter, r *http.Request, project
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	approve := req.Decision == BatchPoolDecisionRequestDecisionApproved
 	opinion := ""
 	if req.Opinion != nil {
@@ -408,7 +408,7 @@ func (s *Server) ListImportRecords(w http.ResponseWriter, r *http.Request, proje
 		return
 	}
 	uid := currentUser(r).ID
-	if !domain.CanEditProject(projectActor(uid, proj.OwnerID, proj.MyRole)) {
+	if !domain.CanEditProject(projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)) {
 		writeForbidden(w)
 		return
 	}
@@ -451,7 +451,7 @@ func (s *Server) ImportTasks(w http.ResponseWriter, r *http.Request, projectId i
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	if !domain.CanImportTasks(actor) {
 		writeForbidden(w)
 		return

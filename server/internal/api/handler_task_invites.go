@@ -22,7 +22,7 @@ func (s *Server) ListTaskInvites(w http.ResponseWriter, r *http.Request, project
 		return
 	}
 	uid := currentUser(r).ID
-	resp, err := s.taskInviteList(r.Context(), projectId, uid, projectActor(uid, proj.OwnerID, proj.MyRole))
+	resp, err := s.taskInviteList(r.Context(), projectId, uid, projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility))
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -41,7 +41,7 @@ func (s *Server) CreateTaskInvites(w http.ResponseWriter, r *http.Request, proje
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	kr, err := s.q.GetKeyResultInProject(r.Context(), store.GetKeyResultInProjectParams{ID: req.KeyResultId, ProjectID: projectId})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -130,7 +130,7 @@ func (s *Server) RevokeTaskInvite(w http.ResponseWriter, r *http.Request, projec
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	invite, err := s.q.GetTaskInviteInProject(r.Context(), store.GetTaskInviteInProjectParams{ID: inviteId, ProjectID: projectId})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

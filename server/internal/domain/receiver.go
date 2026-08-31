@@ -100,8 +100,9 @@ func ReceiptTargets(scope string, receiverIDs, memberIDs []int64) []int64 {
 }
 
 // CanConfirmReceipt 判定能否确认接收：仅接收方本人、且尚未确认（接收方无审核权，不提供退回）。
-func CanConfirmReceipt(userID int64, r ReceiptFact) error {
-	if r.UserID != userID {
+func CanConfirmReceipt(a Actor, userID int64, r ReceiptFact) error {
+	// 隐式访客不落成员表，不可能被指定为接收方（#111）：即便手上有 ID 也当作不是本人的。
+	if a.Implicit || r.UserID != userID {
 		return ErrReceiptNotMine
 	}
 	if r.ConfirmedAt != nil {

@@ -21,7 +21,7 @@ func (s *Server) ListBlockers(w http.ResponseWriter, r *http.Request, projectId 
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	blockers, err := s.projectBlockers(r.Context(), projectId)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -43,7 +43,7 @@ func (s *Server) CreateReminder(w http.ResponseWriter, r *http.Request, projectI
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	targets, err := s.projectRemindTargets(r.Context(), projectId)
 	if err != nil {
 		writeInternalError(w, r, err)

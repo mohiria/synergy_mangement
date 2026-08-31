@@ -55,6 +55,8 @@ export default function ProjectsPage({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ProjectStatus | "all">("all");
+  // 归属：我参与的（成员／负责人）与公开可见的（我不是成员，凭项目公开才看得到）。
+  const [scopeFilter, setScopeFilter] = useState<"all" | "mine" | "public">("all");
   const [form] = Form.useForm<ProjectFormValues>();
 
   const load = useCallback(async () => {
@@ -107,15 +109,21 @@ export default function ProjectsPage({
     label: `${u.displayName}（${u.username}）`,
   }));
 
-  // 搜索与状态筛选只作用于展示，不改变服务端返回的事实。
+  // 搜索与筛选只作用于展示，不改变服务端返回的事实。
+  // 「我参与的」排在前面：公开项目对全体登录用户可见，不先排一下会把个人列表淹掉（#111）。
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    return projects.filter((p) => {
-      if (statusFilter !== "all" && p.status !== statusFilter) return false;
-      if (!needle) return true;
-      return (p.name + p.ownerName + (p.stage ?? "")).toLowerCase().includes(needle);
-    });
-  }, [projects, search, statusFilter]);
+    return projects
+      .filter((p) => {
+        if (statusFilter !== "all" && p.status !== statusFilter) return false;
+        if (scopeFilter === "mine" && p.implicitViewer) return false;
+        if (scopeFilter === "public" && !p.implicitViewer) return false;
+        if (!needle) return true;
+        return (p.name + p.ownerName + (p.stage ?? "")).toLowerCase().includes(needle);
+      })
+      .sort((a, b) => Number(a.implicitViewer) - Number(b.implicitViewer));
+  }, [projects, search, statusFilter, scopeFilter]);
+  const publicCount = projects.filter((p) => p.implicitViewer).length;
 
   return (
     <div className="app-shell">
@@ -202,6 +210,16 @@ export default function ProjectsPage({
                   })),
                 ]}
               />
+              <Select
+                style={{ width: 150 }}
+                value={scopeFilter}
+                onChange={setScopeFilter}
+                options={[
+                  { value: "all" as const, label: "全部项目" },
+                  { value: "mine" as const, label: "我参与的" },
+                  { value: "public" as const, label: `公开可见的${publicCount ? `（${publicCount}）` : ""}` },
+                ]}
+              />
             </div>
             <span className="muted" style={{ fontSize: "var(--type-aux)" }}>
               共 {visible.length} 个项目
@@ -222,9 +240,15 @@ export default function ProjectsPage({
                   dataIndex: "name",
                   ellipsis: { showTitle: false },
                   render: (v: string, p) => (
-                    <Link className="project-name-cell" to={`/projects/${p.id}`} title={v}>
+                    <Link
+                      className="project-name-cell"
+                      to={`/projects/${p.id}`}
+                      title={p.implicitViewer ? `${v}（${p.visibilityLabel} · 我不是成员，只读）` : v}
+                    >
                       <span className={"project-dot " + p.status} />
                       <strong className="cell-text">{v}</strong>
+                      {/* 只标「不是成员」这一种：自己参与的项目公开与否不影响他自己能做什么。 */}
+                      {p.implicitViewer && <span className="status-pill">{p.visibilityLabel} · 只读</span>}
                     </Link>
                   ),
                 },

@@ -26,7 +26,7 @@ func (s *Server) RequestTaskCancellation(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	reason := strings.TrimSpace(req.Reason)
 	if err := domain.ValidateCancelReason(reason); err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "cancel_reason_required", Message: err.Error()})

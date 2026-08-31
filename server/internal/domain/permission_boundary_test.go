@@ -82,7 +82,7 @@ func TestWriteActionsRequireNonViewerMembership(t *testing.T) {
 				t.Fatalf("不应可中间审核: %v", err)
 			}
 			// AC-62：确认接收是访客唯一保留的写操作，不受本前置约束。
-			if err := CanConfirmReceipt(me, ReceiptFact{ID: 1, TaskID: 1, UserID: me}); err != nil {
+			if err := CanConfirmReceipt(actor, me, ReceiptFact{ID: 1, TaskID: 1, UserID: me}); err != nil {
 				t.Fatalf("被指定为接收方时应可确认接收: %v", err)
 			}
 		})

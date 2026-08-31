@@ -43,7 +43,7 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 		return Report{}, false
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 
 	// KR 进展：覆盖度 + 范围内终审通过任务数。
 	objectives, err := s.okrList(ctx, projectId, actor, uid)

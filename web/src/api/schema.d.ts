@@ -1644,6 +1644,8 @@ export interface components {
             canProposeFieldChange: boolean;
             /** @description 本任务上未决审批单条数（派生字段；入池、关键字段变更／取消、完成申请合计，前端不再自行相加） */
             pendingReviewCount?: number;
+            /** @description 当前用户能否提交任务讨论（派生字段；全体项目内成员含访客，公开项目的隐式访客不可，见词汇表「隐式访客」） */
+            canDiscuss?: boolean;
             /** @description 当前用户能否配置任务交付物项（派生字段；负责人／创建人／可编辑项目者，非终态） */
             canManageDeliverables?: boolean;
             /** @description 当前用户能否提交完成申请（派生字段；负责人，进行中且有候选内容） */
@@ -2686,7 +2688,23 @@ export interface components {
             canEdit: boolean;
             /** @description 当前用户能否管理本项目成员和权限（派生字段，同上） */
             canManageMembers: boolean;
+            visibility: components["schemas"]["ProjectVisibility"];
+            /** @description 项目可见性显示文案（派生字段；前端不按枚举拼文案） */
+            visibilityLabel: string;
+            /**
+             * @description 当前用户是靠项目公开才看得见本项目的隐式访客（派生字段，词汇表「隐式访客」）。
+             *     true 时此人不是项目成员：只读全部、写动作一律 403、不发讨论、不进人员选择器。
+             *     项目列表按它区分「我参与的」与「公开可见的」，前端不自己算。
+             */
+            implicitViewer: boolean;
         };
+        /**
+         * @description 项目可见性（词汇表「项目可见性」；裁决 D1）：
+         *     private ＝ 只有项目成员与项目负责人可读；public ＝ 系统内任何登录用户获得隐式访客身份（只读）。
+         *     仅项目负责人与项目管理员可改。
+         * @enum {string}
+         */
+        ProjectVisibility: "private" | "public";
         /** @description 项目规则设置（主 PRD §7.9；AC-60）。按项目生效，均有默认值，仅项目管理员可改。 */
         ProjectSettings: {
             /** @description 审批超时阈值 N（天），三道审批共用；审批件在当前环节等待达到 N×24 小时即超时。默认 3 */
@@ -2714,6 +2732,7 @@ export interface components {
             plannedEndDate?: string;
         };
         UpdateProjectRequest: {
+            visibility: components["schemas"]["ProjectVisibility"];
             name: string;
             /** Format: int64 */
             ownerId: number;

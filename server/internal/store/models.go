@@ -238,6 +238,7 @@ type Project struct {
 	ApprovalTimeoutDays int32
 	DueSoonDays         int32
 	RemindDailyLimit    int32
+	Visibility          string
 }
 
 type ProjectMember struct {

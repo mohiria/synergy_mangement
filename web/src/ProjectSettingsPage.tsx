@@ -19,6 +19,7 @@ type MemberRole = components["schemas"]["MemberRole"];
 type UserSummary = components["schemas"]["UserSummary"];
 type ProjectSettings = components["schemas"]["ProjectSettings"];
 type ProjectStatus = components["schemas"]["ProjectStatus"];
+type ProjectVisibility = components["schemas"]["ProjectVisibility"];
 
 // 项目状态候选项：下拉要列出全部取值，此时没有对象可取派生的 statusLabel，只能在前端枚举；
 // 已有项目的状态显示一律取后端 statusLabel（与角色同口径，F1）。
@@ -29,12 +30,19 @@ const PROJECT_STATUS_LABEL: Record<ProjectStatus, string> = {
   archived: "已归档",
 };
 
+// 项目可见性候选项：同上，下拉要列出全部取值；已有项目的显示一律取后端 visibilityLabel。
+const PROJECT_VISIBILITY_LABEL: Record<ProjectVisibility, string> = {
+  private: "私有项目",
+  public: "公开项目",
+};
+
 // 项目基础信息表单的本地草稿（§7.9 项目设置首项）。
 type BasicDraft = {
   name: string;
   ownerId?: number;
   status: ProjectStatus;
   stage: string;
+  visibility: ProjectVisibility;
   plan?: [Dayjs | null, Dayjs | null];
 };
 
@@ -44,6 +52,7 @@ function toBasicDraft(p: Project): BasicDraft {
     ownerId: p.ownerId,
     status: p.status,
     stage: p.stage ?? "",
+    visibility: p.visibility,
     plan:
       p.plannedStartDate || p.plannedEndDate
         ? [
@@ -254,6 +263,7 @@ export default function ProjectSettingsPage({
         ownerId: basic.ownerId,
         status: basic.status,
         stage: basic.stage.trim() || undefined,
+        visibility: basic.visibility,
         plannedStartDate: basic.plan?.[0]?.format("YYYY-MM-DD"),
         plannedEndDate: basic.plan?.[1]?.format("YYYY-MM-DD"),
       },
@@ -495,6 +505,25 @@ export default function ProjectSettingsPage({
                           onChange={(e) => setBasic({ ...basic, stage: e.target.value })}
                           style={{ width: 280, flex: "none" }}
                           aria-label="项目阶段"
+                        />
+                      </div>
+                      <div className="property">
+                        <label>
+                          项目可见性
+                          <span className="muted" style={{ display: "block" }}>
+                            公开后系统内任何登录用户都能只读本项目并下载文件，但不能做任何写动作，
+                            也不会出现在成员列表与人员选择器里
+                          </span>
+                        </label>
+                        <Select
+                          value={basic.visibility}
+                          disabled={!project?.canEdit}
+                          options={(Object.keys(PROJECT_VISIBILITY_LABEL) as ProjectVisibility[]).map(
+                            (v) => ({ value: v, label: PROJECT_VISIBILITY_LABEL[v] }),
+                          )}
+                          onChange={(v) => setBasic({ ...basic, visibility: v })}
+                          style={{ width: 160, flex: "none" }}
+                          aria-label="项目可见性"
                         />
                       </div>
                       <div className="property">
