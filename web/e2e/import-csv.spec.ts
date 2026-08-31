@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { gotoPage, login } from "./fixtures";
 
-// 表格导入的 CSV 读取契约（#97）：三种常见来源都要读出中文，
+// 表格导入的读取契约（#97、#105）：三种常见来源都要读出中文，
 // 引号包裹、正文里偶然出现的制表符与全分隔符空行都要按 CSV 规则处理。
 // 三份 fixture 内容相同，只有编码不同（见 e2e/fixtures/）。
 
@@ -43,6 +43,41 @@ for (const f of FILES) {
     expect(rows).toHaveLength(3);
   });
 }
+
+// xlsx 走 SheetJS 在前端解析（#105，裁决 B-a）：第一张工作表、日期转 YYYY-MM-DD、全空行剔除。
+test("xlsx 由前端解析出同一种二维表", async ({ page }) => {
+  await login(page);
+  const rows = await openPreview(page, "e2e/fixtures/import.xlsx");
+  expect(rows[0][0]).toBe("O 标题");
+  expect(rows[1][4]).toBe("盘点对象、清单，含不兼容项");
+  expect(rows[1][6]).toBe("2026-03-09");
+  // 全空行不进预览：表头 + 2 条数据行
+  expect(rows).toHaveLength(3);
+});
+
+// 内网离线部署（#105）：解析与模板生成都在前端本地完成，整个导入流程不发外链请求。
+test("导入流程不发任何外部请求，模板由代码现生成", async ({ page }) => {
+  const external: string[] = [];
+  page.on("request", (req) => {
+    const host = new URL(req.url()).host;
+    if (host !== "127.0.0.1:5173" && host !== "127.0.0.1:8080" && !req.url().startsWith("data:")) {
+      external.push(req.url());
+    }
+  });
+  await login(page);
+  await gotoPage(page, "/okr");
+  await page.getByRole("button", { name: "导入已有表格" }).click();
+  await page.locator('input[type="file"]').setInputFiles("e2e/fixtures/import.xlsx");
+  await page.getByRole("button", { name: /下一步：字段映射/ }).click();
+  await expect(page.locator(".ant-modal .data-table tbody tr").first()).toBeVisible();
+  await page.getByRole("button", { name: "上一步" }).click();
+
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "下载 xlsx 模板" }).click();
+  expect((await download).suggestedFilename()).toBe("OKR与任务导入模板.xlsx");
+
+  expect(external).toEqual([]);
+});
 
 // 粘贴路径（剪贴板）保持制表符优先。
 test("粘贴的制表符表格仍按制表符切列", async ({ page }) => {

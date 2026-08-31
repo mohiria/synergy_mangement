@@ -30,7 +30,7 @@
 下「完成」结论前必须真实跑过并附结果：
 
 - `server/`：`go build ./... && go vet ./... && go test ./...`（集成测试需要 postgres 与 minio 两个容器：`docker compose up -d postgres minio`；MinIO 凭据从环境变量 `MINIO_ROOT_USER`／`MINIO_ROOT_PASSWORD` 读，值取本机 `.env`）
-- `web/`：`npm run build`（含 tsc 类型检查）；改动前端结构或样式时再跑 `npm run test:e2e`（Playwright 冒烟，见 `web/e2e/README.md`）
+- `web/`：`npm run build`（含 tsc 类型检查）＋ `npm test`（vitest 跑 `src/**/*.test.ts` 的纯函数单测，目前是导入器解析层）；改动前端结构或样式时再跑 `npm run test:e2e`（Playwright 冒烟，见 `web/e2e/README.md`）
 - 契约变更时：两端代码重新生成，确认编译通过
 
 验证／冒烟启动的临时进程（`go run` 起的 server、`npm run dev`、临时端口上的服务等）测试完成后必须关闭，不留后台；`docker compose` 的常驻 postgres 容器除外。
@@ -50,6 +50,8 @@
 
 - 契约类型生成：`npm run gen:api` → `src/api/schema.d.ts`
 - 构建（含 tsc）：`npm run build`；开发：`npm run dev`（/api 代理到 :8080）
+- 纯函数单测：`npm test`（vitest，只跑 `src/**/*.test.ts`；e2e 归 Playwright）
+- SheetJS（xlsx 解析与模板生成）走仓库内的 `web/vendor/xlsx-0.20.3.tgz`：npm 上的 xlsx 停在 0.18.5 且有两条未修复的高危公告，官方新版只从 cdn.sheetjs.com 分发，内网离线构建因此把 tarball 入库
 
 仓库根（先 `cp .env.example .env` 填好口令，compose 对口令类变量不设默认值）：
 
