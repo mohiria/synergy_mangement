@@ -9,11 +9,12 @@ package domain
 const FieldChangeTypeStructure = "structure"
 
 // 结构变更动作。
+// 裁决 H1（#141）：「输出（交付物项）」已从关键字段清单移除，增删不再走结构变更审批
+// （见 DeliverableStructureRule），此处不再有 add_deliverable 动作。
 const (
 	StructureAddTaskInput   = "add_task_input"
 	StructureAddMemberInput = "add_member_input"
 	StructureRemoveEdge     = "remove_edge"
-	StructureAddDeliverable = "add_deliverable"
 	StructureSetReceivers   = "set_receivers"
 )
 
@@ -22,7 +23,6 @@ var structureFieldLabels = map[string]string{
 	StructureAddTaskInput:   "任务输入",
 	StructureAddMemberInput: "输入源",
 	StructureRemoveEdge:     "输入源",
-	StructureAddDeliverable: "预期交付物",
 	StructureSetReceivers:   "接收方",
 }
 

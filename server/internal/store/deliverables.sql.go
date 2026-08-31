@@ -109,6 +109,37 @@ func (q *Queries) CreateDeliverableFile(ctx context.Context, arg CreateDeliverab
 	return i, err
 }
 
+const deleteDeliverable = `-- name: DeleteDeliverable :many
+WITH keys AS (
+    SELECT object_key FROM deliverable_files WHERE deliverable_id = $1
+), del AS (
+    DELETE FROM deliverables WHERE id = $1
+)
+SELECT object_key FROM keys
+`
+
+// 删除交付物项（裁决 H1，#141）：行由 FK 级联清掉（文件 CASCADE、边 SET NULL），
+// 返回其下全部文件的对象 key 供调用方清理对象存储。
+func (q *Queries) DeleteDeliverable(ctx context.Context, deliverableID int64) ([]string, error) {
+	rows, err := q.db.Query(ctx, deleteDeliverable, deliverableID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var object_key string
+		if err := rows.Scan(&object_key); err != nil {
+			return nil, err
+		}
+		items = append(items, object_key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const deleteDeliverableFile = `-- name: DeleteDeliverableFile :execrows
 DELETE FROM deliverable_files WHERE id = $1
 `
@@ -403,6 +434,43 @@ func (q *Queries) ListDeliverablesByTask(ctx context.Context, taskID int64) ([]D
 			&i.Name,
 			&i.CreatedBy,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFilesByDeliverable = `-- name: ListFilesByDeliverable :many
+SELECT id, deliverable_id, state, file_name, file_type, file_size, object_key, uploaded_by, uploaded_at, effective_at FROM deliverable_files
+WHERE deliverable_id = $1
+ORDER BY id
+`
+
+func (q *Queries) ListFilesByDeliverable(ctx context.Context, deliverableID int64) ([]DeliverableFile, error) {
+	rows, err := q.db.Query(ctx, listFilesByDeliverable, deliverableID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []DeliverableFile
+	for rows.Next() {
+		var i DeliverableFile
+		if err := rows.Scan(
+			&i.ID,
+			&i.DeliverableID,
+			&i.State,
+			&i.FileName,
+			&i.FileType,
+			&i.FileSize,
+			&i.ObjectKey,
+			&i.UploadedBy,
+			&i.UploadedAt,
+			&i.EffectiveAt,
 		); err != nil {
 			return nil, err
 		}

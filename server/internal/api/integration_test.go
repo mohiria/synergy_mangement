@@ -1774,7 +1774,7 @@ func TestDeliverablesAndFiles(t *testing.T) {
 		t.Fatalf("预期交付物列异常: %+v", tasks[0].DeliverableNames)
 	}
 
-	// 再补一个交付物项（一个任务多项交付物）；bob 是所属 KR 负责人，免审即时生效
+	// 再补一个交付物项（一个任务多项交付物）；裁决 H1：提交完成申请前即时生效
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/deliverables", tasksURL, taskID),
 		api.CreateDeliverableRequest{FileName: "现场验收记录.docx"})
 	wantStructureAccepted(t, resp)
@@ -2053,7 +2053,7 @@ func TestCompletionReviewFlow(t *testing.T) {
 		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
-	// 输出属关键字段：已入池任务由所属 KR 负责人 bob 加交付物项，免审即时生效（AC-23）
+	// 裁决 H1（#141）：已入池任务加交付物项即时生效，不走审批
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/deliverables", tasksURL, taskID),
 		api.CreateDeliverableRequest{FileName: "验收记录.docx"})
 	wantStructureAccepted(t, resp)
@@ -5153,9 +5153,10 @@ func TestOkrEditHandoverAndMemberRemoval(t *testing.T) {
 	resp.Body.Close()
 }
 
-// 结构变更被退回后不生效（AC-23、§5.2.B，回归 R1）：输出属关键字段，
-// 已入池任务由任务负责人提交后进所属 KR 负责人审批，退回则交付物项不产生，
+// 结构变更被退回后不生效（AC-23、§5.2.B，回归 R1）：接收方属关键字段，
+// 已入池任务由任务负责人提交后进所属 KR 负责人审批，退回则配置不生效，
 // 且退回未处理期间不接受新的变更单。
+// 原以「输出」为例；裁决 H1（#141）后交付物项增删不走审批，改以接收方覆盖同一条路由。
 func TestStructureChangeRejected(t *testing.T) {
 	q, pool := setupDB(t)
 	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
@@ -5201,44 +5202,164 @@ func TestStructureChangeRejected(t *testing.T) {
 	wantStatus(t, resp, http.StatusCreated)
 	taskID := decodeBody[[]api.Task](t, resp)[0].Id
 
-	// 任务负责人 carol 新增交付物项 → 待审批，交付物项尚未产生
-	deliverablesURL := fmt.Sprintf("%s/%d/deliverables", tasksURL, taskID)
-	resp = doJSON(t, carol, http.MethodPost, deliverablesURL, api.CreateDeliverableRequest{FileName: "联调报告.docx"})
+	// 任务负责人 carol 配置接收方 → 待审批，配置尚未生效
+	receiversURL := fmt.Sprintf("%s/%d/receivers", tasksURL, taskID)
+	resp = doJSON(t, carol, http.MethodPut, receiversURL, api.SetReceiversRequest{Scope: api.ReceiverScopeAll})
 	pending := wantStructureAccepted(t, resp)
 	if pending.FieldChange == nil || pending.FieldChange.ChangeType != api.Structure {
 		t.Fatalf("未生成结构变更单: %+v", pending.FieldChange)
 	}
-	if len(pending.FieldChange.Changes) != 1 || pending.FieldChange.Changes[0].Label != "预期交付物" {
+	if len(pending.FieldChange.Changes) != 1 || pending.FieldChange.Changes[0].Label != "接收方" {
 		t.Fatalf("结构变更差异行异常: %+v", pending.FieldChange.Changes)
 	}
-	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
-	wantStatus(t, resp, http.StatusOK)
-	if ds := decodeBody[api.TaskDetail](t, resp).Deliverables; len(ds) != 0 {
-		t.Fatalf("待审批期间不应先建交付物项: %+v", ds)
+	if pending.ReceiverScope != api.ReceiverScopeNone {
+		t.Fatalf("待审批期间接收方不应变更: %+v", pending.ReceiverScope)
 	}
 	// 互斥：待审批期间不接受第二张单
-	resp = doJSON(t, carol, http.MethodPost, deliverablesURL, api.CreateDeliverableRequest{FileName: "另一项.docx"})
+	resp = doJSON(t, carol, http.MethodPut, receiversURL, api.SetReceiversRequest{Scope: api.ReceiverScopeAll})
 	wantStatus(t, resp, http.StatusConflict)
 	resp.Body.Close()
 
-	// KR 负责人退回：交付物项仍不产生
+	// KR 负责人退回：配置仍不生效
 	resp = doJSON(t, bob, http.MethodPost,
 		fmt.Sprintf("%s/%d/field-changes/%d/decision", tasksURL, taskID, pending.FieldChange.Id),
-		api.FieldChangeDecisionRequest{Decision: api.FieldChangeDecisionRequestDecisionRejected, Opinion: sp("交付物口径未定")})
+		api.FieldChangeDecisionRequest{Decision: api.FieldChangeDecisionRequestDecisionRejected, Opinion: sp("接收范围未定")})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
 	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
 	wantStatus(t, resp, http.StatusOK)
-	if ds := decodeBody[api.TaskDetail](t, resp).Deliverables; len(ds) != 0 {
-		t.Fatalf("退回后不应产生交付物项: %+v", ds)
+	if got := decodeBody[api.TaskDetail](t, resp).Task.ReceiverScope; got != api.ReceiverScopeNone {
+		t.Fatalf("退回后配置不应生效: %+v", got)
 	}
 
-	// 重新提交并通过：这次才真的建出来
-	resp = doJSON(t, carol, http.MethodPost, deliverablesURL, api.CreateDeliverableRequest{FileName: "联调报告.docx"})
+	// 重新提交并通过：这次才真的生效
+	resp = doJSON(t, carol, http.MethodPut, receiversURL, api.SetReceiversRequest{Scope: api.ReceiverScopeAll})
 	again := wantStructureAccepted(t, resp)
 	approveStructureChange(t, bob, base, created.Id, taskID, again)
-	if d := deliverableOf(t, carol, base, created.Id, taskID, "联调报告"); d.Name != "联调报告" {
-		t.Fatalf("通过后应建出交付物项: %+v", d)
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if got := decodeBody[api.TaskDetail](t, resp).Task.ReceiverScope; got != api.ReceiverScopeAll {
+		t.Fatalf("通过后配置应生效: %+v", got)
+	}
+}
+
+// 裁决 H1（#141）：提交完成申请之前，交付物项的新增／删除完全自由、即时生效，不走审批；
+// 完成申请在审期间冻结；已发布（有当前内容）的项不可删，回报指向成果更新。
+func TestDeliverableStructureFree(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	alice, bob, carol := newClient(t), newClient(t), newClient(t)
+	for _, l := range []struct {
+		c              *http.Client
+		user, password string
+	}{{alice, "alice", "alice-pass"}, {bob, "bob", "bob-pass"}, {carol, "carol", "carol-pass"}} {
+		resp := doJSON(t, l.c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: l.user, Password: l.password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+
+	sp := func(v string) *string { return &v }
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "交付物自由增删", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+	for _, uid := range []int64{bobUser.ID, carolUser.ID} {
+		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
+			api.AddProjectMembersRequest{UserIds: []int64{uid}, Role: api.Member})
+		wantStatus(t, resp, http.StatusCreated)
+		resp.Body.Close()
+	}
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
+		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+		}})
+	wantStatus(t, resp, http.StatusCreated)
+	kr1 := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
+	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		SubmitForReview: true,
+		Items:           []api.CreateTaskItem{{KeyResultId: kr1, Name: "联调验证", OwnerId: carolUser.ID, StartDate: start, EndDate: end}},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	taskID := decodeBody[[]api.Task](t, resp)[0].Id
+	deliverablesURL := fmt.Sprintf("%s/%d/deliverables", tasksURL, taskID)
+	detailURL := fmt.Sprintf("%s/%d", tasksURL, taskID)
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, taskID),
+		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	// 已入池任务新增交付物项即时生效，无变更单
+	resp = doJSON(t, carol, http.MethodPost, deliverablesURL, api.CreateDeliverableRequest{FileName: "联调报告.docx"})
+	wantStatus(t, resp, http.StatusOK)
+	if task := decodeBody[api.Task](t, resp); task.FieldChange != nil {
+		t.Fatalf("新增交付物项不应生成变更单: %+v", task.FieldChange)
+	}
+	first := deliverableOf(t, carol, base, created.Id, taskID, "联调报告")
+	if !first.CanDelete {
+		t.Fatalf("未发布的项应可删除: %+v", first)
+	}
+	// 第二项同样即时生效（不再与待审批单互斥）
+	resp = doJSON(t, carol, http.MethodPost, deliverablesURL, api.CreateDeliverableRequest{FileName: "另一项.docx"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	// 空项可自由删
+	second := deliverableOf(t, carol, base, created.Id, taskID, "另一项")
+	resp = doJSON(t, carol, http.MethodDelete, fmt.Sprintf("%s/%d", deliverablesURL, second.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	// 仅候选的项也可删（候选对象文件同步清理，不留孤行）
+	uploadCandidate(t, carol, tasksURL, taskID, first.Id, api.UploadCandidateRequest{FileName: "联调报告v1.docx"}, "candidate-bytes")
+	resp = doJSON(t, carol, http.MethodDelete, fmt.Sprintf("%s/%d", deliverablesURL, first.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodGet, detailURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	if ds := decodeBody[api.TaskDetail](t, resp).Deliverables; len(ds) != 0 {
+		t.Fatalf("删除后不应残留交付物项: %+v", ds)
+	}
+
+	// 提交完成申请 → 在审期间增删冻结
+	resp = doJSON(t, carol, http.MethodPost, deliverablesURL, api.CreateDeliverableRequest{FileName: "联调报告.docx"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	kept := deliverableOf(t, carol, base, created.Id, taskID, "联调报告")
+	uploadCandidate(t, carol, tasksURL, taskID, kept.Id, api.UploadCandidateRequest{FileName: "联调报告终稿.docx"}, "candidate-bytes")
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskID),
+		api.SubmitCompletionRequest{Note: "请终审"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodPost, deliverablesURL, api.CreateDeliverableRequest{FileName: "迟到的项.docx"})
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodDelete, fmt.Sprintf("%s/%d", deliverablesURL, kept.Id), nil)
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+
+	// bob 终审通过 → 已发布的项不可删，回报指向成果更新
+	resp = doJSON(t, carol, http.MethodGet, detailURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	d := decodeBody[api.TaskDetail](t, resp)
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, taskID, d.CompletionReviews[0].Id),
+		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	published := deliverableOf(t, carol, base, created.Id, taskID, "联调报告")
+	if published.Current == nil || published.CanDelete {
+		t.Fatalf("已发布的项 canDelete 应为 false: %+v", published)
+	}
+	resp = doJSON(t, carol, http.MethodDelete, fmt.Sprintf("%s/%d", deliverablesURL, published.Id), nil)
+	wantStatus(t, resp, http.StatusConflict)
+	if e := decodeBody[api.Error](t, resp); e.Code != "deliverable_has_current" {
+		t.Fatalf("已发布项删除的回报应指向成果更新: %+v", e)
 	}
 }
 

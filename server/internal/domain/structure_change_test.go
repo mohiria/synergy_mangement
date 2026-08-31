@@ -5,13 +5,14 @@ import (
 	"testing"
 )
 
-// AC-23／§5.2.B：四类结构变更（输入、输入源、输出、接收方）乘三条路由。
+// AC-23／§5.2.B：三类结构变更（输入、输入源、接收方）乘三条路由。
+// 「输出」已随裁决 H1（#141）移出关键字段清单，见 TestDeliverableStructureRule。
 func TestStructureChangeRoute(t *testing.T) {
 	facts := func(status string) TaskFacts {
 		return TaskFacts{Status: status, CreatorID: 3, OwnerID: 5, KrOwnerID: i64(7)}
 	}
 	ops := []string{StructureAddTaskInput, StructureAddMemberInput, StructureRemoveEdge,
-		StructureAddDeliverable, StructureSetReceivers}
+		StructureSetReceivers}
 	cases := []struct {
 		name       string
 		actor      Actor
@@ -59,8 +60,10 @@ func TestStructureFieldLabel(t *testing.T) {
 		StructureAddTaskInput:   "任务输入",
 		StructureAddMemberInput: "输入源",
 		StructureRemoveEdge:     "输入源",
-		StructureAddDeliverable: "预期交付物",
 		StructureSetReceivers:   "接收方",
+	}
+	if ValidStructureOp("add_deliverable") {
+		t.Fatal("输出已移出关键字段（裁决 H1），add_deliverable 不应再是合法动作")
 	}
 	for op, want := range cases {
 		if got := StructureFieldLabel(op); got != want {

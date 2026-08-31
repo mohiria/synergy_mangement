@@ -51,27 +51,87 @@ func (s *Server) CreateDeliverable(w http.ResponseWriter, r *http.Request, proje
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_deliverable", Message: err.Error()})
 		return
 	}
-	// 输出是关键字段（§5.2.B）：已入池任务新增交付物项要经所属 KR 负责人审批。
-	outcome, ok := s.routeStructureChange(w, r, taskId, actor, uid, facts)
+	// 裁决 H1（#141）：提交完成申请前新增即时生效，不走关键字段审批；在审期间冻结。
+	if err := domain.DeliverableStructureRule(actor, uid, facts); err != nil {
+		writeDeliverableRuleError(w, err)
+		return
+	}
+	if _, err := s.q.CreateDeliverable(r.Context(), store.CreateDeliverableParams{
+		TaskID: taskId, Name: name, CreatedBy: uid,
+	}); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	s.writeTask(w, r, projectId, taskId, uid, actor)
+}
+
+// DeleteDeliverable 删除交付物项（裁决 H1，#141）：未发布的项（空／仅候选）可自由删，
+// 有当前内容的项不可删（走成果更新）；行由 FK 级联清理，候选对象文件同步从对象存储移除。
+func (s *Server) DeleteDeliverable(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64, deliverableId int64) {
+	proj, ok := s.fetchProject(w, r, projectId)
 	if !ok {
 		return
 	}
-	raw, err := json.Marshal(req)
+	uid := currentUser(r).ID
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
+	_, facts, ok := s.fetchTask(w, r, projectId, taskId)
+	if !ok {
+		return
+	}
+	if _, err := s.q.GetDeliverableInProject(r.Context(), store.GetDeliverableInProjectParams{
+		ID: deliverableId, ID_2: taskId, ProjectID: projectId,
+	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, Error{Code: "deliverable_not_found", Message: "交付物不存在"})
+		} else {
+			writeInternalError(w, r, err)
+		}
+		return
+	}
+	hasCurrent, err := s.deliverableHasCurrent(r.Context(), deliverableId)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
-	payload := structurePayload{
-		Op:       domain.StructureAddDeliverable,
-		Label:    domain.StructureFieldLabel(domain.StructureAddDeliverable),
-		OldValue: "—",
-		NewValue: "新增交付物项「" + name + "」",
-		Request:  raw,
-	}
-	if !s.commitStructureChange(w, r, projectId, taskId, uid, outcome, payload, payload.NewValue) {
+	if err := domain.DeleteDeliverableRule(actor, uid, facts, hasCurrent); err != nil {
+		writeDeliverableRuleError(w, err)
 		return
 	}
+	keys, err := s.q.DeleteDeliverable(r.Context(), deliverableId)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	for _, key := range keys {
+		s.removeObject(r.Context(), key)
+	}
 	s.writeTask(w, r, projectId, taskId, uid, actor)
+}
+
+// deliverableHasCurrent 报告交付物项是否已有当前内容（已终审发布）。
+func (s *Server) deliverableHasCurrent(ctx context.Context, deliverableID int64) (bool, error) {
+	files, err := s.q.ListFilesByDeliverable(ctx, deliverableID)
+	if err != nil {
+		return false, err
+	}
+	for _, f := range files {
+		if f.State == domain.DeliverableCurrent {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// writeDeliverableRuleError 把交付物增删规则错误映射为一致的 HTTP 回报。
+func writeDeliverableRuleError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, domain.ErrDeliverableChangeForbidden):
+		writeForbidden(w)
+	case errors.Is(err, domain.ErrDeliverableHasCurrent):
+		writeJSON(w, http.StatusConflict, Error{Code: "deliverable_has_current", Message: err.Error()})
+	default:
+		writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: err.Error()})
+	}
 }
 
 func (s *Server) UploadCandidate(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64, deliverableId int64) {
@@ -281,8 +341,9 @@ func (s *Server) GetFileDownloadUrl(w http.ResponseWriter, r *http.Request, proj
 	writeJSON(w, http.StatusOK, DownloadUrlResponse{Url: url})
 }
 
-// deliverableList 组装任务的交付物项（含当前内容与候选，AC-32/33）。
-func (s *Server) deliverableList(ctx context.Context, taskID int64) ([]Deliverable, error) {
+// deliverableList 组装任务的交付物项（含当前内容与候选，AC-32/33）；
+// canDelete 按裁决 H1 派生（有编辑权限＋草稿或执行类状态＋无当前内容），前端不复刻规则。
+func (s *Server) deliverableList(ctx context.Context, taskID int64, actor domain.Actor, uid int64, facts domain.TaskFacts) ([]Deliverable, error) {
 	items, err := s.q.ListDeliverablesByTask(ctx, taskID)
 	if err != nil {
 		return nil, err
@@ -330,6 +391,7 @@ func (s *Server) deliverableList(ctx context.Context, taskID int64) ([]Deliverab
 			}
 		}
 		fillContentState(&item, hasPendingReview)
+		item.CanDelete = domain.DeleteDeliverableRule(actor, uid, facts, item.Current != nil) == nil
 		out = append(out, item)
 	}
 	return out, nil

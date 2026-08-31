@@ -1029,7 +1029,7 @@ paths:
     post:
       operationId: createDeliverable
       tags: [tasks]
-      summary: 为任务新增交付物项（AC-23；输出属关键字段，已入池任务进所属 KR 负责人审批，草稿直改、KR 负责人本人免审）
+      summary: 为任务新增交付物项（裁决 H1：提交完成申请前即时生效、不走审批；完成申请在审期间冻结）
       requestBody:
         required: true
         content:
@@ -1038,7 +1038,7 @@ paths:
               $ref: "#/components/schemas/CreateDeliverableRequest"
       responses:
         "200":
-          description: 已受理，返回任务最新状态（进入审批时交付物项尚未创建，任务上带待审批变更单）
+          description: 交付物项已创建，返回任务最新状态
           content:
             application/json:
               schema:
@@ -1053,6 +1053,46 @@ paths:
           $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/ValidationError"
+
+  /projects/{projectId}/tasks/{taskId}/deliverables/{deliverableId}:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: taskId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - name: deliverableId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    delete:
+      operationId: deleteDeliverable
+      tags: [tasks]
+      summary: 删除交付物项（裁决 H1：限有编辑权限者；有当前内容的项不可删须走成果更新，完成申请在审期间冻结；候选对象文件同步清理）
+      responses:
+        "200":
+          description: 交付物项已删除，返回任务最新状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /projects/{projectId}/tasks/{taskId}/deliverables/{deliverableId}/candidate:
     parameters:
@@ -3504,7 +3544,7 @@ components:
     Deliverable:
       type: object
       description: 交付物项：至多一份当前内容与一份候选内容，无版本号与历史（PRD §5.3）
-      required: [id, taskId, name, contentState, contentStateLabel, edges]
+      required: [id, taskId, name, contentState, contentStateLabel, edges, canDelete]
       properties:
         id:
           type: integer
@@ -3541,6 +3581,11 @@ components:
           description: 本交付物承接的来源关系边（AC-17 归档视角需在列表层可见可点）
           items:
             $ref: "#/components/schemas/DeliverableEdgeRef"
+        canDelete:
+          type: boolean
+          description: >-
+            当前用户能否删除本项（派生字段，裁决 H1）：有编辑权限、任务在草稿或执行类状态、
+            且本项没有当前内容时为 true；已发布的项删除须走成果更新重传
     CreateDeliverableRequest:
       type: object
       description: |

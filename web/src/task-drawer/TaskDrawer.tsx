@@ -6,7 +6,7 @@ import FileUploadField, { fileTypeLabel, formatFileSize } from "../FileUploadFie
 import PeopleSelect from "./PeopleSelect";
 import Icon from "../icons";
 import type { components } from "../api/schema";
-import { ACTIVITY_PREVIEW, STATUS_CLASS, fmtTime, pendingStructureChange } from "./shared";
+import { ACTIVITY_PREVIEW, STATUS_CLASS, fmtTime } from "./shared";
 
 type Task = components["schemas"]["Task"];
 type ProjectMember = components["schemas"]["ProjectMember"];
@@ -360,7 +360,7 @@ export default function TaskDrawer({
   };
 
   // 新增交付物项（裁决 G1）：入口就是选文件，一步建项并上传候选内容——项名由服务端按文件名派生，
-  // 前端不自己算名字。已入池任务的新增是关键字段变更，进审批时项还没建出来，只能等审批通过再传内容。
+  // 前端不自己算名字。裁决 H1（#141）：提交完成申请前新增即时生效，不再走审批。
   const addDeliverable = async () => {
     if (!task || !newDeliverableFile) return;
     const file = newDeliverableFile;
@@ -373,13 +373,6 @@ export default function TaskDrawer({
     if (!res.data) {
       setNewDeliverableBusy(false);
       message.error(res.error?.message ?? "新增失败");
-      return;
-    }
-    if (pendingStructureChange(res.data)) {
-      setNewDeliverableBusy(false);
-      closeAddDeliverable();
-      message.success("已提交，待所属 KR 负责人审批后生效；通过后再上传内容");
-      setRefreshTick((n) => n + 1);
       return;
     }
     // 项已建出来：取回详情认出新项（按 id 差集，不猜派生出来的项名），接着走候选内容两阶段上传。
@@ -401,6 +394,31 @@ export default function TaskDrawer({
       message.success(`交付物项「${created.name}」已新增，候选内容已上传`);
     }
     setRefreshTick((n) => n + 1);
+  };
+
+  // 删除交付物项（裁决 H1，#141）：能否删由服务端派生（canDelete），
+  // 已发布的项删不了、须走成果更新；候选对象文件由服务端同步清理。
+  const deleteDeliverable = (d: { id: number; name: string }) => {
+    if (!task) return;
+    Modal.confirm({
+      title: `删除交付物项「${d.name}」？`,
+      content: "该项及其候选内容将被清理，此操作不可撤销。",
+      okText: "删除",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: async () => {
+        const res = await client.DELETE(
+          "/projects/{projectId}/tasks/{taskId}/deliverables/{deliverableId}",
+          { params: { path: { projectId, taskId: task.id, deliverableId: d.id } } },
+        );
+        if (!res.data) {
+          message.error(res.error?.message ?? "删除失败");
+          return;
+        }
+        message.success(`交付物项「${d.name}」已删除`);
+        setRefreshTick((n) => n + 1);
+      },
+    });
   };
 
   // 候选内容上传（AC-52）：先在窗口内选择，点「确认上传」才登记并直传；
@@ -906,6 +924,11 @@ export default function TaskDrawer({
                     {d.candidate ? "重传候选内容" : "上传候选内容"}
                   </Button>
                 )}
+                {d.canDelete && (
+                  <Button size="small" danger onClick={() => deleteDeliverable(d)}>
+                    删除
+                  </Button>
+                )}
               </div>
             </article>
           ))}
@@ -922,14 +945,14 @@ export default function TaskDrawer({
         </section>
       )}
       {/* 过程文件与重要外部材料（§7.7 文件对象边界表）：与交付物并列展示但边界不同——
-          不进入完成审批、不作为下游正式输入，可按需选进成果包。 */}
+          不进入完成审批、不作为下游正式输入。 */}
       {(taskFiles.length > 0 || task.canManageDeliverables) && (
         <section className="drawer-section" data-focus="task-files">
           <h3>
             过程文件与外部材料 <span className="section-count">{taskFiles.length} 项</span>
           </h3>
           <div className="notice" style={{ marginBottom: 10 }}>
-            这两类文件不进入完成审批，也不作为下游任务的正式输入；可按需选进成果包。
+            这两类文件不进入完成审批，也不作为下游任务的正式输入；在成果归档页按文件类型可见。
           </div>
           {taskFiles.length === 0 && <div className="empty compact-empty">尚无过程文件与外部材料</div>}
           {taskFiles.map((f) => (

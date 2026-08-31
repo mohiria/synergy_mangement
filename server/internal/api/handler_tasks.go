@@ -467,7 +467,7 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 	}
 	uid := currentUser(r).ID
 	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
-	task, _, ok := s.fetchTask(w, r, projectId, taskId)
+	task, taskFacts, ok := s.fetchTask(w, r, projectId, taskId)
 	if !ok {
 		return
 	}
@@ -491,7 +491,7 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		writeInternalError(w, r, err)
 		return
 	}
-	deliverables, err := s.deliverableList(r.Context(), taskId)
+	deliverables, err := s.deliverableList(r.Context(), taskId, actor, uid, taskFacts)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return

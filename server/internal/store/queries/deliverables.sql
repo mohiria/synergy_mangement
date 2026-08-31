@@ -35,6 +35,21 @@ JOIN objectives o ON o.id = k.objective_id
 WHERE o.project_id = $1
 ORDER BY d.id;
 
+-- name: ListFilesByDeliverable :many
+SELECT * FROM deliverable_files
+WHERE deliverable_id = $1
+ORDER BY id;
+
+-- name: DeleteDeliverable :many
+-- 删除交付物项（裁决 H1，#141）：行由 FK 级联清掉（文件 CASCADE、边 SET NULL），
+-- 返回其下全部文件的对象 key 供调用方清理对象存储。
+WITH keys AS (
+    SELECT object_key FROM deliverable_files WHERE deliverable_id = $1
+), del AS (
+    DELETE FROM deliverables WHERE id = $1
+)
+SELECT object_key FROM keys;
+
 -- name: GetCandidateFile :one
 SELECT * FROM deliverable_files
 WHERE deliverable_id = $1 AND state = 'candidate'

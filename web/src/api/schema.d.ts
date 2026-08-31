@@ -487,9 +487,30 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 为任务新增交付物项（AC-23；输出属关键字段，已入池任务进所属 KR 负责人审批，草稿直改、KR 负责人本人免审） */
+        /** 为任务新增交付物项（裁决 H1：提交完成申请前即时生效、不走审批；完成申请在审期间冻结） */
         post: operations["createDeliverable"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/tasks/{taskId}/deliverables/{deliverableId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+                deliverableId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除交付物项（裁决 H1：限有编辑权限者；有当前内容的项不可删须走成果更新，完成申请在审期间冻结；候选对象文件同步清理） */
+        delete: operations["deleteDeliverable"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1860,6 +1881,8 @@ export interface components {
             contentStateAt?: string;
             /** @description 本交付物承接的来源关系边（AC-17 归档视角需在列表层可见可点） */
             edges: components["schemas"]["DeliverableEdgeRef"][];
+            /** @description 当前用户能否删除本项（派生字段，裁决 H1）：有编辑权限、任务在草稿或执行类状态、 且本项没有当前内容时为 true；已发布的项删除须走成果更新重传 */
+            canDelete: boolean;
         };
         /**
          * @description 新增交付物项（裁决 G1）：不收项名，入口就是选文件。
@@ -3650,7 +3673,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 已受理，返回任务最新状态（进入审批时交付物项尚未创建，任务上带待审批变更单） */
+            /** @description 交付物项已创建，返回任务最新状态 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -3664,6 +3687,34 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["ValidationError"];
+        };
+    };
+    deleteDeliverable: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+                deliverableId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 交付物项已删除，返回任务最新状态 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Task"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     uploadCandidate: {
