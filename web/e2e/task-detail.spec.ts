@@ -70,13 +70,14 @@ test.describe("任务详情抽屉", () => {
     await expect(block.getByText("尚无当前内容")).toHaveCount(0);
   });
 
-  // 裁决 G1：新增交付物项不再先填名称，入口就是选文件，项名由后端按文件名派生。
-  test("新增交付物项的入口是选文件，没有名称输入框（#113）", async ({ page }) => {
+  // 裁决 G1／#120：「上传交付物」单一入口就是选文件（可一次多选），项名由后端按文件名派生。
+  test("上传交付物入口是选文件且支持多选，没有名称输入框（#113、#120）", async ({ page }) => {
     const block = page.locator(".ant-drawer-content [data-focus='deliverables']");
     await expect(block.getByPlaceholder("新增交付物项名称")).toHaveCount(0);
-    await block.getByRole("button", { name: "＋ 新增交付物项" }).click();
-    const modal = page.locator(".ant-modal", { hasText: "新增交付物项" });
+    await block.getByRole("button", { name: "＋ 上传交付物" }).click();
+    const modal = page.locator(".ant-modal", { hasText: "上传交付物" });
     await expect(modal.locator("input[type='file']")).toHaveCount(1);
+    await expect(modal.locator("input[type='file']")).toHaveJSProperty("multiple", true);
     await expect(modal.getByRole("button", { name: "确认上传" })).toBeDisabled();
     // antd 会在两个汉字间插空格（「取 消」），按 name 匹配不稳，取页脚的非主按钮。
     await modal.locator(".ant-modal-footer .ant-btn:not(.ant-btn-primary)").click();

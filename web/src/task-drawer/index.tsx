@@ -248,7 +248,7 @@ export default function TaskDrawerHost({
       params: { path: { projectId, taskId: task.id } },
     });
     if (res.data) {
-      message.success("已发起成果更新，请上传新的候选内容后提交完成申请");
+      message.success("已发起成果更新，请重传交付物后提交完成申请");
       refresh();
     } else {
       message.error(res.error?.message ?? "发起失败");
@@ -288,7 +288,7 @@ export default function TaskDrawerHost({
           ? "已退回，候选文件删除，任务回到进行中"
           : intermediate
             ? "或签通过，进入待 KR 终审"
-            : "终审通过，候选内容已覆盖当前交付物，任务完成",
+            : "终审通过，候选交付物已覆盖当前内容，任务完成",
       );
       refresh();
     } else {

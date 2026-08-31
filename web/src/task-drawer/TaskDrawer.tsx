@@ -7,6 +7,7 @@ import PeopleSelect from "./PeopleSelect";
 import Icon from "../icons";
 import type { components } from "../api/schema";
 import { ACTIVITY_PREVIEW, STATUS_CLASS, fmtTime } from "./shared";
+import { planUploads } from "./deliverable-upload";
 
 type Task = components["schemas"]["Task"];
 type ProjectMember = components["schemas"]["ProjectMember"];
@@ -197,7 +198,7 @@ export default function TaskDrawer({
     </div>
   );
   const [addingDeliverable, setAddingDeliverable] = useState(false);
-  const [newDeliverableFile, setNewDeliverableFile] = useState<File | null>(null);
+  const [newDeliverableFiles, setNewDeliverableFiles] = useState<File[]>([]);
   const [newDeliverableBusy, setNewDeliverableBusy] = useState(false);
   const [discussionDraft, setDiscussionDraft] = useState("");
   const [postingDiscussion, setPostingDiscussion] = useState(false);
@@ -356,42 +357,63 @@ export default function TaskDrawer({
 
   const closeAddDeliverable = () => {
     setAddingDeliverable(false);
-    setNewDeliverableFile(null);
+    setNewDeliverableFiles([]);
   };
 
-  // 新增交付物项（裁决 G1）：入口就是选文件，一步建项并上传候选内容——项名由服务端按文件名派生，
-  // 前端不自己算名字。裁决 H1（#141）：提交完成申请前新增即时生效，不再走审批。
-  const addDeliverable = async () => {
-    if (!task || !newDeliverableFile) return;
-    const file = newDeliverableFile;
+  // 上传交付物（#120）：一个入口一次选多个文件，逐个走「建项 → 登记 → 直传 → 确认」——
+  // 每个文件建一项（项名由服务端按文件名派生，裁决 G1；裁决 H1 后即时生效不走审批），
+  // 文件名与已有项同名时作为该项的重传。逐个反馈成败，单个失败不中断其余。
+  const uploadDeliverables = async () => {
+    if (!task || newDeliverableFiles.length === 0) return;
     setNewDeliverableBusy(true);
-    const before = new Set((detail?.deliverables ?? []).map((d) => d.id));
-    const res = await client.POST("/projects/{projectId}/tasks/{taskId}/deliverables", {
-      params: { path: { projectId, taskId: task.id } },
-      body: { fileName: file.name },
-    });
-    if (!res.data) {
-      setNewDeliverableBusy(false);
-      message.error(res.error?.message ?? "新增失败");
-      return;
+    const files = [...newDeliverableFiles];
+    const existing = detail?.deliverables ?? [];
+    const plans = planUploads(
+      files.map((f) => f.name),
+      existing.map((d) => d.name),
+    );
+    const idByName = new Map(existing.map((d) => [d.name.toLowerCase(), d.id]));
+    const failed: File[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const plan = plans[i];
+      let targetId = idByName.get(plan.targetName.toLowerCase());
+      if (targetId === undefined) {
+        const before = new Set(idByName.values());
+        const res = await client.POST("/projects/{projectId}/tasks/{taskId}/deliverables", {
+          params: { path: { projectId, taskId: task.id } },
+          body: { fileName: file.name },
+        });
+        if (!res.data) {
+          message.error(`「${file.name}」建项失败：${res.error?.message ?? "请稍后重试"}`);
+          failed.push(file);
+          continue;
+        }
+        // 项已建出来：取回详情按 id 差集认出新项，不猜派生出来的项名。
+        const after = await client.GET("/projects/{projectId}/tasks/{taskId}", {
+          params: { path: { projectId, taskId: task.id } },
+        });
+        const created = (after.data?.deliverables ?? []).find((d) => !before.has(d.id));
+        if (!created) {
+          message.error(`「${file.name}」建项后未找到对应交付物项`);
+          failed.push(file);
+          continue;
+        }
+        idByName.set(created.name.toLowerCase(), created.id);
+        targetId = created.id;
+      }
+      if (await putCandidate(targetId, file)) {
+        message.success(`「${file.name}」已上传`);
+      } else {
+        failed.push(file);
+      }
     }
-    // 项已建出来：取回详情认出新项（按 id 差集，不猜派生出来的项名），接着走候选内容两阶段上传。
-    const after = await client.GET("/projects/{projectId}/tasks/{taskId}", {
-      params: { path: { projectId, taskId: task.id } },
-    });
-    const created = (after.data?.deliverables ?? []).find((d) => !before.has(d.id));
-    if (!created) {
-      setNewDeliverableBusy(false);
-      closeAddDeliverable();
-      message.success("交付物项已新增");
-      setRefreshTick((n) => n + 1);
-      return;
-    }
-    const ok = await putCandidate(created.id, file);
     setNewDeliverableBusy(false);
-    if (ok) {
+    if (failed.length > 0) {
+      // 失败的留在选择列表里，便于修正后重试；成功的已从本次批次移除。
+      setNewDeliverableFiles(failed);
+    } else {
       closeAddDeliverable();
-      message.success(`交付物项「${created.name}」已新增，候选内容已上传`);
     }
     setRefreshTick((n) => n + 1);
   };
@@ -402,7 +424,7 @@ export default function TaskDrawer({
     if (!task) return;
     Modal.confirm({
       title: `删除交付物项「${d.name}」？`,
-      content: "该项及其候选内容将被清理，此操作不可撤销。",
+      content: "该项及其已上传未生效的文件将被清理，此操作不可撤销。",
       okText: "删除",
       okButtonProps: { danger: true },
       cancelText: "取消",
@@ -443,7 +465,7 @@ export default function TaskDrawer({
       },
     );
     if (!res.data) {
-      message.error(res.error?.message ?? "登记候选内容失败");
+      message.error(`「${file.name}」登记失败：${res.error?.message ?? "请稍后重试"}`);
       return false;
     }
     try {
@@ -460,7 +482,7 @@ export default function TaskDrawer({
       if (!commit.data) throw new Error(commit.error?.message ?? "确认失败");
       return true;
     } catch {
-      message.error("文件上传失败，请确认文件服务可用后重试");
+      message.error(`「${file.name}」上传失败，请确认文件服务可用后重试`);
       return false;
     }
   };
@@ -469,7 +491,7 @@ export default function TaskDrawer({
     if (!task || !candidateFor || !candidateFile) return;
     setUploadingId(candidateFor.id);
     if (await putCandidate(candidateFor.id, candidateFile)) {
-      message.success("候选内容已上传；随完成申请提交后进入审核");
+      message.success("交付物已上传；提交完成申请时整体交审");
       closeCandidate();
     }
     setUploadingId(null);
@@ -858,7 +880,7 @@ export default function TaskDrawer({
       )}
       {/* 交付物（AC-50/AC-51）：交付物项与当前内容合成一块，每项一行事实——
           当前文件或「尚未提交交付物」、候选提示，有权限时给上传／新增。
-          无交付物项且无配置权限时整块隐藏，否则负责人失去唯一的新增／上传候选内容入口。 */}
+          无交付物项且无配置权限时整块隐藏，否则负责人失去唯一的上传交付物入口。 */}
       {(deliverables.length > 0 || task.canManageDeliverables) && (
         <section className="drawer-section" data-focus="deliverables">
           <h3>
@@ -869,17 +891,17 @@ export default function TaskDrawer({
           </h3>
           {reviewingCount > 0 && (
             <div className="notice warning" style={{ marginBottom: 10 }}>
-              有 {reviewingCount} 项更新审核中，候选内容请在“审核”Tab 查看；当前内容继续有效。
+              有 {reviewingCount} 项更新审核中，候选交付物请在“审核”Tab 查看；当前内容继续有效。
             </div>
           )}
           {pendingSubmitCount > 0 && (
             <div className="notice" style={{ marginBottom: 10 }}>
-              有 {pendingSubmitCount} 项候选内容待提交审核：尚未随完成申请提交，不占用任何人的待办。
+              有 {pendingSubmitCount} 项交付物已上传、待提交审核：尚未随完成申请提交，不占用任何人的待办。
             </div>
           )}
           {task.resultUpdate === "open" && (
             <div className="notice" style={{ marginBottom: 10 }}>
-              成果更新已发起：上传新的候选内容后提交完成申请，审批期间任务保持已完成、当前内容继续有效。
+              成果更新已发起：重传交付物后提交完成申请，审批期间任务保持已完成、当前内容继续有效。
             </div>
           )}
           {deliverables.length === 0 && <div className="empty compact-empty">尚无交付物项</div>}
@@ -921,7 +943,7 @@ export default function TaskDrawer({
                     loading={uploadingId === d.id}
                     onClick={() => setCandidateFor({ id: d.id, name: d.name })}
                   >
-                    {d.candidate ? "重传候选内容" : "上传候选内容"}
+                    重传交付物
                   </Button>
                 )}
                 {d.canDelete && (
@@ -935,10 +957,10 @@ export default function TaskDrawer({
           {task.canManageDeliverables && (
             <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
               <Button size="small" onClick={() => setAddingDeliverable(true)}>
-                ＋ 新增交付物项
+                ＋ 上传交付物
               </Button>
               <span className="muted" style={{ fontSize: 12, alignSelf: "center" }}>
-                选文件即可，项名取文件名
+                可一次选多个文件，项名取文件名
               </span>
             </div>
           )}
@@ -1494,22 +1516,22 @@ export default function TaskDrawer({
       />
       </div>
       <Modal
-        title="新增交付物项"
+        title="上传交付物"
         open={addingDeliverable}
         okText="确认上传"
         cancelText="取消"
         confirmLoading={newDeliverableBusy}
-        okButtonProps={{ disabled: !newDeliverableFile }}
+        okButtonProps={{ disabled: newDeliverableFiles.length === 0 }}
         onCancel={closeAddDeliverable}
-        onOk={addDeliverable}
+        onOk={uploadDeliverables}
       >
-        <FileUploadField value={newDeliverableFile} onChange={setNewDeliverableFile} />
+        <FileUploadField multiple files={newDeliverableFiles} onFilesChange={setNewDeliverableFiles} />
         <div className="notice" style={{ marginTop: 8 }}>
-          交付物项名取所选文件的文件名（不含扩展名），之后更新成果不会改变项名；同名的交付物项已存在时请在该项上「重传候选内容」。
+          可一次选多个文件：每个文件建一项，项名取文件名（不含扩展名）；文件名与已有项同名时作为该项的重传，不建第二项。上传的交付物在提交完成申请时整体交审。
         </div>
       </Modal>
       <Modal
-        title={candidateFor ? `上传候选内容 · ${candidateFor.name}` : "上传候选内容"}
+        title={candidateFor ? `重传交付物 · ${candidateFor.name}` : "重传交付物"}
         open={!!candidateFor}
         okText="确认上传"
         cancelText="取消"
@@ -1520,7 +1542,7 @@ export default function TaskDrawer({
       >
         <FileUploadField value={candidateFile} onChange={setCandidateFile} />
         <div className="notice" style={{ marginTop: 8 }}>
-          文件在点击「确认上传」后才登记为候选内容；关闭窗口不保留本次选择。候选内容随完成申请整体提交后进入审核。
+          文件在点击「确认上传」后才登记；关闭窗口不保留本次选择。上传的交付物在提交完成申请时整体交审。
         </div>
       </Modal>
       <Modal
@@ -1545,7 +1567,7 @@ export default function TaskDrawer({
         <div className="notice" style={{ marginTop: 8 }}>
           {taskFileKind === "external"
             ? "外部材料由内部协调人代为录入：可作为输入证据，但不会把任何输入置为就绪，也不进入完成审批。"
-            : "过程文件不进入完成审批，也不作为下游任务的正式输入；可按需选进成果包。"}
+            : "过程文件不进入完成审批，也不作为下游任务的正式输入；在成果归档页按文件类型可见。"}
         </div>
       </Modal>
       {/* #138：approval 路由的就地保存——弹一行修改原因（必填）后生成关键字段变更单。 */}
