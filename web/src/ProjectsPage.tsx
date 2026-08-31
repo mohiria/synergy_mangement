@@ -216,13 +216,15 @@ export default function ProjectsPage({
               locale={{ emptyText: projects.length ? "没有匹配的项目" : "暂无项目" }}
               pagination={false}
               columns={[
+                // 列表字段一律单行截断、悬停看全称（#91）；ellipsis 同时把 antd 表格切到固定布局。
                 {
                   title: "项目名称",
                   dataIndex: "name",
+                  ellipsis: { showTitle: false },
                   render: (v: string, p) => (
-                    <Link className="project-name-cell" to={`/projects/${p.id}`}>
+                    <Link className="project-name-cell" to={`/projects/${p.id}`} title={v}>
                       <span className={"project-dot " + p.status} />
-                      <strong>{v}</strong>
+                      <strong className="cell-text">{v}</strong>
                     </Link>
                   ),
                 },
@@ -230,10 +232,11 @@ export default function ProjectsPage({
                   title: "负责人",
                   dataIndex: "ownerName",
                   width: 150,
+                  ellipsis: { showTitle: false },
                   render: (v: string) => (
-                    <span className="owner-cell">
+                    <span className="owner-cell" title={v}>
                       <span className="avatar">{v.slice(0, 1)}</span>
-                      {v}
+                      <span className="cell-text">{v}</span>
                     </span>
                   ),
                 },
@@ -250,6 +253,7 @@ export default function ProjectsPage({
                   title: "阶段",
                   dataIndex: "stage",
                   width: 170,
+                  ellipsis: true,
                   render: (v?: string) => v ?? <span className="muted">—</span>,
                 },
                 {

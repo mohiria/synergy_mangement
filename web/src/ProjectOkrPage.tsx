@@ -72,7 +72,7 @@ export default function ProjectOkrPage({
       className={`table-group${o.canEdit ? " row-clickable" : ""}`}
       onClick={o.canEdit ? () => setEditing({ kind: "O", o }) : undefined}
     >
-      <td colSpan={7}>
+      <td colSpan={7} title={`${o.code} ${o.title}${o.description ? `　${o.description}` : ""}`}>
         {o.code}　{o.title}
         {o.description && <span className="muted">　{o.description}</span>}
       </td>
@@ -85,12 +85,12 @@ export default function ProjectOkrPage({
           onClick={k.canEdit ? () => setEditing({ kind: "KR", k }) : undefined}
         >
           <td className="mono">{k.code}</td>
-          <td>{k.description}</td>
-          <td>
+          <td title={k.description}>{k.description}</td>
+          <td title={k.ownerName ?? "未指定"}>
             {k.ownerName ? (
               <span className="owner-cell">
                 <span className="avatar">{k.ownerName.slice(0, 1)}</span>
-                {k.ownerName}
+                <span className="cell-text">{k.ownerName}</span>
               </span>
             ) : (
               <span className="muted">未指定</span>
@@ -105,7 +105,9 @@ export default function ProjectOkrPage({
               <span className="muted">—</span>
             )}
           </td>
-          <td>{k.metric ?? <span className="muted">待补充量化指标</span>}</td>
+          <td title={k.metric ?? "待补充量化指标"}>
+            {k.metric ?? <span className="muted">待补充量化指标</span>}
+          </td>
           <td>
             <span className={`status-pill risk-${k.riskLevel}`}>{k.riskLevelLabel}</span>
           </td>
@@ -155,7 +157,7 @@ export default function ProjectOkrPage({
                       <th>目标描述</th>
                       <th style={{ width: 140 }}>负责人</th>
                       <th style={{ width: 210 }}>周期</th>
-                      <th style={{ width: 180 }}>量化指标</th>
+                      <th style={{ width: 260 }}>量化指标</th>
                       <th style={{ width: 100 }}>状态</th>
                       <th style={{ width: 90 }}>任务</th>
                     </tr>

@@ -1064,20 +1064,25 @@ export default function CollaborationPage({
                     )}
                     {listRows.map((e) => (
                       <tr key={e.id}>
-                        <td>{e.sourceTaskName ?? e.inputRequest?.providerName ?? "—"}</td>
-                        <td>{e.name}</td>
-                        <td>{e.edgeTypeLabel}</td>
-                        <td>{e.necessity === "required" ? "必要" : "参考"}</td>
-                        <td>
-                          {e.currentFileName ?? <span className="muted">暂无</span>}
-                          {e.hasCandidate && (
-                            <div className="muted" style={{ fontSize: 12 }}>
-                              候选审核中
-                            </div>
-                          )}
+                        <td title={e.sourceTaskName ?? e.inputRequest?.providerName ?? "—"}>
+                          {e.sourceTaskName ?? e.inputRequest?.providerName ?? "—"}
                         </td>
-                        <td>{e.targetTaskName}</td>
-                        <td>{e.sourceOwnerName ?? e.inputRequest?.providerName ?? "—"}</td>
+                        <td title={e.name}>{e.name}</td>
+                        <td title={e.edgeTypeLabel}>{e.edgeTypeLabel}</td>
+                        <td>{e.necessity === "required" ? "必要" : "参考"}</td>
+                        {/* 候选提示与文件名同排一行（#91），行高不随内容变化。 */}
+                        <td
+                          title={
+                            (e.currentFileName ?? "暂无") + (e.hasCandidate ? " · 候选审核中" : "")
+                          }
+                        >
+                          {e.currentFileName ?? <span className="muted">暂无</span>}
+                          {e.hasCandidate && <span className="muted"> · 候选审核中</span>}
+                        </td>
+                        <td title={e.targetTaskName}>{e.targetTaskName}</td>
+                        <td title={e.sourceOwnerName ?? e.inputRequest?.providerName ?? "—"}>
+                          {e.sourceOwnerName ?? e.inputRequest?.providerName ?? "—"}
+                        </td>
                         <td>
                           <span className={`status-pill ${e.ready ? "completed" : "warning"}`}>
                             {e.ready ? "已就绪" : "未就绪"}

@@ -186,8 +186,8 @@ export default function ArtifactsPage({
           )}
         </td>
       )}
-      <td>{d.name}</td>
-      <td>
+      <td title={d.name}>{d.name}</td>
+      <td title={`${t.code} ${t.name}`}>
         <span
           className="file-link"
           onClick={() =>
@@ -197,8 +197,12 @@ export default function ArtifactsPage({
           {t.code} {t.name}
         </span>
       </td>
-      <td>{t.ownerName}</td>
-      <td>
+      <td title={t.ownerName}>{t.ownerName}</td>
+      <td title={
+        d.current || d.candidate
+          ? `${(d.current ?? d.candidate)!.fileName} · ${fmtSize((d.current ?? d.candidate)!.fileSize)}`
+          : undefined
+      }>
         {d.current || d.candidate ? (
           <span
             className="file-link"
@@ -219,16 +223,24 @@ export default function ArtifactsPage({
           {d.contentStateLabel}
         </span>
       </td>
-      <td className={t.receiverLabel === "不配置" ? "muted" : ""}>
+      <td className={t.receiverLabel === "不配置" ? "muted" : ""} title={t.receiverLabel}>
         {t.receiverLabel}
       </td>
       <td className="task-date">{fmtTime(d.contentStateAt) || "—"}</td>
-      <td>
+      {/* 关系边一律排成一行（#91）：每条边仍各自可点，完整清单看 title。 */}
+      <td
+        title={
+          d.edges.length === 0
+            ? undefined
+            : d.edges.map((e) => `${e.name}（${e.edgeTypeLabel} → ${e.targetTaskName}）`).join("；")
+        }
+      >
         {d.edges.length === 0 ? (
           <span className="muted">—</span>
         ) : (
-          d.edges.map((e) => (
-            <div key={e.edgeId}>
+          d.edges.map((e, i) => (
+            <span key={e.edgeId}>
+              {i > 0 && "、"}
               <span
                 className="file-link"
                 onClick={() =>
@@ -239,10 +251,7 @@ export default function ArtifactsPage({
               >
                 {e.name}
               </span>
-              <div className="muted" style={{ fontSize: 12 }}>
-                {e.edgeTypeLabel} → {e.targetTaskName}
-              </div>
-            </div>
+            </span>
           ))
         )}
       </td>
@@ -453,8 +462,8 @@ export default function ArtifactsPage({
                               />
                             </td>
                           )}
-                          <td className="muted">{row.file.kindLabel}</td>
-                          <td>
+                          <td className="muted" title={row.file.kindLabel}>{row.file.kindLabel}</td>
+                          <td title={`${row.task.code} ${row.task.name}`}>
                             <span
                               className="file-link"
                               onClick={() =>
@@ -466,8 +475,8 @@ export default function ArtifactsPage({
                               {row.task.code} {row.task.name}
                             </span>
                           </td>
-                          <td>{row.task.ownerName}</td>
-                          <td>
+                          <td title={row.task.ownerName}>{row.task.ownerName}</td>
+                          <td title={`${row.file.fileName} · ${fmtSize(row.file.fileSize)}`}>
                             <span
                               className="file-link"
                               onClick={() => openTaskFile(row.file.id)}
@@ -488,6 +497,7 @@ export default function ArtifactsPage({
                             className={
                               row.task.receiverLabel === "不配置" ? "muted" : ""
                             }
+                            title={row.task.receiverLabel}
                           >
                             {row.task.receiverLabel}
                           </td>

@@ -157,9 +157,9 @@ export default function MyWorkPage({
               {KIND_BADGE[it.kind] ?? "事"}
             </div>
             <div className="work-main">
-              <h3>{title}</h3>
+              <h3 title={title}>{title}</h3>
               <div className="work-meta">
-                <span>{kr}</span>
+                <span title={kr}>{kr}</span>
                 <span>日期 {it.dueDate ?? "—"}</span>
               </div>
             </div>

@@ -286,11 +286,12 @@ export default function ImportModal({
       {step === 1 && (
         <>
           <div className="data-table-wrap" style={{ maxHeight: 320, overflow: "auto" }}>
-            <table className="data-table" style={{ minWidth: 0 }}>
+            {/* 固定表格布局后列宽只由表头决定（#91）：每列给足映射下拉的宽度。 */}
+            <table className="data-table" style={{ minWidth: columnCount * 156 }}>
               <thead>
                 <tr>
                   {Array.from({ length: columnCount }, (_, i) => (
-                    <th key={i}>
+                    <th key={i} style={{ width: 156 }}>
                       <Select
                         size="small"
                         style={{ width: 140 }}
@@ -311,7 +312,7 @@ export default function ImportModal({
                 {rows.slice(0, 6).map((r, ri) => (
                   <tr key={ri}>
                     {Array.from({ length: columnCount }, (_, ci) => (
-                      <td key={ci} className={ri === 0 ? "muted" : ""}>
+                      <td key={ci} className={ri === 0 ? "muted" : ""} title={r[ci] ?? ""}>
                         {r[ci] ?? ""}
                       </td>
                     ))}

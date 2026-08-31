@@ -67,6 +67,35 @@ const STATUS_CLASS: Record<TaskStatus, string> = {
 
 const fmtDate = (d?: string | null) => (d ? d.slice(5).replace("-", ".") : "—");
 
+// 全部任务列表的状态备注（#91）：退回理由、取消原因、卡点与变更审批合成一行文本，
+// alert 决定用红色还是弱化色；没有备注时返回 null，状态列只剩状态胶囊。
+function statusNote(t: Task): { text: string; alert: boolean } | null {
+  const parts: string[] = [];
+  let alert = false;
+  if (t.status === "draft" && t.poolReview?.status === "rejected" && t.poolReview.opinion) {
+    parts.push(`退回：${t.poolReview.opinion}`);
+  }
+  if (t.status === "cancelled" && t.cancelReason) parts.push(`原因：${t.cancelReason}`);
+  if (t.openBlockerCount != null && t.openBlockerCount > 0) {
+    parts.push(`⚠ ${t.openBlockerCount} 个卡点`);
+    alert = true;
+  }
+  if (t.fieldChange?.state === "pending") {
+    const detail = t.fieldChange.changes
+      .map((c) => `${c.label} ${c.oldValue || "—"}→${c.newValue}`)
+      .join("；");
+    parts.push((t.fieldChange.changeType === "cancel" ? "取消审批中：" : "变更审批中：") + detail);
+  }
+  if (t.fieldChange?.state === "rejected" && !t.fieldChange.resolved) {
+    parts.push(
+      (t.fieldChange.changeType === "cancel" ? "取消申请已退回" : "变更已退回") +
+        (t.fieldChange.opinion ? `：${t.fieldChange.opinion}` : ""),
+    );
+    alert = true;
+  }
+  return parts.length > 0 ? { text: parts.join("　·　"), alert } : null;
+}
+
 // 候选项文案：新建输入时要列出全部关系类型，此时还没有边可取派生字段，只能在前端枚举。
 // 已存在边的显示文案一律取后端的 edgeTypeLabel（F1）。
 const EDGE_TYPE_LABEL: Record<EdgeType, string> = {
@@ -511,9 +540,9 @@ export default function ProjectTasksPage({
     <tr key={`kr-${kr.id}`} className="table-group">
       <td colSpan={9}>
         <div className="task-group-label">
-          <span>
+          <span title={`${kr.code} ${kr.description}`}>
             <b>{kr.code}</b>
-            {kr.description}
+            <span className="cell-text">{kr.description}</span>
             <span className="muted">{list.length} 项</span>
           </span>
           {kr.progressSummary && kr.progressSummary.totalTasks > 0 && (
@@ -539,7 +568,7 @@ export default function ProjectTasksPage({
           )}
           {taskCode.get(t.id)}
         </td>
-        <td>
+        <td title={t.name}>
           <Button
             type="link"
             size="small"
@@ -550,41 +579,27 @@ export default function ProjectTasksPage({
             {t.name}
           </Button>
         </td>
-        <td>
+        <td title={t.ownerName}>
           <span className="owner-cell">
             <span className="avatar">{t.ownerName.slice(0, 1)}</span>
-            {t.ownerName}
+            <span className="cell-text">{t.ownerName}</span>
           </span>
         </td>
-        <td>
+        {/* 状态备注（退回理由、取消原因、卡点、变更审批）与状态胶囊同排一行（#91）：
+            行高恒定，超长在列宽处省略，完整内容悬停看 title，明细仍在任务抽屉里。 */}
+        <td title={statusNote(t)?.text}>
           <span className={`status-pill ${STATUS_CLASS[t.status]}`}>{t.statusLabel}</span>
-          {t.status === "draft" && t.poolReview?.status === "rejected" && t.poolReview.opinion && (
-            <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-              退回：{t.poolReview.opinion}
-            </div>
-          )}
-          {t.status === "cancelled" && t.cancelReason && (
-            <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-              原因:{t.cancelReason}
-            </div>
-          )}
-          {t.openBlockerCount != null && t.openBlockerCount > 0 && (
-            <div style={{ fontSize: 12, marginTop: 2, color: "var(--red)" }}>
-              ⚠ {t.openBlockerCount} 个卡点
-            </div>
-          )}
-          {t.fieldChange?.state === "pending" && (
-            <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-              {t.fieldChange.changeType === "cancel" ? "取消审批中：" : "变更审批中："}
-              {t.fieldChange.changes.map((c) => `${c.label} ${c.oldValue || "—"}→${c.newValue}`).join("；")}
-            </div>
-          )}
-          {t.fieldChange?.state === "rejected" && !t.fieldChange.resolved && (
-            <div style={{ fontSize: 12, marginTop: 2, color: "var(--red)" }}>
-              {t.fieldChange.changeType === "cancel" ? "取消申请已退回" : "变更已退回"}
-              {t.fieldChange.opinion ? `：${t.fieldChange.opinion}` : ""}
-            </div>
-          )}
+          {(() => {
+            const note = statusNote(t);
+            return note ? (
+              <span
+                className={`cell-note${note.alert ? "" : " muted"}`}
+                style={note.alert ? { color: "var(--red)" } : undefined}
+              >
+                {note.text}
+              </span>
+            ) : null;
+          })()}
         </td>
         <td>
           {t.progress != null ? (
@@ -602,7 +617,10 @@ export default function ProjectTasksPage({
         </td>
         <td className="task-date">{fmtDate(t.startDate)}</td>
         <td className="task-date">{fmtDate(t.endDate)}</td>
-        <td className="task-output">
+        <td
+          className="task-output"
+          title={t.deliverableNames && t.deliverableNames.length > 0 ? t.deliverableNames.join("、") : undefined}
+        >
           {t.deliverableNames && t.deliverableNames.length > 0 ? (
             t.deliverableNames.join("、")
           ) : (
@@ -786,15 +804,16 @@ export default function ProjectTasksPage({
             <table className="data-table task-table">
               <thead>
                 <tr>
-                  <th style={{ width: 60 }}>编号</th>
+                  {/* 列宽按 1920×1080 校准（#91）：固定列吃满各自内容，剩余宽度全给任务名。 */}
+                  <th style={{ width: 56 }}>编号</th>
                   <th>任务</th>
-                  <th style={{ width: 130 }}>负责人</th>
-                  <th style={{ width: 130 }}>状态</th>
-                  <th style={{ width: 120 }}>进度</th>
-                  <th style={{ width: 80 }}>开始</th>
-                  <th style={{ width: 80 }}>截止</th>
-                  <th style={{ width: 110 }}>预期交付物</th>
-                  <th style={{ width: 170 }} />
+                  <th style={{ width: 110 }}>负责人</th>
+                  <th style={{ width: 200 }}>状态</th>
+                  <th style={{ width: 140 }}>进度</th>
+                  <th style={{ width: 70 }}>开始</th>
+                  <th style={{ width: 70 }}>截止</th>
+                  <th style={{ width: 190 }}>预期交付物</th>
+                  <th style={{ width: 190 }} />
                 </tr>
               </thead>
               <tbody>

@@ -167,7 +167,7 @@ export default function ReportsPage({
                 <tbody>
                   {report.krProgress.map((k) => (
                     <tr key={k.keyResultId}>
-                      <td>{k.description}</td>
+                      <td title={k.description}>{k.description}</td>
                       <td>
                         <span className={`status-pill risk-${k.riskLevel}`}>
                           {RISK_LABEL[k.riskLevel]}

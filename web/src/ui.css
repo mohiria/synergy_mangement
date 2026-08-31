@@ -214,24 +214,39 @@ body {
 .status-pill.risk-warning { background: var(--amber-soft); color: var(--amber); }
 .status-pill.risk-high_risk { background: var(--red-soft); color: var(--red); }
 
-.owner-cell { display: flex; align-items: center; gap: 6px; }
+.owner-cell { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; vertical-align: middle; }
+.owner-cell .cell-text { flex: 0 1 auto; min-width: 0; }
 .muted { color: var(--muted); }
 .mono { font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--type-aux); }
 .empty { padding: 42px 20px; text-align: center; color: var(--muted); }
 
 /* 原型 data-table：O 行为整行分组，KR 为数据行。 */
 .data-table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; box-shadow: var(--shadow-card); }
-.data-table { width: 100%; border-collapse: collapse; font-size: var(--type-body); min-width: 920px; }
+.data-table { width: 100%; border-collapse: collapse; font-size: var(--type-body); min-width: 920px; table-layout: fixed; }
 .data-table th {
   height: 42px; padding: 0 10px;
   background: #f7f8fa; color: #6b7588; font-size: var(--type-aux); font-weight: 600; text-align: left;
   border-bottom: 1px solid var(--line); white-space: nowrap;
 }
-.data-table td { height: 48px; padding: 7px 10px; border-bottom: 1px solid #eceff4; vertical-align: middle; }
+.data-table td {
+  height: 48px; padding: 7px 10px; border-bottom: 1px solid #eceff4; vertical-align: middle;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .data-table tr:last-child td { border-bottom: 0; }
 .data-table tbody tr:hover td { background: #f8f9fc; }
 .data-table tr.table-group td { height: 38px; background: #eef1f5; color: #3e4b61; font-weight: 650; }
 .data-table tr.table-group:hover td { background: #eef1f5; }
+
+/* 列表字段一律单行截断（#91）：table-layout 固定后列宽只由表头声明决定，
+   超长内容在列宽处省略，完整内容用原生 title 悬停显示。
+   空态、单元格内的块级说明各自补一份截断规则，因为 td 的 ellipsis 只作用于自身的行内内容。 */
+.data-table td .empty { white-space: normal; }
+.cell-text {
+  display: inline-block; max-width: 100%; vertical-align: bottom;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* 单元格内的附注与主字段同排一行，由 td 统一截断。 */
+.cell-note { margin-left: 6px; font-size: 12px; }
 
 .notice {
   padding: 10px 12px; border-radius: var(--radius);
@@ -520,7 +535,12 @@ body {
 .flat-table .ant-table { background: transparent; }
 .flat-table .ant-table-container,
 .flat-table .ant-table-content > table { border-radius: 0; }
-.project-name-cell { display: inline-flex; align-items: center; gap: 8px; color: var(--text); text-decoration: none; }
+.project-name-cell { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; color: var(--text); text-decoration: none; }
+.project-name-cell .cell-text { flex: 0 1 auto; min-width: 0; }
+/* antd 的 ellipsis 只给声明了它的列加截断，其余列在这里统一到 .data-table td 的口径（#91）；
+   内部的 inline-flex 需要自己让位，否则撑破列宽。 */
+.flat-table .ant-table-tbody > tr > td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.flat-table .ant-table-cell-ellipsis .project-name-cell { max-width: 100%; }
 .project-name-cell strong { font-weight: 600; }
 .project-name-cell:hover strong { color: var(--accent); }
 
@@ -662,6 +682,7 @@ body {
 .work-main { min-width: 0; }
 .work-main h3 { margin: 0; color: var(--text); font-size: var(--type-body); font-weight: 600; line-height: 1.45; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .work-meta { margin-top: 7px; display: flex; gap: 14px; color: var(--muted); font-size: var(--type-aux); }
+.work-meta span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .work-trailing { display: grid; grid-template-columns: 92px 116px; align-items: center; justify-content: end; gap: 18px; }
 .work-state { min-width: 92px; display: flex; justify-content: flex-start; }
 .work-actions { min-width: 116px; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
@@ -682,7 +703,7 @@ body {
    组间以 8px 页面底色带分隔；列名用「进度」，页面不提供批量指派与批量改期。 */
 /* 表头要真的吸顶，滚动容器必须有高度上限；行数少时不撑高。 */
 .task-table-wrap { max-height: calc(100dvh - 280px); }
-.task-table { min-width: 1080px; }
+.task-table { min-width: 1240px; }
 .task-table th { position: sticky; top: 0; z-index: 1; border-bottom-color: #dfe4eb; }
 .task-table td { height: 52px; }
 .task-table td:nth-child(2) { font-weight: 500; color: #273349; }
@@ -694,8 +715,10 @@ body {
 .task-title-link { color: #34445f; font-weight: 620; text-align: left; }
 .task-progress-cell { display: flex; align-items: center; gap: 8px; }
 .task-progress-cell .progress { width: 72px; min-width: 72px; }
+/* 百分比不参与压缩：列宽固定后先让进度条让位，再截断（#91）。 */
+.task-progress-cell > span { flex: none; }
 .task-date { color: #46536a; white-space: nowrap; }
-.task-output { max-width: 210px; color: #536078; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task-output { color: #536078; }
 
 /* CR-23 图谱详情面板：主标题 16px、正文 14px、辅助 12px；head 高 50px，关闭只取消选择。 */
 .graph-inspector {
@@ -802,7 +825,7 @@ body {
 .artifact-group-head h3 { margin: 0; font-size: var(--type-title); font-weight: 650; color: #364257; }
 .artifact-group-head .muted { font-size: var(--type-aux); }
 .artifact-group .data-table-wrap { border-radius: 0 0 var(--radius) var(--radius); }
-.artifact-table { min-width: 1180px; }
+.artifact-table { min-width: 1300px; }
 
 /* 勾选后浮出的固定选择条（原型 selection-bar）：深色底、贴底居中，不占页头按钮位。 */
 .selection-bar {

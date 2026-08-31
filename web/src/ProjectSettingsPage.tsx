@@ -508,8 +508,11 @@ export default function ProjectSettingsPage({
                               <td className="mono">
                                 {new Date(rec.importedAt).toLocaleString("zh-CN")}
                               </td>
-                              <td>{rec.operatorName}</td>
-                              <td className={rec.sourceFileName ? "" : "muted"}>
+                              <td title={rec.operatorName}>{rec.operatorName}</td>
+                              <td
+                                className={rec.sourceFileName ? "" : "muted"}
+                                title={rec.sourceFileName || undefined}
+                              >
                                 {rec.sourceFileName || "—"}
                               </td>
                               <td className="mono">
@@ -524,7 +527,10 @@ export default function ProjectSettingsPage({
                                   {rec.resultLabel}
                                 </span>
                               </td>
-                              <td className={rec.failureSummary ? "" : "muted"}>
+                              <td
+                                className={rec.failureSummary ? "" : "muted"}
+                                title={rec.failureSummary || undefined}
+                              >
                                 {rec.failureSummary || "—"}
                               </td>
                             </tr>
@@ -562,8 +568,8 @@ export default function ProjectSettingsPage({
                           {auditLogs.map((a) => (
                             <tr key={a.id}>
                               <td className="mono">{new Date(a.occurredAt).toLocaleString("zh-CN")}</td>
-                              <td>{a.actorName ?? "系统"}</td>
-                              <td>{a.action}</td>
+                              <td title={a.actorName ?? "系统"}>{a.actorName ?? "系统"}</td>
+                              <td title={a.action}>{a.action}</td>
                               <td className="muted">
                                 {a.objectType ? `${a.objectType}${a.objectId ? ` #${a.objectId}` : ""}` : "—"}
                               </td>
