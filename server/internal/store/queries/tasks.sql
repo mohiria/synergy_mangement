@@ -1,8 +1,9 @@
 -- name: CreateTask :one
 -- code_seq 取所属 KR 下历史最大值加一，不复用被删任务的序号（AC-64）；
 -- 批量创建在同一事务内串行执行，MAX+1 不会互相踩踏。
-INSERT INTO tasks (key_result_id, name, owner_id, start_date, end_date, status, created_by, code_seq)
-VALUES ($1, $2, $3, $4, $5, $6, $7,
+INSERT INTO tasks (key_result_id, name, owner_id, start_date, end_date, status, created_by,
+    description, completion_criteria, code_seq)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
     (SELECT COALESCE(MAX(code_seq), 0) + 1 FROM tasks WHERE key_result_id = $1))
 RETURNING *;
 

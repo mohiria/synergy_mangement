@@ -12,20 +12,23 @@ import (
 )
 
 const createTask = `-- name: CreateTask :one
-INSERT INTO tasks (key_result_id, name, owner_id, start_date, end_date, status, created_by, code_seq)
-VALUES ($1, $2, $3, $4, $5, $6, $7,
+INSERT INTO tasks (key_result_id, name, owner_id, start_date, end_date, status, created_by,
+    description, completion_criteria, code_seq)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
     (SELECT COALESCE(MAX(code_seq), 0) + 1 FROM tasks WHERE key_result_id = $1))
 RETURNING id, key_result_id, name, owner_id, start_date, end_date, status, created_by, created_at, progress, cancel_reason, description, completion_criteria, updated_at, receiver_scope, code_seq, result_update
 `
 
 type CreateTaskParams struct {
-	KeyResultID int64
-	Name        string
-	OwnerID     int64
-	StartDate   pgtype.Date
-	EndDate     pgtype.Date
-	Status      string
-	CreatedBy   int64
+	KeyResultID        int64
+	Name               string
+	OwnerID            int64
+	StartDate          pgtype.Date
+	EndDate            pgtype.Date
+	Status             string
+	CreatedBy          int64
+	Description        string
+	CompletionCriteria string
 }
 
 // code_seq 取所属 KR 下历史最大值加一，不复用被删任务的序号（AC-64）；
@@ -39,6 +42,8 @@ func (q *Queries) CreateTask(ctx context.Context, arg CreateTaskParams) (Task, e
 		arg.EndDate,
 		arg.Status,
 		arg.CreatedBy,
+		arg.Description,
+		arg.CompletionCriteria,
 	)
 	var i Task
 	err := row.Scan(

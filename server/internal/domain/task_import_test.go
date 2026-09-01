@@ -48,9 +48,6 @@ func TestValidateTaskImport(t *testing.T) {
 				g.Tasks = []ImportedTask{task(nil), task(func(it *ImportedTask) { it.Task.OwnerID = 2 })}
 			}),
 		}, nil},
-		{"带预期交付物", []TaskImportGroup{group(func(g *TaskImportGroup) {
-			g.Tasks = []ImportedTask{task(func(it *ImportedTask) { it.ExpectedDeliverable = "不兼容对象清单" })}
-		})}, nil},
 		{"空批", nil, ErrTaskImportEmpty},
 		{"组里没有任务", []TaskImportGroup{group(func(g *TaskImportGroup) { g.Tasks = nil })}, ErrTaskImportEmpty},
 		{"没有所属 KR", []TaskImportGroup{group(func(g *TaskImportGroup) { g.KeyResultID = 0 })}, ErrTaskImportKrMissing},
@@ -66,11 +63,6 @@ func TestValidateTaskImport(t *testing.T) {
 		{"截止早于开始", []TaskImportGroup{group(func(g *TaskImportGroup) {
 			g.Tasks = []ImportedTask{task(func(it *ImportedTask) { it.Task.End = day("2026-03-01") })}
 		})}, ErrTaskPeriodInverted},
-		{"预期交付物名超长", []TaskImportGroup{group(func(g *TaskImportGroup) {
-			g.Tasks = []ImportedTask{task(func(it *ImportedTask) {
-				it.ExpectedDeliverable = "清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单清单一"
-			})}
-		})}, ErrDeliverableNameTooLong},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

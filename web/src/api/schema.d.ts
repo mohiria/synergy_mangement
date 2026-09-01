@@ -1589,8 +1589,18 @@ export interface components {
             startDate: string;
             /** Format: date */
             endDate: string;
-            /** @description 预期交付物名称（选填，原型创建弹窗列）；随任务创建对应交付物项 */
-            expectedDeliverable?: string;
+            /** @description 量化指标／完成标准（选填，裁决 */
+            completionCriteria?: string;
+            /** @description 任务说明（选填，裁决 */
+            description?: string;
+            /** @description 参与人（选填，裁决 */
+            participantIds?: number[];
+            /** @description 成果接收方范围（选填，裁决 */
+            receiverScope?: components["schemas"]["ReceiverScope"];
+            /** @description 指定成员为接收方时的名单（receiverScope=members 时必填且至少一人） */
+            receiverIds?: number[];
+            /** @description 成果审核人（选填，裁决 */
+            reviewerIds?: number[];
         };
         CreateTaskBatchRequest: {
             items: components["schemas"]["CreateTaskItem"][];
@@ -2010,7 +2020,6 @@ export interface components {
             startDate: string;
             /** Format: date */
             endDate: string;
-            expectedDeliverable?: string;
         };
         ImportKrItem: {
             description: string;

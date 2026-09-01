@@ -7,10 +7,9 @@ var (
 	ErrTaskImportKrMissing = errors.New("每条任务都要指定所属 KR")
 )
 
-// ImportedTask 一条待导入的任务：任务本身加上可选的预期交付物项。
+// ImportedTask 一条待导入的任务（裁决 #164：导入不再含预期交付物列）。
 type ImportedTask struct {
-	Task                NewTask
-	ExpectedDeliverable string
+	Task NewTask
 }
 
 // TaskImportGroup 按所属 KR 分组的一批待导入任务（AC-02b）。
@@ -20,7 +19,7 @@ type TaskImportGroup struct {
 }
 
 // ValidateTaskImport 整批校验任务导入：任何一条不合规都不写。
-// 单条任务与预期交付物沿用创建任务时的同一份规则，导入不另设宽松口径。
+// 单条任务沿用创建任务时的同一份规则，导入不另设宽松口径。
 func ValidateTaskImport(groups []TaskImportGroup, roleOf func(int64) string) error {
 	if len(groups) == 0 {
 		return ErrTaskImportEmpty
@@ -35,11 +34,6 @@ func ValidateTaskImport(groups []TaskImportGroup, roleOf func(int64) string) err
 		for _, it := range g.Tasks {
 			if err := ValidateNewTask(it.Task, roleOf); err != nil {
 				return err
-			}
-			if it.ExpectedDeliverable != "" {
-				if err := ValidateDeliverableName(it.ExpectedDeliverable); err != nil {
-					return err
-				}
 			}
 		}
 	}

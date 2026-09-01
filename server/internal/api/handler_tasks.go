@@ -116,9 +116,27 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 			writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_task", Message: err.Error()})
 			return
 		}
-		if item.ExpectedDeliverable != nil && strings.TrimSpace(*item.ExpectedDeliverable) != "" {
-			if err := domain.ValidateDeliverableName(strings.TrimSpace(*item.ExpectedDeliverable)); err != nil {
-				writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_deliverable", Message: err.Error()})
+		// 裁决 #164：五个选填字段沿用各配置项既有的校验器。
+		isMember := func(id int64) bool { return roleByID[id] != "" }
+		if item.ParticipantIds != nil {
+			if err := domain.ValidateParticipants(item.OwnerId, *item.ParticipantIds, isMember); err != nil {
+				writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_participants", Message: err.Error()})
+				return
+			}
+		}
+		if item.ReviewerIds != nil {
+			if err := domain.ValidateReviewers(*item.ReviewerIds, func(id int64) string { return roleByID[id] }); err != nil {
+				writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_reviewers", Message: err.Error()})
+				return
+			}
+		}
+		if item.ReceiverScope != nil {
+			ids := []int64{}
+			if item.ReceiverIds != nil {
+				ids = *item.ReceiverIds
+			}
+			if err := domain.ValidateReceivers(string(*item.ReceiverScope), ids, isMember); err != nil {
+				writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_receivers", Message: err.Error()})
 				return
 			}
 		}
@@ -134,7 +152,7 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 	qtx := s.q.WithTx(tx)
 	createdIDs := make([]int64, 0, len(req.Items))
 	for i, item := range req.Items {
-		task, err := qtx.CreateTask(r.Context(), store.CreateTaskParams{
+		params := store.CreateTaskParams{
 			KeyResultID: item.KeyResultId,
 			Name:        strings.TrimSpace(item.Name),
 			OwnerID:     item.OwnerId,
@@ -142,7 +160,14 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 			EndDate:     pgtype.Date{Time: item.EndDate.Time, Valid: true},
 			Status:      domain.TaskNotStarted,
 			CreatedBy:   uid,
-		})
+		}
+		if item.Description != nil {
+			params.Description = strings.TrimSpace(*item.Description)
+		}
+		if item.CompletionCriteria != nil {
+			params.CompletionCriteria = strings.TrimSpace(*item.CompletionCriteria)
+		}
+		task, err := qtx.CreateTask(r.Context(), params)
 		if err != nil {
 			writeInternalError(w, r, err)
 			return
@@ -161,12 +186,34 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 				return
 			}
 		}
-		// 预期交付物（原型创建弹窗列）：随任务建立对应交付物项。
-		if item.ExpectedDeliverable != nil {
-			if dn := strings.TrimSpace(*item.ExpectedDeliverable); dn != "" {
-				if _, err := qtx.CreateDeliverable(r.Context(), store.CreateDeliverableParams{TaskID: task.ID, Name: dn, CreatedBy: uid}); err != nil {
+		// 裁决 #164：参与人、成果审核人与接收方随创建一并落库（选填）。
+		if item.ParticipantIds != nil {
+			for _, id := range domain.NormalizeParticipants(*item.ParticipantIds) {
+				if err := qtx.SetTaskParticipant(r.Context(), store.SetTaskParticipantParams{TaskID: task.ID, UserID: id}); err != nil {
 					writeInternalError(w, r, err)
 					return
+				}
+			}
+		}
+		if item.ReviewerIds != nil {
+			for _, id := range domain.NormalizeParticipants(*item.ReviewerIds) {
+				if err := qtx.SetTaskReviewer(r.Context(), store.SetTaskReviewerParams{TaskID: task.ID, UserID: id}); err != nil {
+					writeInternalError(w, r, err)
+					return
+				}
+			}
+		}
+		if item.ReceiverScope != nil && *item.ReceiverScope != ReceiverScopeNone {
+			if _, err := qtx.SetTaskReceiverScope(r.Context(), store.SetTaskReceiverScopeParams{ID: task.ID, ReceiverScope: string(*item.ReceiverScope)}); err != nil {
+				writeInternalError(w, r, err)
+				return
+			}
+			if *item.ReceiverScope == ReceiverScopeMembers && item.ReceiverIds != nil {
+				for _, id := range domain.NormalizeParticipants(*item.ReceiverIds) {
+					if err := qtx.SetTaskReceiver(r.Context(), store.SetTaskReceiverParams{TaskID: task.ID, UserID: id}); err != nil {
+						writeInternalError(w, r, err)
+						return
+					}
 				}
 			}
 		}

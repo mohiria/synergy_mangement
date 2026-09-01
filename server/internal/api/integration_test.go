@@ -104,6 +104,23 @@ func uploadCandidate(t *testing.T, c *http.Client, tasksURL string, taskID, deli
 	return f
 }
 
+// createDeliverable 走正式入口为任务新增一个交付物项（裁决 #164：创建任务不再带预期交付物）。
+// 项名由文件名派生（去掉最后一段扩展名）。
+func createDeliverable(t *testing.T, c *http.Client, tasksURL string, taskID int64, fileName string) int64 {
+	t.Helper()
+	resp := doJSON(t, c, http.MethodPost, fmt.Sprintf("%s/%d/deliverables", tasksURL, taskID),
+		api.CreateDeliverableRequest{FileName: fileName})
+	wantStatus(t, resp, http.StatusOK)
+	detail := decodeBody[api.Task](t, resp)
+	resp2 := doJSON(t, c, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
+	wantStatus(t, resp2, http.StatusOK)
+	ds := decodeBody[api.TaskDetail](t, resp2).Deliverables
+	if len(ds) == 0 {
+		t.Fatalf("交付物项未建立: %+v", detail)
+	}
+	return ds[len(ds)-1].Id
+}
+
 func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -952,6 +969,56 @@ func TestTaskCreateDirectPoolEntry(t *testing.T) {
 		t.Fatalf("无负责人 KR 下创建应直接未开始: %+v", list)
 	}
 
+	// 裁决 #164：五个选填字段随创建落库，任务概况可见。
+	scope := api.ReceiverScopeMembers
+	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		Items: []api.CreateTaskItem{{
+			KeyResultId: krWithOwner, Name: "带选填字段的任务", OwnerId: carolUser.ID,
+			StartDate: start, EndDate: end,
+			CompletionCriteria: sp("回归通过率 ≥ 99%"), Description: sp("覆盖联动断链后的自动回退"),
+			ParticipantIds: &[]int64{bobUser.ID}, ReviewerIds: &[]int64{bobUser.ID},
+			ReceiverScope: &scope, ReceiverIds: &[]int64{bobUser.ID},
+		}},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodGet, tasksURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	var created2 *api.Task
+	for _, tk := range decodeBody[[]api.Task](t, resp) {
+		if tk.Name == "带选填字段的任务" {
+			cp := tk
+			created2 = &cp
+		}
+	}
+	if created2 == nil {
+		t.Fatal("带选填字段的任务未落库")
+	}
+	if created2.CompletionCriteria == nil || *created2.CompletionCriteria != "回归通过率 ≥ 99%" ||
+		created2.Description == nil || *created2.Description != "覆盖联动断链后的自动回退" {
+		t.Fatalf("量化指标/任务说明未落库: %+v", created2)
+	}
+	if created2.Participants == nil || len(*created2.Participants) != 1 || (*created2.Participants)[0].UserId != bobUser.ID {
+		t.Fatalf("参与人未落库: %+v", created2.Participants)
+	}
+	if created2.ReceiverScope != api.ReceiverScopeMembers || created2.Receivers == nil || len(*created2.Receivers) != 1 {
+		t.Fatalf("接收方未落库: %+v", created2.Receivers)
+	}
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, created2.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if d := decodeBody[api.TaskDetail](t, resp); len(d.Reviewers) != 1 || d.Reviewers[0].UserId != bobUser.ID {
+		t.Fatalf("成果审核人未落库: %+v", d.Reviewers)
+	}
+	// 参与人不能选负责人本人 422
+	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		Items: []api.CreateTaskItem{{
+			KeyResultId: krWithOwner, Name: "非法参与人", OwnerId: carolUser.ID,
+			StartDate: start, EndDate: end, ParticipantIds: &[]int64{carolUser.ID},
+		}},
+	})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+
 	// 校验失败整批不落库：截止早于开始 422
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
@@ -982,7 +1049,7 @@ func TestTaskCreateDirectPoolEntry(t *testing.T) {
 	// 访客可查看任务列表
 	resp = doJSON(t, dave, http.MethodGet, tasksURL, nil)
 	wantStatus(t, resp, http.StatusOK)
-	if got := decodeBody[[]api.Task](t, resp); len(got) != 3 {
+	if got := decodeBody[[]api.Task](t, resp); len(got) != 4 {
 		t.Fatalf("任务列表数量异常: %+v", got)
 	}
 }
@@ -1665,17 +1732,25 @@ func TestDeliverablesAndFiles(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
-	// 创建任务时带预期交付物 → 自动建交付物项并出现在列表列
+	// 裁决 #164：创建任务不再带预期交付物，交付物项建立后才出现在列表列
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
-			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: bobUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("验收方案 V1")},
+			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 		},
 	})
 	wantStatus(t, resp, http.StatusCreated)
 	tasks := decodeBody[[]api.Task](t, resp)
 	taskID := tasks[0].Id
-	if tasks[0].DeliverableNames == nil || (*tasks[0].DeliverableNames)[0] != "验收方案 V1" {
-		t.Fatalf("预期交付物列异常: %+v", tasks[0].DeliverableNames)
+	if tasks[0].DeliverableNames != nil {
+		t.Fatalf("新任务不应有交付物项: %+v", tasks[0].DeliverableNames)
+	}
+	createDeliverable(t, bob, tasksURL, taskID, "验收方案 V1.docx")
+	resp = doJSON(t, bob, http.MethodGet, tasksURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	for _, tk := range decodeBody[[]api.Task](t, resp) {
+		if tk.Id == taskID && (tk.DeliverableNames == nil || (*tk.DeliverableNames)[0] != "验收方案 V1") {
+			t.Fatalf("交付物列异常: %+v", tk.DeliverableNames)
+		}
 	}
 
 	// 再补一个交付物项（一个任务多项交付物）；裁决 H1：提交完成申请前即时生效
@@ -1945,13 +2020,14 @@ func TestCompletionReviewFlow(t *testing.T) {
 	// carol 建任务（带两个交付物项，直接入池）→ carol 开始执行
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
-			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: carolUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("验收方案")},
+			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
 	})
 	wantStatus(t, resp, http.StatusCreated)
 	tasks := decodeBody[[]api.Task](t, resp)
 	taskID := tasks[0].Id
 	// 裁决 H1（#141）：已入池任务加交付物项即时生效，不走审批
+	createDeliverable(t, carol, tasksURL, taskID, "验收方案.docx")
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/deliverables", tasksURL, taskID),
 		api.CreateDeliverableRequest{FileName: "验收记录.docx"})
 	wantStructureAccepted(t, resp)
@@ -2147,7 +2223,7 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 	// bob 免审建上游任务 A（带交付物）与跨 KR 下游任务 B（carol 负责）
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
-			{KeyResultId: kr1, Name: "采集现场数据", OwnerId: bobUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("现场数据包")},
+			{KeyResultId: kr1, Name: "采集现场数据", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 			{KeyResultId: kr2, Name: "回归验证分析", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
 	})
@@ -2162,11 +2238,8 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 		}
 	}
 
-	// 取 A 的交付物项
-	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskA.Id), nil)
-	wantStatus(t, resp, http.StatusOK)
-	detailA := decodeBody[api.TaskDetail](t, resp)
-	dA := detailA.Deliverables[0].Id
+	// 为 A 建交付物项（裁决 #164：创建任务不再带预期交付物）
+	dA := createDeliverable(t, bob, tasksURL, taskA.Id, "现场数据包.zip")
 
 	// AC-28：B 的负责人 carol 选择 A 建立必要输入边（裁决 #163：不再选对应交付物）；
 	// 输入与输入源是关键字段（AC-23），先进所属 KR 负责人审批，通过后边才建立
@@ -2238,7 +2311,7 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 	resp.Body.Close()
 	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskA.Id), nil)
 	wantStatus(t, resp, http.StatusOK)
-	detailA = decodeBody[api.TaskDetail](t, resp)
+	detailA := decodeBody[api.TaskDetail](t, resp)
 	reviewID := detailA.CompletionReviews[0].Id
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, taskA.Id, reviewID),
 		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
@@ -2361,7 +2434,7 @@ func TestIntermediateReviewOrSign(t *testing.T) {
 
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
-			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: carolUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("验收方案")},
+			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
 	})
 	wantStatus(t, resp, http.StatusCreated)
@@ -2376,15 +2449,12 @@ func TestIntermediateReviewOrSign(t *testing.T) {
 		t.Fatalf("或签组配置异常: %+v", got)
 	}
 
-	// 开始执行、上传候选、提交 → 进入成果审核
+	// 开始执行、建项、上传候选、提交 → 进入成果审核
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, taskID),
 		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
-	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
-	wantStatus(t, resp, http.StatusOK)
-	detail := decodeBody[api.TaskDetail](t, resp)
-	dA := detail.Deliverables[0].Id
+	dA := createDeliverable(t, carol, tasksURL, taskID, "验收方案.docx")
 	uploadCandidate(t, carol, tasksURL, taskID, dA, api.UploadCandidateRequest{FileName: "验收方案V1.docx"}, "candidate-bytes")
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskID),
 		api.SubmitCompletionRequest{Note: "请或签审核"})
@@ -2402,7 +2472,7 @@ func TestIntermediateReviewOrSign(t *testing.T) {
 
 	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
 	wantStatus(t, resp, http.StatusOK)
-	detail = decodeBody[api.TaskDetail](t, resp)
+	detail := decodeBody[api.TaskDetail](t, resp)
 	reviewID := detail.CompletionReviews[0].Id
 	if detail.CompletionReviews[0].State != api.CompletionReviewStateIntermediateReview {
 		t.Fatalf("申请状态异常: %+v", detail.CompletionReviews[0])
@@ -2692,8 +2762,8 @@ func TestMultiSourceInputs(t *testing.T) {
 	// KR 负责人 bob 免审建两条上游任务与两条下游任务（C 用于多来源任务，D 用于多对接人）
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
-			{KeyResultId: kr1, Name: "采集现场数据", OwnerId: bobUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("现场数据包")},
-			{KeyResultId: kr1, Name: "整理历史台账", OwnerId: bobUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("历史台账")},
+			{KeyResultId: kr1, Name: "采集现场数据", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
+			{KeyResultId: kr1, Name: "整理历史台账", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 			{KeyResultId: kr1, Name: "回归验证分析", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 			{KeyResultId: kr1, Name: "外部口径汇总", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
@@ -2897,7 +2967,7 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "回归验证分析", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
-			{KeyResultId: kr1, Name: "现场数据采集", OwnerId: bobUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("现场数据包")},
+			{KeyResultId: kr1, Name: "现场数据采集", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 		},
 	})
 	wantStatus(t, resp, http.StatusCreated)
@@ -3020,9 +3090,7 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
-	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, upstream.Id), nil)
-	wantStatus(t, resp, http.StatusOK)
-	upstreamDeliverable := decodeBody[api.TaskDetail](t, resp).Deliverables[0].Id
+	upstreamDeliverable := createDeliverable(t, bob, tasksURL, upstream.Id, "现场数据包.zip")
 	uploadCandidate(t, bob, tasksURL, upstream.Id, upstreamDeliverable, api.UploadCandidateRequest{FileName: "现场数据包.zip"}, "candidate-bytes")
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, upstream.Id),
 		api.SubmitCompletionRequest{Note: "数据包齐"})
@@ -3093,7 +3161,7 @@ func TestMyWorkFiveGroups(t *testing.T) {
 	// carol 创建任务（直接入池）→ carol 待我处理出现任务卡；bob（KR 负责人）暂无审批件
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
-			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: carolUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("验收方案")},
+			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
 	})
 	wantStatus(t, resp, http.StatusCreated)
@@ -3122,10 +3190,7 @@ func TestMyWorkFiveGroups(t *testing.T) {
 		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
-	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
-	wantStatus(t, resp, http.StatusOK)
-	detail := decodeBody[api.TaskDetail](t, resp)
-	dA := detail.Deliverables[0].Id
+	dA := createDeliverable(t, carol, tasksURL, taskID, "验收方案.docx")
 	uploadCandidate(t, carol, tasksURL, taskID, dA, api.UploadCandidateRequest{FileName: "验收方案.docx"}, "candidate-bytes")
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskID),
 		api.SubmitCompletionRequest{Note: "请终审"})
@@ -3346,7 +3411,7 @@ func TestArtifacts(t *testing.T) {
 	// 走完整链路生成一份当前内容：建任务→开始→候选→终审通过
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
-			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: bobUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("验收方案")},
+			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 		},
 	})
 	wantStatus(t, resp, http.StatusCreated)
@@ -3356,10 +3421,7 @@ func TestArtifacts(t *testing.T) {
 		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
-	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
-	wantStatus(t, resp, http.StatusOK)
-	detail := decodeBody[api.TaskDetail](t, resp)
-	dA := detail.Deliverables[0].Id
+	dA := createDeliverable(t, bob, tasksURL, taskID, "验收方案.docx")
 	uploadCandidate(t, bob, tasksURL, taskID, dA, api.UploadCandidateRequest{FileName: "验收方案V1.docx"}, "acceptance-doc-bytes")
 
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskID),
@@ -3368,7 +3430,7 @@ func TestArtifacts(t *testing.T) {
 	resp.Body.Close()
 	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
 	wantStatus(t, resp, http.StatusOK)
-	detail = decodeBody[api.TaskDetail](t, resp)
+	detail := decodeBody[api.TaskDetail](t, resp)
 	reviewID := detail.CompletionReviews[0].Id
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, taskID, reviewID),
 		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
@@ -3599,9 +3661,9 @@ func TestProjectReport(t *testing.T) {
 	far := openapiDate(t, "2026-12-31")
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
-			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: bobUser.ID, StartDate: start, EndDate: soon, ExpectedDeliverable: sp("验收方案")},
+			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: bobUser.ID, StartDate: start, EndDate: soon},
 			{KeyResultId: kr1, Name: "临近截止任务", OwnerId: bobUser.ID, StartDate: start, EndDate: soon},
-			{KeyResultId: kr1, Name: "上游未完成任务", OwnerId: bobUser.ID, StartDate: start, EndDate: far, ExpectedDeliverable: sp("上游数据包")},
+			{KeyResultId: kr1, Name: "上游未完成任务", OwnerId: bobUser.ID, StartDate: start, EndDate: far},
 		},
 	})
 	wantStatus(t, resp, http.StatusCreated)
@@ -3626,10 +3688,7 @@ func TestProjectReport(t *testing.T) {
 		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
-	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskA.Id), nil)
-	wantStatus(t, resp, http.StatusOK)
-	detail := decodeBody[api.TaskDetail](t, resp)
-	dA := detail.Deliverables[0].Id
+	dA := createDeliverable(t, bob, tasksURL, taskA.Id, "验收方案.docx")
 	uploadCandidate(t, bob, tasksURL, taskA.Id, dA, api.UploadCandidateRequest{FileName: "验收方案V1.docx"}, "candidate-bytes")
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskA.Id),
 		api.SubmitCompletionRequest{Note: "请终审"})
@@ -3637,7 +3696,7 @@ func TestProjectReport(t *testing.T) {
 	resp.Body.Close()
 	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskA.Id), nil)
 	wantStatus(t, resp, http.StatusOK)
-	detail = decodeBody[api.TaskDetail](t, resp)
+	detail := decodeBody[api.TaskDetail](t, resp)
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, taskA.Id, detail.CompletionReviews[0].Id),
 		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
 	wantStatus(t, resp, http.StatusOK)
@@ -3794,7 +3853,7 @@ func TestImportAndPool(t *testing.T) {
 		Title: sp("提升交付质量"),
 		KeyResults: &[]api.ImportKrItem{
 			{Description: "上线自动验收", OwnerId: &bobUser.ID, Tasks: &[]api.ImportTaskItem{
-				{Name: "导入任务一", OwnerId: carolUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("方案一")},
+				{Name: "导入任务一", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 				{Name: "导入任务二", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 			}},
 			{Description: "现场回归通过", OwnerId: &bobUser.ID, Tasks: &[]api.ImportTaskItem{
@@ -3891,7 +3950,7 @@ func TestImportAndPool(t *testing.T) {
 	resp = doJSON(t, alice, http.MethodPost, importTasksURL, api.ImportTasksRequest{
 		SourceFileName: sp("任务批量导入.xlsx"),
 		Items: []api.ImportTaskGroup{{KeyResultId: kr1ID, Tasks: []api.ImportTaskItem{
-			{Name: "导入任务四", OwnerId: carolUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("方案四")},
+			{Name: "导入任务四", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 			{Name: "导入任务五", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 		}}},
 	})
@@ -4287,8 +4346,8 @@ func TestReceiversAndReceipts(t *testing.T) {
 	// carol 建两个任务并入池通过、开始执行
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
-			{KeyResultId: kr1, Name: "指定接收方的任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("移交清单")},
-			{KeyResultId: kr1, Name: "全员接收的任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("通报材料")},
+			{KeyResultId: kr1, Name: "指定接收方的任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
+			{KeyResultId: kr1, Name: "全员接收的任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
 	})
 	wantStatus(t, resp, http.StatusCreated)
@@ -4337,21 +4396,19 @@ func TestReceiversAndReceipts(t *testing.T) {
 		t.Fatalf("终审通过前不应有待接收项: %+v", work.Receipts)
 	}
 
-	// 走完完成审核：上传候选 → 提交 → bob 终审通过
+	// 走完完成审核：建项 → 上传候选 → 提交 → bob 终审通过
 	approve := func(taskID int64, fileName string) {
 		t.Helper()
 		detailURL := fmt.Sprintf("%s/%d", tasksURL, taskID)
-		r := doJSON(t, carol, http.MethodGet, detailURL, nil)
-		wantStatus(t, r, http.StatusOK)
-		d := decodeBody[api.TaskDetail](t, r)
-		uploadCandidate(t, carol, tasksURL, taskID, d.Deliverables[0].Id, api.UploadCandidateRequest{FileName: fileName}, "candidate-bytes")
-		r = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskID),
+		did := createDeliverable(t, carol, tasksURL, taskID, fileName)
+		uploadCandidate(t, carol, tasksURL, taskID, did, api.UploadCandidateRequest{FileName: fileName}, "candidate-bytes")
+		r := doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskID),
 			api.SubmitCompletionRequest{Note: "请终审"})
 		wantStatus(t, r, http.StatusOK)
 		r.Body.Close()
 		r = doJSON(t, carol, http.MethodGet, detailURL, nil)
 		wantStatus(t, r, http.StatusOK)
-		d = decodeBody[api.TaskDetail](t, r)
+		d := decodeBody[api.TaskDetail](t, r)
 		r = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, taskID, d.CompletionReviews[0].Id),
 			api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
 		wantStatus(t, r, http.StatusOK)
@@ -6052,7 +6109,7 @@ func TestResultUpdateFlow(t *testing.T) {
 	// carol 建任务 → bob 入池通过 → carol 执行 → 首次定稿走完完成审批
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
-			{KeyResultId: kr1, Name: "输出接口说明", OwnerId: carolUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("接口说明")},
+			{KeyResultId: kr1, Name: "输出接口说明", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
 	})
 	wantStatus(t, resp, http.StatusCreated)
@@ -6063,10 +6120,7 @@ func TestResultUpdateFlow(t *testing.T) {
 	resp.Body.Close()
 
 	detailURL := fmt.Sprintf("%s/%d", tasksURL, taskID)
-	resp = doJSON(t, carol, http.MethodGet, detailURL, nil)
-	wantStatus(t, resp, http.StatusOK)
-	detail := decodeBody[api.TaskDetail](t, resp)
-	deliverableID := detail.Deliverables[0].Id
+	deliverableID := createDeliverable(t, carol, tasksURL, taskID, "接口说明.docx")
 	uploadCandidate(t, carol, tasksURL, taskID, deliverableID, api.UploadCandidateRequest{FileName: "接口说明-v1.docx"}, "v1-bytes")
 	completionURL := fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskID)
 	resp = doJSON(t, carol, http.MethodPost, completionURL, api.SubmitCompletionRequest{Note: "首次定稿"})
@@ -6074,7 +6128,7 @@ func TestResultUpdateFlow(t *testing.T) {
 	resp.Body.Close()
 	resp = doJSON(t, carol, http.MethodGet, detailURL, nil)
 	wantStatus(t, resp, http.StatusOK)
-	detail = decodeBody[api.TaskDetail](t, resp)
+	detail := decodeBody[api.TaskDetail](t, resp)
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/decision", completionURL, detail.CompletionReviews[0].Id),
 		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
 	wantStatus(t, resp, http.StatusOK)
@@ -6323,8 +6377,7 @@ func TestPublicProjectImplicitViewer(t *testing.T) {
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
-			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: bobUser.ID, StartDate: start, EndDate: end,
-				ExpectedDeliverable: sp("验收方案")},
+			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 			{KeyResultId: kr1, Name: "承接验收方案", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 		},
 	})
@@ -6418,9 +6471,7 @@ func TestPublicProjectImplicitViewer(t *testing.T) {
 		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
-	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
-	wantStatus(t, resp, http.StatusOK)
-	deliverableID := decodeBody[api.TaskDetail](t, resp).Deliverables[0].Id
+	deliverableID := createDeliverable(t, bob, tasksURL, taskID, "验收方案.docx")
 	file := uploadCandidate(t, bob, tasksURL, taskID, deliverableID,
 		api.UploadCandidateRequest{FileName: "验收方案.docx", FileType: sp("docx")}, "candidate-bytes")
 	resp = doJSON(t, dave, http.MethodGet, fmt.Sprintf("%s/files/%d/download-url", projectURL, file.Id), nil)

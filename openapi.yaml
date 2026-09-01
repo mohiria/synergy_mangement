@@ -585,7 +585,7 @@ paths:
     post:
       operationId: createTaskBatch
       tags: [tasks]
-      summary: 表格式批量创建任务（裁决 #162：创建即入正式任务池，初始状态未开始；入池留痕并通知所属 KR 负责人）
+      summary: 表格式批量创建任务（裁决 #162：创建即入正式任务池；裁决 #164：必填为名称/所属 KR/负责人/周期，另有五个选填字段）
       requestBody:
         required: true
         content:
@@ -3052,10 +3052,35 @@ components:
         endDate:
           type: string
           format: date
-        expectedDeliverable:
+        completionCriteria:
           type: string
-          maxLength: 100
-          description: 预期交付物名称（选填，原型创建弹窗列）；随任务创建对应交付物项
+          maxLength: 2000
+          description: 量化指标／完成标准（选填，裁决 #164）
+        description:
+          type: string
+          maxLength: 2000
+          description: 任务说明（选填，裁决 #164）
+        participantIds:
+          type: array
+          description: 参与人（选填，裁决 #164）；须为项目成员且不含负责人本人，重复选择按一人记
+          items:
+            type: integer
+            format: int64
+        receiverScope:
+          $ref: "#/components/schemas/ReceiverScope"
+          description: 成果接收方范围（选填，裁决 #164）；缺省为未配置
+        receiverIds:
+          type: array
+          description: 指定成员为接收方时的名单（receiverScope=members 时必填且至少一人）
+          items:
+            type: integer
+            format: int64
+        reviewerIds:
+          type: array
+          description: 成果审核人（选填，裁决 #164）；须为非只读项目成员
+          items:
+            type: integer
+            format: int64
     CreateTaskBatchRequest:
       type: object
       required: [items]
@@ -3767,9 +3792,6 @@ components:
         endDate:
           type: string
           format: date
-        expectedDeliverable:
-          type: string
-          maxLength: 100
     ImportKrItem:
       type: object
       required: [description]

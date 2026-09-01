@@ -89,12 +89,6 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 							failImport(http.StatusUnprocessableEntity, "invalid_task", err.Error())
 							return
 						}
-						if tk.ExpectedDeliverable != nil && strings.TrimSpace(*tk.ExpectedDeliverable) != "" {
-							if err := domain.ValidateDeliverableName(strings.TrimSpace(*tk.ExpectedDeliverable)); err != nil {
-								failImport(http.StatusUnprocessableEntity, "invalid_deliverable", err.Error())
-								return
-							}
-						}
 					}
 				}
 			}
@@ -211,14 +205,6 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 					}); err != nil {
 						failImportInternal(err)
 						return
-					}
-				}
-				if tk.ExpectedDeliverable != nil {
-					if dn := strings.TrimSpace(*tk.ExpectedDeliverable); dn != "" {
-						if _, err := qtx.CreateDeliverable(r.Context(), store.CreateDeliverableParams{TaskID: task.ID, Name: dn, CreatedBy: uid}); err != nil {
-							failImportInternal(err)
-							return
-						}
 					}
 				}
 			}
@@ -348,18 +334,14 @@ func (s *Server) ImportTasks(w http.ResponseWriter, r *http.Request, projectId i
 	for _, g := range req.Items {
 		dg := domain.TaskImportGroup{KeyResultID: g.KeyResultId}
 		for _, tk := range g.Tasks {
-			it := domain.ImportedTask{
+			dg.Tasks = append(dg.Tasks, domain.ImportedTask{
 				Task: domain.NewTask{
 					Name:    strings.TrimSpace(tk.Name),
 					OwnerID: tk.OwnerId,
 					Start:   tk.StartDate.Time,
 					End:     tk.EndDate.Time,
 				},
-			}
-			if tk.ExpectedDeliverable != nil {
-				it.ExpectedDeliverable = strings.TrimSpace(*tk.ExpectedDeliverable)
-			}
-			dg.Tasks = append(dg.Tasks, it)
+			})
 		}
 		groups = append(groups, dg)
 	}
@@ -419,12 +401,6 @@ func (s *Server) ImportTasks(w http.ResponseWriter, r *http.Request, projectId i
 					ProjectID: pgtype.Int8{Int64: projectId, Valid: true},
 					TaskID:    pgtype.Int8{Int64: task.ID, Valid: true},
 				}); err != nil {
-					failImportInternal(err)
-					return
-				}
-			}
-			if it.ExpectedDeliverable != "" {
-				if _, err := qtx.CreateDeliverable(r.Context(), store.CreateDeliverableParams{TaskID: task.ID, Name: it.ExpectedDeliverable, CreatedBy: uid}); err != nil {
 					failImportInternal(err)
 					return
 				}

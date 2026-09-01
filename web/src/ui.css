@@ -322,6 +322,12 @@ body {
 .task-sheet-row { min-height: 58px; border-bottom: 1px solid #edf0f4; }
 .task-sheet-row:last-child { border-bottom: 0; }
 .task-sheet-cell { padding: 8px 10px; min-width: 0; }
+/* 裁决 #164：行下展开的五个选填字段区。 */
+.task-sheet-more {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  min-width: 1010px; padding: 10px 12px 14px;
+  background: #f7f8fa; border-bottom: 1px solid #edf0f4;
+}
 .task-sheet-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
 
 .row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 3px; }

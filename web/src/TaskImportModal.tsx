@@ -10,7 +10,7 @@ type KeyResult = components["schemas"]["KeyResult"];
 // 步骤与解析在 import/ImportSkeleton 里（#105），这里只给字段定义与结构组装。
 // 入口的权限由页面按 project.canEdit 派生字段控制，规则本身在域层（CanImportTasks）。
 
-type FieldKey = "krCode" | "taskName" | "taskOwner" | "startDate" | "endDate" | "deliverable";
+type FieldKey = "krCode" | "taskName" | "taskOwner" | "startDate" | "endDate";
 
 const FIELDS: ImportField<FieldKey>[] = [
   { key: "krCode", label: "所属 KR 编号", guess: /KR|关键结果/ },
@@ -18,16 +18,15 @@ const FIELDS: ImportField<FieldKey>[] = [
   { key: "taskOwner", label: "任务负责人", guess: /负责人/, person: true },
   { key: "startDate", label: "开始日期", guess: /开始/ },
   { key: "endDate", label: "截止日期", guess: /截止|结束/ },
-  { key: "deliverable", label: "预期交付物", guess: /交付/ },
 ];
 
+// 裁决 #164：导入模板不再含「预期交付物」列，导入保持轻量，其余字段导入后在抽屉补。
 const TEMPLATE_COLUMNS = [
   { header: "所属 KR 编号", sample: "KR1.1" },
   { header: "任务名称", sample: "盘点三套核心库对象与不兼容项" },
   { header: "任务负责人", sample: "陈牧阳" },
   { header: "开始日期", sample: "2026-03-09" },
   { header: "截止日期", sample: "2026-03-26" },
-  { header: "预期交付物", sample: "核心库不兼容对象清单" },
 ];
 
 const normalizeDate = (s: string) => {
@@ -85,7 +84,6 @@ function makeAssemble(krByCode: Map<string, KeyResult>) {
         ownerId: ownerId ?? 0,
         startDate: sd,
         endDate: ed,
-        expectedDeliverable: v("deliverable") || undefined,
       });
     }
     return { structure: out, problems };
@@ -114,7 +112,7 @@ export default function TaskImportModal({
       title="批量导入任务"
       subtitle="字段映射 → 人员匹配 → 结构预览 → 生成任务"
       intro="选择 CSV／xlsx 文件，或从 Excel 复制后直接粘贴（首行为表头）；所属 KR 用编号（如 KR1.1）定位，留空表示沿用上一行。"
-      pastePlaceholder={"所属 KR 编号\t任务名称\t任务负责人\t开始日期\t截止日期\t预期交付物"}
+      pastePlaceholder={"所属 KR 编号\t任务名称\t任务负责人\t开始日期\t截止日期"}
       templateFileName="任务导入模板.xlsx"
       templateColumns={TEMPLATE_COLUMNS}
       fields={FIELDS}
@@ -137,7 +135,6 @@ export default function TaskImportModal({
                 <div key={i} className="muted" style={{ marginLeft: 16, marginTop: 4, fontSize: 14 }}>
                   {t.name} · {members.find((m) => m.userId === t.ownerId)?.displayName ?? "？"} ·{" "}
                   {t.startDate || "?"}—{t.endDate || "?"}
-                  {t.expectedDeliverable ? ` · ${t.expectedDeliverable}` : ""}
                 </div>
               ))}
             </div>

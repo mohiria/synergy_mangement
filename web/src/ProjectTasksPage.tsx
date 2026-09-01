@@ -442,7 +442,14 @@ type TaskRow = {
   name: string;
   ownerId?: number;
   period?: [Dayjs | null, Dayjs | null] | null;
-  outputName: string;
+  // 裁决 #164：五个选填字段（量化指标、任务说明、参与人、成果接收方、成果审核人）。
+  showMore: boolean;
+  completionCriteria: string;
+  description: string;
+  participantIds: number[];
+  reviewerIds: number[];
+  receiverScope: "none" | "members" | "all";
+  receiverIds: number[];
 };
 
 let taskRowSeq = 0;
@@ -474,10 +481,16 @@ function CreateTaskModal({
     key: ++taskRowSeq,
     keyResultId: invite ? invite.keyResultId : krList[0]?.id,
     name: "",
-    outputName: "",
     ownerId: members.some((m) => m.userId === currentUserId && m.role !== "viewer")
       ? currentUserId
       : undefined,
+    showMore: false,
+    completionCriteria: "",
+    description: "",
+    participantIds: [],
+    reviewerIds: [],
+    receiverScope: "none",
+    receiverIds: [],
   });
 
   useEffect(() => {
@@ -521,13 +534,26 @@ function CreateTaskModal({
         setError("每项任务都要填写开始与截止时间");
         return;
       }
+      if (r.receiverScope === "members" && r.receiverIds.length === 0) {
+        setError("指定成员为接收方时至少选择一人");
+        return;
+      }
+      if (r.participantIds.includes(r.ownerId)) {
+        setError("任务负责人已单列，不必再选为参与人");
+        return;
+      }
       items.push({
         keyResultId: r.keyResultId,
         name: r.name.trim(),
         ownerId: r.ownerId,
         startDate: r.period[0].format("YYYY-MM-DD"),
         endDate: r.period[1].format("YYYY-MM-DD"),
-        expectedDeliverable: r.outputName.trim() || undefined,
+        completionCriteria: r.completionCriteria.trim() || undefined,
+        description: r.description.trim() || undefined,
+        participantIds: r.participantIds.length > 0 ? r.participantIds : undefined,
+        reviewerIds: r.reviewerIds.length > 0 ? r.reviewerIds : undefined,
+        receiverScope: r.receiverScope !== "none" ? r.receiverScope : undefined,
+        receiverIds: r.receiverScope === "members" ? r.receiverIds : undefined,
       });
     }
     setSaving(true);
@@ -581,62 +607,132 @@ function CreateTaskModal({
           <span>任务名称</span>
           <span>负责人</span>
           <span>任务周期</span>
-          <span>预期交付物</span>
+          <span>选填信息</span>
           <span />
         </div>
         {rows.map((r) => (
-          <div key={r.key} className="task-sheet-row">
-            <div className="task-sheet-cell">
-              <Select
-                style={{ width: "100%" }}
-                options={krOptions}
-                value={r.keyResultId}
-                onChange={(v) => patch(r.key, { keyResultId: v })}
-                placeholder="所属 KR"
-              />
+          <div key={r.key}>
+            <div className="task-sheet-row">
+              <div className="task-sheet-cell">
+                <Select
+                  style={{ width: "100%" }}
+                  options={krOptions}
+                  value={r.keyResultId}
+                  onChange={(v) => patch(r.key, { keyResultId: v })}
+                  placeholder="所属 KR"
+                />
+              </div>
+              <div className="task-sheet-cell">
+                <Input
+                  maxLength={200}
+                  placeholder="任务名称"
+                  value={r.name}
+                  onChange={(e) => patch(r.key, { name: e.target.value })}
+                />
+              </div>
+              <div className="task-sheet-cell">
+                <Select
+                  style={{ width: "100%" }}
+                  options={ownerOptions}
+                  value={r.ownerId}
+                  onChange={(v) => patch(r.key, { ownerId: v })}
+                  showSearch
+                  filterOption={(input, option) =>
+                    `${option?.label ?? ""}${option?.username ?? ""}`
+                      .toLowerCase()
+                      .includes(input.toLowerCase())
+                  }
+                  placeholder="负责人"
+                />
+              </div>
+              <div className="task-sheet-cell">
+                <DateRangeField value={r.period} onChange={(v) => patch(r.key, { period: v })} />
+              </div>
+              <div className="task-sheet-cell">
+                {/* 裁决 #164：量化指标、任务说明、参与人、成果接收方、成果审核人五个选填字段。 */}
+                <Button size="small" onClick={() => patch(r.key, { showMore: !r.showMore })}>
+                  {r.showMore ? "收起选填" : "展开选填"}
+                </Button>
+              </div>
+              <Button
+                type="text"
+                size="small"
+                onClick={() => setRows((rs) => rs.filter((x) => x.key !== r.key))}
+                aria-label="删除该任务行"
+              >
+                ✕
+              </Button>
             </div>
-            <div className="task-sheet-cell">
-              <Input
-                maxLength={200}
-                placeholder="任务名称"
-                value={r.name}
-                onChange={(e) => patch(r.key, { name: e.target.value })}
-              />
-            </div>
-            <div className="task-sheet-cell">
-              <Select
-                style={{ width: "100%" }}
-                options={ownerOptions}
-                value={r.ownerId}
-                onChange={(v) => patch(r.key, { ownerId: v })}
-                showSearch
-                filterOption={(input, option) =>
-                  `${option?.label ?? ""}${option?.username ?? ""}`
-                    .toLowerCase()
-                    .includes(input.toLowerCase())
-                }
-                placeholder="负责人"
-              />
-            </div>
-            <div className="task-sheet-cell">
-              <DateRangeField value={r.period} onChange={(v) => patch(r.key, { period: v })} />
-            </div>
-            <div className="task-sheet-cell">
-              <Input
-                maxLength={100}
-                placeholder="预期交付物（选填）"
-                value={r.outputName}
-                onChange={(e) => patch(r.key, { outputName: e.target.value })}
-              />
-            </div>
-            <Button
-              type="text"
-              size="small"
-              onClick={() => setRows((rs) => rs.filter((x) => x.key !== r.key))}
-              aria-label="删除该任务行"
-            >
-              ✕
-            </Button>
+            {r.showMore && (
+              <div className="task-sheet-more">
+                <div>
+                  <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>量化指标（选填）</div>
+                  <Input
+                    maxLength={2000}
+                    value={r.completionCriteria}
+                    onChange={(e) => patch(r.key, { completionCriteria: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>任务说明（选填）</div>
+                  <Input
+                    maxLength={2000}
+                    value={r.description}
+                    onChange={(e) => patch(r.key, { description: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>参与人（选填，不含负责人）</div>
+                  <Select
+                    mode="multiple"
+                    style={{ width: "100%" }}
+                    options={members
+                      .filter((m) => m.userId !== r.ownerId)
+                      .map((m) => ({ value: m.userId, label: m.displayName }))}
+                    value={r.participantIds}
+                    onChange={(v) => patch(r.key, { participantIds: v })}
+                    placeholder="选择参与人"
+                  />
+                </div>
+                <div>
+                  <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>成果审核人（选填，非只读成员）</div>
+                  <Select
+                    mode="multiple"
+                    style={{ width: "100%" }}
+                    options={ownerOptions}
+                    value={r.reviewerIds}
+                    onChange={(v) => patch(r.key, { reviewerIds: v })}
+                    placeholder="选择成果审核人"
+                  />
+                </div>
+                <div>
+                  <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>成果接收方（选填）</div>
+                  <Select
+                    style={{ width: "100%" }}
+                    value={r.receiverScope}
+                    onChange={(v) => patch(r.key, { receiverScope: v, receiverIds: [] })}
+                    options={[
+                      { value: "none", label: "未配置" },
+                      { value: "members", label: "指定成员" },
+                      { value: "all", label: "所有项目成员" },
+                    ]}
+                  />
+                </div>
+                {r.receiverScope === "members" && (
+                  <div>
+                    <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>接收方名单（至少一人）</div>
+                    <Select
+                      mode="multiple"
+                      style={{ width: "100%" }}
+                      options={members.map((m) => ({ value: m.userId, label: m.displayName }))}
+                      value={r.receiverIds}
+                      onChange={(v) => patch(r.key, { receiverIds: v })}
+                      placeholder="选择接收方"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         ))}
       </div>
