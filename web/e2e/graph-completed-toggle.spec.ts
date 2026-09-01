@@ -87,28 +87,23 @@ test.describe("显示已完成开关", () => {
   });
 });
 
-// Q-07（#90）：AC-43 的「高亮关系两端」靠淡化其余节点反衬，成员节点必须一起参与，
-// 否则选中一条关系时旁边照常亮着的成员节点会把对比削掉。
-// 固定坐标（cmd/seed）：KR1.2 下「完成第三方报表工具兼容性验证」的输入由成员郑凯提供；
-// 「完成资金模块驱动切换与连接池调优」与该关系无关（它的邻居是 1.1.x 与 1.2.4）。
-test.describe("成员节点参与淡化", () => {
-  const MEMBER = "郑凯";
-  const UNRELATED_TASK = "完成资金模块驱动切换与连接池调优";
-
+// #159（裁决）：图谱节点只保留 O／KR／任务，不再生成成员（人名）节点及其连线；
+// 成员提供的输入只在任务详情面板（输入源）与关系列表表达。
+// 原 Q-07「成员节点参与淡化」用例随成员节点一起废弃。
+// 固定坐标（cmd/seed）：KR1.2 下「完成第三方报表工具兼容性验证」的输入由成员郑凯提供，
+// 该 KR 层此前必然渲染成员节点。
+test.describe("图谱无成员节点（#159）", () => {
   test.beforeEach(async ({ page }) => {
     await login(page);
   });
 
-  test("选中无关任务时成员节点淡化，选中它自己的关系时回到高亮", async ({ page }) => {
+  test("KR 层与全局展开层都不渲染成员节点", async ({ page }) => {
     await openGraph(page, "?kr=2");
-    const member = page.locator(".gnode-member", { hasText: MEMBER });
-    await expect(member).toBeVisible();
-    await expect(member).not.toHaveClass(/dimmed/);
+    await expect(page.locator(".gnode").first()).toBeVisible();
+    await expect(page.locator(".gnode-member")).toHaveCount(0);
 
-    await page.locator(".gnode", { hasText: UNRELATED_TASK }).first().click();
-    await expect(member).toHaveClass(/dimmed/);
-
-    await member.click();
-    await expect(member).not.toHaveClass(/dimmed/);
+    await page.getByRole("button", { name: "全局展开" }).click();
+    await expect(page.locator(".gnode-task").first()).toBeVisible();
+    await expect(page.locator(".gnode-member")).toHaveCount(0);
   });
 });

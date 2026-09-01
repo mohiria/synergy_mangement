@@ -33,16 +33,17 @@ const GRAPH_BATCH_STEP = 100;
 const ZOOM_MIN = 0.45;
 const ZOOM_MAX = 2.2;
 
-// #146：任务／成员节点是实线圆环（PRD §11；原型 nodeMarkup r=29、聚焦起点 r=35）。
+// #146：任务节点是实线圆环（PRD §11；原型 nodeMarkup r=29、聚焦起点 r=35）。
+// #159 裁决：图谱节点只有 O／KR／任务三类，成员节点及其连线不再渲染。
 const TASK_R = 29;
 const TASK_R_FOCUS = 35;
-const MEMBER_R = 29;
 
 // #124 同口径（ArtifactsPage）：这些类型走浏览器内联预览，其余只下载。
 const PREVIEWABLE = new Set(["pdf", "png", "jpg", "jpeg", "gif", "webp", "txt"]);
 
-// #149：图谱选中对象——任务与边沿用独立 state（联动淡化），O／KR／成员是纯详情选中。
-type NodeSelection = { kind: "o" | "kr" | "member"; id: number };
+// #149：图谱选中对象——任务与边沿用独立 state（联动淡化），O／KR 是纯详情选中
+// （#159 后成员不再是图谱节点）。
+type NodeSelection = { kind: "o" | "kr"; id: number };
 
 // CR-19（#145）：节点拖拽在当前浏览会话内固定——模块级缓存在组件卸载后存活，
 // 刷新页面即清空、其他用户不继承；key 为「项目:视图:节点」，各层级坐标系互不串。
@@ -253,7 +254,6 @@ export default function CollaborationPage({
   );
   const krById = useMemo(() => new Map(krList.map((k) => [k.id, k])), [krList]);
   const taskById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
-  const edgeById = useMemo(() => new Map(edges.map((e) => [e.id, e])), [edges]);
 
   // 拖拽固定的缓存 key：不同层级布局坐标系不同，偏移只在本视图内生效（CR-19）。
   // #151：key 从任务 id 泛化为节点 key（t:／o:／kr:／m:边／mp:成员），全部节点可拖。
@@ -346,13 +346,20 @@ export default function CollaborationPage({
   // 裁决 K＝A（#114，F-11）：层级视图按工具栏筛选淡化——O 筛选淡化非选中 O 及其 KR，
   // KR 筛选淡化非选中 KR，人员筛选按该 KR 下有无该人员的任务淡化；口径与另两层一致（AC-45）。
   const filtering = oFilter !== "all" || krFilter !== "all" || personFilter !== "all";
+  // #159：人员筛选语义＝按任务负责人或参与人过滤任务节点（图谱已无成员节点）。
+  const matchesPerson = useCallback(
+    (t: Task) =>
+      personFilter === "all" ||
+      t.ownerId === personFilter ||
+      (t.participants ?? []).some((p) => p.userId === personFilter),
+    [personFilter],
+  );
   const krPass = useCallback(
     (k: (typeof krList)[number]) =>
       (oFilter === "all" || k.objectiveId === oFilter) &&
       (krFilter === "all" || k.id === krFilter) &&
-      (personFilter === "all" ||
-        tasks.some((t) => t.keyResultId === k.id && t.ownerId === personFilter)),
-    [oFilter, krFilter, personFilter, tasks],
+      (personFilter === "all" || tasks.some((t) => t.keyResultId === k.id && matchesPerson(t))),
+    [oFilter, krFilter, personFilter, tasks, matchesPerson],
   );
 
   // —— O／KR 层级树布局（#148 对齐原型 aggregateModel）：横向——O 排上方，
@@ -419,15 +426,16 @@ export default function CollaborationPage({
 
   // —— KR 任务关系层布局（#152 用户裁定，偏离原型放射形态）：左→右流向——
   // KR 固定画布最左，本 KR 任务按 KR 内依赖链深度分列、自左向右展开；
-  // 外部相邻任务放最右一列，成员来源输入在 KR 下方竖排（CR-13 保留成员节点）。 ——
+  // 外部相邻任务放最右一列（#159：成员输入不上画布，只在详情面板表达）。 ——
   const krLayer = useMemo(() => {
     if (mode.kind !== "kr") return null;
     const kr = krById.get(mode.krId);
     if (!kr) return null;
     const inKr = tasks.filter((t) => t.keyResultId === mode.krId && isTaskVisible(t));
     const inKrIds = new Set(inKr.map((t) => t.id));
+    // #159：只保留任务↔任务边；成员来源（sourceTaskId 为空）的输入边不绘制。
     const relevantEdges = edges.filter(
-      (e) => (e.sourceTaskId != null && inKrIds.has(e.sourceTaskId)) || inKrIds.has(e.targetTaskId),
+      (e) => e.sourceTaskId != null && (inKrIds.has(e.sourceTaskId) || inKrIds.has(e.targetTaskId)),
     );
     const neighborIds = new Set<number>();
     for (const e of relevantEdges) {
@@ -478,16 +486,6 @@ export default function CollaborationPage({
     // 外部相邻任务：最右一列（跨 KR 的边由 edgePath 的反向曲率区分方向）。
     const neighborX = colStart + colCount * colGap + 60;
     neighbors.forEach((t, i) => positions.set(t.id, slot(neighborX, topY + i * rowGap)));
-    // 成员来源输入：KR 下方竖排，与任务列同为左缘出发。
-    const memberNodes: { edgeId: number; label: string; inputName: string }[] = [];
-    const memberX = krX + 70;
-    const memberTop = topY + Math.max(maxRows, 1) * rowGap + 40;
-    relevantEdges.forEach((e) => {
-      if (e.sourceTaskId == null && e.inputRequest) {
-        positions.set(-e.id, slot(memberX, memberTop + memberNodes.length * rowGap));
-        memberNodes.push({ edgeId: e.id, label: e.inputRequest.providerName, inputName: e.name });
-      }
-    });
     // KR 节点（CR-21 白底三态复用；已在本层，点它不再下钻）：最左、对任务行竖向居中。
     const krCy = maxRows > 0 ? topY + ((maxRows - 1) * rowGap) / 2 : topY;
     const krPos = { x: krX, y: krCy - krH / 2, w: krW, h: krH };
@@ -497,13 +495,9 @@ export default function CollaborationPage({
       (t) => t.keyResultId === mode.krId && t.status === "completed" && !isTaskVisible(t),
     ).length;
     const rows = Math.max(maxRows, neighbors.length);
-    const height = Math.max(
-      topY + rows * rowGap + 80,
-      memberNodes.length > 0 ? memberTop + memberNodes.length * rowGap + 40 : 0,
-      krPos.y + krH + 80,
-    );
+    const height = Math.max(topY + rows * rowGap + 80, krPos.y + krH + 80);
     const width = Math.max(700, neighborX + 130);
-    return { kr, krPos, inKr, neighbors, relevantEdges, positions, memberNodes, hiddenCompleted, width, height };
+    return { kr, krPos, inKr, neighbors, relevantEdges, positions, hiddenCompleted, width, height };
   }, [mode, krById, tasks, edges, isTaskVisible]);
 
   // —— 任务聚焦层布局（AC-27、CR-05）：逐层展开 ——
@@ -582,25 +576,16 @@ export default function CollaborationPage({
         positions.set(id, slot(cx + Math.cos(angle) * rx, cy + Math.sin(angle) * ry));
       });
     });
-    // 成员来源的输入：左侧竖排（原型 person 落位），作为可点节点参与聚焦（CR-13）。
-    const memberNodes: { edgeId: number; label: string; inputName: string }[] = [];
-    const relevantEdges = edges.filter((e) => {
-      const targetIn = visible.has(e.targetTaskId);
-      if (e.sourceTaskId == null) return targetIn && !!e.inputRequest;
-      return visible.has(e.sourceTaskId) && targetIn;
-    });
-    relevantEdges.forEach((e) => {
-      if (e.sourceTaskId == null && e.inputRequest) {
-        positions.set(-e.id, slot(120, 200 + memberNodes.length * 130));
-        memberNodes.push({ edgeId: e.id, label: e.inputRequest.providerName, inputName: e.name });
-      }
-    });
+    // #159：成员来源的输入不上画布，只保留任务↔任务边（成员输入在任务详情面板表达）。
+    const relevantEdges = edges.filter(
+      (e) => e.sourceTaskId != null && visible.has(e.sourceTaskId) && visible.has(e.targetTaskId),
+    );
     const width = cx + maxRx + 160;
-    const height = Math.max(cy + maxRy + 140, 200 + memberNodes.length * 130 + 60);
+    const height = cy + maxRy + 140;
     const visibleTasks = [...visible]
       .map((id) => taskById.get(id))
       .filter((t): t is Task => !!t);
-    return { origin, visibleTasks, relevantEdges, positions, memberNodes, height, width };
+    return { origin, visibleTasks, relevantEdges, positions, height, width };
   }, [mode, expanded, edges, taskById, isTaskVisible]);
 
   // —— 全局展开布局（AC-09）：O/KR 分组骨架 + 全部任务 + 关系相关项目成员 ——
@@ -654,39 +639,20 @@ export default function CollaborationPage({
       }
       maxY = Math.max(maxY, y);
     });
-    // 关系相关项目成员节点（词汇表）：承担输入责任的成员，底部横排。
-    const memberEdges = edges.filter((e) => e.sourceTaskId == null && e.inputRequest && visibleIds.has(e.targetTaskId));
-    const memberByProvider = new Map<number, { name: string; edgeIds: number[] }>();
-    for (const e of memberEdges) {
-      const pid = e.inputRequest!.providerId;
-      const entry = memberByProvider.get(pid) ?? { name: e.inputRequest!.providerName, edgeIds: [] };
-      entry.edgeIds.push(e.id);
-      memberByProvider.set(pid, entry);
-    }
-    const memberNodes: { providerId: number; name: string; pos: NodePos; edgeIds: number[] }[] = [];
-    let mi = 0;
-    const memberY = maxY + 24;
-    for (const [pid, entry] of memberByProvider) {
-      const pos = { x: 24 + mi * 216, y: memberY, w: 200, h: 88 };
-      memberNodes.push({ providerId: pid, name: entry.name, pos, edgeIds: entry.edgeIds });
-      for (const eid of entry.edgeIds) positions.set(-eid, pos);
-      mi++;
-    }
-    const visibleEdges = edges.filter((e) => {
-      const targetOK = visibleIds.has(e.targetTaskId);
-      const sourceOK = e.sourceTaskId != null ? visibleIds.has(e.sourceTaskId) : positions.has(-e.id);
-      return targetOK && sourceOK;
-    });
-    const height = (memberNodes.length > 0 ? memberY + 88 : maxY) + 40;
-    const width = Math.max(24 + objectives.length * (colW + colGap), 24 + mi * 216) + 20;
-    return { visibleTasks, positions, oNodes, krNodes, ownsLinks, memberNodes, visibleEdges, height, width };
+    // #159：成员不再生成节点，协作线只连接任务↔任务。
+    const visibleEdges = edges.filter(
+      (e) => e.sourceTaskId != null && visibleIds.has(e.sourceTaskId) && visibleIds.has(e.targetTaskId),
+    );
+    const height = maxY + 40;
+    const width = 24 + objectives.length * (colW + colGap) + 20;
+    return { visibleTasks, positions, oNodes, krNodes, ownsLinks, visibleEdges, height, width };
   }, [mode, tasks, edges, objectives, krList, isTaskVisible]);
 
   // 筛选淡化（AC-09；细化 AC-45 随 #20）：O/KR/人员不匹配 → 淡化保留上下文。
   const taskMatchesFilter = (t: Task) => {
     if (krFilter !== "all" && t.keyResultId !== krFilter) return false;
     if (oFilter !== "all" && krById.get(t.keyResultId)?.objectiveId !== oFilter) return false;
-    if (personFilter !== "all" && t.ownerId !== personFilter) return false;
+    if (!matchesPerson(t)) return false;
     return true;
   };
   const hasFilter = oFilter !== "all" || krFilter !== "all" || personFilter !== "all";
@@ -942,11 +908,6 @@ export default function CollaborationPage({
     h: r * 2,
   });
   const taskCircle = (id: number, base: NodePos): NodePos => circleBounds(withOffset(`t:${id}`, base), taskRadius(id));
-  // #151：成员节点带拖拽偏移的圆包围盒；kr／focus 层按边（m:），全局展开按成员（mp:）。
-  const memberCircleKeyed = (nodeKey: string, base: NodePos): NodePos =>
-    circleBounds(withOffset(nodeKey, base), MEMBER_R);
-  const memberKeyForEdge = (e: DeliverableEdge) =>
-    mode.kind === "full" ? `mp:${e.inputRequest?.providerId}` : `m:${e.id}`;
 
   // #151：O→KR 的 V-H-V 正交线（原型 edgePath owns 分支，46% 处转水平）——
   // 在渲染时按偏移后的两端位置重算，拖动任一端连线跟随。
@@ -1072,26 +1033,6 @@ export default function CollaborationPage({
     ro.observe(el);
     return () => ro.disconnect();
   }, [viewMode, loading, notFound]);
-
-  // AC-43：选中一条关系或一个任务时，与之无关的成员节点同样淡化——
-  // 否则「高亮关系两端」会被旁边照常亮着的成员节点削弱（Q-07）。
-  // 成员节点挂在「指定成员输入」的边上，按它所在边与该边的接收任务判定。
-  const memberDimmed = (edgeIds: number[]) => {
-    const targets = edgeIds
-      .map((id) => edgeById.get(id)?.targetTaskId)
-      .filter((id): id is number => id != null);
-    const dimByFilter =
-      hasFilter &&
-      !targets.some((id) => {
-        const t = taskById.get(id);
-        return t ? taskMatchesFilter(t) : false;
-      });
-    const dimBySelect =
-      selectedEdge != null
-        ? !edgeIds.includes(selectedEdge)
-        : neighborIds != null && !targets.some((id) => neighborIds.has(id));
-    return dimByFilter || dimBySelect;
-  };
 
   // 任务风险三态：卡点等级取最大值；小地图与节点样式共用一份口径。
   const taskRiskLevel = (taskId: number): "high_risk" | "warning" | "" => {
@@ -1716,73 +1657,9 @@ export default function CollaborationPage({
     </aside>
   );
 
-  // #149 成员节点详情（§8.1：当前关系职责、待提供内容、关联任务、计划时间）。
-  // 职责列表由该成员承担的全部输入边聚合（与画布同一份数据），每条可点选对应边。
-  const memberDuties =
-    selectedNode?.kind === "member"
-      ? edges.filter((e) => e.inputRequest?.providerId === selectedNode.id)
-      : [];
-  const memberInspector = selectedNode?.kind === "member" && memberDuties.length > 0 && (
-    <aside className="graph-inspector">
-      <div className="graph-inspector-head">
-        <h2>节点详情</h2>
-        <button type="button" aria-label="关闭详情" onClick={() => setSelectedNode(null)}>
-          ✕
-        </button>
-      </div>
-      <div className="graph-inspector-body">
-        <div className="gi-title">
-          <span className="gi-eyebrow">关系相关项目成员</span>
-          <h2 title={memberDuties[0].inputRequest!.providerName}>
-            {memberDuties[0].inputRequest!.providerName}
-          </h2>
-        </div>
-        <div className="gi-grid">
-          <div className="gi-prop">
-            <span>待提供输入</span>
-            <strong>{memberDuties.filter((e) => !e.ready).length} 项</strong>
-          </div>
-          <div className="gi-prop">
-            <span>关联任务</span>
-            <strong>{new Set(memberDuties.map((e) => e.targetTaskId)).size} 个</strong>
-          </div>
-        </div>
-        <div className="gi-block">
-          <div className="gi-block-head">
-            <b>当前关系职责</b>
-            <span>{memberDuties.length} 条</span>
-          </div>
-          {memberDuties.map((e) => (
-            <button
-              key={e.id}
-              type="button"
-              className="gi-mini"
-              title={e.name}
-              onClick={() => {
-                setSelectedTask(null);
-                setImpactMode(false);
-                setSelectedNode(null);
-                setSelectedEdge(e.id);
-              }}
-            >
-              <span>
-                <b>{e.name}</b>
-                <small>
-                  目标 {taskById.get(e.targetTaskId)?.code ?? ""} {e.targetTaskName ?? ""} · 期望{" "}
-                  {e.expectedDate ?? "—"}
-                </small>
-              </span>
-              <span className={`gi-badge ${e.ready ? "ready" : "risk-warning"}`}>
-                {e.ready ? "已就绪" : "未就绪"}
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
-    </aside>
-  );
-
-  const inspector = taskInspector || oInspector || krInspector || memberInspector;
+  // #159 裁决：成员不再是图谱节点，无成员详情面板；成员提供的输入从任务详情的
+  // 输入源或关系列表进入对应关系详情查看。
+  const inspector = taskInspector || oInspector || krInspector;
 
   // CR-21 KR 节点三态：高风险归红态，预警归橙态，其余灰态。
   // riskLevel 本身已由后端读时派生（卡点等级、超期、临期取最大值），前端不再叠加卡点数
@@ -1836,23 +1713,22 @@ export default function CollaborationPage({
   // 小地图模型（原型 cp-minimap）：非归属关系边画线、节点画色点；数据量小，直接算不缓存。
   const mmDots: { x: number; y: number; cls: string }[] = [];
   const mmLines: { x1: number; y1: number; x2: number; y2: number }[] = [];
-  // #146：任务／成员的小地图点位取圆心（id 非空按任务圆换算，成员由调用方先转圆）。
+  // #146：任务的小地图点位取圆心（id 非空按任务圆换算）。
   const mmDot = (id: number | null, pos: NodePos, cls: string) => {
     const p = id != null ? taskCircle(id, pos) : pos;
     mmDots.push({ x: p.x + p.w / 2, y: p.y + p.h / 2, cls });
   };
+  // #159：小地图只画任务↔任务边（成员边不再上画布）。
   const mmEdgeLines = (
     edgeList: DeliverableEdge[],
     positions: Map<number, NodePos>,
   ) => {
     for (const e of edgeList) {
-      const fromBase = e.sourceTaskId != null ? positions.get(e.sourceTaskId) : positions.get(-e.id);
+      if (e.sourceTaskId == null) continue;
+      const fromBase = positions.get(e.sourceTaskId);
       const toBase = positions.get(e.targetTaskId);
       if (!fromBase || !toBase) continue;
-      const from =
-        e.sourceTaskId != null
-          ? taskCircle(e.sourceTaskId, fromBase)
-          : memberCircleKeyed(memberKeyForEdge(e), fromBase);
+      const from = taskCircle(e.sourceTaskId, fromBase);
       const to = taskCircle(e.targetTaskId, toBase);
       mmLines.push({ x1: from.x + from.w / 2, y1: from.y + from.h / 2, x2: to.x + to.w / 2, y2: to.y + to.h / 2 });
     }
@@ -1872,19 +1748,11 @@ export default function CollaborationPage({
       const pos = krLayer.positions.get(t.id);
       if (pos) mmDot(t.id, pos, taskRiskLevel(t.id));
     }
-    for (const m of krLayer.memberNodes) {
-      const pos = krLayer.positions.get(-m.edgeId);
-      if (pos) mmDot(null, memberCircleKeyed(`m:${m.edgeId}`, pos), "member");
-    }
     mmEdgeLines(krLayer.relevantEdges, krLayer.positions);
   } else if (mode.kind === "focus" && focusLayer) {
     for (const t of focusLayer.visibleTasks) {
       const pos = focusLayer.positions.get(t.id);
       if (pos) mmDot(t.id, pos, taskRiskLevel(t.id));
-    }
-    for (const m of focusLayer.memberNodes) {
-      const pos = focusLayer.positions.get(-m.edgeId);
-      if (pos) mmDot(null, memberCircleKeyed(`m:${m.edgeId}`, pos), "member");
     }
     mmEdgeLines(focusLayer.relevantEdges, focusLayer.positions);
   } else if (mode.kind === "full" && full) {
@@ -1894,7 +1762,6 @@ export default function CollaborationPage({
       const pos = full.positions.get(t.id);
       if (pos) mmDot(t.id, pos, taskRiskLevel(t.id));
     }
-    for (const m of full.memberNodes) mmDot(null, memberCircleKeyed(`mp:${m.providerId}`, m.pos), "member");
     mmEdgeLines(full.visibleEdges, full.positions);
   }
   const mmDotR = Math.max(10, stageSize.w / 110);
@@ -1970,9 +1837,17 @@ export default function CollaborationPage({
                 onChange={setPersonFilter}
                 options={[
                   { value: "all" as const, label: "全部人员" },
-                  ...[...new Map(tasks.map((t) => [t.ownerId, t.ownerName])).entries()].map(
-                    ([id, name]) => ({ value: id, label: name }),
-                  ),
+                  // #159：人员筛选按任务负责人／参与人过滤任务节点，候选也覆盖两者。
+                  ...[
+                    ...new Map(
+                      tasks.flatMap((t) => [
+                        [t.ownerId, t.ownerName] as [number, string],
+                        ...(t.participants ?? []).map(
+                          (p) => [p.userId, p.displayName] as [number, string],
+                        ),
+                      ]),
+                    ).entries(),
+                  ].map(([id, name]) => ({ value: id, label: name })),
                 ]}
               />
               <span className="muted" style={{ fontSize: 12 }}>
@@ -2289,14 +2164,11 @@ export default function CollaborationPage({
                       );
                     })}
                     {krLayer.relevantEdges.map((e) => {
-                      const fromBase =
-                        e.sourceTaskId != null ? krLayer.positions.get(e.sourceTaskId) : krLayer.positions.get(-e.id);
+                      if (e.sourceTaskId == null) return null;
+                      const fromBase = krLayer.positions.get(e.sourceTaskId);
                       const toBase = krLayer.positions.get(e.targetTaskId);
                       if (!fromBase || !toBase) return null;
-                      const from =
-                        e.sourceTaskId != null
-                          ? taskCircle(e.sourceTaskId, fromBase)
-                          : memberCircleKeyed(memberKeyForEdge(e), fromBase);
+                      const from = taskCircle(e.sourceTaskId, fromBase);
                       const to = taskCircle(e.targetTaskId, toBase);
                       return renderEdge(e, from, to);
                     })}
@@ -2340,60 +2212,17 @@ export default function CollaborationPage({
                     const pos = krLayer.positions.get(t.id);
                     return pos ? taskNode(t, pos) : null;
                   })}
-                  {krLayer.memberNodes.map((m) => {
-                    const posBase = krLayer.positions.get(-m.edgeId);
-                    if (!posBase) return null;
-                    // #146：成员节点是紫圆（原型 person），圆内姓名前两字、圆下 caption 显输入名。
-                    const pos = memberCircleKeyed(`m:${m.edgeId}`, posBase);
-                    // #149：点成员节点打开成员详情（该成员全部输入职责），不再借道边详情。
-                    const pid = edgeById.get(m.edgeId)?.inputRequest?.providerId;
-                    const select = () => {
-                      setSelectedTask(null);
-                      setImpactMode(false);
-                      setSelectedEdge(null);
-                      setSelectedNode((prev) =>
-                        pid == null || (prev?.kind === "member" && prev.id === pid)
-                          ? null
-                          : { kind: "member", id: pid },
-                      );
-                    };
-                    return (
-                      <div
-                        key={`m-${m.edgeId}`}
-                        role="button"
-                        tabIndex={0}
-                        className={`gnode gnode-member ${
-                          (selectedNode?.kind === "member" && selectedNode.id === pid) || selectedEdge === m.edgeId
-                            ? "selected"
-                            : ""
-                        } ${memberDimmed([m.edgeId]) ? "dimmed" : ""}`}
-                        style={{ left: pos.x, top: pos.y, width: pos.w, height: pos.h }}
-                        title={`${m.label} · ${m.inputName || "输入提供成员"}`}
-                        onMouseDown={(ev) => startDrag(`m:${m.edgeId}`, ev.clientX, ev.clientY)}
-                        onClick={guardClick(select)}
-                        onKeyDown={pressAsClick(select)}
-                      >
-                        <b>{m.label.slice(0, 2)}</b>
-                        <small>{m.inputName || "输入提供成员"}</small>
-                      </div>
-                    );
-                  })}
                 </>
               ) : mode.kind === "focus" && focusLayer ? (
                 <>
                   <svg className="graph-svg" width={focusLayer.width} height={focusLayer.height}>
                     {arrowDefs}
                     {focusLayer.relevantEdges.map((e) => {
-                      const fromBase =
-                        e.sourceTaskId != null
-                          ? focusLayer.positions.get(e.sourceTaskId)
-                          : focusLayer.positions.get(-e.id);
+                      if (e.sourceTaskId == null) return null;
+                      const fromBase = focusLayer.positions.get(e.sourceTaskId);
                       const toBase = focusLayer.positions.get(e.targetTaskId);
                       if (!fromBase || !toBase) return null;
-                      const from =
-                        e.sourceTaskId != null
-                          ? taskCircle(e.sourceTaskId, fromBase)
-                          : memberCircleKeyed(memberKeyForEdge(e), fromBase);
+                      const from = taskCircle(e.sourceTaskId, fromBase);
                       const to = taskCircle(e.targetTaskId, toBase);
                       return renderEdge(e, from, to);
                     })}
@@ -2401,42 +2230,6 @@ export default function CollaborationPage({
                   {focusLayer.visibleTasks.map((t) => {
                     const pos = focusLayer.positions.get(t.id);
                     return pos ? taskNode(t, pos) : null;
-                  })}
-                  {focusLayer.memberNodes.map((m) => {
-                    const posBase = focusLayer.positions.get(-m.edgeId);
-                    if (!posBase) return null;
-                    const pos = memberCircleKeyed(`m:${m.edgeId}`, posBase);
-                    const pid = edgeById.get(m.edgeId)?.inputRequest?.providerId;
-                    const select = () => {
-                      setSelectedTask(null);
-                      setImpactMode(false);
-                      setSelectedEdge(null);
-                      setSelectedNode((prev) =>
-                        pid == null || (prev?.kind === "member" && prev.id === pid)
-                          ? null
-                          : { kind: "member", id: pid },
-                      );
-                    };
-                    return (
-                      <div
-                        key={`fx-m-${m.edgeId}`}
-                        role="button"
-                        tabIndex={0}
-                        className={`gnode gnode-member ${
-                          (selectedNode?.kind === "member" && selectedNode.id === pid) || selectedEdge === m.edgeId
-                            ? "selected"
-                            : ""
-                        } ${memberDimmed([m.edgeId]) ? "dimmed" : ""}`}
-                        style={{ left: pos.x, top: pos.y, width: pos.w, height: pos.h }}
-                        title={`${m.label} · ${m.inputName || "输入提供成员"}`}
-                        onMouseDown={(ev) => startDrag(`m:${m.edgeId}`, ev.clientX, ev.clientY)}
-                        onClick={guardClick(select)}
-                        onKeyDown={pressAsClick(select)}
-                      >
-                        <b>{m.label.slice(0, 2)}</b>
-                        <small>{m.inputName || "输入提供成员"}</small>
-                      </div>
-                    );
                   })}
                 </>
               ) : mode.kind === "full" && full ? (
@@ -2465,13 +2258,10 @@ export default function CollaborationPage({
                         );
                       })}
                       {full.visibleEdges.map((e) => {
-                        const fromBase = e.sourceTaskId != null ? full.positions.get(e.sourceTaskId) : full.positions.get(-e.id);
+                        if (e.sourceTaskId == null) return null;
+                        const fromBase = full.positions.get(e.sourceTaskId);
                         const toBase = full.positions.get(e.targetTaskId);
-                        const from = fromBase
-                          ? e.sourceTaskId != null
-                            ? taskCircle(e.sourceTaskId, fromBase)
-                            : memberCircleKeyed(memberKeyForEdge(e), fromBase)
-                          : fromBase;
+                        const from = fromBase ? taskCircle(e.sourceTaskId, fromBase) : fromBase;
                         const to = toBase ? taskCircle(e.targetTaskId, toBase) : toBase;
                         if (!from || !to) return null;
                         const dim =
@@ -2538,40 +2328,6 @@ export default function CollaborationPage({
                     {full.visibleTasks.slice(0, renderBudget).map((t) => {
                       const pos = full.positions.get(t.id);
                       return pos ? taskNode(t, pos) : null;
-                    })}
-                    {full.memberNodes.map((m) => {
-                      const pos = memberCircleKeyed(`mp:${m.providerId}`, m.pos);
-                      const select = () => {
-                        setSelectedTask(null);
-                        setImpactMode(false);
-                        setSelectedEdge(null);
-                        setSelectedNode((prev) =>
-                          prev?.kind === "member" && prev.id === m.providerId
-                            ? null
-                            : { kind: "member", id: m.providerId },
-                        );
-                      };
-                      return (
-                        <div
-                          key={`fm-${m.providerId}`}
-                          role="button"
-                          tabIndex={0}
-                          className={`gnode gnode-member ${
-                            (selectedNode?.kind === "member" && selectedNode.id === m.providerId) ||
-                            (selectedEdge != null && m.edgeIds.includes(selectedEdge))
-                              ? "selected"
-                              : ""
-                          } ${memberDimmed(m.edgeIds) ? "dimmed" : ""}`}
-                          style={{ left: pos.x, top: pos.y, width: pos.w, height: pos.h }}
-                          title={`${m.name} · 关系相关项目成员`}
-                          onMouseDown={(ev) => startDrag(`mp:${m.providerId}`, ev.clientX, ev.clientY)}
-                          onClick={guardClick(select)}
-                          onKeyDown={pressAsClick(select)}
-                        >
-                          <b>{m.name.slice(0, 2)}</b>
-                          <small>关系相关项目成员</small>
-                        </div>
-                      );
                     })}
                 </>
               ) : null}
