@@ -256,9 +256,10 @@ export default function CollaborationPage({
   const edgeById = useMemo(() => new Map(edges.map((e) => [e.id, e])), [edges]);
 
   // 拖拽固定的缓存 key：不同层级布局坐标系不同，偏移只在本视图内生效（CR-19）。
+  // #151：key 从任务 id 泛化为节点 key（t:／o:／kr:／m:边／mp:成员），全部节点可拖。
   const modeKey =
     mode.kind === "kr" ? `kr:${mode.krId}` : mode.kind === "focus" ? `focus:${mode.taskId}` : mode.kind;
-  const offsetKey = (id: number) => `${projectId}:${modeKey}:${id}`;
+  const offsetKey = (nodeKey: string) => `${projectId}:${modeKey}:${nodeKey}`;
 
   const resetViewport = () => {
     setZoom(1);
@@ -358,7 +359,8 @@ export default function CollaborationPage({
   // 下属 KR 在其下方 2 列网格（单 KR 1 列），O→KR 走 V-H-V 正交线。 ——
   const tree = useMemo(() => {
     const nodes: { key: string; kind: "o" | "kr"; id: number; pos: NodePos; dimmed: boolean }[] = [];
-    const lines: { d: string; x1: number; y1: number; x2: number; y2: number; dimmed: boolean }[] = [];
+    // #151：连线只记两端节点，路径在渲染时按拖拽偏移后的位置重算。
+    const links: { oId: number; krId: number; dimmed: boolean }[] = [];
     const oW = 220;
     const oH = 58;
     const krW = 280;
@@ -379,29 +381,17 @@ export default function CollaborationPage({
           (krFilter === "all" && personFilter === "all" ? true : krs.some(krPass)));
       const oDimmed = !oPass;
       nodes.push({ key: `o-${o.id}`, kind: "o", id: o.id, pos: oPos, dimmed: oDimmed });
-      const ocx = oPos.x + oW / 2;
-      const oby = oPos.y + oH;
       krs.forEach((k, i) => {
         const kx = x + (i % columns) * (krW + gapX);
         const ky = 160 + Math.floor(i / columns) * (krH + rowGap);
         const krDimmed = filtering && !krPass(k);
         nodes.push({ key: `kr-${k.id}`, kind: "kr", id: k.id, pos: { x: kx, y: ky, w: krW, h: krH }, dimmed: krDimmed });
-        const kcx = kx + krW / 2;
-        // V-H-V 正交线（原型 edgePath 的 owns objective→kr 分支，46% 处转水平）。
-        const branchY = oby + (ky - oby) * 0.46;
-        lines.push({
-          d: `M ${ocx} ${oby} V ${branchY} H ${kcx} V ${ky}`,
-          x1: ocx,
-          y1: oby,
-          x2: kcx,
-          y2: ky,
-          dimmed: oDimmed || krDimmed,
-        });
+        links.push({ oId: o.id, krId: k.id, dimmed: oDimmed || krDimmed });
         maxY = Math.max(maxY, ky + krH);
       });
       x += colW + colGap;
     }
-    return { nodes, lines, width: Math.max(700, x - colGap + 24), height: maxY + 40 };
+    return { nodes, links, width: Math.max(700, x - colGap + 24), height: maxY + 40 };
   }, [objectives, krList, filtering, krPass, oFilter, krFilter, personFilter]);
 
   // —— O 聚焦层（#148 对齐原型 focusModel O 分支；CR-03）：只显该 O 与下属 KR 横排一行。 ——
@@ -420,18 +410,11 @@ export default function CollaborationPage({
     const oPos = { x: width / 2 - oW / 2, y: 36, w: oW, h: oH };
     const krY = 250;
     const startX = (width - rowW) / 2;
-    const ocx = oPos.x + oW / 2;
-    const oby = oPos.y + oH;
     const krNodes = krs.map((k, i) => {
       const kx = startX + i * (krW + gapX);
       return { id: k.id, pos: { x: kx, y: krY, w: krW, h: krH }, dimmed: filtering && !krPass(k) };
     });
-    const lines = krNodes.map((n) => {
-      const kcx = n.pos.x + krW / 2;
-      const branchY = oby + (krY - oby) * 0.46;
-      return { d: `M ${ocx} ${oby} V ${branchY} H ${kcx} V ${krY}`, x1: ocx, y1: oby, x2: kcx, y2: krY, dimmed: n.dimmed };
-    });
-    return { o, oPos, krNodes, lines, width, height: krY + krH + 60 };
+    return { o, oPos, krNodes, width, height: krY + krH + 60 };
   }, [mode, objectives, krList, filtering, krPass]);
 
   // —— KR 任务关系层布局（#148 对齐原型 focusModel KR 分支）：放射状——KR 节点居中，
@@ -614,7 +597,8 @@ export default function CollaborationPage({
     const positions = new Map<number, NodePos>();
     const oNodes: { id: number; title: string; krCount: number; pos: NodePos }[] = [];
     const krNodes: { id: number; pos: NodePos }[] = [];
-    const ownsLines: { d: string; krId: number; taskId?: number }[] = [];
+    // #151：owns 线只记两端与列脊线位置，路径在渲染时按拖拽偏移后的位置重算。
+    const ownsLinks: { oId?: number; krId: number; taskId?: number; spineX?: number }[] = [];
     let maxY = 0;
     objectives.forEach((o, oi) => {
       const colX = 24 + oi * (colW + colGap);
@@ -622,30 +606,20 @@ export default function CollaborationPage({
       const krs = krList.filter((k) => k.objectiveId === o.id);
       const oPos = { x: colX + (colW - oW) / 2, y: 16, w: oW, h: oH };
       oNodes.push({ id: o.id, title: o.title, krCount: krs.length, pos: oPos });
-      const oCx = oPos.x + oW / 2;
       const spineX = colX + 5;
       let y = 16 + oH + 30;
       for (const k of krs) {
         const krTasks = visibleTasks.filter((t) => t.keyResultId === k.id);
         const krPos = { x: colX + (colW - krW) / 2, y, w: krW, h: krH };
         krNodes.push({ id: k.id, pos: krPos });
-        const krCx = krPos.x + krW / 2;
-        const krCy = y + krH / 2;
         // O→KR：原型的正交连线（V-H-V），沿列左侧走线不穿下方节点。
-        ownsLines.push({
-          d: `M ${oCx} ${oPos.y + oH} V ${oPos.y + oH + 12} H ${spineX} V ${krCy} H ${krPos.x}`,
-          krId: k.id,
-        });
+        ownsLinks.push({ oId: o.id, krId: k.id, spineX });
         krTasks.forEach((t, i) => {
           const tx = innerX + (i % 2) * (nodeW + gapX);
           const ty = y + krH + 18 + Math.floor(i / 2) * (nodeH + 12);
           positions.set(t.id, { x: tx, y: ty, w: nodeW, h: nodeH });
           // KR→任务：owns 直线绘于节点层之下，端点隐入任务圆心（#146 槽位顶部是圆环）。
-          ownsLines.push({
-            d: `M ${krCx} ${krCy} L ${tx + nodeW / 2} ${ty + TASK_R}`,
-            krId: k.id,
-            taskId: t.id,
-          });
+          ownsLinks.push({ krId: k.id, taskId: t.id });
         });
         const rows = Math.ceil(krTasks.length / 2);
         y += krH + (rows > 0 ? 18 + rows * (nodeH + 12) : 0) + 26;
@@ -677,7 +651,7 @@ export default function CollaborationPage({
     });
     const height = (memberNodes.length > 0 ? memberY + 88 : maxY) + 40;
     const width = Math.max(24 + objectives.length * (colW + colGap), 24 + mi * 216) + 20;
-    return { visibleTasks, positions, oNodes, krNodes, ownsLines, memberNodes, visibleEdges, height, width };
+    return { visibleTasks, positions, oNodes, krNodes, ownsLinks, memberNodes, visibleEdges, height, width };
   }, [mode, tasks, edges, objectives, krList, isTaskVisible]);
 
   // 筛选淡化（AC-09；细化 AC-45 随 #20）：O/KR/人员不匹配 → 淡化保留上下文。
@@ -889,9 +863,9 @@ export default function CollaborationPage({
     };
   };
 
-  // #145：节点拖拽对所有出现任务节点的层级生效（kr／focus／full），不再限于全局展开。
-  const startDrag = (taskId: number, startX: number, startY: number) => {
-    const key = offsetKey(taskId);
+  // #145：节点拖拽对所有层级生效；#151：O／KR／成员节点同样可拖，连线实时跟随。
+  const startDrag = (nodeKey: string, startX: number, startY: number) => {
+    const key = offsetKey(nodeKey);
     const base = dragOffsets.get(key) ?? { dx: 0, dy: 0 };
     let moved = false;
     const onMove = (ev: MouseEvent) => {
@@ -915,10 +889,19 @@ export default function CollaborationPage({
     document.addEventListener("mouseup", onUp);
   };
 
-  const withOffset = (taskId: number, pos: NodePos): NodePos => {
-    const off = dragOffsets.get(offsetKey(taskId));
+  const withOffset = (nodeKey: string, pos: NodePos): NodePos => {
+    const off = dragOffsets.get(offsetKey(nodeKey));
     if (!off) return pos;
     return { ...pos, x: pos.x + off.dx, y: pos.y + off.dy };
+  };
+
+  // 拖拽超过阈值后吞掉随后的 click（原型 suppressClick）；所有可拖节点的 onClick 共用。
+  const guardClick = (fn: () => void) => () => {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+    fn();
   };
 
   // #146：布局槽位（圆环＋圆下 caption 的占位）→ 圆形包围盒。节点渲染与边锚点共用
@@ -930,8 +913,61 @@ export default function CollaborationPage({
     w: r * 2,
     h: r * 2,
   });
-  const taskCircle = (id: number, base: NodePos): NodePos => circleBounds(withOffset(id, base), taskRadius(id));
-  const memberCircle = (base: NodePos): NodePos => circleBounds(base, MEMBER_R);
+  const taskCircle = (id: number, base: NodePos): NodePos => circleBounds(withOffset(`t:${id}`, base), taskRadius(id));
+  // #151：成员节点带拖拽偏移的圆包围盒；kr／focus 层按边（m:），全局展开按成员（mp:）。
+  const memberCircleKeyed = (nodeKey: string, base: NodePos): NodePos =>
+    circleBounds(withOffset(nodeKey, base), MEMBER_R);
+  const memberKeyForEdge = (e: DeliverableEdge) =>
+    mode.kind === "full" ? `mp:${e.inputRequest?.providerId}` : `m:${e.id}`;
+
+  // #151：O→KR 的 V-H-V 正交线（原型 edgePath owns 分支，46% 处转水平）——
+  // 在渲染时按偏移后的两端位置重算，拖动任一端连线跟随。
+  const vhvPath = (o: NodePos, k: NodePos) => {
+    const ocx = o.x + o.w / 2;
+    const oby = o.y + o.h;
+    const kcx = k.x + k.w / 2;
+    const ky = k.y;
+    const branchY = oby + (ky - oby) * 0.46;
+    return { d: `M ${ocx} ${oby} V ${branchY} H ${kcx} V ${ky}`, x1: ocx, y1: oby, x2: kcx, y2: ky };
+  };
+
+  // 层级树／O 聚焦／全局展开的偏移后视图：节点位置与层级线都按拖拽偏移重算（#151）。
+  const treeNodes = tree.nodes.map((n) => ({ ...n, pos: withOffset(`${n.kind}:${n.id}`, n.pos) }));
+  const treeNodeByKey = new Map(treeNodes.map((n) => [n.key, n]));
+  const treeLines = tree.links.map((l) => {
+    const o = treeNodeByKey.get(`o-${l.oId}`)!;
+    const k = treeNodeByKey.get(`kr-${l.krId}`)!;
+    return { ...vhvPath(o.pos, k.pos), dimmed: l.dimmed };
+  });
+  const oLayerOPos = oLayer ? withOffset(`o:${oLayer.o.id}`, oLayer.oPos) : null;
+  const oLayerKrNodes = oLayer
+    ? oLayer.krNodes.map((n) => ({ ...n, pos: withOffset(`kr:${n.id}`, n.pos) }))
+    : [];
+  const oLayerLines = oLayerOPos
+    ? oLayerKrNodes.map((n) => ({ ...vhvPath(oLayerOPos, n.pos), dimmed: n.dimmed }))
+    : [];
+  const krCenterPos = krLayer ? withOffset(`kr:${krLayer.kr.id}`, krLayer.krPos) : null;
+  const fullONodes = full ? full.oNodes.map((n) => ({ ...n, pos: withOffset(`o:${n.id}`, n.pos) })) : [];
+  const fullKrNodes = full ? full.krNodes.map((n) => ({ ...n, pos: withOffset(`kr:${n.id}`, n.pos) })) : [];
+  const fullOPosById = new Map(fullONodes.map((n) => [n.id, n.pos]));
+  const fullKrPosById = new Map(fullKrNodes.map((n) => [n.id, n.pos]));
+  const fullOwnsD = (l: { oId?: number; krId: number; taskId?: number; spineX?: number }): string | null => {
+    const kr = fullKrPosById.get(l.krId);
+    if (!kr) return null;
+    const krCx = kr.x + kr.w / 2;
+    const krCy = kr.y + kr.h / 2;
+    if (l.taskId != null) {
+      const base = full?.positions.get(l.taskId);
+      if (!base) return null;
+      const p = taskCircle(l.taskId, base);
+      return `M ${krCx} ${krCy} L ${p.x + p.w / 2} ${p.y + p.h / 2}`;
+    }
+    const o = l.oId != null ? fullOPosById.get(l.oId) : undefined;
+    if (!o || l.spineX == null) return null;
+    const oCx = o.x + o.w / 2;
+    const oBy = o.y + o.h;
+    return `M ${oCx} ${oBy} V ${oBy + 12} H ${l.spineX} V ${krCy} H ${kr.x}`;
+  };
 
   // §11 键盘可达：节点是 role=button 的可聚焦元素，Enter／空格等价单击。
   const pressAsClick = (fn: () => void) => (ev: React.KeyboardEvent) => {
@@ -1134,14 +1170,8 @@ export default function CollaborationPage({
         }`}
         style={{ left: pos.x, top: pos.y, width: pos.w, height: pos.h }}
         title={`${t.code} · ${t.name}`}
-        onMouseDown={(ev) => startDrag(t.id, ev.clientX, ev.clientY)}
-        onClick={() => {
-          if (suppressClickRef.current) {
-            suppressClickRef.current = false;
-            return;
-          }
-          select();
-        }}
+        onMouseDown={(ev) => startDrag(`t:${t.id}`, ev.clientX, ev.clientY)}
+        onClick={guardClick(select)}
         onKeyDown={pressAsClick(select)}
         onDoubleClick={() => setDrawerTaskId(t.id)}
       >
@@ -1783,29 +1813,32 @@ export default function CollaborationPage({
       const fromBase = e.sourceTaskId != null ? positions.get(e.sourceTaskId) : positions.get(-e.id);
       const toBase = positions.get(e.targetTaskId);
       if (!fromBase || !toBase) continue;
-      const from = e.sourceTaskId != null ? taskCircle(e.sourceTaskId, fromBase) : memberCircle(fromBase);
+      const from =
+        e.sourceTaskId != null
+          ? taskCircle(e.sourceTaskId, fromBase)
+          : memberCircleKeyed(memberKeyForEdge(e), fromBase);
       const to = taskCircle(e.targetTaskId, toBase);
       mmLines.push({ x1: from.x + from.w / 2, y1: from.y + from.h / 2, x2: to.x + to.w / 2, y2: to.y + to.h / 2 });
     }
   };
   if (mode.kind === "tree") {
-    for (const n of tree.nodes) {
+    for (const n of treeNodes) {
       mmDot(null, n.pos, n.kind === "o" ? "objective" : `kr ${krVisualState(n.id)}`);
     }
-    for (const l of tree.lines) mmLines.push({ x1: l.x1, y1: l.y1, x2: l.x2, y2: l.y2 });
-  } else if (mode.kind === "o" && oLayer) {
-    mmDot(null, oLayer.oPos, "objective");
-    for (const n of oLayer.krNodes) mmDot(null, n.pos, `kr ${krVisualState(n.id)}`);
-    for (const l of oLayer.lines) mmLines.push({ x1: l.x1, y1: l.y1, x2: l.x2, y2: l.y2 });
-  } else if (mode.kind === "kr" && krLayer) {
-    mmDot(null, krLayer.krPos, `kr ${krVisualState(krLayer.kr.id)}`);
+    for (const l of treeLines) mmLines.push({ x1: l.x1, y1: l.y1, x2: l.x2, y2: l.y2 });
+  } else if (mode.kind === "o" && oLayer && oLayerOPos) {
+    mmDot(null, oLayerOPos, "objective");
+    for (const n of oLayerKrNodes) mmDot(null, n.pos, `kr ${krVisualState(n.id)}`);
+    for (const l of oLayerLines) mmLines.push({ x1: l.x1, y1: l.y1, x2: l.x2, y2: l.y2 });
+  } else if (mode.kind === "kr" && krLayer && krCenterPos) {
+    mmDot(null, krCenterPos, `kr ${krVisualState(krLayer.kr.id)}`);
     for (const t of [...krLayer.inKr, ...krLayer.neighbors]) {
       const pos = krLayer.positions.get(t.id);
       if (pos) mmDot(t.id, pos, taskRiskLevel(t.id));
     }
     for (const m of krLayer.memberNodes) {
       const pos = krLayer.positions.get(-m.edgeId);
-      if (pos) mmDot(null, memberCircle(pos), "member");
+      if (pos) mmDot(null, memberCircleKeyed(`m:${m.edgeId}`, pos), "member");
     }
     mmEdgeLines(krLayer.relevantEdges, krLayer.positions);
   } else if (mode.kind === "focus" && focusLayer) {
@@ -1815,17 +1848,17 @@ export default function CollaborationPage({
     }
     for (const m of focusLayer.memberNodes) {
       const pos = focusLayer.positions.get(-m.edgeId);
-      if (pos) mmDot(null, memberCircle(pos), "member");
+      if (pos) mmDot(null, memberCircleKeyed(`m:${m.edgeId}`, pos), "member");
     }
     mmEdgeLines(focusLayer.relevantEdges, focusLayer.positions);
   } else if (mode.kind === "full" && full) {
-    for (const n of full.oNodes) mmDot(null, n.pos, "objective");
-    for (const n of full.krNodes) mmDot(null, n.pos, `kr ${krVisualState(n.id)}`);
+    for (const n of fullONodes) mmDot(null, n.pos, "objective");
+    for (const n of fullKrNodes) mmDot(null, n.pos, `kr ${krVisualState(n.id)}`);
     for (const t of full.visibleTasks) {
       const pos = full.positions.get(t.id);
       if (pos) mmDot(t.id, pos, taskRiskLevel(t.id));
     }
-    for (const m of full.memberNodes) mmDot(null, memberCircle(m.pos), "member");
+    for (const m of full.memberNodes) mmDot(null, memberCircleKeyed(`mp:${m.providerId}`, m.pos), "member");
     mmEdgeLines(full.visibleEdges, full.positions);
   }
   const mmDotR = Math.max(10, stageSize.w / 110);
@@ -2127,21 +2160,22 @@ export default function CollaborationPage({
                     transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
                   }}
                 >
-              {mode.kind === "o" && oLayer ? (
+              {mode.kind === "o" && oLayer && oLayerOPos ? (
                 <>
                   <svg className="graph-svg" width={oLayer.width} height={oLayer.height}>
-                    {oLayer.lines.map((l, i) => (
+                    {oLayerLines.map((l, i) => (
                       <path key={i} d={l.d} fill="none" stroke="#b8c4ce" strokeWidth={1.6} opacity={l.dimmed ? 0.2 : 1} />
                     ))}
                   </svg>
                   <div
                     className="gnode gnode-o"
-                    style={{ left: oLayer.oPos.x, top: oLayer.oPos.y, width: oLayer.oPos.w, height: oLayer.oPos.h }}
+                    style={{ left: oLayerOPos.x, top: oLayerOPos.y, width: oLayerOPos.w, height: oLayerOPos.h }}
+                    onMouseDown={(ev) => startDrag(`o:${oLayer.o.id}`, ev.clientX, ev.clientY)}
                   >
                     <b>{oLayer.o.title}</b>
-                    <small>{oLayer.krNodes.length} 个 KR</small>
+                    <small>{oLayerKrNodes.length} 个 KR</small>
                   </div>
-                  {oLayer.krNodes.map((n) => (
+                  {oLayerKrNodes.map((n) => (
                     <div
                       key={`okr-${n.id}`}
                       role="button"
@@ -2150,7 +2184,8 @@ export default function CollaborationPage({
                         krVisualState(n.id) !== "normal" ? `risk-${krVisualState(n.id)}` : ""
                       }`}
                       style={{ left: n.pos.x, top: n.pos.y, width: n.pos.w, height: n.pos.h }}
-                      onClick={() => enterKr(n.id)}
+                      onMouseDown={(ev) => startDrag(`kr:${n.id}`, ev.clientX, ev.clientY)}
+                      onClick={guardClick(() => enterKr(n.id))}
                       onKeyDown={pressAsClick(() => enterKr(n.id))}
                     >
                       {krNodeContent(n.id)}
@@ -2160,11 +2195,11 @@ export default function CollaborationPage({
               ) : mode.kind === "tree" ? (
                 <>
                   <svg className="graph-svg" width={tree.width} height={tree.height}>
-                    {tree.lines.map((l, i) => (
+                    {treeLines.map((l, i) => (
                       <path key={i} d={l.d} fill="none" stroke="#b8c4ce" strokeWidth={1.6} opacity={l.dimmed ? 0.2 : 1} />
                     ))}
                   </svg>
-                  {tree.nodes.map((n) =>
+                  {treeNodes.map((n) =>
                     n.kind === "o" ? (
                       <div
                         key={n.key}
@@ -2172,7 +2207,8 @@ export default function CollaborationPage({
                         tabIndex={0}
                         className={`gnode gnode-o ${n.dimmed ? "dimmed" : ""}`}
                         style={{ left: n.pos.x, top: n.pos.y, width: n.pos.w, height: n.pos.h }}
-                        onClick={() => enterO(n.id)}
+                        onMouseDown={(ev) => startDrag(`o:${n.id}`, ev.clientX, ev.clientY)}
+                        onClick={guardClick(() => enterO(n.id))}
                         onKeyDown={pressAsClick(() => enterO(n.id))}
                       >
                         <b>{objectives.find((o) => o.id === n.id)?.title}</b>
@@ -2187,7 +2223,8 @@ export default function CollaborationPage({
                           krVisualState(n.id) !== "normal" ? `risk-${krVisualState(n.id)}` : ""
                         }`}
                         style={{ left: n.pos.x, top: n.pos.y, width: n.pos.w, height: n.pos.h }}
-                        onClick={() => enterKr(n.id)}
+                        onMouseDown={(ev) => startDrag(`kr:${n.id}`, ev.clientX, ev.clientY)}
+                        onClick={guardClick(() => enterKr(n.id))}
                         onKeyDown={pressAsClick(() => enterKr(n.id))}
                       >
                         {krNodeContent(n.id)}
@@ -2195,12 +2232,12 @@ export default function CollaborationPage({
                     ),
                   )}
                 </>
-              ) : mode.kind === "kr" && krLayer ? (
+              ) : mode.kind === "kr" && krLayer && krCenterPos ? (
                 <>
                   <svg className="graph-svg" width={krLayer.width} height={krLayer.height}>
                     {arrowDefs}
                     {/* KR→任务 owns 直线（#148）：灰、无箭头，绘于关系边之下；
-                        端点跟随拖拽后的任务圆心。 */}
+                        两端都跟随拖拽（#151：KR 中心节点同样可拖）。 */}
                     {krLayer.inKr.map((t) => {
                       const base = krLayer.positions.get(t.id);
                       if (!base) return null;
@@ -2208,7 +2245,9 @@ export default function CollaborationPage({
                       return (
                         <path
                           key={`owns-${t.id}`}
-                          d={`M ${krLayer.cx} ${krLayer.cy} L ${p.x + p.w / 2} ${p.y + p.h / 2}`}
+                          d={`M ${krCenterPos.x + krCenterPos.w / 2} ${krCenterPos.y + krCenterPos.h / 2} L ${
+                            p.x + p.w / 2
+                          } ${p.y + p.h / 2}`}
                           fill="none"
                           stroke="#b2bdca"
                           strokeWidth={1.7}
@@ -2220,7 +2259,10 @@ export default function CollaborationPage({
                         e.sourceTaskId != null ? krLayer.positions.get(e.sourceTaskId) : krLayer.positions.get(-e.id);
                       const toBase = krLayer.positions.get(e.targetTaskId);
                       if (!fromBase || !toBase) return null;
-                      const from = e.sourceTaskId != null ? taskCircle(e.sourceTaskId, fromBase) : memberCircle(fromBase);
+                      const from =
+                        e.sourceTaskId != null
+                          ? taskCircle(e.sourceTaskId, fromBase)
+                          : memberCircleKeyed(memberKeyForEdge(e), fromBase);
                       const to = taskCircle(e.targetTaskId, toBase);
                       return renderEdge(e, from, to);
                     })}
@@ -2246,12 +2288,13 @@ export default function CollaborationPage({
                             krVisualState(krId) !== "normal" ? `risk-${krVisualState(krId)}` : ""
                           } ${selectedNode?.kind === "kr" && selectedNode.id === krId ? "selected" : ""}`}
                           style={{
-                            left: krLayer.krPos.x,
-                            top: krLayer.krPos.y,
-                            width: krLayer.krPos.w,
-                            height: krLayer.krPos.h,
+                            left: krCenterPos.x,
+                            top: krCenterPos.y,
+                            width: krCenterPos.w,
+                            height: krCenterPos.h,
                           }}
-                          onClick={selectKr}
+                          onMouseDown={(ev) => startDrag(`kr:${krId}`, ev.clientX, ev.clientY)}
+                          onClick={guardClick(selectKr)}
                           onKeyDown={pressAsClick(selectKr)}
                         >
                           {krNodeContent(krId)}
@@ -2266,7 +2309,7 @@ export default function CollaborationPage({
                     const posBase = krLayer.positions.get(-m.edgeId);
                     if (!posBase) return null;
                     // #146：成员节点是紫圆（原型 person），圆内姓名前两字、圆下 caption 显输入名。
-                    const pos = memberCircle(posBase);
+                    const pos = memberCircleKeyed(`m:${m.edgeId}`, posBase);
                     // #149：点成员节点打开成员详情（该成员全部输入职责），不再借道边详情。
                     const pid = edgeById.get(m.edgeId)?.inputRequest?.providerId;
                     const select = () => {
@@ -2291,7 +2334,8 @@ export default function CollaborationPage({
                         } ${memberDimmed([m.edgeId]) ? "dimmed" : ""}`}
                         style={{ left: pos.x, top: pos.y, width: pos.w, height: pos.h }}
                         title={`${m.label} · ${m.inputName || "输入提供成员"}`}
-                        onClick={select}
+                        onMouseDown={(ev) => startDrag(`m:${m.edgeId}`, ev.clientX, ev.clientY)}
+                        onClick={guardClick(select)}
                         onKeyDown={pressAsClick(select)}
                       >
                         <b>{m.label.slice(0, 2)}</b>
@@ -2311,7 +2355,10 @@ export default function CollaborationPage({
                           : focusLayer.positions.get(-e.id);
                       const toBase = focusLayer.positions.get(e.targetTaskId);
                       if (!fromBase || !toBase) return null;
-                      const from = e.sourceTaskId != null ? taskCircle(e.sourceTaskId, fromBase) : memberCircle(fromBase);
+                      const from =
+                        e.sourceTaskId != null
+                          ? taskCircle(e.sourceTaskId, fromBase)
+                          : memberCircleKeyed(memberKeyForEdge(e), fromBase);
                       const to = taskCircle(e.targetTaskId, toBase);
                       return renderEdge(e, from, to);
                     })}
@@ -2323,7 +2370,7 @@ export default function CollaborationPage({
                   {focusLayer.memberNodes.map((m) => {
                     const posBase = focusLayer.positions.get(-m.edgeId);
                     if (!posBase) return null;
-                    const pos = memberCircle(posBase);
+                    const pos = memberCircleKeyed(`m:${m.edgeId}`, posBase);
                     const pid = edgeById.get(m.edgeId)?.inputRequest?.providerId;
                     const select = () => {
                       setSelectedTask(null);
@@ -2347,7 +2394,8 @@ export default function CollaborationPage({
                         } ${memberDimmed([m.edgeId]) ? "dimmed" : ""}`}
                         style={{ left: pos.x, top: pos.y, width: pos.w, height: pos.h }}
                         title={`${m.label} · ${m.inputName || "输入提供成员"}`}
-                        onClick={select}
+                        onMouseDown={(ev) => startDrag(`m:${m.edgeId}`, ev.clientX, ev.clientY)}
+                        onClick={guardClick(select)}
                         onKeyDown={pressAsClick(select)}
                       >
                         <b>{m.label.slice(0, 2)}</b>
@@ -2360,8 +2408,11 @@ export default function CollaborationPage({
                 <>
                     <svg className="graph-svg" width={full.width} height={full.height}>
                       {arrowDefs}
-                      {/* O→KR→任务层级连线（#123）：owns 边灰色无箭头，绘于关系边之下。 */}
-                      {full.ownsLines.map((l, i) => {
+                      {/* O→KR→任务层级连线（#123）：owns 边灰色无箭头，绘于关系边之下；
+                          路径按拖拽偏移后的两端位置重算（#151）。 */}
+                      {full.ownsLinks.map((l, i) => {
+                        const d = fullOwnsD(l);
+                        if (!d) return null;
                         const dim =
                           hasFilter &&
                           (l.taskId != null
@@ -2370,7 +2421,7 @@ export default function CollaborationPage({
                         return (
                           <path
                             key={`owns-${i}`}
-                            d={l.d}
+                            d={d}
                             fill="none"
                             stroke="#b8c4ce"
                             strokeWidth={1.6}
@@ -2384,7 +2435,7 @@ export default function CollaborationPage({
                         const from = fromBase
                           ? e.sourceTaskId != null
                             ? taskCircle(e.sourceTaskId, fromBase)
-                            : memberCircle(fromBase)
+                            : memberCircleKeyed(memberKeyForEdge(e), fromBase)
                           : fromBase;
                         const to = toBase ? taskCircle(e.targetTaskId, toBase) : toBase;
                         if (!from || !to) return null;
@@ -2405,7 +2456,7 @@ export default function CollaborationPage({
                     </svg>
                     {/* O／KR 真实节点（#123）：视觉与层级树同一套（gnode-o／gnode-kr + krNodeContent），
                         点击下钻到对应层级；筛选下无匹配后代任务即淡化。 */}
-                    {full.oNodes.map((n) => {
+                    {fullONodes.map((n) => {
                       const dim =
                         hasFilter &&
                         !tasks.some(
@@ -2418,7 +2469,8 @@ export default function CollaborationPage({
                           tabIndex={0}
                           className={`gnode gnode-o ${dim ? "dimmed" : ""}`}
                           style={{ left: n.pos.x, top: n.pos.y, width: n.pos.w, height: n.pos.h }}
-                          onClick={() => enterO(n.id)}
+                          onMouseDown={(ev) => startDrag(`o:${n.id}`, ev.clientX, ev.clientY)}
+                          onClick={guardClick(() => enterO(n.id))}
                           onKeyDown={pressAsClick(() => enterO(n.id))}
                         >
                           <b>{n.title}</b>
@@ -2426,7 +2478,7 @@ export default function CollaborationPage({
                         </div>
                       );
                     })}
-                    {full.krNodes.map((n) => {
+                    {fullKrNodes.map((n) => {
                       const dim =
                         hasFilter && !tasks.some((t) => t.keyResultId === n.id && taskMatchesFilter(t));
                       return (
@@ -2438,7 +2490,8 @@ export default function CollaborationPage({
                             krVisualState(n.id) !== "normal" ? `risk-${krVisualState(n.id)}` : ""
                           }`}
                           style={{ left: n.pos.x, top: n.pos.y, width: n.pos.w, height: n.pos.h }}
-                          onClick={() => enterKr(n.id)}
+                          onMouseDown={(ev) => startDrag(`kr:${n.id}`, ev.clientX, ev.clientY)}
+                          onClick={guardClick(() => enterKr(n.id))}
                           onKeyDown={pressAsClick(() => enterKr(n.id))}
                         >
                           {krNodeContent(n.id)}
@@ -2450,7 +2503,7 @@ export default function CollaborationPage({
                       return pos ? taskNode(t, pos) : null;
                     })}
                     {full.memberNodes.map((m) => {
-                      const pos = memberCircle(m.pos);
+                      const pos = memberCircleKeyed(`mp:${m.providerId}`, m.pos);
                       const select = () => {
                         setSelectedTask(null);
                         setImpactMode(false);
@@ -2474,7 +2527,8 @@ export default function CollaborationPage({
                           } ${memberDimmed(m.edgeIds) ? "dimmed" : ""}`}
                           style={{ left: pos.x, top: pos.y, width: pos.w, height: pos.h }}
                           title={`${m.name} · 关系相关项目成员`}
-                          onClick={select}
+                          onMouseDown={(ev) => startDrag(`mp:${m.providerId}`, ev.clientX, ev.clientY)}
+                          onClick={guardClick(select)}
                           onKeyDown={pressAsClick(select)}
                         >
                           <b>{m.name.slice(0, 2)}</b>
