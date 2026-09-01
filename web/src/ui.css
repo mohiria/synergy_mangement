@@ -539,6 +539,12 @@ body {
   border-radius: 50%; padding: 0; display: grid; place-items: center;
   box-shadow: 0 4px 5px rgba(34, 50, 73, 0.16);
 }
+/* #155：整圆可点＋外扩命中区——透明伪元素把可点范围扩到圆外 14px（盖住包围盒四角
+   被 border-radius 裁掉的区域），单击圆内任意一点即可选中；圆下 caption 是子元素，
+   点击冒泡到节点本就计入命中。 */
+.gnode-task::before, .gnode-member::before {
+  content: ""; position: absolute; inset: -14px; border-radius: 50%;
+}
 .gnode-task { border: 3px solid #67839c; background: #f8fbfd; cursor: grab; }
 .gnode-task:active { cursor: grabbing; }
 /* 编号不截断：长编号允许略超出圆缘（原型 SVG 文本同样不裁切）。 */
