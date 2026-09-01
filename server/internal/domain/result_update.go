@@ -59,3 +59,20 @@ func InResultUpdate(t TaskFacts) bool {
 func ResultUpdateReviewInFlight(t TaskFacts) bool {
 	return t.Status == TaskCompleted && t.ResultUpdate == ResultUpdateReviewing
 }
+
+// ResultUpdateStateAfterDecision 成果更新审结后的进程状态（裁决 #165）：
+// 通过则进程结束（新内容已生效）；退回则回到「已发起」——候选保留在任务上，
+// 负责人可删除、重传后带剩余候选重新提交。
+func ResultUpdateStateAfterDecision(approve bool) string {
+	if approve {
+		return ResultUpdateNone
+	}
+	return ResultUpdateOpen
+}
+
+// CanDeleteCandidate 判定能否删除候选文件（裁决 #165）：与登记候选同口径——
+// 负责人（管理员／项目负责人纠错），执行类状态或成果更新已发起；
+// 完成申请在审期间不可删（候选已随申请快照）。页面只提供删除按钮，新增内容走既有上传入口。
+func CanDeleteCandidate(a Actor, userID int64, t TaskFacts) bool {
+	return CanUploadCandidate(a, userID, t)
+}

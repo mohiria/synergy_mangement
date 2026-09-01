@@ -1063,6 +1063,25 @@ paths:
           $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/ValidationError"
+    delete:
+      operationId: deleteCandidate
+      tags: [tasks]
+      summary: 删除候选文件（裁决 #165：退回后候选保留，负责人可逐个删除；被删候选不进成果归档）
+      responses:
+        "200":
+          description: 已删除，返回任务最新事实
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /projects/{projectId}/tasks/{taskId}/deliverables/{deliverableId}/candidate/commit:
     parameters:
@@ -3499,6 +3518,12 @@ components:
           description: >-
             当前用户能否删除本项（派生字段，裁决 H1）：有编辑权限、任务在执行类状态、
             且本项没有当前内容时为 true；已发布的项删除须走成果更新重传
+        canDeleteCandidate:
+          type: boolean
+          description: >-
+            当前用户能否删除本项的候选文件（派生字段，裁决 #165）：与登记候选同口径——
+            负责人（管理员纠错），执行类状态或成果更新已发起；完成申请在审期间不可删；
+            无候选文件时不返回
     CreateDeliverableRequest:
       type: object
       description: |

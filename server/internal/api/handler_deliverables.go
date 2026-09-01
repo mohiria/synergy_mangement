@@ -234,6 +234,51 @@ func (s *Server) UploadCandidate(w http.ResponseWriter, r *http.Request, project
 	})
 }
 
+// DeleteCandidate 删除候选文件（裁决 #165）：退回后候选保留在任务上，负责人可逐个删除；
+// 被删候选不进成果归档。口径与登记候选一致（CanDeleteCandidate），完成申请在审期间不可删。
+func (s *Server) DeleteCandidate(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64, deliverableId int64) {
+	proj, ok := s.fetchProject(w, r, projectId)
+	if !ok {
+		return
+	}
+	uid := currentUser(r).ID
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
+	d, err := s.q.GetDeliverableInProject(r.Context(), store.GetDeliverableInProjectParams{ID: deliverableId, ID_2: taskId, ProjectID: projectId})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, Error{Code: "deliverable_not_found", Message: "交付物不存在"})
+		} else {
+			writeInternalError(w, r, err)
+		}
+		return
+	}
+	facts := domain.TaskFacts{Status: d.TaskStatus, CreatorID: d.TaskCreatedBy, OwnerID: d.TaskOwnerID, ResultUpdate: d.TaskResultUpdate}
+	if !domain.CanDeleteCandidate(actor, uid, facts) {
+		switch d.TaskStatus {
+		case domain.TaskNotStarted, domain.TaskWaitingInput, domain.TaskInProgress:
+			writeForbidden(w)
+		default:
+			writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: "任务当前状态不能删除候选文件"})
+		}
+		return
+	}
+	f, err := s.q.GetCandidateFile(r.Context(), deliverableId)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, Error{Code: "candidate_not_found", Message: "该交付物项没有候选文件"})
+		} else {
+			writeInternalError(w, r, err)
+		}
+		return
+	}
+	if _, err := s.q.DeleteDeliverableFile(r.Context(), f.ID); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	s.removeObject(r.Context(), f.ObjectKey)
+	s.writeTask(w, r, projectId, taskId, uid, actor)
+}
+
 // CommitCandidate 两阶段提交第二步：校验对象确已写入后，uploading → candidate 并覆盖旧候选（R4）。
 func (s *Server) CommitCandidate(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64, deliverableId int64) {
 	var req CommitUploadRequest
@@ -395,6 +440,11 @@ func (s *Server) deliverableList(ctx context.Context, taskID int64, actor domain
 		}
 		fillContentState(&item, hasPendingReview)
 		item.CanDelete = domain.DeleteDeliverableRule(actor, uid, facts, item.Current != nil) == nil
+		// 裁决 #165：退回后候选保留，负责人可逐个删除（有候选时才返回该派生标志）。
+		if item.Candidate != nil {
+			canDeleteCandidate := domain.CanDeleteCandidate(actor, uid, facts)
+			item.CanDeleteCandidate = &canDeleteCandidate
+		}
 		out = append(out, item)
 	}
 	return out, nil

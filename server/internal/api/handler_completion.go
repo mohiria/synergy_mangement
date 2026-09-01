@@ -229,21 +229,9 @@ func (s *Server) DecideCompletion(w http.ResponseWriter, r *http.Request, projec
 				writeInternalError(w, r, err)
 				return
 			}
-		} else {
-			// AC-40：退回删除本次候选文件，原当前交付物保持不变。
-			f, err := qtx.GetCandidateFile(r.Context(), item.DeliverableID)
-			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-				writeInternalError(w, r, err)
-				return
-			}
-			if err == nil && f.ID == item.FileID.Int64 {
-				if _, err := qtx.DeleteDeliverableFile(r.Context(), f.ID); err != nil {
-					writeInternalError(w, r, err)
-					return
-				}
-				removeKeys = append(removeKeys, f.ObjectKey)
-			}
 		}
+		// 裁决 #165（AC-40 修订）：退回不再删除候选——候选保留在任务上，
+		// 负责人可逐个删除或重传后带剩余候选重新提交；原当前交付物保持不变。
 	}
 	if _, err := qtx.DecideCompletionReview(r.Context(), store.DecideCompletionReviewParams{
 		ID: reviewId, State: reviewState, Opinion: opinion, DecidedBy: pgtype.Int8{Int64: uid, Valid: true},
@@ -255,8 +243,9 @@ func (s *Server) DecideCompletion(w http.ResponseWriter, r *http.Request, projec
 		writeInternalError(w, r, err)
 		return
 	}
-	// AC-66：成果更新终审有结论即结束进程——通过则新内容已生效，退回则候选已删除。
-	if err := s.closeResultUpdate(r, w, qtx, taskId, facts); err != nil {
+	// AC-66（裁决 #165 修订）：成果更新终审通过则进程结束（新内容已生效）；
+	// 退回则回到「已发起」——候选保留，负责人可删改后重新提交。
+	if err := s.settleResultUpdate(r, w, qtx, taskId, facts, approve); err != nil {
 		return
 	}
 	if approve {
@@ -291,7 +280,7 @@ func (s *Server) DecideCompletion(w http.ResponseWriter, r *http.Request, projec
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 
-// decideIntermediate 或签处理：任一人通过→待 KR 终审（留痕）；任一人退回→整体退回并删除候选。
+// decideIntermediate 或签处理：任一人通过→待 KR 终审（留痕）；任一人退回→整体退回（裁决 #165：候选保留）。
 // 裁决 C2（#136）：KR 负责人在组内且通过时规则返回终审通过——本函数只落或签留痕后返回
 // merged=true，由调用方继续同一条终审通过路径；其余情形在本函数内完成响应并返回 false。
 func (s *Server) decideIntermediate(w http.ResponseWriter, r *http.Request, tx pgx.Tx, qtx *store.Queries,
@@ -319,7 +308,6 @@ func (s *Server) decideIntermediate(w http.ResponseWriter, r *http.Request, tx p
 		}
 		return false
 	}
-	var removeKeys []string
 	if approve {
 		if _, err := qtx.RecordIntermediateApproval(r.Context(), store.RecordIntermediateApprovalParams{
 			ID: review.ID, State: newReviewState, IntermediateBy: pgtype.Int8{Int64: uid, Valid: true}, IntermediateOpinion: opinion,
@@ -331,29 +319,7 @@ func (s *Server) decideIntermediate(w http.ResponseWriter, r *http.Request, tx p
 			return true
 		}
 	} else {
-		// AC-24：整体退回——删除本次候选文件，原当前交付物保持不变。
-		items, err := qtx.ListCompletionReviewItems(r.Context(), review.ID)
-		if err != nil {
-			writeInternalError(w, r, err)
-			return
-		}
-		for _, item := range items {
-			if !item.FileID.Valid {
-				continue
-			}
-			f, err := qtx.GetCandidateFile(r.Context(), item.DeliverableID)
-			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-				writeInternalError(w, r, err)
-				return
-			}
-			if err == nil && f.ID == item.FileID.Int64 {
-				if _, err := qtx.DeleteDeliverableFile(r.Context(), f.ID); err != nil {
-					writeInternalError(w, r, err)
-					return
-				}
-				removeKeys = append(removeKeys, f.ObjectKey)
-			}
-		}
+		// AC-24（裁决 #165 修订）：整体退回——候选保留在任务上，原当前交付物保持不变。
 		if _, err := qtx.DecideCompletionReview(r.Context(), store.DecideCompletionReviewParams{
 			ID: review.ID, State: newReviewState, Opinion: opinion, DecidedBy: pgtype.Int8{Int64: uid, Valid: true},
 		}); err != nil {
@@ -365,18 +331,16 @@ func (s *Server) decideIntermediate(w http.ResponseWriter, r *http.Request, tx p
 		writeInternalError(w, r, err)
 		return false
 	}
-	// AC-66：或签退回即整体退回，成果更新进程随之结束；或签通过时申请仍在审，进程保持不变。
+	// AC-66（裁决 #165 修订）：或签退回即整体退回，成果更新回到「已发起」（候选保留）；
+	// 或签通过时申请仍在审，进程保持不变。
 	if !approve {
-		if err := s.closeResultUpdate(r, w, qtx, taskId, facts); err != nil {
+		if err := s.settleResultUpdate(r, w, qtx, taskId, facts, false); err != nil {
 			return false
 		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
 		writeInternalError(w, r, err)
 		return false
-	}
-	for _, key := range removeKeys {
-		s.removeObject(r.Context(), key)
 	}
 	if approve {
 		s.actionActivity(r.Context(), taskId, domain.ActivityCompletionApproved, uid, opinion)
@@ -552,12 +516,12 @@ func (s *Server) completionReviewList(ctx context.Context, taskID int64, facts d
 
 // closeResultUpdate 完成审批有结论时结束成果更新进程（AC-66）；非成果更新的申请不受影响。
 // 出错时已写出响应，调用方直接返回。
-func (s *Server) closeResultUpdate(r *http.Request, w http.ResponseWriter, qtx *store.Queries, taskID int64, facts domain.TaskFacts) error {
+func (s *Server) settleResultUpdate(r *http.Request, w http.ResponseWriter, qtx *store.Queries, taskID int64, facts domain.TaskFacts, approve bool) error {
 	if !domain.ResultUpdateReviewInFlight(facts) {
 		return nil
 	}
 	if _, err := qtx.SetTaskResultUpdate(r.Context(), store.SetTaskResultUpdateParams{
-		ID: taskID, ResultUpdate: domain.ResultUpdateNone,
+		ID: taskID, ResultUpdate: domain.ResultUpdateStateAfterDecision(approve),
 	}); err != nil {
 		writeInternalError(w, r, err)
 		return err

@@ -2088,7 +2088,7 @@ func TestCompletionReviewFlow(t *testing.T) {
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 
-	// AC-40：退回删除候选文件、任务回进行中、审核事实保留
+	// AC-40（裁决 #165 修订）：退回后候选保留、任务回进行中、审核事实保留
 	op := "样例覆盖不足"
 	resp = doJSON(t, bob, http.MethodPost, decisionURL, api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionRejected, Opinion: &op})
 	wantStatus(t, resp, http.StatusOK)
@@ -2100,18 +2100,34 @@ func TestCompletionReviewFlow(t *testing.T) {
 	wantStatus(t, resp, http.StatusOK)
 	detail = decodeBody[api.TaskDetail](t, resp)
 	for _, d := range detail.Deliverables {
-		if d.Candidate != nil {
-			t.Fatalf("退回后候选应删除: %+v", d)
+		if d.Candidate == nil {
+			t.Fatalf("退回后候选应保留: %+v", d)
+		}
+		if d.CanDeleteCandidate == nil || !*d.CanDeleteCandidate {
+			t.Fatalf("负责人应可删除候选: %+v", d)
 		}
 	}
 	if detail.CompletionReviews[0].State != api.CompletionReviewStateRejected || detail.CompletionReviews[0].Opinion == nil || *detail.CompletionReviews[0].Opinion != op {
 		t.Fatalf("退回事实未保留: %+v", detail.CompletionReviews[0])
 	}
-	if detail.CompletionReviews[0].Items[0].FileId != nil {
-		t.Fatalf("已删除候选不应再提供下载: %+v", detail.CompletionReviews[0].Items[0])
+	if detail.CompletionReviews[0].Items[0].FileId == nil {
+		t.Fatalf("保留的候选应仍可下载: %+v", detail.CompletionReviews[0].Items[0])
 	}
 
-	// 重传候选（仅第一项）并重提 → AC-39/15：通过后候选成为当前内容、任务完成
+	// 裁决 #165：删除第二项候选（管理员按纠错口径同样可删）
+	resp = doJSON(t, alice, http.MethodDelete, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskID, d2), nil)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodGet, detailURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail = decodeBody[api.TaskDetail](t, resp)
+	for _, d := range detail.Deliverables {
+		if d.Id == d2 && d.Candidate != nil {
+			t.Fatalf("删除后候选应消失: %+v", d)
+		}
+	}
+
+	// 重传候选（仅第一项，覆盖保留的候选）并重提 → 第二次申请只带剩余候选（裁决 #165）
 	uploadCandidate(t, carol, tasksURL, taskID, d1, api.UploadCandidateRequest{FileName: "成果-终版.docx"}, "candidate-bytes")
 	// 先给第二项种一份当前内容，验证「未包含的当前交付物不变」
 	seeded, err := q.CreateDeliverableFile(context.Background(), store.CreateDeliverableFileParams{
@@ -2486,7 +2502,7 @@ func TestIntermediateReviewOrSign(t *testing.T) {
 	wantStatus(t, resp, http.StatusForbidden)
 	resp.Body.Close()
 
-	// AC-24：erin 退回（意见必填）→ 候选删除、任务回进行中、意见保留
+	// AC-24（裁决 #165 修订）：erin 退回（意见必填）→ 候选保留、任务回进行中、意见保留
 	resp = doJSON(t, erin, http.MethodPost, decisionURL, api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionRejected})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
@@ -2502,11 +2518,11 @@ func TestIntermediateReviewOrSign(t *testing.T) {
 	if detail.CompletionReviews[0].State != api.CompletionReviewStateRejected || *detail.CompletionReviews[0].Opinion != op {
 		t.Fatalf("退回意见未保留: %+v", detail.CompletionReviews[0])
 	}
-	if detail.Deliverables[0].Candidate != nil {
-		t.Fatalf("退回后候选应删除: %+v", detail.Deliverables[0])
+	if detail.Deliverables[0].Candidate == nil {
+		t.Fatalf("退回后候选应保留（裁决 #165）: %+v", detail.Deliverables[0])
 	}
 
-	// 重新提交完整流程：重传候选→提交→dave 通过（或签任一人）→ 待 KR 终审、erin 待办关闭
+	// 重新提交完整流程：重传候选（覆盖保留的候选）→提交→dave 通过（或签任一人）→ 待 KR 终审、erin 待办关闭
 	uploadCandidate(t, carol, tasksURL, taskID, dA, api.UploadCandidateRequest{FileName: "验收方案V2.docx"}, "candidate-bytes")
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskID),
 		api.SubmitCompletionRequest{Note: "修正口径后重提"})
@@ -6063,9 +6079,9 @@ func TestTaskParticipants(t *testing.T) {
 	}
 }
 
-// 成果更新（AC-66、AC-33、AC-39；#78）：已完成任务重新发起交付物更新，走同一道完成审批，
-// 审批期间任务保持已完成、当前内容继续有效；终审通过后候选覆盖当前内容且旧文件不可恢复，
-// 退回则候选删除、当前内容不变。「已生效 · 有更新审核中」由本流程产生。
+// 成果更新（AC-66、AC-33、AC-39；#78，裁决 #165 修订）：已完成任务重新发起交付物更新，
+// 走同一道完成审批，审批期间任务保持已完成、当前内容继续有效；终审通过后候选覆盖当前内容
+// 且旧文件不可恢复，退回则候选保留、进程回到已发起、当前内容不变。
 func TestResultUpdateFlow(t *testing.T) {
 	q, pool := setupDB(t)
 	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
@@ -6285,18 +6301,25 @@ func TestResultUpdateFlow(t *testing.T) {
 	if rejected.Status != api.TaskStatusCompleted {
 		t.Fatalf("成果更新退回后任务仍为已完成: %+v", rejected.Status)
 	}
-	if rejected.ResultUpdate == nil || *rejected.ResultUpdate != api.ResultUpdateStateNone {
-		t.Fatalf("退回后成果更新进程应结束: %+v", rejected.ResultUpdate)
+	// 裁决 #165：退回后成果更新回到「已发起」——候选保留，可删改后重新提交。
+	if rejected.ResultUpdate == nil || *rejected.ResultUpdate != api.ResultUpdateStateOpen {
+		t.Fatalf("退回后成果更新应回到已发起: %+v", rejected.ResultUpdate)
 	}
 	resp = doJSON(t, alice, http.MethodGet, detailURL, nil)
 	wantStatus(t, resp, http.StatusOK)
 	detail = decodeBody[api.TaskDetail](t, resp)
 	d = detail.Deliverables[0]
-	if d.Candidate != nil {
-		t.Fatalf("退回后候选应删除: %+v", d.Candidate)
+	if d.Candidate == nil {
+		t.Fatalf("退回后候选应保留（裁决 #165）: %+v", d)
 	}
 	if d.Current == nil || d.Current.FileName != "接口说明-v2.docx" {
 		t.Fatalf("退回不改变当前内容: %+v", d.Current)
+	}
+	// 负责人删除保留的候选（成果更新已发起时可删），随后进程仍为已发起。
+	resp = doJSON(t, carol, http.MethodDelete, fmt.Sprintf("%s/%d/deliverables/%d/candidate", tasksURL, taskID, deliverableID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if got := decodeBody[api.Task](t, resp); got.ResultUpdate == nil || *got.ResultUpdate != api.ResultUpdateStateOpen {
+		t.Fatalf("删除候选不应改变成果更新进程: %+v", got.ResultUpdate)
 	}
 	// 发起、通过、退回均进任务动态（#64 写路径留痕）
 	kinds := map[string]bool{}

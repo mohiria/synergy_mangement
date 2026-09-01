@@ -491,7 +491,8 @@ export interface paths {
         put?: never;
         /** 登记候选交付物内容并取得预签名上传地址（任务负责人；重复调用覆盖未提交审核的候选） */
         post: operations["uploadCandidate"];
-        delete?: never;
+        /** 删除候选文件（裁决 */
+        delete: operations["deleteCandidate"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1839,6 +1840,8 @@ export interface components {
             edges: components["schemas"]["DeliverableEdgeRef"][];
             /** @description 当前用户能否删除本项（派生字段，裁决 H1）：有编辑权限、任务在执行类状态、 且本项没有当前内容时为 true；已发布的项删除须走成果更新重传 */
             canDelete: boolean;
+            /** @description 当前用户能否删除本项的候选文件（派生字段，裁决 #165）：与登记候选同口径—— 负责人（管理员纠错），执行类状态或成果更新已发起；完成申请在审期间不可删； 无候选文件时不返回 */
+            canDeleteCandidate?: boolean;
         };
         /**
          * @description 新增交付物项（裁决 G1）：不收项名，入口就是选文件。
@@ -3620,6 +3623,34 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["ValidationError"];
+        };
+    };
+    deleteCandidate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+                deliverableId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除，返回任务最新事实 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Task"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     commitCandidate: {

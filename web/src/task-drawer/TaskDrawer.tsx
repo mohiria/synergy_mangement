@@ -440,6 +440,30 @@ export default function TaskDrawer({
     });
   };
 
+  // 删除候选文件（裁决 #165）：退回后候选保留，负责人可逐个删除；被删候选不进成果归档。
+  const deleteCandidate = (d: { id: number; name: string; candidate?: { fileName: string } | null }) => {
+    if (!task) return;
+    Modal.confirm({
+      title: `删除候选「${d.candidate?.fileName ?? d.name}」？`,
+      content: "删除后该文件不进成果归档，重新提交完成申请时只带剩余候选。",
+      okText: "删除",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: async () => {
+        const res = await client.DELETE(
+          "/projects/{projectId}/tasks/{taskId}/deliverables/{deliverableId}/candidate",
+          { params: { path: { projectId, taskId: task.id, deliverableId: d.id } } },
+        );
+        if (!res.data) {
+          message.error(res.error?.message ?? "删除失败");
+          return;
+        }
+        message.success("候选文件已删除");
+        setRefreshTick((n) => n + 1);
+      },
+    });
+  };
+
   // 候选内容上传（AC-52）：先在窗口内选择，点「确认上传」才登记并直传；
   // 关闭窗口丢弃本次选择，不产生任何业务事实。
   const closeCandidate = () => {
@@ -941,6 +965,12 @@ export default function TaskDrawer({
                     onClick={() => setCandidateFor({ id: d.id, name: d.name })}
                   >
                     重传交付物
+                  </Button>
+                )}
+                {/* 裁决 #165：退回后候选保留，负责人可逐个删除；新增内容走上传入口。 */}
+                {d.candidate && d.canDeleteCandidate && (
+                  <Button size="small" danger onClick={() => deleteCandidate(d)}>
+                    删除候选
                   </Button>
                 )}
                 {d.canDelete && (
