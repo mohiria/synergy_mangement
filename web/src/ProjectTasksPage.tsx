@@ -15,6 +15,7 @@ import type { components } from "./api/schema";
 import Icon from "./icons";
 import ProjectShell from "./ProjectShell";
 import TaskImportModal from "./TaskImportModal";
+import PersonPicker from "./PersonPicker";
 import TaskDrawerHost from "./task-drawer";
 import {
   STATUS_CLASS,
@@ -683,26 +684,26 @@ function CreateTaskModal({
                 </div>
                 <div>
                   <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>参与人（选填，不含负责人）</div>
-                  <Select
-                    mode="multiple"
-                    style={{ width: "100%" }}
-                    options={members
+                  <PersonPicker
+                    people={members
                       .filter((m) => m.userId !== r.ownerId)
-                      .map((m) => ({ value: m.userId, label: m.displayName }))}
+                      .map((m) => ({ userId: m.userId, displayName: m.displayName, username: m.username }))}
                     value={r.participantIds}
-                    onChange={(v) => patch(r.key, { participantIds: v })}
                     placeholder="选择参与人"
+                    size="middle"
+                    onSave={(v) => patch(r.key, { participantIds: v })}
                   />
                 </div>
                 <div>
                   <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>成果审核人（选填，非只读成员）</div>
-                  <Select
-                    mode="multiple"
-                    style={{ width: "100%" }}
-                    options={ownerOptions}
+                  <PersonPicker
+                    people={members
+                      .filter((m) => m.role !== "viewer")
+                      .map((m) => ({ userId: m.userId, displayName: m.displayName, username: m.username }))}
                     value={r.reviewerIds}
-                    onChange={(v) => patch(r.key, { reviewerIds: v })}
                     placeholder="选择成果审核人"
+                    size="middle"
+                    onSave={(v) => patch(r.key, { reviewerIds: v })}
                   />
                 </div>
                 <div>
@@ -721,13 +722,12 @@ function CreateTaskModal({
                 {r.receiverScope === "members" && (
                   <div>
                     <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>接收方名单（至少一人）</div>
-                    <Select
-                      mode="multiple"
-                      style={{ width: "100%" }}
-                      options={members.map((m) => ({ value: m.userId, label: m.displayName }))}
+                    <PersonPicker
+                      people={members.map((m) => ({ userId: m.userId, displayName: m.displayName, username: m.username }))}
                       value={r.receiverIds}
-                      onChange={(v) => patch(r.key, { receiverIds: v })}
                       placeholder="选择接收方"
+                      size="middle"
+                      onSave={(v) => patch(r.key, { receiverIds: v })}
                     />
                   </div>
                 )}
@@ -849,29 +849,17 @@ function InviteOwnersModal({
           <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
             选择受邀成员（可多选）
           </div>
-          {/* #126：不再按角色分组、不用树形穿梭框——扁平多选，一人一行「头像 姓名（用户名）」。 */}
-          <Select
-            mode="multiple"
-            style={{ width: "100%" }}
-            placeholder="搜索姓名或用户名"
-            value={selected}
-            onChange={setSelected}
-            optionFilterProp="label"
-            options={candidates.map((m) => ({
-              value: m.userId,
-              label: `${m.displayName}（${m.username}）`,
+          {/* #126／#166：扁平多选，人员选择组件——搜索框 + 头像行。 */}
+          <PersonPicker
+            people={candidates.map((m) => ({
+              userId: m.userId,
+              displayName: m.displayName,
+              username: m.username,
             }))}
-            optionRender={(opt) => {
-              const m = candidates.find((c) => c.userId === opt.value);
-              return (
-                <span className="owner-cell">
-                  <span className="avatar">{m?.displayName.slice(0, 1)}</span>
-                  <span className="cell-text">
-                    {m?.displayName}（{m?.username}）
-                  </span>
-                </span>
-              );
-            }}
+            value={selected}
+            placeholder="选择受邀成员"
+            size="middle"
+            onSave={setSelected}
           />
         </div>
         <div>

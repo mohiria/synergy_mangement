@@ -5,7 +5,8 @@ import { client } from "../api/client";
 import TreeTransfer from "../TreeTransfer";
 import type { TreeTransferItem } from "../TreeTransfer";
 import type { components } from "../api/schema";
-import { EDGE_TYPE_LABEL, memberTreeItems, structureMessage, type KrOption } from "./shared";
+import PersonPicker from "../PersonPicker";
+import { EDGE_TYPE_LABEL, structureMessage, type KrOption } from "./shared";
 
 type Objective = components["schemas"]["Objective"];
 type Task = components["schemas"]["Task"];
@@ -106,7 +107,10 @@ export default function ConfigureInputModal({
         search: `${code} ${t.name} ${t.ownerName} ${oTitle} ${kr?.code ?? ""} ${kr?.description ?? ""} ${deliverables.join(" ")}`.toLowerCase(),
       };
     });
-  const providerItems = memberTreeItems(members.filter((m) => m.role !== "viewer"));
+  // #166：对接人选择统一为人员选择组件（搜索框 + 头像行）。
+  const providerPeople = members
+    .filter((m) => m.role !== "viewer")
+    .map((m) => ({ userId: m.userId, displayName: m.displayName, username: m.username }));
 
   const save = async () => {
     if (mode === "member") {
@@ -206,15 +210,14 @@ export default function ConfigureInputModal({
           <>
             <div>
               <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
-                对接人（按分组整组选择或多选）
+                对接人（可多选；非只读项目成员）
               </div>
-              <TreeTransfer
-                items={providerItems}
-                targetKeys={providerIds.map(String)}
-                onChange={(keys) => setProviderIds(keys.map(Number))}
-                titles={["可选成员", "已选成员"]}
-                unit="人"
-                searchPlaceholder="搜索姓名、账号或分组"
+              <PersonPicker
+                people={providerPeople}
+                value={providerIds}
+                placeholder="选择对接人"
+                size="middle"
+                onSave={setProviderIds}
               />
             </div>
             <div>

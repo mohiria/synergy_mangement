@@ -188,6 +188,35 @@ body {
   font-size: var(--type-aux); font-weight: 700;
 }
 
+/* 人员选择组件（#166，参考 references/人员选择组件参考.png）：
+   触发区仿输入框；面板 = 顶部搜索框 + 成员列表（头像 + 姓名 + 账号）。 */
+.pp-trigger {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 24px; max-width: 420px; min-width: 160px; flex: 1;
+  padding: 1px 8px; border: 1px solid #d6dce5; border-radius: var(--radius);
+  background: #fff; cursor: pointer; font-size: inherit; text-align: left; color: var(--text);
+}
+.pp-trigger.middle { min-height: 32px; width: 100%; max-width: none; }
+.pp-trigger:hover { border-color: var(--accent); }
+.pp-trigger.disabled { cursor: not-allowed; background: #f5f6f8; }
+.pp-trigger-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-trigger-text.muted { color: var(--muted); }
+.pp-caret { color: var(--muted); font-size: var(--type-aux); flex: none; }
+.pp-panel { width: 300px; }
+.pp-search { padding: 10px 10px 8px; border-bottom: 1px solid var(--line); }
+.pp-list { max-height: 264px; overflow: auto; padding: 4px; }
+.pp-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border-radius: var(--radius); cursor: pointer;
+}
+.pp-row:hover { background: #f4f6f9; }
+.pp-row.selected { background: #eef2ff; }
+.pp-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-name { color: var(--text); }
+.pp-username { color: var(--muted); font-size: var(--type-aux); }
+.pp-check { color: var(--accent); font-weight: 700; flex: none; }
+.pp-empty { padding: 16px 10px; color: var(--muted); font-size: var(--type-aux); text-align: center; }
+
 .page { width: 100%; max-width: 1480px; margin: 0 auto; padding: 28px 32px 48px; }
 /* 内容区宽度分档（基线 §5）：我的工作窄、图谱宽，其余 1480。 */
 .page.page-narrow { max-width: 1240px; }

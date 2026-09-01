@@ -25,15 +25,13 @@ test("配置审核人 → 提交完成申请 → 审核人在抽屉或签通过�
   await page.getByText(TASK_NAME).first().click();
   const drawer = page.locator(".ant-drawer-content");
   await expect(drawer).toBeVisible();
+  // #166：人员选择组件——点击触发区弹出「搜索框 + 头像行」面板，收起时一次保存。
   const reviewerRow = drawer.locator(".task-info-row", { hasText: "成果审核人" });
-  await reviewerRow.locator(".ant-select").click();
-  await page
-    .locator(".ant-select-dropdown .ant-select-item", { hasText: REVIEWER.displayName })
-    .click();
-  await page.keyboard.press("Escape"); // 收起下拉即保存
-  // antd Select 有隐藏的 aria-live span，getByText 会先命中它；断言可见的选中标签。
+  await reviewerRow.locator(".pp-trigger").click();
+  await page.locator(".pp-panel .pp-row", { hasText: REVIEWER.displayName }).click();
+  await drawer.locator(".task-info-row", { hasText: "周期" }).click(); // 点面板外收起即保存
   await expect(
-    reviewerRow.locator(".ant-select-selection-item", { hasText: REVIEWER.displayName }),
+    reviewerRow.locator(".pp-trigger-text", { hasText: REVIEWER.displayName }),
   ).toBeVisible();
   // #135：审核 Tab 不再有配置行
   await page.locator(".task-drawer-tabs .ant-tabs-tab", { hasText: "审核" }).click();

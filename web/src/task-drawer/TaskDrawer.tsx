@@ -4,6 +4,7 @@ import dayjs from "dayjs";
 import { client } from "../api/client";
 import FileUploadField, { fileTypeLabel, formatFileSize } from "../FileUploadField";
 import PeopleSelect from "./PeopleSelect";
+import PersonPicker from "../PersonPicker";
 import Icon from "../icons";
 import type { components } from "../api/schema";
 import { ACTIVITY_PREVIEW, STATUS_CLASS, fmtTime } from "./shared";
@@ -74,37 +75,19 @@ export default function TaskDrawer({
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const drawerRef = useRef<HTMLDivElement>(null);
   const [progressDraft, setProgressDraft] = useState<number | null>(null);
-  // #135：接收方就地多选——「所有项目成员」用固定首项（哨兵 -1）表达，
-  // 选中即清空并禁用逐人选择；下拉收起时一次保存。
+  // #135／#166：接收方就地多选——「所有项目成员」用固定首项（哨兵 -1）表达，
+  // 选中即清空逐人选择；面板收起时一次保存（PersonPicker 承载）。
   const ALL_RECEIVERS = -1;
-  const [receiverDraft, setReceiverDraft] = useState<number[]>([]);
-  useEffect(() => {
-    setReceiverDraft(
-      task?.receiverScope === "all"
-        ? [ALL_RECEIVERS]
-        : (task?.receivers ?? []).map((r) => r.userId),
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task?.id, task?.receiverScope, (task?.receivers ?? []).map((r) => r.userId).join(",")]);
-  const commitReceivers = () => {
+  const receiverValue =
+    task?.receiverScope === "all"
+      ? [ALL_RECEIVERS]
+      : (task?.receivers ?? []).map((r) => r.userId);
+  const saveReceiversDraft = (ids: number[]) => {
     if (!task) return;
-    const current =
-      task.receiverScope === "all"
-        ? [ALL_RECEIVERS]
-        : (task.receivers ?? []).map((r) => r.userId);
-    if ([...receiverDraft].sort().join(",") === [...current].sort().join(",")) return;
-    if (receiverDraft.includes(ALL_RECEIVERS)) actions.saveReceivers(task, "all", []);
-    else if (receiverDraft.length === 0) actions.saveReceivers(task, "none", []);
-    else actions.saveReceivers(task, "members", receiverDraft);
+    if (ids.includes(ALL_RECEIVERS)) actions.saveReceivers(task, "all", []);
+    else if (ids.length === 0) actions.saveReceivers(task, "none", []);
+    else actions.saveReceivers(task, "members", ids);
   };
-  const memberOption = (m: ProjectMember) => (
-    <span className="owner-cell">
-      <span className="avatar">{m.displayName.slice(0, 1)}</span>
-      <span className="cell-text">
-        {m.displayName}（{m.username}）
-      </span>
-    </span>
-  );
   // #138 就地编辑（裁决 E1）：字段点击进入编辑态；保存按 fieldEditMode 路由——
   // exempt 直接提交，approval 先弹一行「修改原因」（必填）；
   // 已有待审变更单时全部字段锁定（后端 ErrChangePendingExists 同口径），逐字段标「审批中」。
@@ -656,35 +639,23 @@ export default function TaskDrawer({
             <div className="task-info-row">
               <span>接收方</span>
               {task.canManageReceivers ? (
-                <Select
-                  mode="multiple"
-                  size="small"
-                  style={{ minWidth: 220, maxWidth: 420, flex: 1 }}
-                  placeholder="未配置：选择成员或「所有项目成员」"
-                  value={receiverDraft}
-                  onChange={(ids: number[]) => {
-                    if (ids.includes(ALL_RECEIVERS) && !receiverDraft.includes(ALL_RECEIVERS)) {
-                      setReceiverDraft([ALL_RECEIVERS]);
-                    } else {
-                      setReceiverDraft(ids.filter((v) => v !== ALL_RECEIVERS));
-                    }
-                  }}
-                  onDropdownVisibleChange={(o) => {
-                    if (!o) commitReceivers();
-                  }}
-                  optionFilterProp="label"
-                  options={[
-                    { value: ALL_RECEIVERS, label: "所有项目成员" },
+                <PersonPicker
+                  people={[
+                    { userId: ALL_RECEIVERS, displayName: "所有项目成员" },
                     ...members.map((m) => ({
-                      value: m.userId,
-                      label: `${m.displayName}（${m.username}）`,
-                      disabled: receiverDraft.includes(ALL_RECEIVERS),
+                      userId: m.userId,
+                      displayName: m.displayName,
+                      username: m.username,
                     })),
                   ]}
-                  optionRender={(opt) => {
-                    const m = members.find((c) => c.userId === opt.value);
-                    return m ? memberOption(m) : opt.label;
-                  }}
+                  value={receiverValue}
+                  placeholder="未配置：选择成员或「所有项目成员」"
+                  normalizeDraft={(next, prev) =>
+                    next.includes(ALL_RECEIVERS) && !prev.includes(ALL_RECEIVERS)
+                      ? [ALL_RECEIVERS]
+                      : next.filter((v) => v !== ALL_RECEIVERS)
+                  }
+                  onSave={saveReceiversDraft}
                 />
               ) : (
                 <strong className={task.receiverScope === "none" ? "muted" : ""}>
