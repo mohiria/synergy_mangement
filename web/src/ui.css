@@ -949,7 +949,8 @@ body {
    relation-mini／file-row／flow-card；CR-23 字号契约、圆角 4px）。 */
 .gi-title { padding-bottom: 12px; border-bottom: 1px solid #e7ebf0; }
 .gi-eyebrow { display: block; color: #66728a; font-size: var(--type-aux); font-weight: 700; letter-spacing: 0.08em; }
-.gi-title h2 { margin: 6px 0 8px; font-size: var(--type-title); line-height: 1.45; letter-spacing: -0.01em; }
+/* #153：面板标题过长单行截断，悬停 title 看全称，不换行撑高面板。 */
+.gi-title h2 { margin: 6px 0 8px; font-size: var(--type-title); line-height: 1.45; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gi-badge {
   display: inline-flex; align-items: center; gap: 5px; height: 22px; border-radius: var(--radius);
   background: #eef1f4; color: #596575; padding: 0 8px; font-size: var(--type-aux); font-weight: 500; white-space: nowrap;

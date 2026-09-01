@@ -1261,7 +1261,7 @@ export default function CollaborationPage({
       <div className="graph-inspector-body">
         <div className="gi-title">
           <span className="gi-eyebrow">交付物边</span>
-          <h2>{selectedEdgeObj.name}</h2>
+          <h2 title={selectedEdgeObj.name}>{selectedEdgeObj.name}</h2>
           <span className={`gi-badge ${selectedEdgeObj.ready ? "ready" : "risk-warning"}`}>
             {selectedEdgeObj.ready ? "已就绪" : "未就绪"}
           </span>
@@ -1439,7 +1439,7 @@ export default function CollaborationPage({
       <div className="graph-inspector-body">
         <div className="gi-title">
           <span className="gi-eyebrow">任务节点 · {inspectorDetail.task.code}</span>
-          <h2>{inspectorDetail.task.name}</h2>
+          <h2 title={inspectorDetail.task.name}>{inspectorDetail.task.name}</h2>
           <span className="gi-badge">{inspectorDetail.task.statusLabel}</span>
           {(() => {
             const rb = taskRiskBadge(inspectorDetail.task.id);
@@ -1620,7 +1620,7 @@ export default function CollaborationPage({
       <div className="graph-inspector-body">
         <div className="gi-title">
           <span className="gi-eyebrow">目标 O · {selectedO.code}</span>
-          <h2>{selectedO.title}</h2>
+          <h2 title={selectedO.title}>{selectedO.title}</h2>
           <span
             className={`gi-badge ${selectedO.riskLevel !== "normal" ? `risk-${selectedO.riskLevel}` : ""}`}
           >
@@ -1666,7 +1666,7 @@ export default function CollaborationPage({
       <div className="graph-inspector-body">
         <div className="gi-title">
           <span className="gi-eyebrow">KR 节点 · {selectedKr.code}</span>
-          <h2>{selectedKr.description}</h2>
+          <h2 title={selectedKr.description}>{selectedKr.description}</h2>
           <span
             className={`gi-badge ${selectedKr.riskLevel !== "normal" ? `risk-${selectedKr.riskLevel}` : ""}`}
           >
@@ -1733,7 +1733,9 @@ export default function CollaborationPage({
       <div className="graph-inspector-body">
         <div className="gi-title">
           <span className="gi-eyebrow">关系相关项目成员</span>
-          <h2>{memberDuties[0].inputRequest!.providerName}</h2>
+          <h2 title={memberDuties[0].inputRequest!.providerName}>
+            {memberDuties[0].inputRequest!.providerName}
+          </h2>
         </div>
         <div className="gi-grid">
           <div className="gi-prop">
@@ -1787,6 +1789,12 @@ export default function CollaborationPage({
   // 重算——否则预警级卡点会被画成红色描边，与文字标签自相矛盾。
   const krVisualState = (krId: number): "normal" | "warning" | "high_risk" =>
     krById.get(krId)?.riskLevel ?? "normal";
+
+  // #153：节点标签截断后悬停显示完整名称（原生 title），各层 O／KR 节点统一。
+  const krNodeTitle = (krId: number) => {
+    const k = krById.get(krId);
+    return k ? `${k.code} ${k.description}` : undefined;
+  };
 
   // AC-08 新口径：KR 节点只显示编号与名称、风险状态和非零卡点数；
   // CR-21：预警／高风险再叠一个「!」标记，不只靠描边颜色区分。
@@ -2198,6 +2206,7 @@ export default function CollaborationPage({
                   <div
                     className="gnode gnode-o"
                     style={{ left: oLayerOPos.x, top: oLayerOPos.y, width: oLayerOPos.w, height: oLayerOPos.h }}
+                    title={oLayer.o.title}
                     onMouseDown={(ev) => startDrag(`o:${oLayer.o.id}`, ev.clientX, ev.clientY)}
                   >
                     <b>{oLayer.o.title}</b>
@@ -2212,6 +2221,7 @@ export default function CollaborationPage({
                         krVisualState(n.id) !== "normal" ? `risk-${krVisualState(n.id)}` : ""
                       }`}
                       style={{ left: n.pos.x, top: n.pos.y, width: n.pos.w, height: n.pos.h }}
+                      title={krNodeTitle(n.id)}
                       onMouseDown={(ev) => startDrag(`kr:${n.id}`, ev.clientX, ev.clientY)}
                       onClick={guardClick(() => enterKr(n.id))}
                       onKeyDown={pressAsClick(() => enterKr(n.id))}
@@ -2235,6 +2245,7 @@ export default function CollaborationPage({
                         tabIndex={0}
                         className={`gnode gnode-o ${n.dimmed ? "dimmed" : ""}`}
                         style={{ left: n.pos.x, top: n.pos.y, width: n.pos.w, height: n.pos.h }}
+                        title={objectives.find((o) => o.id === n.id)?.title}
                         onMouseDown={(ev) => startDrag(`o:${n.id}`, ev.clientX, ev.clientY)}
                         onClick={guardClick(() => enterO(n.id))}
                         onKeyDown={pressAsClick(() => enterO(n.id))}
@@ -2251,6 +2262,7 @@ export default function CollaborationPage({
                           krVisualState(n.id) !== "normal" ? `risk-${krVisualState(n.id)}` : ""
                         }`}
                         style={{ left: n.pos.x, top: n.pos.y, width: n.pos.w, height: n.pos.h }}
+                        title={krNodeTitle(n.id)}
                         onMouseDown={(ev) => startDrag(`kr:${n.id}`, ev.clientX, ev.clientY)}
                         onClick={guardClick(() => enterKr(n.id))}
                         onKeyDown={pressAsClick(() => enterKr(n.id))}
@@ -2321,6 +2333,7 @@ export default function CollaborationPage({
                             width: krCenterPos.w,
                             height: krCenterPos.h,
                           }}
+                          title={krNodeTitle(krId)}
                           onMouseDown={(ev) => startDrag(`kr:${krId}`, ev.clientX, ev.clientY)}
                           onClick={guardClick(selectKr)}
                           onKeyDown={pressAsClick(selectKr)}
@@ -2497,6 +2510,7 @@ export default function CollaborationPage({
                           tabIndex={0}
                           className={`gnode gnode-o ${dim ? "dimmed" : ""}`}
                           style={{ left: n.pos.x, top: n.pos.y, width: n.pos.w, height: n.pos.h }}
+                          title={n.title}
                           onMouseDown={(ev) => startDrag(`o:${n.id}`, ev.clientX, ev.clientY)}
                           onClick={guardClick(() => enterO(n.id))}
                           onKeyDown={pressAsClick(() => enterO(n.id))}
@@ -2518,6 +2532,7 @@ export default function CollaborationPage({
                             krVisualState(n.id) !== "normal" ? `risk-${krVisualState(n.id)}` : ""
                           }`}
                           style={{ left: n.pos.x, top: n.pos.y, width: n.pos.w, height: n.pos.h }}
+                          title={krNodeTitle(n.id)}
                           onMouseDown={(ev) => startDrag(`kr:${n.id}`, ev.clientX, ev.clientY)}
                           onClick={guardClick(() => enterKr(n.id))}
                           onKeyDown={pressAsClick(() => enterKr(n.id))}
