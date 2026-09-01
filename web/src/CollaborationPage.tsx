@@ -35,6 +35,11 @@ const GRAPH_BATCH_STEP = 100;
 const ZOOM_MIN = 0.45;
 const ZOOM_MAX = 2.2;
 
+// #146：任务／成员节点是实线圆环（PRD §11；原型 nodeMarkup r=29、聚焦起点 r=35）。
+const TASK_R = 29;
+const TASK_R_FOCUS = 35;
+const MEMBER_R = 29;
+
 // CR-19（#145）：节点拖拽在当前浏览会话内固定——模块级缓存在组件卸载后存活，
 // 刷新页面即清空、其他用户不继承；key 为「项目:视图:节点」，各层级坐标系互不串。
 const sessionDragOffsets = new Map<string, { dx: number; dy: number }>();
@@ -376,18 +381,19 @@ export default function CollaborationPage({
     }
     const neighbors = tasks.filter((t) => neighborIds.has(t.id) && isTaskVisible(t));
     const nodeW = 250;
-    const nodeH = 66;
+    // #146：槽位高度容纳圆环（58px）＋圆下 caption。
+    const nodeH = 96;
     const gap = 16;
     const positions = new Map<number, NodePos>();
     inKr.forEach((t, i) => positions.set(t.id, { x: 360, y: 24 + i * (nodeH + gap), w: nodeW, h: nodeH }));
     neighbors.forEach((t, i) => positions.set(t.id, { x: 40, y: 24 + i * (nodeH + gap), w: nodeW, h: nodeH }));
     let height = Math.max(inKr.length, neighbors.length) * (nodeH + gap) + 60;
-    const memberNodes: { edgeId: number; label: string }[] = [];
+    const memberNodes: { edgeId: number; label: string; inputName: string }[] = [];
     relevantEdges.forEach((e) => {
       if (e.sourceTaskId == null && e.inputRequest) {
-        positions.set(-e.id, { x: 40, y: height, w: 180, h: 44 });
-        memberNodes.push({ edgeId: e.id, label: e.inputRequest.providerName });
-        height += 56;
+        positions.set(-e.id, { x: 40, y: height, w: 180, h: 88 });
+        memberNodes.push({ edgeId: e.id, label: e.inputRequest.providerName, inputName: e.name });
+        height += 100;
       }
     });
     // 「显示已完成」关闭时被藏起来的本 KR 任务数：全完成的 KR 点进来是空画布，
@@ -439,7 +445,8 @@ export default function CollaborationPage({
       byHop.set(h, [...(byHop.get(h) ?? []), id]);
     }
     const nodeW = 240;
-    const nodeH = 66;
+    // #146：槽位高度容纳圆环（聚焦起点 70px）＋圆下 caption。
+    const nodeH = 96;
     const gapY = 16;
     const colGap = 100;
     const positions = new Map<number, NodePos>();
@@ -454,7 +461,7 @@ export default function CollaborationPage({
     });
     let height = maxRows * (nodeH + gapY) + 60;
     // 成员来源的输入：挂在被输入任务左侧，作为可点节点参与聚焦（CR-13）。
-    const memberNodes: { edgeId: number; label: string }[] = [];
+    const memberNodes: { edgeId: number; label: string; inputName: string }[] = [];
     const relevantEdges = edges.filter((e) => {
       const targetIn = visible.has(e.targetTaskId);
       if (e.sourceTaskId == null) return targetIn && !!e.inputRequest;
@@ -462,9 +469,9 @@ export default function CollaborationPage({
     });
     relevantEdges.forEach((e) => {
       if (e.sourceTaskId == null && e.inputRequest) {
-        positions.set(-e.id, { x: 40, y: height, w: 200, h: 44 });
-        memberNodes.push({ edgeId: e.id, label: e.inputRequest.providerName });
-        height += 56;
+        positions.set(-e.id, { x: 40, y: height, w: 200, h: 88 });
+        memberNodes.push({ edgeId: e.id, label: e.inputRequest.providerName, inputName: e.name });
+        height += 100;
       }
     });
     const width = Math.max(700, 40 + cols.length * (nodeW + colGap));
@@ -482,8 +489,9 @@ export default function CollaborationPage({
     if (mode.kind !== "full") return null;
     const visibleTasks = tasks.filter(isTaskVisible);
     const visibleIds = new Set(visibleTasks.map((t) => t.id));
-    const nodeW = 240;
-    const nodeH = 62;
+    // #146：任务槽收窄成圆环＋caption 的占位（圆 58px），列宽随之变紧凑。
+    const nodeW = 150;
+    const nodeH = 96;
     const gapX = 14;
     const colPad = 14;
     const colW = 2 * nodeW + gapX + colPad * 2;
@@ -521,9 +529,9 @@ export default function CollaborationPage({
           const tx = innerX + (i % 2) * (nodeW + gapX);
           const ty = y + krH + 18 + Math.floor(i / 2) * (nodeH + 12);
           positions.set(t.id, { x: tx, y: ty, w: nodeW, h: nodeH });
-          // KR→任务：owns 直线绘于节点层之下，端点隐入节点（原型同法）。
+          // KR→任务：owns 直线绘于节点层之下，端点隐入任务圆心（#146 槽位顶部是圆环）。
           ownsLines.push({
-            d: `M ${krCx} ${krCy} L ${tx + nodeW / 2} ${ty + nodeH / 2}`,
+            d: `M ${krCx} ${krCy} L ${tx + nodeW / 2} ${ty + TASK_R}`,
             krId: k.id,
             taskId: t.id,
           });
@@ -546,7 +554,7 @@ export default function CollaborationPage({
     let mi = 0;
     const memberY = maxY + 24;
     for (const [pid, entry] of memberByProvider) {
-      const pos = { x: 24 + mi * 216, y: memberY, w: 200, h: 44 };
+      const pos = { x: 24 + mi * 216, y: memberY, w: 200, h: 88 };
       memberNodes.push({ providerId: pid, name: entry.name, pos, edgeIds: entry.edgeIds });
       for (const eid of entry.edgeIds) positions.set(-eid, pos);
       mi++;
@@ -556,7 +564,7 @@ export default function CollaborationPage({
       const sourceOK = e.sourceTaskId != null ? visibleIds.has(e.sourceTaskId) : positions.has(-e.id);
       return targetOK && sourceOK;
     });
-    const height = (memberNodes.length > 0 ? memberY + 44 : maxY) + 40;
+    const height = (memberNodes.length > 0 ? memberY + 88 : maxY) + 40;
     const width = Math.max(24 + objectives.length * (colW + colGap), 24 + mi * 216) + 20;
     return { visibleTasks, positions, oNodes, krNodes, ownsLines, memberNodes, visibleEdges, height, width };
   }, [mode, tasks, edges, objectives, krList, isTaskVisible]);
@@ -800,6 +808,26 @@ export default function CollaborationPage({
     return { ...pos, x: pos.x + off.dx, y: pos.y + off.dy };
   };
 
+  // #146：布局槽位（圆环＋圆下 caption 的占位）→ 圆形包围盒。节点渲染与边锚点共用
+  // 这一份换算，箭头因此落在圆边而不是槽位边缘；聚焦层起点用大圆（原型 r=35）。
+  const taskRadius = (id: number) => (mode.kind === "focus" && mode.taskId === id ? TASK_R_FOCUS : TASK_R);
+  const circleBounds = (pos: NodePos, r: number): NodePos => ({
+    x: pos.x + pos.w / 2 - r,
+    y: pos.y,
+    w: r * 2,
+    h: r * 2,
+  });
+  const taskCircle = (id: number, base: NodePos): NodePos => circleBounds(withOffset(id, base), taskRadius(id));
+  const memberCircle = (base: NodePos): NodePos => circleBounds(base, MEMBER_R);
+
+  // §11 键盘可达：节点是 role=button 的可聚焦元素，Enter／空格等价单击。
+  const pressAsClick = (fn: () => void) => (ev: React.KeyboardEvent) => {
+    if (ev.key === "Enter" || ev.key === " ") {
+      ev.preventDefault();
+      fn();
+    }
+  };
+
   // 「重新布局」清除会话内固定并复位视口（PRD §6.4；只清本项目的 key，不动其他项目）。
   const relayout = () => {
     for (const key of [...sessionDragOffsets.keys()]) {
@@ -897,42 +925,53 @@ export default function CollaborationPage({
         : "";
   };
 
+  // #146：任务节点是实线圆环（PRD §11）——圆内任务编号、圆下 caption 显任务名；
+  // 三态＝灰蓝／橙浅橙底／红浅红底＋「!」标记；生命周期状态与负责人不上画布
+  // （详情面板与关系列表本就有）。
   const taskNode = (t: Task, posBase: NodePos) => {
-    const pos = withOffset(t.id, posBase);
-    const taskBlockers = openBlockers.filter((b) => b.taskId === t.id);
+    const pos = taskCircle(t.id, posBase);
     const risk = taskRiskLevel(t.id);
     const dimByFilter = hasFilter && !taskMatchesFilter(t);
     const dimBySelect = neighborIds != null && !neighborIds.has(t.id);
+    const select = () => {
+      setImpactMode(false);
+      setSelectedEdge(null);
+      if (mode.kind === "focus") {
+        // CR-05：点相邻节点继续展开下一层，画布节点集合随之增长。
+        setExpanded((prev) => new Set(prev).add(t.id));
+        setSelectedTask(t.id);
+        return;
+      }
+      setSelectedTask((prev) => (prev === t.id ? null : t.id));
+    };
     return (
       <div
         key={t.id}
-        className={`gnode ${risk ? `risk-${risk}` : ""} ${selectedTask === t.id ? "selected" : ""} ${
+        role="button"
+        tabIndex={0}
+        className={`gnode gnode-task ${risk ? `risk-${risk}` : ""} ${selectedTask === t.id ? "selected" : ""} ${
           dimByFilter || dimBySelect ? "dimmed" : ""
         }`}
         style={{ left: pos.x, top: pos.y, width: pos.w, height: pos.h }}
+        title={`${t.code} · ${t.name}`}
         onMouseDown={(ev) => startDrag(t.id, ev.clientX, ev.clientY)}
         onClick={() => {
           if (suppressClickRef.current) {
             suppressClickRef.current = false;
             return;
           }
-          setImpactMode(false);
-          setSelectedEdge(null);
-          if (mode.kind === "focus") {
-            // CR-05：点相邻节点继续展开下一层，画布节点集合随之增长。
-            setExpanded((prev) => new Set(prev).add(t.id));
-            setSelectedTask(t.id);
-            return;
-          }
-          setSelectedTask((prev) => (prev === t.id ? null : t.id));
+          select();
         }}
+        onKeyDown={pressAsClick(select)}
         onDoubleClick={() => setDrawerTaskId(t.id)}
       >
-        <b>{t.name}</b>
-        <small>
-          {krById.get(t.keyResultId)?.code} · {t.ownerName} · {t.statusLabel}
-          {taskBlockers.length > 0 && ` · ${taskBlockers.length} 个卡点`}
-        </small>
+        {risk && (
+          <span className={`gnode-risk-marker risk-${risk}`} aria-hidden>
+            !
+          </span>
+        )}
+        <b>{t.code}</b>
+        <small>{t.name}</small>
       </div>
     );
   };
@@ -1146,8 +1185,9 @@ export default function CollaborationPage({
   // 小地图模型（原型 cp-minimap）：非归属关系边画线、节点画色点；数据量小，直接算不缓存。
   const mmDots: { x: number; y: number; cls: string }[] = [];
   const mmLines: { x1: number; y1: number; x2: number; y2: number }[] = [];
+  // #146：任务／成员的小地图点位取圆心（id 非空按任务圆换算，成员由调用方先转圆）。
   const mmDot = (id: number | null, pos: NodePos, cls: string) => {
-    const p = id != null ? withOffset(id, pos) : pos;
+    const p = id != null ? taskCircle(id, pos) : pos;
     mmDots.push({ x: p.x + p.w / 2, y: p.y + p.h / 2, cls });
   };
   const mmEdgeLines = (
@@ -1158,8 +1198,8 @@ export default function CollaborationPage({
       const fromBase = e.sourceTaskId != null ? positions.get(e.sourceTaskId) : positions.get(-e.id);
       const toBase = positions.get(e.targetTaskId);
       if (!fromBase || !toBase) continue;
-      const from = e.sourceTaskId != null ? withOffset(e.sourceTaskId, fromBase) : fromBase;
-      const to = withOffset(e.targetTaskId, toBase);
+      const from = e.sourceTaskId != null ? taskCircle(e.sourceTaskId, fromBase) : memberCircle(fromBase);
+      const to = taskCircle(e.targetTaskId, toBase);
       mmLines.push({ x1: from.x + from.w / 2, y1: from.y + from.h / 2, x2: to.x + to.w / 2, y2: to.y + to.h / 2 });
     }
   };
@@ -1175,7 +1215,7 @@ export default function CollaborationPage({
     }
     for (const m of krLayer.memberNodes) {
       const pos = krLayer.positions.get(-m.edgeId);
-      if (pos) mmDot(null, pos, "member");
+      if (pos) mmDot(null, memberCircle(pos), "member");
     }
     mmEdgeLines(krLayer.relevantEdges, krLayer.positions);
   } else if (mode.kind === "focus" && focusLayer) {
@@ -1185,7 +1225,7 @@ export default function CollaborationPage({
     }
     for (const m of focusLayer.memberNodes) {
       const pos = focusLayer.positions.get(-m.edgeId);
-      if (pos) mmDot(null, pos, "member");
+      if (pos) mmDot(null, memberCircle(pos), "member");
     }
     mmEdgeLines(focusLayer.relevantEdges, focusLayer.positions);
   } else if (mode.kind === "full" && full) {
@@ -1195,7 +1235,7 @@ export default function CollaborationPage({
       const pos = full.positions.get(t.id);
       if (pos) mmDot(t.id, pos, taskRiskLevel(t.id));
     }
-    for (const m of full.memberNodes) mmDot(null, m.pos, "member");
+    for (const m of full.memberNodes) mmDot(null, memberCircle(m.pos), "member");
     mmEdgeLines(full.visibleEdges, full.positions);
   }
   const mmDotR = Math.max(10, stageSize.w / 110);
@@ -1478,9 +1518,12 @@ export default function CollaborationPage({
                     n.kind === "o" ? (
                       <div
                         key={n.key}
+                        role="button"
+                        tabIndex={0}
                         className={`gnode gnode-o ${n.dimmed ? "dimmed" : ""}`}
                         style={{ left: n.pos.x, top: n.pos.y, width: n.pos.w, height: n.pos.h }}
                         onClick={() => enter({ kind: "o", objectiveId: n.id })}
+                        onKeyDown={pressAsClick(() => enter({ kind: "o", objectiveId: n.id }))}
                       >
                         <b>{objectives.find((o) => o.id === n.id)?.title}</b>
                         <small>{krList.filter((k) => k.objectiveId === n.id).length} 个 KR</small>
@@ -1488,11 +1531,14 @@ export default function CollaborationPage({
                     ) : (
                       <div
                         key={n.key}
+                        role="button"
+                        tabIndex={0}
                         className={`gnode gnode-kr ${n.dimmed ? "dimmed" : ""} ${
                           krVisualState(n.id) !== "normal" ? `risk-${krVisualState(n.id)}` : ""
                         }`}
                         style={{ left: n.pos.x, top: n.pos.y, width: n.pos.w, height: n.pos.h }}
                         onClick={() => enter({ kind: "kr", krId: n.id })}
+                        onKeyDown={pressAsClick(() => enter({ kind: "kr", krId: n.id }))}
                       >
                         {krNodeContent(n.id)}
                       </div>
@@ -1508,8 +1554,8 @@ export default function CollaborationPage({
                         e.sourceTaskId != null ? krLayer.positions.get(e.sourceTaskId) : krLayer.positions.get(-e.id);
                       const toBase = krLayer.positions.get(e.targetTaskId);
                       if (!fromBase || !toBase) return null;
-                      const from = e.sourceTaskId != null ? withOffset(e.sourceTaskId, fromBase) : fromBase;
-                      const to = withOffset(e.targetTaskId, toBase);
+                      const from = e.sourceTaskId != null ? taskCircle(e.sourceTaskId, fromBase) : memberCircle(fromBase);
+                      const to = taskCircle(e.targetTaskId, toBase);
                       const st = edgeStroke(e);
                       const d = edgePath(from, to);
                       const isSel = selectedEdge === e.id;
@@ -1545,24 +1591,32 @@ export default function CollaborationPage({
                     return pos ? taskNode(t, pos) : null;
                   })}
                   {krLayer.memberNodes.map((m) => {
-                    const pos = krLayer.positions.get(-m.edgeId);
-                    return pos ? (
+                    const posBase = krLayer.positions.get(-m.edgeId);
+                    if (!posBase) return null;
+                    // #146：成员节点是紫圆（原型 person），圆内姓名前两字、圆下 caption 显输入名。
+                    const pos = memberCircle(posBase);
+                    const select = () => {
+                      setSelectedTask(null);
+                      setImpactMode(false);
+                      setSelectedEdge((prev) => (prev === m.edgeId ? null : m.edgeId));
+                    };
+                    return (
                       <div
                         key={`m-${m.edgeId}`}
+                        role="button"
+                        tabIndex={0}
                         className={`gnode gnode-member ${selectedEdge === m.edgeId ? "selected" : ""} ${
                           memberDimmed([m.edgeId]) ? "dimmed" : ""
                         }`}
                         style={{ left: pos.x, top: pos.y, width: pos.w, height: pos.h }}
-                        onClick={() => {
-                          setSelectedTask(null);
-                          setImpactMode(false);
-                          setSelectedEdge((prev) => (prev === m.edgeId ? null : m.edgeId));
-                        }}
+                        title={`${m.label} · ${m.inputName || "输入提供成员"}`}
+                        onClick={select}
+                        onKeyDown={pressAsClick(select)}
                       >
-                        <b>{m.label}</b>
-                        <small>输入提供成员</small>
+                        <b>{m.label.slice(0, 2)}</b>
+                        <small>{m.inputName || "输入提供成员"}</small>
                       </div>
-                    ) : null;
+                    );
                   })}
                 </>
               ) : mode.kind === "focus" && focusLayer ? (
@@ -1576,8 +1630,8 @@ export default function CollaborationPage({
                           : focusLayer.positions.get(-e.id);
                       const toBase = focusLayer.positions.get(e.targetTaskId);
                       if (!fromBase || !toBase) return null;
-                      const from = e.sourceTaskId != null ? withOffset(e.sourceTaskId, fromBase) : fromBase;
-                      const to = withOffset(e.targetTaskId, toBase);
+                      const from = e.sourceTaskId != null ? taskCircle(e.sourceTaskId, fromBase) : memberCircle(fromBase);
+                      const to = taskCircle(e.targetTaskId, toBase);
                       const st = edgeStroke(e);
                       const d = edgePath(from, to);
                       const isSel = selectedEdge === e.id;
@@ -1613,24 +1667,31 @@ export default function CollaborationPage({
                     return pos ? taskNode(t, pos) : null;
                   })}
                   {focusLayer.memberNodes.map((m) => {
-                    const pos = focusLayer.positions.get(-m.edgeId);
-                    return pos ? (
+                    const posBase = focusLayer.positions.get(-m.edgeId);
+                    if (!posBase) return null;
+                    const pos = memberCircle(posBase);
+                    const select = () => {
+                      setSelectedTask(null);
+                      setImpactMode(false);
+                      setSelectedEdge((prev) => (prev === m.edgeId ? null : m.edgeId));
+                    };
+                    return (
                       <div
                         key={`fx-m-${m.edgeId}`}
+                        role="button"
+                        tabIndex={0}
                         className={`gnode gnode-member ${selectedEdge === m.edgeId ? "selected" : ""} ${
                           memberDimmed([m.edgeId]) ? "dimmed" : ""
                         }`}
                         style={{ left: pos.x, top: pos.y, width: pos.w, height: pos.h }}
-                        onClick={() => {
-                          setSelectedTask(null);
-                          setImpactMode(false);
-                          setSelectedEdge((prev) => (prev === m.edgeId ? null : m.edgeId));
-                        }}
+                        title={`${m.label} · ${m.inputName || "输入提供成员"}`}
+                        onClick={select}
+                        onKeyDown={pressAsClick(select)}
                       >
-                        <b>{m.label}</b>
-                        <small>输入提供成员</small>
+                        <b>{m.label.slice(0, 2)}</b>
+                        <small>{m.inputName || "输入提供成员"}</small>
                       </div>
-                    ) : null;
+                    );
                   })}
                 </>
               ) : mode.kind === "full" && full ? (
@@ -1658,8 +1719,12 @@ export default function CollaborationPage({
                       {full.visibleEdges.map((e) => {
                         const fromBase = e.sourceTaskId != null ? full.positions.get(e.sourceTaskId) : full.positions.get(-e.id);
                         const toBase = full.positions.get(e.targetTaskId);
-                        const from = fromBase && e.sourceTaskId != null ? withOffset(e.sourceTaskId, fromBase) : fromBase;
-                        const to = toBase ? withOffset(e.targetTaskId, toBase) : toBase;
+                        const from = fromBase
+                          ? e.sourceTaskId != null
+                            ? taskCircle(e.sourceTaskId, fromBase)
+                            : memberCircle(fromBase)
+                          : fromBase;
+                        const to = toBase ? taskCircle(e.targetTaskId, toBase) : toBase;
                         if (!from || !to) return null;
                         const st = edgeStroke(e);
                         const dim =
@@ -1714,9 +1779,12 @@ export default function CollaborationPage({
                       return (
                         <div
                           key={`fo-${n.id}`}
+                          role="button"
+                          tabIndex={0}
                           className={`gnode gnode-o ${dim ? "dimmed" : ""}`}
                           style={{ left: n.pos.x, top: n.pos.y, width: n.pos.w, height: n.pos.h }}
                           onClick={() => enter({ kind: "o", objectiveId: n.id })}
+                          onKeyDown={pressAsClick(() => enter({ kind: "o", objectiveId: n.id }))}
                         >
                           <b>{n.title}</b>
                           <small>{n.krCount} 个 KR</small>
@@ -1729,11 +1797,14 @@ export default function CollaborationPage({
                       return (
                         <div
                           key={`fk-${n.id}`}
+                          role="button"
+                          tabIndex={0}
                           className={`gnode gnode-kr ${dim ? "dimmed" : ""} ${
                             krVisualState(n.id) !== "normal" ? `risk-${krVisualState(n.id)}` : ""
                           }`}
                           style={{ left: n.pos.x, top: n.pos.y, width: n.pos.w, height: n.pos.h }}
                           onClick={() => enter({ kind: "kr", krId: n.id })}
+                          onKeyDown={pressAsClick(() => enter({ kind: "kr", krId: n.id }))}
                         >
                           {krNodeContent(n.id)}
                         </div>
@@ -1743,24 +1814,32 @@ export default function CollaborationPage({
                       const pos = full.positions.get(t.id);
                       return pos ? taskNode(t, pos) : null;
                     })}
-                    {full.memberNodes.map((m) => (
-                      <div
-                        key={`fm-${m.providerId}`}
-                        className={`gnode gnode-member ${
-                          selectedEdge != null && m.edgeIds.includes(selectedEdge) ? "selected" : ""
-                        } ${memberDimmed(m.edgeIds) ? "dimmed" : ""}`}
-                        style={{ left: m.pos.x, top: m.pos.y, width: m.pos.w, height: m.pos.h }}
-                        onClick={() => {
-                          setSelectedTask(null);
-                          setImpactMode(false);
-                          const first = m.edgeIds[0];
-                          setSelectedEdge((prev) => (prev != null && m.edgeIds.includes(prev) ? null : first));
-                        }}
-                      >
-                        <b>{m.name}</b>
-                        <small>关系相关项目成员</small>
-                      </div>
-                    ))}
+                    {full.memberNodes.map((m) => {
+                      const pos = memberCircle(m.pos);
+                      const select = () => {
+                        setSelectedTask(null);
+                        setImpactMode(false);
+                        const first = m.edgeIds[0];
+                        setSelectedEdge((prev) => (prev != null && m.edgeIds.includes(prev) ? null : first));
+                      };
+                      return (
+                        <div
+                          key={`fm-${m.providerId}`}
+                          role="button"
+                          tabIndex={0}
+                          className={`gnode gnode-member ${
+                            selectedEdge != null && m.edgeIds.includes(selectedEdge) ? "selected" : ""
+                          } ${memberDimmed(m.edgeIds) ? "dimmed" : ""}`}
+                          style={{ left: pos.x, top: pos.y, width: pos.w, height: pos.h }}
+                          title={`${m.name} · 关系相关项目成员`}
+                          onClick={select}
+                          onKeyDown={pressAsClick(select)}
+                        >
+                          <b>{m.name.slice(0, 2)}</b>
+                          <small>关系相关项目成员</small>
+                        </div>
+                      );
+                    })}
                 </>
               ) : null}
                 </div>

@@ -462,8 +462,10 @@ body {
 /* CR-21 节点视觉：O 深灰底白字无彩色描边；KR 白底三态（灰／橙／红描边 + 「!」标记）；
    O、KR 卡片统一用系统第一层级灰阴影；文字留内边距不贴边。 */
 .gnode { position: absolute; border-radius: var(--radius); background: #fff; border: 1px solid var(--line-strong); box-shadow: var(--shadow-card); padding: 10px 12px; cursor: pointer; font-size: var(--type-aux); }
-.gnode.dimmed { opacity: 0.25; }
+/* #146：淡化不透明度对齐原型 .cp-node.dimmed。 */
+.gnode.dimmed { opacity: 0.15; }
 .gnode.selected { box-shadow: 0 0 0 3px rgba(79, 98, 216, 0.32), var(--shadow-card); }
+.gnode:focus-visible { outline: 2px solid #8e9def; outline-offset: 2px; }
 .gnode-kr { border: 2px solid #929dad; }
 .gnode.risk-warning { border: 2.5px solid var(--amber); }
 .gnode.risk-high_risk { border: 2.5px solid var(--red); }
@@ -477,7 +479,41 @@ body {
 .gnode-o small { color: rgba(255, 255, 255, 0.74); }
 .gnode b { display: block; font-size: var(--type-body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gnode small { display: block; color: var(--muted); font-size: var(--type-aux); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.gnode-member { background: #f4f5ff; border-color: #aab5ee; }
+/* #146 任务／成员节点（PRD §11；原型 .cp-node.task／person）：实线圆环，圆内编号／姓名前两字，
+   圆下 caption；任务三态＝灰蓝、橙描边浅橙底、红描边浅红底＋「!」标记，生命周期状态不上画布。 */
+.gnode-task, .gnode-member {
+  border-radius: 50%; padding: 0; display: grid; place-items: center;
+  box-shadow: 0 4px 5px rgba(34, 50, 73, 0.16);
+}
+.gnode-task { border: 3px solid #67839c; background: #f8fbfd; cursor: grab; }
+.gnode-task:active { cursor: grabbing; }
+/* 编号不截断：长编号允许略超出圆缘（原型 SVG 文本同样不裁切）。 */
+.gnode-task b { color: #32465a; font-weight: 700; overflow: visible; }
+.gnode-task.risk-warning { border: 3px solid var(--amber); background: #fff3d9; }
+.gnode-task.risk-warning b { color: var(--amber); }
+.gnode-task.risk-high_risk { border: 3px solid var(--red); background: #fdebed; }
+.gnode-task.risk-high_risk b { color: var(--red); }
+.gnode-member { border: 3px solid #fff; background: #725fa7; }
+.gnode-member b { color: #fff; font-weight: 700; }
+/* caption 挂在圆下方，宽度可超出圆本身；超长截断、悬停 title 看全称。 */
+.gnode-task small, .gnode-member small {
+  position: absolute; top: calc(100% + 5px); left: 50%; transform: translateX(-50%);
+  max-width: 150px; text-align: center; color: #405066; font-weight: 600;
+}
+/* 「!」标记落在圆环右上角圆周附近（原型 node-risk-marker translate(21,-21)）。 */
+.gnode-task .gnode-risk-marker { top: -2px; right: -2px; border: 2px solid #fff; }
+/* 选中态是蓝色外发光（原型 drop-shadow），不遮盖任务自身的风险描边。 */
+.gnode-task.selected, .gnode-member.selected {
+  box-shadow: 0 0 3px rgba(82, 104, 223, 0.7), 0 0 8px 3px rgba(82, 104, 223, 0.4);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .gnode-task.selected { animation: gnode-locate 0.55s ease-out 1; }
+}
+@keyframes gnode-locate {
+  0% { box-shadow: 0 0 0 rgba(82, 104, 223, 0); }
+  45% { box-shadow: 0 0 13px 4px rgba(82, 104, 223, 0.58); }
+  100% { box-shadow: 0 0 3px rgba(82, 104, 223, 0.7), 0 0 8px 3px rgba(82, 104, 223, 0.4); }
+}
 /* 管理 O/KR 全页模式（#125；原型 overview-okr-merged.css，按系统调色板与 4px 圆角契约适配）。 */
 .okr-management-note {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
