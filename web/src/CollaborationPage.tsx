@@ -417,9 +417,9 @@ export default function CollaborationPage({
     return { o, oPos, krNodes, width, height: krY + krH + 60 };
   }, [mode, objectives, krList, filtering, krPass]);
 
-  // —— KR 任务关系层布局（#148 对齐原型 focusModel KR 分支）：放射状——KR 节点居中，
-  // 本 KR 任务按角度环绕（环半径按数量自适应），外部相邻任务分列画布左右两缘，
-  // 成员来源输入接在左缘竖排（CR-13 保留成员节点）。 ——
+  // —— KR 任务关系层布局（#152 用户裁定，偏离原型放射形态）：左→右流向——
+  // KR 固定画布最左，本 KR 任务按 KR 内依赖链深度分列、自左向右展开；
+  // 外部相邻任务放最右一列，成员来源输入在 KR 下方竖排（CR-13 保留成员节点）。 ——
   const krLayer = useMemo(() => {
     if (mode.kind !== "kr") return null;
     const kr = krById.get(mode.krId);
@@ -437,45 +437,73 @@ export default function CollaborationPage({
     const neighbors = tasks.filter((t) => neighborIds.has(t.id) && isTaskVisible(t));
     // 槽位存圆心对齐的包围盒（circleBounds 换算后圆心正落 (X,Y)）。
     const slot = (X: number, Y: number, r = TASK_R): NodePos => ({ x: X - r, y: Y - r, w: r * 2, h: r * 2 });
-    const n = inKr.length;
-    // 环半径按任务数自适应：周长至少容纳每任务约 90px（圆 58＋间距），>12 个自动撑大。
-    const rx = Math.max(205, n * 15);
-    const ry = Math.max(185, n * 13);
-    const cx = Math.max(620, rx + 330);
-    const cy = Math.max(330, ry + 110);
+    // 列号＝KR 内依赖深度：没有 KR 内上游的任务在第 0 列，下游任务列号取上游最大值＋1；
+    // 互锁环内的任务按先到先得截断，不死循环。
+    const depth = new Map<number, number>();
+    const upstreamIn = (id: number) =>
+      relevantEdges
+        .filter((e) => e.targetTaskId === id && e.sourceTaskId != null && inKrIds.has(e.sourceTaskId))
+        .map((e) => e.sourceTaskId!);
+    const calcDepth = (id: number, seen: Set<number>): number => {
+      const cached = depth.get(id);
+      if (cached != null) return cached;
+      if (seen.has(id)) return 0;
+      seen.add(id);
+      const ups = upstreamIn(id);
+      const d = ups.length === 0 ? 0 : Math.max(...ups.map((u) => calcDepth(u, seen))) + 1;
+      depth.set(id, d);
+      return d;
+    };
+    inKr.forEach((t) => calcDepth(t.id, new Set()));
+    const byCol = new Map<number, Task[]>();
+    inKr.forEach((t) => {
+      const c = depth.get(t.id) ?? 0;
+      byCol.set(c, [...(byCol.get(c) ?? []), t]);
+    });
+    const colCount = byCol.size === 0 ? 0 : Math.max(...byCol.keys()) + 1;
+    const krW = 300;
+    const krH = 62;
+    const krX = 40;
+    const colStart = krX + krW + 150; // 第一列任务圆心 x
+    const colGap = 190;
+    const rowGap = 145;
+    const topY = 130; // 首行任务圆心 y
     const positions = new Map<number, NodePos>();
-    inKr.forEach((t, i) => {
-      const angle = -Math.PI / 2 + (i * Math.PI * 2) / Math.max(n, 4);
-      positions.set(t.id, slot(cx + Math.cos(angle) * rx, cy + Math.sin(angle) * ry));
-    });
-    const leftX = 110;
-    const rightX = cx + (cx - leftX);
-    neighbors.forEach((t, i) => {
-      positions.set(t.id, slot(i % 2 ? rightX : leftX, 130 + Math.floor(i / 2) * 145));
-    });
-    const leftRows = Math.ceil(neighbors.length / 2);
-    const rightRows = Math.floor(neighbors.length / 2);
+    let maxRows = inKr.length > 0 ? 1 : 0;
+    for (const [c, list] of byCol) {
+      list.sort((a, b) => a.id - b.id);
+      maxRows = Math.max(maxRows, list.length);
+      list.forEach((t, i) => positions.set(t.id, slot(colStart + c * colGap, topY + i * rowGap)));
+    }
+    // 外部相邻任务：最右一列（跨 KR 的边由 edgePath 的反向曲率区分方向）。
+    const neighborX = colStart + colCount * colGap + 60;
+    neighbors.forEach((t, i) => positions.set(t.id, slot(neighborX, topY + i * rowGap)));
+    // 成员来源输入：KR 下方竖排，与任务列同为左缘出发。
     const memberNodes: { edgeId: number; label: string; inputName: string }[] = [];
+    const memberX = krX + 70;
+    const memberTop = topY + Math.max(maxRows, 1) * rowGap + 40;
     relevantEdges.forEach((e) => {
       if (e.sourceTaskId == null && e.inputRequest) {
-        positions.set(-e.id, slot(leftX, 130 + (leftRows + memberNodes.length) * 145));
+        positions.set(-e.id, slot(memberX, memberTop + memberNodes.length * rowGap));
         memberNodes.push({ edgeId: e.id, label: e.inputRequest.providerName, inputName: e.name });
       }
     });
-    // 中心 KR 节点（CR-21 白底三态复用；已在本层，点它不再下钻）。
-    const krPos = { x: cx - 150, y: cy - 31, w: 300, h: 62 };
+    // KR 节点（CR-21 白底三态复用；已在本层，点它不再下钻）：最左、对任务行竖向居中。
+    const krCy = maxRows > 0 ? topY + ((maxRows - 1) * rowGap) / 2 : topY;
+    const krPos = { x: krX, y: krCy - krH / 2, w: krW, h: krH };
     // 「显示已完成」关闭时被藏起来的本 KR 任务数：全完成的 KR 点进来是空画布，
     // 空态要能指出「打开开关就看得到」（Q-10、AC-45）。
     const hiddenCompleted = tasks.filter(
       (t) => t.keyResultId === mode.krId && t.status === "completed" && !isTaskVisible(t),
     ).length;
+    const rows = Math.max(maxRows, neighbors.length);
     const height = Math.max(
-      cy + ry + 150,
-      130 + (leftRows + memberNodes.length) * 145 + 80,
-      130 + rightRows * 145 + 80,
+      topY + rows * rowGap + 80,
+      memberNodes.length > 0 ? memberTop + memberNodes.length * rowGap + 40 : 0,
+      krPos.y + krH + 80,
     );
-    const width = rightX + 130;
-    return { kr, krPos, cx, cy, inKr, neighbors, relevantEdges, positions, memberNodes, hiddenCompleted, width, height };
+    const width = Math.max(700, neighborX + 130);
+    return { kr, krPos, inKr, neighbors, relevantEdges, positions, memberNodes, hiddenCompleted, width, height };
   }, [mode, krById, tasks, edges, isTaskVisible]);
 
   // —— 任务聚焦层布局（AC-27、CR-05）：逐层展开 ——
