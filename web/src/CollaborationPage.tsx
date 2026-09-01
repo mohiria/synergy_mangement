@@ -321,48 +321,101 @@ export default function CollaborationPage({
     [showCompleted],
   );
 
-  // —— O／KR 层级树布局 ——
-  const tree = useMemo(() => {
-    const nodes: { key: string; kind: "o" | "kr"; id: number; pos: NodePos; dimmed: boolean }[] = [];
-    const lines: { x1: number; y1: number; x2: number; y2: number; dimmed: boolean }[] = [];
-    const oX = 30;
-    const krX = 340;
-    const oW = 220;
-    const oH = 58;
-    const krW = 300;
-    const krH = 62;
-    let y = 20;
-    const focusO = mode.kind === "o" ? mode.objectiveId : null;
-    // 裁决 K＝A（#114，F-11）：层级树也按工具栏筛选淡化——O 筛选淡化非选中 O 及其 KR，
-    // KR 筛选淡化非选中 KR，人员筛选按该 KR 下有无该人员的任务淡化；口径与另两层一致（AC-45）。
-    const filtering = oFilter !== "all" || krFilter !== "all" || personFilter !== "all";
-    const krPass = (k: (typeof krList)[number]) =>
+  // 裁决 K＝A（#114，F-11）：层级视图按工具栏筛选淡化——O 筛选淡化非选中 O 及其 KR，
+  // KR 筛选淡化非选中 KR，人员筛选按该 KR 下有无该人员的任务淡化；口径与另两层一致（AC-45）。
+  const filtering = oFilter !== "all" || krFilter !== "all" || personFilter !== "all";
+  const krPass = useCallback(
+    (k: (typeof krList)[number]) =>
       (oFilter === "all" || k.objectiveId === oFilter) &&
       (krFilter === "all" || k.id === krFilter) &&
       (personFilter === "all" ||
-        tasks.some((t) => t.keyResultId === k.id && t.ownerId === personFilter));
+        tasks.some((t) => t.keyResultId === k.id && t.ownerId === personFilter)),
+    [oFilter, krFilter, personFilter, tasks],
+  );
+
+  // —— O／KR 层级树布局（#148 对齐原型 aggregateModel）：横向——O 排上方，
+  // 下属 KR 在其下方 2 列网格（单 KR 1 列），O→KR 走 V-H-V 正交线。 ——
+  const tree = useMemo(() => {
+    const nodes: { key: string; kind: "o" | "kr"; id: number; pos: NodePos; dimmed: boolean }[] = [];
+    const lines: { d: string; x1: number; y1: number; x2: number; y2: number; dimmed: boolean }[] = [];
+    const oW = 220;
+    const oH = 58;
+    const krW = 280;
+    const krH = 62;
+    const gapX = 16;
+    const rowGap = 26;
+    const colGap = 44;
+    let x = 24;
+    let maxY = 160;
     for (const o of objectives) {
       const krs = krList.filter((k) => k.objectiveId === o.id);
-      const blockHeight = Math.max(krs.length * (krH + 18) - 18, oH);
-      const oY = y + blockHeight / 2 - oH / 2;
+      const columns = krs.length <= 1 ? 1 : 2;
+      const colW = columns * krW + (columns - 1) * gapX;
+      const oPos = { x: x + colW / 2 - oW / 2, y: 20, w: oW, h: oH };
       const oPass =
         !filtering ||
         ((oFilter === "all" || o.id === oFilter) &&
           (krFilter === "all" && personFilter === "all" ? true : krs.some(krPass)));
-      const oDimmed = (focusO != null && focusO !== o.id) || !oPass;
-      nodes.push({ key: `o-${o.id}`, kind: "o", id: o.id, pos: { x: oX, y: oY, w: oW, h: oH }, dimmed: oDimmed });
+      const oDimmed = !oPass;
+      nodes.push({ key: `o-${o.id}`, kind: "o", id: o.id, pos: oPos, dimmed: oDimmed });
+      const ocx = oPos.x + oW / 2;
+      const oby = oPos.y + oH;
       krs.forEach((k, i) => {
-        const kY = y + i * (krH + 18);
-        const krDimmed = (focusO != null && focusO !== o.id) || (filtering && !krPass(k));
-        nodes.push({ key: `kr-${k.id}`, kind: "kr", id: k.id, pos: { x: krX, y: kY, w: krW, h: krH }, dimmed: krDimmed });
-        lines.push({ x1: oX + oW, y1: oY + oH / 2, x2: krX, y2: kY + krH / 2, dimmed: oDimmed || krDimmed });
+        const kx = x + (i % columns) * (krW + gapX);
+        const ky = 160 + Math.floor(i / columns) * (krH + rowGap);
+        const krDimmed = filtering && !krPass(k);
+        nodes.push({ key: `kr-${k.id}`, kind: "kr", id: k.id, pos: { x: kx, y: ky, w: krW, h: krH }, dimmed: krDimmed });
+        const kcx = kx + krW / 2;
+        // V-H-V 正交线（原型 edgePath 的 owns objective→kr 分支，46% 处转水平）。
+        const branchY = oby + (ky - oby) * 0.46;
+        lines.push({
+          d: `M ${ocx} ${oby} V ${branchY} H ${kcx} V ${ky}`,
+          x1: ocx,
+          y1: oby,
+          x2: kcx,
+          y2: ky,
+          dimmed: oDimmed || krDimmed,
+        });
+        maxY = Math.max(maxY, ky + krH);
       });
-      y += blockHeight + 34;
+      x += colW + colGap;
     }
-    return { nodes, lines, height: y + 20 };
-  }, [objectives, krList, tasks, mode, oFilter, krFilter, personFilter]);
+    return { nodes, lines, width: Math.max(700, x - colGap + 24), height: maxY + 40 };
+  }, [objectives, krList, filtering, krPass, oFilter, krFilter, personFilter]);
 
-  // —— KR 任务关系层布局 ——
+  // —— O 聚焦层（#148 对齐原型 focusModel O 分支；CR-03）：只显该 O 与下属 KR 横排一行。 ——
+  const oLayer = useMemo(() => {
+    if (mode.kind !== "o") return null;
+    const o = objectives.find((it) => it.id === mode.objectiveId);
+    if (!o) return null;
+    const krs = krList.filter((k) => k.objectiveId === o.id);
+    const oW = 220;
+    const oH = 58;
+    const krW = 280;
+    const krH = 62;
+    const gapX = 24;
+    const rowW = Math.max(krs.length * krW + Math.max(krs.length - 1, 0) * gapX, oW);
+    const width = Math.max(700, rowW + 96);
+    const oPos = { x: width / 2 - oW / 2, y: 36, w: oW, h: oH };
+    const krY = 250;
+    const startX = (width - rowW) / 2;
+    const ocx = oPos.x + oW / 2;
+    const oby = oPos.y + oH;
+    const krNodes = krs.map((k, i) => {
+      const kx = startX + i * (krW + gapX);
+      return { id: k.id, pos: { x: kx, y: krY, w: krW, h: krH }, dimmed: filtering && !krPass(k) };
+    });
+    const lines = krNodes.map((n) => {
+      const kcx = n.pos.x + krW / 2;
+      const branchY = oby + (krY - oby) * 0.46;
+      return { d: `M ${ocx} ${oby} V ${branchY} H ${kcx} V ${krY}`, x1: ocx, y1: oby, x2: kcx, y2: krY, dimmed: n.dimmed };
+    });
+    return { o, oPos, krNodes, lines, width, height: krY + krH + 60 };
+  }, [mode, objectives, krList, filtering, krPass]);
+
+  // —— KR 任务关系层布局（#148 对齐原型 focusModel KR 分支）：放射状——KR 节点居中，
+  // 本 KR 任务按角度环绕（环半径按数量自适应），外部相邻任务分列画布左右两缘，
+  // 成员来源输入接在左缘竖排（CR-13 保留成员节点）。 ——
   const krLayer = useMemo(() => {
     if (mode.kind !== "kr") return null;
     const kr = krById.get(mode.krId);
@@ -378,28 +431,47 @@ export default function CollaborationPage({
       if (!inKrIds.has(e.targetTaskId)) neighborIds.add(e.targetTaskId);
     }
     const neighbors = tasks.filter((t) => neighborIds.has(t.id) && isTaskVisible(t));
-    const nodeW = 250;
-    // #146：槽位高度容纳圆环（58px）＋圆下 caption。
-    const nodeH = 96;
-    const gap = 16;
+    // 槽位存圆心对齐的包围盒（circleBounds 换算后圆心正落 (X,Y)）。
+    const slot = (X: number, Y: number, r = TASK_R): NodePos => ({ x: X - r, y: Y - r, w: r * 2, h: r * 2 });
+    const n = inKr.length;
+    // 环半径按任务数自适应：周长至少容纳每任务约 90px（圆 58＋间距），>12 个自动撑大。
+    const rx = Math.max(205, n * 15);
+    const ry = Math.max(185, n * 13);
+    const cx = Math.max(620, rx + 330);
+    const cy = Math.max(330, ry + 110);
     const positions = new Map<number, NodePos>();
-    inKr.forEach((t, i) => positions.set(t.id, { x: 360, y: 24 + i * (nodeH + gap), w: nodeW, h: nodeH }));
-    neighbors.forEach((t, i) => positions.set(t.id, { x: 40, y: 24 + i * (nodeH + gap), w: nodeW, h: nodeH }));
-    let height = Math.max(inKr.length, neighbors.length) * (nodeH + gap) + 60;
+    inKr.forEach((t, i) => {
+      const angle = -Math.PI / 2 + (i * Math.PI * 2) / Math.max(n, 4);
+      positions.set(t.id, slot(cx + Math.cos(angle) * rx, cy + Math.sin(angle) * ry));
+    });
+    const leftX = 110;
+    const rightX = cx + (cx - leftX);
+    neighbors.forEach((t, i) => {
+      positions.set(t.id, slot(i % 2 ? rightX : leftX, 130 + Math.floor(i / 2) * 145));
+    });
+    const leftRows = Math.ceil(neighbors.length / 2);
+    const rightRows = Math.floor(neighbors.length / 2);
     const memberNodes: { edgeId: number; label: string; inputName: string }[] = [];
     relevantEdges.forEach((e) => {
       if (e.sourceTaskId == null && e.inputRequest) {
-        positions.set(-e.id, { x: 40, y: height, w: 180, h: 88 });
+        positions.set(-e.id, slot(leftX, 130 + (leftRows + memberNodes.length) * 145));
         memberNodes.push({ edgeId: e.id, label: e.inputRequest.providerName, inputName: e.name });
-        height += 100;
       }
     });
+    // 中心 KR 节点（CR-21 白底三态复用；已在本层，点它不再下钻）。
+    const krPos = { x: cx - 150, y: cy - 31, w: 300, h: 62 };
     // 「显示已完成」关闭时被藏起来的本 KR 任务数：全完成的 KR 点进来是空画布，
     // 空态要能指出「打开开关就看得到」（Q-10、AC-45）。
     const hiddenCompleted = tasks.filter(
       (t) => t.keyResultId === mode.krId && t.status === "completed" && !isTaskVisible(t),
     ).length;
-    return { kr, inKr, neighbors, relevantEdges, positions, memberNodes, hiddenCompleted, height: height + 40 };
+    const height = Math.max(
+      cy + ry + 150,
+      130 + (leftRows + memberNodes.length) * 145 + 80,
+      130 + rightRows * 145 + 80,
+    );
+    const width = rightX + 130;
+    return { kr, krPos, cx, cy, inKr, neighbors, relevantEdges, positions, memberNodes, hiddenCompleted, width, height };
   }, [mode, krById, tasks, edges, isTaskVisible]);
 
   // —— 任务聚焦层布局（AC-27、CR-05）：逐层展开 ——
@@ -442,23 +514,43 @@ export default function CollaborationPage({
       const h = hop.get(id) ?? 0;
       byHop.set(h, [...(byHop.get(h) ?? []), id]);
     }
-    const nodeW = 240;
-    // #146：槽位高度容纳圆环（聚焦起点 70px）＋圆下 caption。
-    const nodeH = 96;
-    const gapY = 16;
-    const colGap = 100;
-    const positions = new Map<number, NodePos>();
-    let maxRows = 0;
-    const cols = [...byHop.keys()].sort((a, b) => a - b);
-    cols.forEach((h, ci) => {
-      const ids = (byHop.get(h) ?? []).sort((a, b) => a - b);
-      maxRows = Math.max(maxRows, ids.length);
-      ids.forEach((id, i) => {
-        positions.set(id, { x: 40 + ci * (nodeW + colGap), y: 24 + i * (nodeH + gapY), w: nodeW, h: nodeH });
+    // #148 中心放射（原型 focusModel 任务分支）：起点居中放大（r=35），第 h 跳绕第 h 环
+    // 分布，环半径按该环节点数自适应；同环内按父节点方位排序并从父方位起步布角，
+    // 新展开的节点因此落在其父节点外侧附近、已有节点不重排语义（CR-05）不变。
+    const rings = [...byHop.keys()].filter((h) => h > 0).sort((a, b) => a - b);
+    const angleOf = new Map<number, number>([[origin.id, -Math.PI / 2]]);
+    const ringR: { rx: number; ry: number }[] = [];
+    rings.forEach((h, ri) => {
+      const count = (byHop.get(h) ?? []).length;
+      ringR.push({
+        rx: Math.max(250 + ri * 170, count * 15),
+        ry: Math.max(220 + ri * 150, count * 13),
       });
     });
-    let height = maxRows * (nodeH + gapY) + 60;
-    // 成员来源的输入：挂在被输入任务左侧，作为可点节点参与聚焦（CR-13）。
+    const maxRx = ringR.reduce((m, r) => Math.max(m, r.rx), 0);
+    const maxRy = ringR.reduce((m, r) => Math.max(m, r.ry), 0);
+    const cx = Math.max(620, maxRx + 250);
+    const cy = Math.max(350, maxRy + 110);
+    const slot = (X: number, Y: number, r = TASK_R): NodePos => ({ x: X - r, y: Y - r, w: r * 2, h: r * 2 });
+    const positions = new Map<number, NodePos>();
+    positions.set(origin.id, slot(cx, cy, TASK_R_FOCUS));
+    rings.forEach((h, ri) => {
+      const parentAngle = (id: number) => {
+        for (const nb of neighborsOf(id)) {
+          if (hop.get(nb) === h - 1 && angleOf.has(nb)) return angleOf.get(nb)!;
+        }
+        return -Math.PI / 2;
+      };
+      const ids = (byHop.get(h) ?? []).sort((a, b) => parentAngle(a) - parentAngle(b) || a - b);
+      const start = ids.length > 0 ? parentAngle(ids[0]) : -Math.PI / 2;
+      const { rx, ry } = ringR[ri];
+      ids.forEach((id, i) => {
+        const angle = start + (i * Math.PI * 2) / Math.max(ids.length, 4);
+        angleOf.set(id, angle);
+        positions.set(id, slot(cx + Math.cos(angle) * rx, cy + Math.sin(angle) * ry));
+      });
+    });
+    // 成员来源的输入：左侧竖排（原型 person 落位），作为可点节点参与聚焦（CR-13）。
     const memberNodes: { edgeId: number; label: string; inputName: string }[] = [];
     const relevantEdges = edges.filter((e) => {
       const targetIn = visible.has(e.targetTaskId);
@@ -467,16 +559,16 @@ export default function CollaborationPage({
     });
     relevantEdges.forEach((e) => {
       if (e.sourceTaskId == null && e.inputRequest) {
-        positions.set(-e.id, { x: 40, y: height, w: 200, h: 88 });
+        positions.set(-e.id, slot(120, 200 + memberNodes.length * 130));
         memberNodes.push({ edgeId: e.id, label: e.inputRequest.providerName, inputName: e.name });
-        height += 100;
       }
     });
-    const width = Math.max(700, 40 + cols.length * (nodeW + colGap));
+    const width = cx + maxRx + 160;
+    const height = Math.max(cy + maxRy + 140, 200 + memberNodes.length * 130 + 60);
     const visibleTasks = [...visible]
       .map((id) => taskById.get(id))
       .filter((t): t is Task => !!t);
-    return { origin, visibleTasks, relevantEdges, positions, memberNodes, height: height + 40, width };
+    return { origin, visibleTasks, relevantEdges, positions, memberNodes, height, width };
   }, [mode, expanded, edges, taskById, isTaskVisible]);
 
   // —— 全局展开布局（AC-09）：O/KR 分组骨架 + 全部任务 + 关系相关项目成员 ——
@@ -954,7 +1046,9 @@ export default function CollaborationPage({
     }`;
     const mx = (from.x + from.w / 2 + to.x + to.w / 2) / 2;
     const my = (from.y + from.h / 2 + to.y + to.h / 2) / 2;
+    // 标签截断：交付物名可能是整句描述，常驻标签太长会横穿画布；全称看 <title>。
     const label = `${e.interlockRisk ? "互锁" : e.edgeTypeLabel} · ${e.name}`;
+    const shortLabel = label.length > 22 ? `${label.slice(0, 22)}…` : label;
     return (
       <g key={e.id} className={cls} opacity={dim ? 0.15 : 1}>
         <path
@@ -980,8 +1074,9 @@ export default function CollaborationPage({
           }}
         />
         <text className="edge-label" x={mx} y={my - 8} textAnchor="middle">
-          {label}
+          {shortLabel}
         </text>
+        <title>{label}</title>
       </g>
     );
   };
@@ -1236,12 +1331,14 @@ export default function CollaborationPage({
   // #145：舞台尺寸按当前层级取布局画布大小；平移缩放作用在整个舞台上。
   const stageSize =
     mode.kind === "kr" && krLayer
-      ? { w: 700, h: krLayer.height }
-      : mode.kind === "focus" && focusLayer
-        ? { w: focusLayer.width, h: focusLayer.height }
-        : mode.kind === "full" && full
-          ? { w: full.width, h: full.height }
-          : { w: 700, h: tree.height };
+      ? { w: krLayer.width, h: krLayer.height }
+      : mode.kind === "o" && oLayer
+        ? { w: oLayer.width, h: oLayer.height }
+        : mode.kind === "focus" && focusLayer
+          ? { w: focusLayer.width, h: focusLayer.height }
+          : mode.kind === "full" && full
+            ? { w: full.width, h: full.height }
+            : { w: tree.width, h: tree.height };
 
   // 小地图模型（原型 cp-minimap）：非归属关系边画线、节点画色点；数据量小，直接算不缓存。
   const mmDots: { x: number; y: number; cls: string }[] = [];
@@ -1264,12 +1361,17 @@ export default function CollaborationPage({
       mmLines.push({ x1: from.x + from.w / 2, y1: from.y + from.h / 2, x2: to.x + to.w / 2, y2: to.y + to.h / 2 });
     }
   };
-  if (mode.kind === "tree" || mode.kind === "o") {
+  if (mode.kind === "tree") {
     for (const n of tree.nodes) {
       mmDot(null, n.pos, n.kind === "o" ? "objective" : `kr ${krVisualState(n.id)}`);
     }
     for (const l of tree.lines) mmLines.push({ x1: l.x1, y1: l.y1, x2: l.x2, y2: l.y2 });
+  } else if (mode.kind === "o" && oLayer) {
+    mmDot(null, oLayer.oPos, "objective");
+    for (const n of oLayer.krNodes) mmDot(null, n.pos, `kr ${krVisualState(n.id)}`);
+    for (const l of oLayer.lines) mmLines.push({ x1: l.x1, y1: l.y1, x2: l.x2, y2: l.y2 });
   } else if (mode.kind === "kr" && krLayer) {
+    mmDot(null, krLayer.krPos, `kr ${krVisualState(krLayer.kr.id)}`);
     for (const t of [...krLayer.inKr, ...krLayer.neighbors]) {
       const pos = krLayer.positions.get(t.id);
       if (pos) mmDot(t.id, pos, taskRiskLevel(t.id));
@@ -1561,18 +1663,41 @@ export default function CollaborationPage({
                     transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
                   }}
                 >
-              {mode.kind === "tree" || mode.kind === "o" ? (
+              {mode.kind === "o" && oLayer ? (
                 <>
-                  <svg className="graph-svg" width="700" height={tree.height}>
+                  <svg className="graph-svg" width={oLayer.width} height={oLayer.height}>
+                    {oLayer.lines.map((l, i) => (
+                      <path key={i} d={l.d} fill="none" stroke="#b8c4ce" strokeWidth={1.6} opacity={l.dimmed ? 0.2 : 1} />
+                    ))}
+                  </svg>
+                  <div
+                    className="gnode gnode-o"
+                    style={{ left: oLayer.oPos.x, top: oLayer.oPos.y, width: oLayer.oPos.w, height: oLayer.oPos.h }}
+                  >
+                    <b>{oLayer.o.title}</b>
+                    <small>{oLayer.krNodes.length} 个 KR</small>
+                  </div>
+                  {oLayer.krNodes.map((n) => (
+                    <div
+                      key={`okr-${n.id}`}
+                      role="button"
+                      tabIndex={0}
+                      className={`gnode gnode-kr ${n.dimmed ? "dimmed" : ""} ${
+                        krVisualState(n.id) !== "normal" ? `risk-${krVisualState(n.id)}` : ""
+                      }`}
+                      style={{ left: n.pos.x, top: n.pos.y, width: n.pos.w, height: n.pos.h }}
+                      onClick={() => enter({ kind: "kr", krId: n.id })}
+                      onKeyDown={pressAsClick(() => enter({ kind: "kr", krId: n.id }))}
+                    >
+                      {krNodeContent(n.id)}
+                    </div>
+                  ))}
+                </>
+              ) : mode.kind === "tree" ? (
+                <>
+                  <svg className="graph-svg" width={tree.width} height={tree.height}>
                     {tree.lines.map((l, i) => (
-                      <path
-                        key={i}
-                        d={`M ${l.x1} ${l.y1} C ${(l.x1 + l.x2) / 2} ${l.y1}, ${(l.x1 + l.x2) / 2} ${l.y2}, ${l.x2} ${l.y2}`}
-                        fill="none"
-                        stroke="#b8c4ce"
-                        strokeWidth={1.6}
-                        opacity={l.dimmed ? 0.2 : 1}
-                      />
+                      <path key={i} d={l.d} fill="none" stroke="#b8c4ce" strokeWidth={1.6} opacity={l.dimmed ? 0.2 : 1} />
                     ))}
                   </svg>
                   {tree.nodes.map((n) =>
@@ -1608,8 +1733,24 @@ export default function CollaborationPage({
                 </>
               ) : mode.kind === "kr" && krLayer ? (
                 <>
-                  <svg className="graph-svg" width="700" height={krLayer.height}>
+                  <svg className="graph-svg" width={krLayer.width} height={krLayer.height}>
                     {arrowDefs}
+                    {/* KR→任务 owns 直线（#148）：灰、无箭头，绘于关系边之下；
+                        端点跟随拖拽后的任务圆心。 */}
+                    {krLayer.inKr.map((t) => {
+                      const base = krLayer.positions.get(t.id);
+                      if (!base) return null;
+                      const p = taskCircle(t.id, base);
+                      return (
+                        <path
+                          key={`owns-${t.id}`}
+                          d={`M ${krLayer.cx} ${krLayer.cy} L ${p.x + p.w / 2} ${p.y + p.h / 2}`}
+                          fill="none"
+                          stroke="#b2bdca"
+                          strokeWidth={1.7}
+                        />
+                      );
+                    })}
                     {krLayer.relevantEdges.map((e) => {
                       const fromBase =
                         e.sourceTaskId != null ? krLayer.positions.get(e.sourceTaskId) : krLayer.positions.get(-e.id);
@@ -1620,6 +1761,24 @@ export default function CollaborationPage({
                       return renderEdge(e, from, to);
                     })}
                   </svg>
+                  {/* 中心 KR 节点（#148；CR-21 视觉复用）：已在本层，点它不下钻；
+                      空 KR 交给空态提示，不渲染孤零零的中心节点。 */}
+                  {(krLayer.inKr.length > 0 || krLayer.neighbors.length > 0) && (
+                    <div
+                      className={`gnode gnode-kr ${
+                        krVisualState(krLayer.kr.id) !== "normal" ? `risk-${krVisualState(krLayer.kr.id)}` : ""
+                      }`}
+                      style={{
+                        left: krLayer.krPos.x,
+                        top: krLayer.krPos.y,
+                        width: krLayer.krPos.w,
+                        height: krLayer.krPos.h,
+                        cursor: "default",
+                      }}
+                    >
+                      {krNodeContent(krLayer.kr.id)}
+                    </div>
+                  )}
                   {[...krLayer.inKr, ...krLayer.neighbors].map((t) => {
                     const pos = krLayer.positions.get(t.id);
                     return pos ? taskNode(t, pos) : null;
@@ -1856,6 +2015,8 @@ export default function CollaborationPage({
                         </Button>
                       )}
                     </>
+                  ) : mode.kind === "o" && oLayer ? (
+                    `聚焦「${oLayer.o.title}」：只显示该 O 与下属 KR；点击 KR 进入任务关系层`
                   ) : (
                     "默认只显示 O、KR 与层级连线（不可点击）；点击 O 聚焦下属 KR，点击 KR 进入任务关系层"
                   )}
