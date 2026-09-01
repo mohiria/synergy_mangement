@@ -17,13 +17,11 @@ type DeliverableEdge = components["schemas"]["DeliverableEdge"];
 type Blocker = components["schemas"]["Blocker"];
 
 
-// 箭头按边色分档：SVG marker 不继承所属 path 的 stroke（context-stroke 支持面不稳），
-// 只能一色一个 marker。取值与 edgeStroke 保持一致。
+// 箭头分档（#147 收敛为两档）：默认灰（原型 #cp-arrow #73839a），互锁随边色红；
+// SVG marker 不继承所属 path 的 stroke（context-stroke 支持面不稳），只能一色一个 marker。
 const ARROW_COLORS: Record<string, string> = {
-  interlock: "#c44752",
-  feedback: "#5a62c9",
-  hard: "#436d84",
-  plain: "#8ea3b0",
+  interlock: "#bd3e49",
+  plain: "#73839a",
 };
 
 // 全局展开的分批渲染阈值（协作关系 PRD §12）：首批 200 个节点渲染完即可交互，
@@ -743,8 +741,7 @@ export default function CollaborationPage({
     return `M ${x1} ${y1} C ${detour} ${y1}, ${detour} ${y2}, ${x2} ${y2}`;
   };
 
-  const arrowKind = (e: DeliverableEdge) =>
-    e.interlockRisk ? "interlock" : e.edgeType === "feedback" ? "feedback" : e.edgeType === "hard_prerequisite" ? "hard" : "plain";
+  const arrowKind = (e: DeliverableEdge) => (e.interlockRisk ? "interlock" : "plain");
   // 原型 collaboration-prototype.js:316 的箭头形状与尺寸。
   const arrowDefs = (
     <defs>
@@ -765,14 +762,17 @@ export default function CollaborationPage({
     </defs>
   );
 
+  // #147 边默认灰色系（PRD §11）：普通／成果／硬前置灰实线、反馈灰虚线、互锁红虚线；
+  // 非互锁的未就绪关系用橙色异常提示（原型 anomaly）；关键路径只加粗不上色（§6.3），
+  // 普通硬前置不再默认加粗——「默认状态不使用多种蓝色、青色或线宽强调普通关系」。
   const edgeStroke = (e: DeliverableEdge) => {
-    const interlock = !!e.interlockRisk;
-    const feedback = e.edgeType === "feedback";
-    const hard = e.edgeType === "hard_prerequisite";
+    if (e.interlockRisk) return { stroke: "#bd3e49", width: 2.5, dash: "6 4" };
+    const dash = e.edgeType === "feedback" ? "6 4" : undefined;
+    if (!e.ready) return { stroke: "#a86917", width: 2, dash };
     return {
-      stroke: interlock ? "#c44752" : feedback ? "#5a62c9" : hard ? "#436d84" : "#8ea3b0",
-      width: e.onCriticalPath ? 3.2 : hard ? 2.4 : 1.6,
-      dash: interlock ? "5 3" : feedback ? "4 4" : undefined,
+      stroke: "#929dad",
+      width: e.onCriticalPath ? 2.4 : e.edgeType === "hard_prerequisite" ? 1.7 : 1.6,
+      dash,
     };
   };
 
@@ -923,6 +923,67 @@ export default function CollaborationPage({
       : taskBlockers.length > 0
         ? "warning"
         : "";
+  };
+
+  // #147：选中边，或选中任务的当前一层边（影响路径模式下为链路内的硬前置边），
+  // 临时蓝色粗线＋光晕（PRD §11、CR-11「高亮两端」；节点端淡化沿用 neighborIds）。
+  const isEdgeHighlighted = (e: DeliverableEdge) => {
+    if (selectedEdge != null) return selectedEdge === e.id;
+    if (selectedTask == null) return false;
+    if (impactMode) {
+      return (
+        e.edgeType === "hard_prerequisite" &&
+        e.sourceTaskId != null &&
+        neighborIds != null &&
+        neighborIds.has(e.sourceTaskId) &&
+        neighborIds.has(e.targetTaskId)
+      );
+    }
+    return e.sourceTaskId === selectedTask || e.targetTaskId === selectedTask;
+  };
+
+  // #147：三个层级共用一份边渲染——可见线、透明命中层、默认隐藏的文字标签
+  // （悬停／高亮／异常时显示「关系类型 · 交付物名称」，互锁常驻，原型 labels-key）。
+  const renderEdge = (e: DeliverableEdge, from: NodePos, to: NodePos, dim = false) => {
+    const st = edgeStroke(e);
+    const d = edgePath(from, to);
+    const highlighted = isEdgeHighlighted(e);
+    const unready = !e.interlockRisk && !e.ready;
+    const cls = `edge-g${highlighted ? " highlighted" : ""}${e.interlockRisk ? " interlock anomaly" : ""}${
+      unready ? " unready anomaly" : ""
+    }`;
+    const mx = (from.x + from.w / 2 + to.x + to.w / 2) / 2;
+    const my = (from.y + from.h / 2 + to.y + to.h / 2) / 2;
+    const label = `${e.interlockRisk ? "互锁" : e.edgeTypeLabel} · ${e.name}`;
+    return (
+      <g key={e.id} className={cls} opacity={dim ? 0.15 : 1}>
+        <path
+          d={d}
+          fill="none"
+          className="edge-line"
+          stroke={highlighted ? "#2f54d4" : st.stroke}
+          strokeWidth={highlighted ? 4 : st.width}
+          strokeDasharray={highlighted ? undefined : st.dash}
+          markerEnd={`url(#cp-arrow-${arrowKind(e)})`}
+        />
+        <path
+          d={d}
+          fill="none"
+          className="edge-hit"
+          stroke="transparent"
+          strokeWidth={14}
+          style={{ pointerEvents: "stroke", cursor: "pointer" }}
+          onClick={() => {
+            setSelectedTask(null);
+            setImpactMode(false);
+            setSelectedEdge((prev) => (prev === e.id ? null : e.id));
+          }}
+        />
+        <text className="edge-label" x={mx} y={my - 8} textAnchor="middle">
+          {label}
+        </text>
+      </g>
+    );
   };
 
   // #146：任务节点是实线圆环（PRD §11）——圆内任务编号、圆下 caption 显任务名；
@@ -1556,34 +1617,7 @@ export default function CollaborationPage({
                       if (!fromBase || !toBase) return null;
                       const from = e.sourceTaskId != null ? taskCircle(e.sourceTaskId, fromBase) : memberCircle(fromBase);
                       const to = taskCircle(e.targetTaskId, toBase);
-                      const st = edgeStroke(e);
-                      const d = edgePath(from, to);
-                      const isSel = selectedEdge === e.id;
-                      return (
-                        <g key={e.id}>
-                          <path
-                            d={d}
-                            fill="none"
-                            stroke={st.stroke}
-                            strokeWidth={isSel ? st.width + 1.5 : st.width}
-                            strokeDasharray={st.dash}
-                            markerEnd={`url(#cp-arrow-${arrowKind(e)})`}
-                          />
-                          <path
-                            d={d}
-                            fill="none"
-                            className="edge-hit"
-                            stroke="transparent"
-                            strokeWidth={14}
-                            style={{ pointerEvents: "stroke", cursor: "pointer" }}
-                            onClick={() => {
-                              setSelectedTask(null);
-                              setImpactMode(false);
-                              setSelectedEdge((prev) => (prev === e.id ? null : e.id));
-                            }}
-                          />
-                        </g>
-                      );
+                      return renderEdge(e, from, to);
                     })}
                   </svg>
                   {[...krLayer.inKr, ...krLayer.neighbors].map((t) => {
@@ -1632,34 +1666,7 @@ export default function CollaborationPage({
                       if (!fromBase || !toBase) return null;
                       const from = e.sourceTaskId != null ? taskCircle(e.sourceTaskId, fromBase) : memberCircle(fromBase);
                       const to = taskCircle(e.targetTaskId, toBase);
-                      const st = edgeStroke(e);
-                      const d = edgePath(from, to);
-                      const isSel = selectedEdge === e.id;
-                      return (
-                        <g key={e.id}>
-                          <path
-                            d={d}
-                            fill="none"
-                            stroke={st.stroke}
-                            strokeWidth={isSel ? st.width + 1.5 : st.width}
-                            strokeDasharray={st.dash}
-                            markerEnd={`url(#cp-arrow-${arrowKind(e)})`}
-                          />
-                          <path
-                            d={d}
-                            fill="none"
-                            className="edge-hit"
-                            stroke="transparent"
-                            strokeWidth={14}
-                            style={{ pointerEvents: "stroke", cursor: "pointer" }}
-                            onClick={() => {
-                              setSelectedTask(null);
-                              setImpactMode(false);
-                              setSelectedEdge((prev) => (prev === e.id ? null : e.id));
-                            }}
-                          />
-                        </g>
-                      );
+                      return renderEdge(e, from, to);
                     })}
                   </svg>
                   {focusLayer.visibleTasks.map((t) => {
@@ -1726,7 +1733,6 @@ export default function CollaborationPage({
                           : fromBase;
                         const to = toBase ? taskCircle(e.targetTaskId, toBase) : toBase;
                         if (!from || !to) return null;
-                        const st = edgeStroke(e);
                         const dim =
                           (neighborIds != null &&
                             !(
@@ -1739,33 +1745,7 @@ export default function CollaborationPage({
                               (e.sourceTaskId != null && taskMatchesFilter(taskById.get(e.sourceTaskId)!)) ||
                               taskMatchesFilter(taskById.get(e.targetTaskId)!)
                             ));
-                        const isSel = selectedEdge === e.id;
-                        return (
-                          <g key={e.id}>
-                            <path
-                              d={edgePath(from, to)}
-                              fill="none"
-                              stroke={st.stroke}
-                              strokeWidth={isSel ? st.width + 1.5 : st.width}
-                              strokeDasharray={st.dash}
-                              opacity={dim ? 0.15 : 1}
-                              markerEnd={`url(#cp-arrow-${arrowKind(e)})`}
-                            />
-                            <path
-                              d={edgePath(from, to)}
-                              fill="none"
-                              className="edge-hit"
-                            stroke="transparent"
-                              strokeWidth={14}
-                              style={{ pointerEvents: "stroke", cursor: "pointer" }}
-                              onClick={() => {
-                                setSelectedTask(null);
-                                setImpactMode(false);
-                                setSelectedEdge((prev) => (prev === e.id ? null : e.id));
-                              }}
-                            />
-                          </g>
-                        );
+                        return renderEdge(e, from, to, dim);
                       })}
                     </svg>
                     {/* O／KR 真实节点（#123）：视觉与层级树同一套（gnode-o／gnode-kr + krNodeContent），
@@ -1855,7 +1835,7 @@ export default function CollaborationPage({
               ) : (
                 <div className="graph-note">
                   {mode.kind === "kr" && krLayer ? (
-                    `${krLayer.kr.code} 任务关系层：硬前置加粗、关键路径最粗、互锁红色虚线、反馈紫色虚线`
+                    `${krLayer.kr.code} 任务关系层：关系默认灰线、互锁红色虚线常驻；点击任务或关系后当前一层蓝色高亮，悬停边显示类型与交付物名`
                   ) : mode.kind === "focus" && focusLayer ? (
                     <>
                       以「{focusLayer.origin.name}」为起点逐层展开：点任一相邻节点继续展开下一层，
@@ -1888,6 +1868,18 @@ export default function CollaborationPage({
                     : "该 KR 下还没有任务"}
                 </div>
               )}
+              {/* #147：左下角紧凑图例（原型 cp-legend）；只解释常驻视觉，
+                  不解释临时焦点蓝色（§11）。 */}
+              <div className="graph-legend" aria-hidden>
+                <span><i className="lg-o" />O</span>
+                <span><i className="lg-kr" />KR</span>
+                <span><i className="lg-task" />任务</span>
+                <span><i className="lg-warning" />预警</span>
+                <span><i className="lg-risk" />高风险／卡点</span>
+                <span><i className="lg-line" />普通关系</span>
+                <span><i className="lg-feedback" />反馈</span>
+                <span><i className="lg-interlock" />互锁</span>
+              </div>
               {/* 小地图（PRD §6.4，原型 cp-minimap）：内容全貌＋当前视口框。 */}
               <div className="graph-minimap" aria-hidden>
                 <svg viewBox={`0 0 ${stageSize.w} ${stageSize.h}`} preserveAspectRatio="xMidYMid meet">

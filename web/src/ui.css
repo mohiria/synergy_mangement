@@ -443,6 +443,38 @@ body {
 /* 详情面板打开时右上操作让位，避免被压住。 */
 .graph-ops-right.with-inspector { right: 312px; }
 .graph-svg { position: absolute; inset: 0; pointer-events: none; }
+/* #147 边标签（原型 labels-key）：默认隐藏，悬停／选中／路径高亮／异常（互锁与未就绪常驻）
+   时显示「关系类型 · 交付物名称」；文字带画布底色描边保证压线可读。 */
+.edge-g .edge-label {
+  display: none; fill: #708095; font-size: var(--type-aux); font-weight: 600;
+  paint-order: stroke; stroke: #f8f9fc; stroke-width: 4px; stroke-linejoin: round; pointer-events: none;
+}
+.edge-g:hover .edge-label, .edge-g.highlighted .edge-label, .edge-g.anomaly .edge-label { display: block; }
+.edge-g.interlock .edge-label { fill: var(--red); }
+.edge-g.unready .edge-label { fill: var(--amber); }
+.edge-g.highlighted .edge-label { fill: #253fba; }
+/* 选中／路径高亮的蓝色光晕（原型 .cp-edge.selected）。 */
+.edge-g.highlighted .edge-line { filter: drop-shadow(0 0 5px rgba(82, 104, 223, 0.42)); }
+/* #147 左下角紧凑图例（原型 cp-legend；圆角契约取 4px／50%）。 */
+.graph-legend {
+  position: absolute; left: 12px; bottom: 12px; z-index: 4;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px;
+  max-width: calc(100% - 166px); padding: 6px 8px;
+  border: 1px solid var(--line); border-radius: var(--radius); background: rgba(255, 255, 255, 0.94);
+  font-size: var(--type-aux); color: #687589;
+}
+.graph-legend span { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.graph-legend i { display: inline-block; width: 9px; height: 9px; }
+.graph-legend .lg-o { border-radius: var(--radius); background: var(--navy); }
+.graph-legend .lg-kr { border-radius: var(--radius); background: #6d7fd9; }
+.graph-legend .lg-task { border-radius: 50%; background: #fff; border: 2px solid #67839c; }
+.graph-legend .lg-warning { border-radius: 50%; background: #fff3d9; border: 2px solid var(--amber); }
+.graph-legend .lg-risk { border-radius: 50%; background: #fdebed; border: 2px solid var(--red); }
+.graph-legend .lg-line, .graph-legend .lg-feedback, .graph-legend .lg-interlock {
+  width: 17px; height: 0; border-top: 2px solid #929dad;
+}
+.graph-legend .lg-feedback { border-top-style: dashed; }
+.graph-legend .lg-interlock { border-top-style: dashed; border-top-color: var(--red); }
 /* 小地图（原型 cp-minimap）。 */
 .graph-minimap {
   position: absolute; right: 12px; bottom: 12px; z-index: 4; width: 132px; height: 82px;
@@ -541,9 +573,9 @@ body {
 /* #138 就地编辑：可点字段悬停给出编辑暗示。 */
 .inline-editable { cursor: pointer; border-bottom: 1px dashed transparent; }
 .inline-editable:hover { border-bottom-color: var(--primary); }
-/* 说明条是画布覆盖层（#145）：左下角，不随平移缩放；#147 图例落位后再统一排布。 */
+/* 说明条是画布覆盖层（#145）：左下角图例（#147）之上，不随平移缩放。 */
 .graph-note {
-  position: absolute; left: 12px; bottom: 12px; z-index: 4; display: inline-block; max-width: 60%;
+  position: absolute; left: 12px; bottom: 52px; z-index: 4; display: inline-block; max-width: 60%;
   background: rgba(255, 255, 255, 0.94); border: 1px solid var(--line); border-radius: var(--radius);
   padding: 7px 10px; font-size: var(--type-aux); color: var(--muted);
 }
