@@ -5,6 +5,7 @@ import { client } from "./api/client";
 import type { components } from "./api/schema";
 import Icon from "./icons";
 import ProjectShell from "./ProjectShell";
+import TaskDrawerHost from "./task-drawer";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
@@ -51,6 +52,9 @@ export default function ProjectOverviewPage({
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  // #156（PRD §7.5、AC-31）：点击任务留在总览，本页右侧打开任务详情抽屉；
+  // 从风险依据进入时带 source=blockers 落位「当前卡点」区块。
+  const [drawerTask, setDrawerTask] = useState<{ id: number; source?: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -265,9 +269,7 @@ export default function ProjectOverviewPage({
                               className="nav-row"
                               style={{ width: 28, height: 28, padding: 0, justifyContent: "center" }}
                               aria-label="查看任务"
-                              onClick={() =>
-                                navigate(`/projects/${projectId}/tasks?task=${t.id}&tab=overview`)
-                              }
+                              onClick={() => setDrawerTask({ id: t.id })}
                             >
                               <Icon name="chevron" size={15} />
                             </button>
@@ -291,9 +293,7 @@ export default function ProjectOverviewPage({
                           riskNote={k.riskNote}
                           blockers={blockers.filter((b) => krOfTask.get(b.taskId) === k.id)}
                           taskCode={taskCode}
-                          onOpenTask={(taskId) =>
-                            navigate(`/projects/${projectId}/tasks?task=${taskId}&tab=blockers`)
-                          }
+                          onOpenTask={(taskId) => setDrawerTask({ id: taskId, source: "blockers" })}
                         />
                         <div className="kr-graph-link">
                           <Button
@@ -314,6 +314,14 @@ export default function ProjectOverviewPage({
           ))}
         </>
       )}
+      {/* #156：任务详情抽屉在本页打开（PRD §7.5、AC-31），动作落库后刷新总览数据。 */}
+      <TaskDrawerHost
+        projectId={projectId}
+        taskId={drawerTask?.id ?? null}
+        source={drawerTask?.source}
+        onClose={() => setDrawerTask(null)}
+        onChanged={load}
+      />
     </ProjectShell>
   );
 }
