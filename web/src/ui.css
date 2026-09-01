@@ -414,8 +414,14 @@ body {
 
 /* 协作关系图谱（原型 graph-shell 生效样式；手绘 SVG + 绝对定位节点）。 */
 .graph-layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 12px; }
-.risk-queue { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; align-self: start; }
-.risk-queue-head { padding: 10px 14px; border-bottom: 1px solid var(--line); font-weight: 600; font-size: var(--type-body); background: #f8f9fb; }
+/* #154：条目多时列表区自适应滚动，底部「回到 O／KR 层级树」常驻可见——
+   队列整体封顶与画布同高（graph-shell 的 calc），条目滚动交给 .risk-queue-list。 */
+.risk-queue {
+  background: #fff; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;
+  align-self: start; display: flex; flex-direction: column; max-height: calc(100vh - 250px);
+}
+.risk-queue-head { flex: none; padding: 10px 14px; border-bottom: 1px solid var(--line); font-weight: 600; font-size: var(--type-body); background: #f8f9fb; }
+.risk-queue-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .risk-queue-item {
   width: 100%; text-align: left; border: 0; background: #fff; padding: 10px 14px;
   border-bottom: 1px solid #edf0f2; cursor: pointer; font: inherit;
@@ -433,7 +439,7 @@ body {
 .risk-queue-counts i { color: var(--red); font-weight: 600; }
 .risk-queue-counts em { color: var(--amber); margin-top: 3px; }
 /* #150 原型 cp-lens-foot：语义说明＋回层级树入口。 */
-.risk-queue-foot { padding: 10px 14px; background: #f8fafc; border-top: 1px solid #e5e9ef; }
+.risk-queue-foot { flex: none; padding: 10px 14px; background: #f8fafc; border-top: 1px solid #e5e9ef; }
 .risk-queue-foot span { display: block; color: #7b8798; font-size: var(--type-aux); }
 .risk-queue-foot button { margin-top: 6px; border: 0; background: none; color: var(--accent); font-size: var(--type-aux); padding: 0; cursor: pointer; }
 /* 画布本身不滚动：详情面板与画布操作层要常驻，滚动交给内层 graph-scroll（CR-22、CR-23）。 */

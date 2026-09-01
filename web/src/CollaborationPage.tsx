@@ -2090,6 +2090,8 @@ export default function CollaborationPage({
                     前端只消费 topBlocker）。#150：右侧「N 卡点／N 未就绪」双徽章（0 不显示，
                     CR-22），未就绪计入排序权重（原型 renderRiskLens：卡点×3＋未就绪），
                     进入条件扩为风险／卡点／未就绪任一非零。 */}
+                {/* #154：条目列表区独立滚动，底部「回到 O／KR 层级树」不随列表滚走。 */}
+                <div className="risk-queue-list">
                 {(() => {
                   const weight = (k: (typeof krList)[number]) =>
                     (k.openBlockerCount ?? 0) * 3 + (k.notReadyCount ?? 0);
@@ -2132,6 +2134,7 @@ export default function CollaborationPage({
                     </button>
                   ));
                 })()}
+                </div>
                 {/* 原型 cp-lens-foot：语义说明＋回层级树入口。 */}
                 <div className="risk-queue-foot">
                   <span>红色仅表示真实阻塞或冲突</span>
