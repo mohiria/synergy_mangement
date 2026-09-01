@@ -38,8 +38,6 @@ export default function ConfigureInputModal({
   const [providerIds, setProviderIds] = useState<number[]>([]);
   const [contentNote, setContentNote] = useState("");
   const [sourceTaskIds, setSourceTaskIds] = useState<number[]>([]);
-  const [sourceDeliverables, setSourceDeliverables] = useState<{ id: number; name: string }[]>([]);
-  const [deliverableId, setDeliverableId] = useState<number | undefined>(undefined);
   const [edgeType, setEdgeType] = useState<EdgeType>("hard_prerequisite");
   const [necessity, setNecessity] = useState<"required" | "reference">("required");
   const [expectedDate, setExpectedDate] = useState<Dayjs | null>(null);
@@ -52,32 +50,12 @@ export default function ConfigureInputModal({
       setProviderIds([]);
       setContentNote("");
       setSourceTaskIds([]);
-      setSourceDeliverables([]);
-      setDeliverableId(undefined);
       setEdgeType("hard_prerequisite");
       setNecessity("required");
       setExpectedDate(null);
       setError(null);
     }
   }, [task]);
-
-  // 交付物项挂在具体来源任务上，只在单选一个来源任务时可指定（AC-53）。
-  useEffect(() => {
-    if (sourceTaskIds.length !== 1) {
-      setSourceDeliverables([]);
-      setDeliverableId(undefined);
-      return;
-    }
-    client
-      .GET("/projects/{projectId}/tasks/{taskId}", {
-        params: { path: { projectId, taskId: sourceTaskIds[0] } },
-      })
-      .then((res) => {
-        if (res.data) {
-          setSourceDeliverables(res.data.deliverables.map((d) => ({ id: d.id, name: d.name })));
-        }
-      });
-  }, [projectId, sourceTaskIds]);
 
   if (!task) return null;
   const candidates = tasks.filter((t) => t.id !== task.id && t.status !== "cancelled");
@@ -178,7 +156,6 @@ export default function ConfigureInputModal({
         necessity,
         edgeType,
         sourceTaskIds,
-        deliverableId,
         expectedDate: expectedDate ? expectedDate.format("YYYY-MM-DD") : undefined,
       },
     });
@@ -198,7 +175,7 @@ export default function ConfigureInputModal({
       title={
         <div>
           配置输入
-          <span className="modal-sub">来源为系统内已有任务；当前交付物生效后输入自动就绪</span>
+          <span className="modal-sub">来源为系统内已有任务；来源任务完成后输入自动就绪（裁决 #163）</span>
         </div>
       }
       open={!!task}
@@ -263,22 +240,6 @@ export default function ConfigureInputModal({
             titles={["可选任务", "已选任务"]}
             unit="项"
             searchPlaceholder="搜索 O、KR、任务、负责人或交付物"
-          />
-        </div>
-        )}
-        {mode === "task" && (
-        <div>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
-            对应交付物（选填；无文件的条件可不选；仅单选一个来源任务时可指定）
-          </div>
-          <Select
-            style={{ width: "100%" }}
-            allowClear
-            disabled={sourceTaskIds.length !== 1}
-            placeholder="选择来源任务的交付物项"
-            value={deliverableId}
-            onChange={setDeliverableId}
-            options={sourceDeliverables.map((d) => ({ value: d.id, label: d.name }))}
           />
         </div>
         )}

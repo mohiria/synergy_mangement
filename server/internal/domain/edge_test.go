@@ -45,19 +45,26 @@ func TestCanConfigureInputs(t *testing.T) {
 	}
 }
 
-// AC-48：关系就绪——仅当前内容生效时就绪；候选不提前满足；有当前又有候选仍按当前就绪。
+// 裁决 #163（AC-48 修订）：任务来源边的就绪只看「来源任务已完成」——完成必然产生
+// 已终审生效的当前成果，语义等价；未完成时无论是否已上传文件一律未就绪。
 func TestEdgeReady(t *testing.T) {
-	if EdgeReady(true, false) != true {
-		t.Fatal("有当前内容应就绪")
+	cases := []struct {
+		name         string
+		sourceStatus string
+		want         bool
+	}{
+		{"来源已完成即就绪", TaskCompleted, true},
+		{"进行中未就绪", TaskInProgress, false},
+		{"未开始未就绪", TaskNotStarted, false},
+		{"终审中未就绪", TaskPendingFinalReview, false},
+		{"已关闭未就绪", TaskCancelled, false},
 	}
-	if EdgeReady(false, true) != false {
-		t.Fatal("仅候选不应就绪")
-	}
-	if EdgeReady(true, true) != true {
-		t.Fatal("当前+候选更新应继续就绪")
-	}
-	if EdgeReady(false, false) != false {
-		t.Fatal("无内容不应就绪")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := EdgeReady(tc.sourceStatus); got != tc.want {
+				t.Fatalf("EdgeReady(%q) = %v, want %v", tc.sourceStatus, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -85,7 +92,7 @@ func TestDeriveDisplayStatus(t *testing.T) {
 	}
 }
 
-// AC-53：一次配置可多选来源任务——至少一个、不可重复、逐条沿用单边校验；指定交付物项时只能单选。
+// AC-53：一次配置可多选来源任务——至少一个、不可重复、逐条沿用单边校验（裁决 #163：不再挂交付物项）。
 func TestValidateNewTaskInputs(t *testing.T) {
 	base := NewTaskInputs{EdgeType: EdgeHardPrerequisite, Necessity: NecessityRequired, SourceTaskIDs: []int64{2, 3, 4}, TargetTaskID: 1}
 	cases := []struct {
@@ -100,8 +107,6 @@ func TestValidateNewTaskInputs(t *testing.T) {
 		{"含自身", func(in *NewTaskInputs) { in.SourceTaskIDs = []int64{2, 1} }, ErrEdgeSelfLoop},
 		{"类型非法", func(in *NewTaskInputs) { in.EdgeType = "loop" }, ErrEdgeTypeInvalid},
 		{"必要性非法", func(in *NewTaskInputs) { in.Necessity = "optional" }, ErrNecessityInvalid},
-		{"单来源可指定交付物项", func(in *NewTaskInputs) { in.SourceTaskIDs = []int64{2}; in.HasDeliverable = true }, nil},
-		{"多来源不可指定交付物项", func(in *NewTaskInputs) { in.HasDeliverable = true }, ErrDeliverableMultiSource},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

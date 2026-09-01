@@ -161,10 +161,6 @@ func (s *Server) applyStructureChange(ctx context.Context, qtx *store.Queries,
 }
 
 func applyAddTaskInput(ctx context.Context, qtx *store.Queries, projectID, taskID, uid int64, req CreateTaskInputRequest) error {
-	deliverable := pgtype.Int8{}
-	if req.DeliverableId != nil {
-		deliverable = pgtype.Int8{Int64: *req.DeliverableId, Valid: true}
-	}
 	for _, sourceID := range req.SourceTaskIds {
 		// name 列保留（历史值不动），建边时写一份当时的快照；带编号的完整标识读时现算（#112）。
 		display := ""
@@ -172,14 +168,13 @@ func applyAddTaskInput(ctx context.Context, qtx *store.Queries, projectID, taskI
 			display = domain.EdgeDisplayName("", src.Name, "")
 		}
 		if _, err := qtx.CreateEdge(ctx, store.CreateEdgeParams{
-			TargetTaskID:  taskID,
-			SourceTaskID:  pgtype.Int8{Int64: sourceID, Valid: true},
-			DeliverableID: deliverable,
-			Name:          display,
-			EdgeType:      string(req.EdgeType),
-			Necessity:     string(req.Necessity),
-			ExpectedDate:  toPgDate(req.ExpectedDate),
-			CreatedBy:     uid,
+			TargetTaskID: taskID,
+			SourceTaskID: pgtype.Int8{Int64: sourceID, Valid: true},
+			Name:         display,
+			EdgeType:     string(req.EdgeType),
+			Necessity:    string(req.Necessity),
+			ExpectedDate: toPgDate(req.ExpectedDate),
+			CreatedBy:    uid,
 		}); err != nil {
 			return err
 		}

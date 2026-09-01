@@ -361,21 +361,24 @@ func (s *Server) deliverableList(ctx context.Context, taskID int64, actor domain
 	for _, f := range files {
 		byDeliverable[f.DeliverableID] = append(byDeliverable[f.DeliverableID], f)
 	}
-	edgeRows, err := s.q.ListEdgeRefsByDeliverableTask(ctx, taskID)
+	// 裁决 #163：边不再挂具体交付物项，「来源关系边」按所属任务的输出边归组，各项共用同一组。
+	edgeRows, err := s.q.ListEdgeRefsByDeliverableTask(ctx, pgtype.Int8{Int64: taskID, Valid: true})
 	if err != nil {
 		return nil, err
 	}
-	refs := make([]edgeRefRow, 0, len(edgeRows))
+	taskEdges := make([]DeliverableEdgeRef, 0, len(edgeRows))
 	for _, e := range edgeRows {
-		refs = append(refs, edgeRefRow{
-			ID: e.ID, DeliverableID: e.DeliverableID,
-			EdgeType: e.EdgeType, TargetTaskID: e.TargetTaskID, TargetTaskName: e.TargetTaskName,
+		taskEdges = append(taskEdges, DeliverableEdgeRef{
+			EdgeId:         e.ID,
+			EdgeType:       EdgeType(e.EdgeType),
+			EdgeTypeLabel:  domain.EdgeTypeLabel(e.EdgeType),
+			TargetTaskId:   e.TargetTaskID,
+			TargetTaskName: e.TargetTaskName,
 		})
 	}
-	edgesByDeliverable := edgeRefsByDeliverable(refs)
 	out := make([]Deliverable, 0, len(items))
 	for _, d := range items {
-		item := Deliverable{Id: d.ID, TaskId: d.TaskID, Name: d.Name, Edges: edgesByDeliverable[d.ID]}
+		item := Deliverable{Id: d.ID, TaskId: d.TaskID, Name: d.Name, Edges: taskEdges}
 		for _, f := range byDeliverable[d.ID] {
 			view := toDeliverableFile(store.DeliverableFile{
 				ID: f.ID, DeliverableID: f.DeliverableID, State: f.State,
@@ -414,22 +417,22 @@ func fillContentState(item *Deliverable, hasPendingReview bool) {
 	}
 }
 
-// edgeRefsByDeliverable 把关系边行按来源交付物归拢；两处查询行结构一致，此处只取公共字段。
+// edgeRefsBySourceTask 把关系边行按来源任务归拢（裁决 #163）；两处查询行结构一致。
 type edgeRefRow struct {
 	ID             int64
-	DeliverableID  pgtype.Int8
+	SourceTaskID   pgtype.Int8
 	EdgeType       string
 	TargetTaskID   int64
 	TargetTaskName string
 }
 
-func edgeRefsByDeliverable(rows []edgeRefRow) map[int64][]DeliverableEdgeRef {
+func edgeRefsBySourceTask(rows []edgeRefRow) map[int64][]DeliverableEdgeRef {
 	out := map[int64][]DeliverableEdgeRef{}
 	for _, row := range rows {
-		if !row.DeliverableID.Valid {
+		if !row.SourceTaskID.Valid {
 			continue
 		}
-		out[row.DeliverableID.Int64] = append(out[row.DeliverableID.Int64], DeliverableEdgeRef{
+		out[row.SourceTaskID.Int64] = append(out[row.SourceTaskID.Int64], DeliverableEdgeRef{
 			EdgeId:         row.ID,
 			EdgeType:       EdgeType(row.EdgeType),
 			EdgeTypeLabel:  domain.EdgeTypeLabel(row.EdgeType),

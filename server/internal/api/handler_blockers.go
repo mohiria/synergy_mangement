@@ -226,7 +226,7 @@ func (s *Server) projectBlockerFacts(ctx context.Context, projectID int64) (doma
 	for _, e := range edgeRows {
 		in := domain.BlockerInputFact{
 			EdgeID: e.ID, TargetTaskID: e.TargetTaskID, InputName: e.Name,
-			Necessity: e.Necessity, Ready: domain.EdgeReady(e.CurrentFileID.Valid, e.HasCandidate),
+			Necessity: e.Necessity, Ready: domain.EdgeReady(e.SourceTaskStatus.String),
 		}
 		if e.SourceTaskID.Valid {
 			src := e.SourceTaskID.Int64

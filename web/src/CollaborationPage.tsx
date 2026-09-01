@@ -62,18 +62,9 @@ type Mode =
 
 type NodePos = { x: number; y: number; w: number; h: number };
 
-// 关系列表「当前交付物」列（裁决 J1，#142）：显示「类型 · 大小」，类型文案由服务端派生；
-// 边未绑定具体交付物项且来源任务有多项当前内容时显示「N 项」，悬停列出各项「文件名 · 大小」。
+// 关系列表「当前交付物」列（裁决 J1、#163）：来源任务全部当前文件，显示「类型 · 大小」，
+// 类型文案由服务端派生；多项当前内容时显示「N 项」，悬停列出各项「文件名 · 大小」。
 function edgeCurrentFiles(e: DeliverableEdge): { fileName: string; fileTypeLabel: string; fileSize: number }[] {
-  if (e.currentFileName) {
-    return [
-      {
-        fileName: e.currentFileName,
-        fileTypeLabel: e.currentFileTypeLabel ?? "文件",
-        fileSize: e.currentFileSize ?? 0,
-      },
-    ];
-  }
   return e.sourceCurrentFiles ?? [];
 }
 
@@ -1282,42 +1273,12 @@ export default function CollaborationPage({
               关键路径未计算：系统只确认硬依赖链，不宣称关键路径。
             </div>
           )}
-        {/* CR-12：候选更新只提示、不展示内容。 */}
-        {selectedEdgeObj.hasCandidate && (
-          <div className="gi-note">有更新审核中：候选内容不作为正式输入，当前内容继续有效。</div>
-        )}
         <div className="gi-block">
           <div className="gi-block-head">
             <b>当前交付物</b>
-            <span>{selectedEdgeObj.ready ? "终审已生效" : "尚未形成"}</span>
+            <span>{selectedEdgeObj.ready ? "来源任务已完成" : "来源任务未完成"}</span>
           </div>
-          {selectedEdgeObj.currentFileId != null ? (
-            <div className="gi-file">
-              <span title={selectedEdgeObj.currentFileName}>
-                <b>{selectedEdgeObj.currentFileName}</b>
-                <small>
-                  {selectedEdgeObj.currentFileTypeLabel ?? "文件"}
-                  {selectedEdgeObj.currentFileSize ? ` · ${formatFileSize(selectedEdgeObj.currentFileSize)}` : ""}
-                </small>
-              </span>
-              <span>
-                {previewable(selectedEdgeObj.currentFileName) && (
-                  <Button
-                    size="small"
-                    onClick={() => openEdgeFile(selectedEdgeObj.currentFileId!, selectedEdgeObj.currentFileName, true)}
-                  >
-                    预览
-                  </Button>
-                )}
-                <Button
-                  size="small"
-                  onClick={() => openEdgeFile(selectedEdgeObj.currentFileId!, selectedEdgeObj.currentFileName, false)}
-                >
-                  下载
-                </Button>
-              </span>
-            </div>
-          ) : (selectedEdgeObj.sourceCurrentFiles ?? []).length > 0 ? (
+          {(selectedEdgeObj.sourceCurrentFiles ?? []).length > 0 ? (
             (selectedEdgeObj.sourceCurrentFiles ?? []).map((f) => (
               <div key={f.fileId} className="gi-file">
                 <span title={f.fileName}>
@@ -1918,12 +1879,10 @@ export default function CollaborationPage({
                         </td>
                         <td title={e.edgeTypeLabel}>{e.edgeTypeLabel}</td>
                         <td>{e.necessity === "required" ? "必要" : "参考"}</td>
-                        {/* 裁决 J1（#142）：「当前交付物」列显示「类型 · 大小」（类型由服务端派生），
-                            来源任务多项时显示「N 项」并悬停列出各项「文件名 · 大小」；
-                            候选提示与内容同排一行（#91），行高不随内容变化。 */}
-                        <td title={edgeCurrentTitle(e) + (e.hasCandidate ? " · 候选审核中" : "")}>
+                        {/* 裁决 J1（#142）＋#163：「当前交付物」列显示来源任务当前文件的「类型 · 大小」
+                            （类型由服务端派生），多项时显示「N 项」并悬停列出各项「文件名 · 大小」。 */}
+                        <td title={edgeCurrentTitle(e)}>
                           {edgeCurrentCell(e) ?? <span className="muted">暂无</span>}
-                          {e.hasCandidate && <span className="muted"> · 候选审核中</span>}
                         </td>
                         <td title={e.targetTaskName}>{e.targetTaskName}</td>
                         <td title={e.sourceOwnerName ?? e.inputRequest?.providerName ?? "—"}>

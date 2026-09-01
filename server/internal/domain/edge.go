@@ -59,10 +59,10 @@ func CanConfigureInputs(a Actor, userID int64, t TaskFacts) bool {
 	return CanEditTaskConfig(a, userID, t)
 }
 
-// EdgeReady 关系就绪状态（AC-48）：只有已生效的当前内容使关系就绪；候选不提前满足输入，
-// 已有当前内容时的候选更新不改变原有就绪状态。
-func EdgeReady(hasCurrent, hasCandidate bool) bool {
-	return hasCurrent
+// EdgeReady 任务来源边的就绪状态（裁决 #163，AC-48 修订）：来源任务已完成即就绪——
+// 完成必然产生已终审生效的当前成果；未完成时无论是否已上传文件一律未就绪。
+func EdgeReady(sourceStatus string) bool {
+	return sourceStatus == TaskCompleted
 }
 
 // DeriveDisplayStatus 页面主状态派生（§5.1、§4.4.7 等待输入；AC-58）：后台状态存真实值，
@@ -75,28 +75,21 @@ func DeriveDisplayStatus(stored string, hasUnmetRequiredInput bool) string {
 	return stored
 }
 
-var (
-	ErrEdgeSourceDuplicated   = errors.New("来源任务不能重复选择")
-	ErrDeliverableMultiSource = errors.New("指定交付物项时只能选择一个来源任务")
-)
+var ErrEdgeSourceDuplicated = errors.New("来源任务不能重复选择")
 
 // NewTaskInputs 一次配置产生的多条「来源任务 → 目标任务」输入（AC-53：来源任务可多选）。
 type NewTaskInputs struct {
-	EdgeType       string
-	Necessity      string
-	SourceTaskIDs  []int64
-	TargetTaskID   int64
-	HasDeliverable bool
+	EdgeType      string
+	Necessity     string
+	SourceTaskIDs []int64
+	TargetTaskID  int64
 }
 
 // ValidateNewTaskInputs 校验一次多选来源任务的输入配置（AC-53）：至少选一个、同一次不可重复，
-// 每条来源仍按单边规则校验；交付物项挂在具体来源任务上，故只在单选时可指定。
+// 每条来源仍按单边规则校验（裁决 #163：边不再挂具体交付物项）。
 func ValidateNewTaskInputs(in NewTaskInputs) error {
 	if len(in.SourceTaskIDs) == 0 {
 		return ErrEdgeSourceMissing
-	}
-	if in.HasDeliverable && len(in.SourceTaskIDs) > 1 {
-		return ErrDeliverableMultiSource
 	}
 	seen := make(map[int64]struct{}, len(in.SourceTaskIDs))
 	for _, id := range in.SourceTaskIDs {

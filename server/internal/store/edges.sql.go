@@ -12,21 +12,20 @@ import (
 )
 
 const createEdge = `-- name: CreateEdge :one
-INSERT INTO deliverable_edges (target_task_id, source_task_id, source_user_id, deliverable_id, name, edge_type, necessity, expected_date, created_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING id, target_task_id, source_task_id, source_user_id, deliverable_id, name, edge_type, necessity, expected_date, created_by, created_at
+INSERT INTO deliverable_edges (target_task_id, source_task_id, source_user_id, name, edge_type, necessity, expected_date, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, target_task_id, source_task_id, source_user_id, name, edge_type, necessity, expected_date, created_by, created_at
 `
 
 type CreateEdgeParams struct {
-	TargetTaskID  int64
-	SourceTaskID  pgtype.Int8
-	SourceUserID  pgtype.Int8
-	DeliverableID pgtype.Int8
-	Name          string
-	EdgeType      string
-	Necessity     string
-	ExpectedDate  pgtype.Date
-	CreatedBy     int64
+	TargetTaskID int64
+	SourceTaskID pgtype.Int8
+	SourceUserID pgtype.Int8
+	Name         string
+	EdgeType     string
+	Necessity    string
+	ExpectedDate pgtype.Date
+	CreatedBy    int64
 }
 
 func (q *Queries) CreateEdge(ctx context.Context, arg CreateEdgeParams) (DeliverableEdge, error) {
@@ -34,7 +33,6 @@ func (q *Queries) CreateEdge(ctx context.Context, arg CreateEdgeParams) (Deliver
 		arg.TargetTaskID,
 		arg.SourceTaskID,
 		arg.SourceUserID,
-		arg.DeliverableID,
 		arg.Name,
 		arg.EdgeType,
 		arg.Necessity,
@@ -47,7 +45,6 @@ func (q *Queries) CreateEdge(ctx context.Context, arg CreateEdgeParams) (Deliver
 		&i.TargetTaskID,
 		&i.SourceTaskID,
 		&i.SourceUserID,
-		&i.DeliverableID,
 		&i.Name,
 		&i.EdgeType,
 		&i.Necessity,
@@ -71,7 +68,7 @@ func (q *Queries) DeleteEdge(ctx context.Context, id int64) (int64, error) {
 }
 
 const getEdgeInProject = `-- name: GetEdgeInProject :one
-SELECT e.id, e.target_task_id, e.source_task_id, e.source_user_id, e.deliverable_id, e.name, e.edge_type, e.necessity, e.expected_date, e.created_by, e.created_at, tt.owner_id AS target_owner_id, tt.created_by AS target_created_by, tt.status AS target_status,
+SELECT e.id, e.target_task_id, e.source_task_id, e.source_user_id, e.name, e.edge_type, e.necessity, e.expected_date, e.created_by, e.created_at, tt.owner_id AS target_owner_id, tt.created_by AS target_created_by, tt.status AS target_status,
     k.owner_id AS target_kr_owner_id
 FROM deliverable_edges e
 JOIN tasks tt ON tt.id = e.target_task_id
@@ -90,7 +87,6 @@ type GetEdgeInProjectRow struct {
 	TargetTaskID    int64
 	SourceTaskID    pgtype.Int8
 	SourceUserID    pgtype.Int8
-	DeliverableID   pgtype.Int8
 	Name            string
 	EdgeType        string
 	Necessity       string
@@ -111,7 +107,6 @@ func (q *Queries) GetEdgeInProject(ctx context.Context, arg GetEdgeInProjectPara
 		&i.TargetTaskID,
 		&i.SourceTaskID,
 		&i.SourceUserID,
-		&i.DeliverableID,
 		&i.Name,
 		&i.EdgeType,
 		&i.Necessity,
@@ -172,27 +167,26 @@ func (q *Queries) ListCurrentFilesByProjectTask(ctx context.Context, projectID i
 }
 
 const listEdgeRefsByDeliverableTask = `-- name: ListEdgeRefsByDeliverableTask :many
-SELECT e.id, e.deliverable_id, e.name, e.edge_type, e.target_task_id,
+SELECT e.id, e.source_task_id, e.name, e.edge_type, e.target_task_id,
     tt.name AS target_task_name
 FROM deliverable_edges e
 JOIN tasks tt ON tt.id = e.target_task_id
-JOIN deliverables d ON d.id = e.deliverable_id
-WHERE d.task_id = $1
+WHERE e.source_task_id = $1
 ORDER BY e.id
 `
 
 type ListEdgeRefsByDeliverableTaskRow struct {
 	ID             int64
-	DeliverableID  pgtype.Int8
+	SourceTaskID   pgtype.Int8
 	Name           string
 	EdgeType       string
 	TargetTaskID   int64
 	TargetTaskName string
 }
 
-// 交付物承接的关系边（AC-17 归档视角「来源关系边」列）：按来源交付物所属任务过滤。
-func (q *Queries) ListEdgeRefsByDeliverableTask(ctx context.Context, taskID int64) ([]ListEdgeRefsByDeliverableTaskRow, error) {
-	rows, err := q.db.Query(ctx, listEdgeRefsByDeliverableTask, taskID)
+// 交付物承接的关系边（AC-17 归档视角「来源关系边」列；裁决 #163：按来源任务归属）。
+func (q *Queries) ListEdgeRefsByDeliverableTask(ctx context.Context, sourceTaskID pgtype.Int8) ([]ListEdgeRefsByDeliverableTaskRow, error) {
+	rows, err := q.db.Query(ctx, listEdgeRefsByDeliverableTask, sourceTaskID)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +196,7 @@ func (q *Queries) ListEdgeRefsByDeliverableTask(ctx context.Context, taskID int6
 		var i ListEdgeRefsByDeliverableTaskRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.DeliverableID,
+			&i.SourceTaskID,
 			&i.Name,
 			&i.EdgeType,
 			&i.TargetTaskID,
@@ -219,27 +213,26 @@ func (q *Queries) ListEdgeRefsByDeliverableTask(ctx context.Context, taskID int6
 }
 
 const listEdgeRefsByProject = `-- name: ListEdgeRefsByProject :many
-SELECT e.id, e.deliverable_id, e.name, e.edge_type, e.target_task_id,
+SELECT e.id, e.source_task_id, e.name, e.edge_type, e.target_task_id,
     tt.name AS target_task_name
 FROM deliverable_edges e
 JOIN tasks tt ON tt.id = e.target_task_id
 JOIN key_results k ON k.id = tt.key_result_id
 JOIN objectives o ON o.id = k.objective_id
-JOIN deliverables d ON d.id = e.deliverable_id
-WHERE o.project_id = $1
+WHERE e.source_task_id IS NOT NULL AND o.project_id = $1
 ORDER BY e.id
 `
 
 type ListEdgeRefsByProjectRow struct {
 	ID             int64
-	DeliverableID  pgtype.Int8
+	SourceTaskID   pgtype.Int8
 	Name           string
 	EdgeType       string
 	TargetTaskID   int64
 	TargetTaskName string
 }
 
-// 同上，项目全量：归档视角一次性取齐所有交付物的来源关系边。
+// 同上，项目全量：归档视角一次性取齐所有来源任务的输出边。
 func (q *Queries) ListEdgeRefsByProject(ctx context.Context, projectID int64) ([]ListEdgeRefsByProjectRow, error) {
 	rows, err := q.db.Query(ctx, listEdgeRefsByProject, projectID)
 	if err != nil {
@@ -251,7 +244,7 @@ func (q *Queries) ListEdgeRefsByProject(ctx context.Context, projectID int64) ([
 		var i ListEdgeRefsByProjectRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.DeliverableID,
+			&i.SourceTaskID,
 			&i.Name,
 			&i.EdgeType,
 			&i.TargetTaskID,
@@ -268,17 +261,11 @@ func (q *Queries) ListEdgeRefsByProject(ctx context.Context, projectID int64) ([
 }
 
 const listEdgesByProject = `-- name: ListEdgesByProject :many
-SELECT e.id, e.target_task_id, e.source_task_id, e.source_user_id, e.deliverable_id, e.name, e.edge_type, e.necessity, e.expected_date, e.created_by, e.created_at,
+SELECT e.id, e.target_task_id, e.source_task_id, e.source_user_id, e.name, e.edge_type, e.necessity, e.expected_date, e.created_by, e.created_at,
     st.name AS source_task_name, st.status AS source_task_status,
     st.owner_id AS source_owner_id, su.display_name AS source_owner_name,
     mu.display_name AS source_user_name,
-    tt.name AS target_task_name, tt.owner_id AS target_owner_id, tt.created_by AS target_created_by,
-    d.name AS deliverable_name,
-    cf.id AS current_file_id, cf.file_name AS current_file_name, cf.file_size AS current_file_size,
-    EXISTS (
-        SELECT 1 FROM deliverable_files df
-        WHERE df.deliverable_id = e.deliverable_id AND df.state = 'candidate'
-    ) AS has_candidate
+    tt.name AS target_task_name, tt.owner_id AS target_owner_id, tt.created_by AS target_created_by
 FROM deliverable_edges e
 JOIN tasks tt ON tt.id = e.target_task_id
 JOIN key_results k ON k.id = tt.key_result_id
@@ -286,8 +273,6 @@ JOIN objectives o ON o.id = k.objective_id
 LEFT JOIN tasks st ON st.id = e.source_task_id
 LEFT JOIN users su ON su.id = st.owner_id
 LEFT JOIN users mu ON mu.id = e.source_user_id
-LEFT JOIN deliverables d ON d.id = e.deliverable_id
-LEFT JOIN deliverable_files cf ON cf.deliverable_id = e.deliverable_id AND cf.state = 'current'
 WHERE o.project_id = $1
 ORDER BY e.id
 `
@@ -297,7 +282,6 @@ type ListEdgesByProjectRow struct {
 	TargetTaskID     int64
 	SourceTaskID     pgtype.Int8
 	SourceUserID     pgtype.Int8
-	DeliverableID    pgtype.Int8
 	Name             string
 	EdgeType         string
 	Necessity        string
@@ -312,14 +296,10 @@ type ListEdgesByProjectRow struct {
 	TargetTaskName   string
 	TargetOwnerID    int64
 	TargetCreatedBy  int64
-	DeliverableName  pgtype.Text
-	CurrentFileID    pgtype.Int8
-	CurrentFileName  pgtype.Text
-	CurrentFileSize  pgtype.Int8
-	HasCandidate     bool
 }
 
-// 项目全部交付物边，含两端任务事实与就绪派生所需的当前／候选内容存在性（AC-48）。
+// 项目全部交付物边，含两端任务事实（AC-48 修订，裁决 #163：就绪只看来源任务状态，
+// 成员来源由输入请求状态判定，均在 domain/handler 计算）。
 func (q *Queries) ListEdgesByProject(ctx context.Context, projectID int64) ([]ListEdgesByProjectRow, error) {
 	rows, err := q.db.Query(ctx, listEdgesByProject, projectID)
 	if err != nil {
@@ -334,7 +314,6 @@ func (q *Queries) ListEdgesByProject(ctx context.Context, projectID int64) ([]Li
 			&i.TargetTaskID,
 			&i.SourceTaskID,
 			&i.SourceUserID,
-			&i.DeliverableID,
 			&i.Name,
 			&i.EdgeType,
 			&i.Necessity,
@@ -349,11 +328,6 @@ func (q *Queries) ListEdgesByProject(ctx context.Context, projectID int64) ([]Li
 			&i.TargetTaskName,
 			&i.TargetOwnerID,
 			&i.TargetCreatedBy,
-			&i.DeliverableName,
-			&i.CurrentFileID,
-			&i.CurrentFileName,
-			&i.CurrentFileSize,
-			&i.HasCandidate,
 		); err != nil {
 			return nil, err
 		}
@@ -367,25 +341,26 @@ func (q *Queries) ListEdgesByProject(ctx context.Context, projectID int64) ([]Li
 
 const listInputReadinessByProject = `-- name: ListInputReadinessByProject :many
 SELECT tt.key_result_id, tt.status AS target_status,
-    EXISTS (
-        SELECT 1 FROM deliverable_files cf
-        WHERE cf.deliverable_id = e.deliverable_id AND cf.state = 'current'
-    ) AS has_current
+    st.status AS source_task_status,
+    ir.state AS input_request_state
 FROM deliverable_edges e
 JOIN tasks tt ON tt.id = e.target_task_id
 JOIN key_results k ON k.id = tt.key_result_id
 JOIN objectives o ON o.id = k.objective_id
+LEFT JOIN tasks st ON st.id = e.source_task_id
+LEFT JOIN input_requests ir ON ir.edge_id = e.id
 WHERE o.project_id = $1
 `
 
 type ListInputReadinessByProjectRow struct {
-	KeyResultID  int64
-	TargetStatus string
-	HasCurrent   bool
+	KeyResultID       int64
+	TargetStatus      string
+	SourceTaskStatus  pgtype.Text
+	InputRequestState pgtype.Text
 }
 
 // #150 风险队列「未就绪摘要」：项目全部输入边的就绪事实——目标任务所属 KR、
-// 目标任务状态、边上有无已生效当前内容（与 AC-48 就绪同源）；计数规则在 domain。
+// 目标任务状态、来源任务状态与成员来源的输入请求状态（与 AC-48 修订同源）；计数规则在 domain。
 func (q *Queries) ListInputReadinessByProject(ctx context.Context, projectID int64) ([]ListInputReadinessByProjectRow, error) {
 	rows, err := q.db.Query(ctx, listInputReadinessByProject, projectID)
 	if err != nil {
@@ -395,7 +370,12 @@ func (q *Queries) ListInputReadinessByProject(ctx context.Context, projectID int
 	var items []ListInputReadinessByProjectRow
 	for rows.Next() {
 		var i ListInputReadinessByProjectRow
-		if err := rows.Scan(&i.KeyResultID, &i.TargetStatus, &i.HasCurrent); err != nil {
+		if err := rows.Scan(
+			&i.KeyResultID,
+			&i.TargetStatus,
+			&i.SourceTaskStatus,
+			&i.InputRequestState,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

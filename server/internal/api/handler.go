@@ -820,9 +820,14 @@ func (s *Server) okrList(ctx context.Context, projectID int64, actor domain.Acto
 	}
 	inputFactsByKr := make(map[int64][]domain.KrInputFact)
 	for _, row := range readinessRows {
+		// 裁决 #163：任务来源按来源任务已完成判定，成员来源按输入请求已提供判定。
+		ready := domain.EdgeReady(row.SourceTaskStatus.String)
+		if row.InputRequestState.Valid {
+			ready = domain.MemberEdgeReady(row.InputRequestState.String)
+		}
 		inputFactsByKr[row.KeyResultID] = append(inputFactsByKr[row.KeyResultID], domain.KrInputFact{
 			TargetStatus: row.TargetStatus,
-			Ready:        domain.EdgeReady(row.HasCurrent, false),
+			Ready:        ready,
 		})
 	}
 	// KR 下任务数（含已完成与已关闭）：OKR 表「任务」列与删除守卫同源（AC-65）。

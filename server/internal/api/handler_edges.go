@@ -29,7 +29,7 @@ func unreadyRequiredInputs(edges []store.ListEdgesByProjectRow, requests []store
 	targets := []int64{}
 	byTarget := map[int64][]domain.InputEdgeState{}
 	for _, e := range edges {
-		ready := domain.EdgeReady(e.CurrentFileID.Valid, e.HasCandidate)
+		ready := domain.EdgeReady(e.SourceTaskStatus.String)
 		if state, ok := stateByEdge[e.ID]; ok {
 			ready = domain.MemberEdgeReady(state)
 		}
@@ -84,17 +84,16 @@ func (s *Server) CreateTaskInput(w http.ResponseWriter, r *http.Request, project
 		return
 	}
 	inputs := domain.NewTaskInputs{
-		EdgeType:       string(req.EdgeType),
-		Necessity:      string(req.Necessity),
-		SourceTaskIDs:  req.SourceTaskIds,
-		TargetTaskID:   taskId,
-		HasDeliverable: req.DeliverableId != nil,
+		EdgeType:      string(req.EdgeType),
+		Necessity:     string(req.Necessity),
+		SourceTaskIDs: req.SourceTaskIds,
+		TargetTaskID:  taskId,
 	}
 	if err := domain.ValidateNewTaskInputs(inputs); err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_edge", Message: err.Error()})
 		return
 	}
-	// 每个来源任务都必须属于本项目；指定交付物项时必须挂在（唯一的）来源任务上。
+	// 每个来源任务都必须属于本项目。
 	for _, sourceID := range inputs.SourceTaskIDs {
 		if _, err := s.q.GetTaskInProject(r.Context(), store.GetTaskInProjectParams{ID: sourceID, ProjectID: projectId}); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -105,15 +104,7 @@ func (s *Server) CreateTaskInput(w http.ResponseWriter, r *http.Request, project
 			return
 		}
 	}
-	if req.DeliverableId != nil {
-		sourceID := inputs.SourceTaskIDs[0]
-		d, err := s.q.GetDeliverableInProject(r.Context(), store.GetDeliverableInProjectParams{ID: *req.DeliverableId, ID_2: sourceID, ProjectID: projectId})
-		if err != nil || d.TaskID != sourceID {
-			writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_deliverable", Message: "交付物项不属于来源任务"})
-			return
-		}
-	}
-	// 输入与输入源是关键字段（§5.2.B）：已入池任务的新增要经所属 KR 负责人审批。
+	// 输入与输入源是关键字段（§5.2.B）：新增要经所属 KR 负责人审批。
 	outcome, ok := s.routeStructureChange(w, r, taskId, actor, uid, facts)
 	if !ok {
 		return
@@ -271,8 +262,8 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 	for _, rv := range reviewerRows {
 		reviewerNamesByTask[rv.TaskID] = append(reviewerNamesByTask[rv.TaskID], rv.DisplayName)
 	}
-	// 裁决 J1（#142）：「当前交付物」列显示类型与大小；边未绑定具体交付物项时
-	// 按来源任务列出全部已生效当前内容（一项显示「类型 · 大小」，多项显示「N 项」）。
+	// 裁决 J1（#142）＋裁决 #163：「当前交付物」列按来源任务列出全部已生效当前内容
+	// （一项显示「类型 · 大小」，多项显示「N 项」）。
 	currentFileRows, err := s.q.ListCurrentFilesByProjectTask(ctx, projectID)
 	if err != nil {
 		return nil, err
@@ -295,7 +286,6 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 	analysis := domain.AnalyzeHardEdges(hardEdges, durations)
 	out := make([]DeliverableEdge, 0, len(rows))
 	for _, e := range rows {
-		hasCurrent := e.CurrentFileID.Valid
 		facts := domain.TaskFacts{Status: "", CreatorID: e.TargetCreatedBy, OwnerID: e.TargetOwnerID}
 		// 解除权限沿目标任务判定；状态从行内不可得时按非终态处理（列表行含 target 状态即可）。
 		facts.Status = domain.TaskInProgress
@@ -307,8 +297,7 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 			EdgeTypeLabel: optString(domain.EdgeTypeLabel(e.EdgeType)),
 			Necessity:     Necessity(e.Necessity),
 			TargetTaskId:  e.TargetTaskID,
-			Ready:         domain.EdgeReady(hasCurrent, e.HasCandidate),
-			HasCandidate:  e.HasCandidate,
+			Ready:         domain.EdgeReady(e.SourceTaskStatus.String),
 			CanRemove:     &canRemove,
 		}
 		item.TargetTaskName = optString(e.TargetTaskName)
@@ -336,15 +325,7 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 		} else if e.SourceUserName.Valid {
 			item.SourceOwnerName = &e.SourceUserName.String
 		}
-		item.DeliverableId = fromPgInt8(e.DeliverableID)
-		item.DeliverableName = fromPgText(e.DeliverableName)
-		if e.CurrentFileID.Valid {
-			item.CurrentFileId = &e.CurrentFileID.Int64
-			item.CurrentFileName = fromPgText(e.CurrentFileName)
-			item.CurrentFileSize = &e.CurrentFileSize.Int64
-			label := domain.FileTypeLabel(e.CurrentFileName.String)
-			item.CurrentFileTypeLabel = &label
-		} else if e.SourceTaskID.Valid {
+		if e.SourceTaskID.Valid {
 			if files := currentFilesByTask[e.SourceTaskID.Int64]; len(files) > 0 {
 				item.SourceCurrentFiles = &files
 			}

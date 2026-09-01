@@ -1763,7 +1763,7 @@ export interface components {
              */
             fileSize: number;
         };
-        /** @description 交付物承接的关系边引用（词汇表「交付物边」）：本交付物是这条边的来源内容 */
+        /** @description 交付物承接的关系边引用（词汇表「交付物边」；裁决 */
         DeliverableEdgeRef: {
             /** Format: int64 */
             edgeId: number;
@@ -1825,7 +1825,7 @@ export interface components {
              * @description 提交／生效时间：有当前内容取生效时刻，否则取候选提交时刻（派生字段）
              */
             contentStateAt?: string;
-            /** @description 本交付物承接的来源关系边（AC-17 归档视角需在列表层可见可点） */
+            /** @description 本交付物承接的来源关系边（AC-17 归档视角需在列表层可见可点；裁决 */
             edges: components["schemas"]["DeliverableEdgeRef"][];
             /** @description 当前用户能否删除本项（派生字段，裁决 H1）：有编辑权限、任务在执行类状态、 且本项没有当前内容时为 true；已发布的项删除须走成果更新重传 */
             canDelete: boolean;
@@ -1943,7 +1943,7 @@ export interface components {
          * @enum {string}
          */
         Necessity: "required" | "reference";
-        /** @description 交付物边（词汇表）；边上关联当前与候选交付物，就绪状态派生（AC-48） */
+        /** @description 交付物边（词汇表；裁决 */
         DeliverableEdge: {
             /** Format: int64 */
             id: number;
@@ -1972,31 +1972,10 @@ export interface components {
             /** Format: int64 */
             targetTaskId: number;
             targetTaskName?: string;
-            /**
-             * Format: int64
-             * @description 对应来源任务的交付物项
-             */
-            deliverableId?: number;
-            deliverableName?: string;
-            /**
-             * Format: int64
-             * @description 已生效当前内容（可下载；派生字段）
-             */
-            currentFileId?: number;
-            currentFileName?: string;
-            /**
-             * Format: int64
-             * @description 已生效当前内容的文件大小（字节；与 currentFileName 同源，裁决 J1）
-             */
-            currentFileSize?: number;
-            /** @description 已生效当前内容的文件类型显示文案（派生字段，裁决 J1；前端不按扩展名自己算） */
-            currentFileTypeLabel?: string;
-            /** @description 来源任务全部已生效当前内容（裁决 J1）：边未绑定具体交付物项时， 关系列表「当前交付物」列按此显示——一项显示「类型 · 大小」， 多项显示「N 项」并悬停列出各项「文件名 · 大小」 */
+            /** @description 来源任务全部已生效当前内容（裁决 J1、#163）：边详情与关系列表「当前交付物」列按此显示 ——一项显示「类型 · 大小」，多项显示「N 项」并悬停列出各项「文件名 · 大小」 */
             sourceCurrentFiles?: components["schemas"]["EdgeCurrentFile"][];
-            /** @description 关系就绪状态（AC-48）：仅当前内容生效时就绪；候选不提前满足输入 */
+            /** @description 关系就绪状态（AC-48 修订，裁决 */
             ready: boolean;
-            /** @description 审核期间存在候选更新（不改变原有就绪状态） */
-            hasCandidate: boolean;
             /**
              * Format: date
              * @description 期望时间
@@ -2020,11 +1999,6 @@ export interface components {
             edgeType: components["schemas"]["EdgeType"];
             /** @description 来源任务（AC-53 多选）；确认后按选择顺序分别建立「来源任务 → 目标任务」交付物边，不可重复 */
             sourceTaskIds: number[];
-            /**
-             * Format: int64
-             * @description 来源任务的交付物项（选填；未选时以边本身表达结构化条件；仅在只选一个来源任务时可指定）
-             */
-            deliverableId?: number;
             /** Format: date */
             expectedDate?: string;
         };

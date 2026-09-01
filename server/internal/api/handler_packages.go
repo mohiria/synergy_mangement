@@ -97,11 +97,11 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 	refs := make([]edgeRefRow, 0, len(edgeRefRows))
 	for _, e := range edgeRefRows {
 		refs = append(refs, edgeRefRow{
-			ID: e.ID, DeliverableID: e.DeliverableID,
+			ID: e.ID, SourceTaskID: e.SourceTaskID,
 			EdgeType: e.EdgeType, TargetTaskID: e.TargetTaskID, TargetTaskName: e.TargetTaskName,
 		})
 	}
-	edgesByDeliverable := edgeRefsByDeliverable(refs)
+	edgesByTask := edgeRefsBySourceTask(refs)
 	reviewerRows, err := s.q.IntermediateReviewerNamesByProject(ctx, projectId)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -173,7 +173,7 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 			taskByID[d.TaskID] = agg
 			order = append(order, d.TaskID)
 		}
-		item := Deliverable{Id: d.ID, TaskId: d.TaskID, Name: d.Name, Edges: edgesByDeliverable[d.ID]}
+		item := Deliverable{Id: d.ID, TaskId: d.TaskID, Name: d.Name, Edges: edgesByTask[d.TaskID]}
 		for _, f := range filesByDeliverable[d.ID] {
 			view := toDeliverableFile(store.DeliverableFile{
 				ID: f.ID, DeliverableID: f.DeliverableID, State: f.State, FileName: f.FileName,

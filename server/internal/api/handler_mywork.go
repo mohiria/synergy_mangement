@@ -184,7 +184,7 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 	}
 	for _, e := range edgeRows {
 		if e.SourceTaskID.Valid {
-			ready := domain.EdgeReady(e.CurrentFileID.Valid, e.HasCandidate)
+			ready := domain.EdgeReady(e.SourceTaskStatus.String)
 			fact := domain.WorkUpstreamFact{
 				EdgeID: e.ID, TargetTaskID: e.TargetTaskID, TargetName: e.TargetTaskName,
 				SourceTaskID: &e.SourceTaskID.Int64, SourceName: e.SourceTaskName.String,

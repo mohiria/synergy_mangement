@@ -2168,12 +2168,12 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 	detailA := decodeBody[api.TaskDetail](t, resp)
 	dA := detailA.Deliverables[0].Id
 
-	// AC-28：B 的负责人 carol 选择 A 及其交付物建立必要输入边；
-	// 输入与输入源是关键字段（AC-23），已入池任务先进所属 KR 负责人审批，通过后边才建立
+	// AC-28：B 的负责人 carol 选择 A 建立必要输入边（裁决 #163：不再选对应交付物）；
+	// 输入与输入源是关键字段（AC-23），先进所属 KR 负责人审批，通过后边才建立
 	inputsURL := func(id int64) string { return fmt.Sprintf("%s/%d/inputs", tasksURL, id) }
 	resp = doJSON(t, carol, http.MethodPost, inputsURL(taskB.Id), api.CreateTaskInputRequest{
 		Necessity: api.Required, EdgeType: api.HardPrerequisite,
-		SourceTaskIds: []int64{taskA.Id}, DeliverableId: &dA,
+		SourceTaskIds: []int64{taskA.Id},
 	})
 	pendingEdge := wantStructureAccepted(t, resp)
 	if len(projectEdges(t, carol, base, created.Id)) != 0 {
@@ -2223,14 +2223,12 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 	resp.Body.Close()
 	uploadCandidate(t, bob, tasksURL, taskA.Id, dA, api.UploadCandidateRequest{FileName: "现场数据包.zip"}, "candidate-bytes")
 
-	// 仅候选时仍未就绪（AC-48）
+	// 来源任务未完成时一律未就绪（裁决 #163）：已上传候选也不改变判定
 	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/projects/%d/edges", base, created.Id), nil)
 	wantStatus(t, resp, http.StatusOK)
 	for _, e := range decodeBody[[]api.DeliverableEdge](t, resp) {
-		if e.TargetTaskId == taskB.Id {
-			if e.Ready || !e.HasCandidate {
-				t.Fatalf("仅候选不应就绪: %+v", e)
-			}
+		if e.TargetTaskId == taskB.Id && e.Ready {
+			t.Fatalf("来源任务未完成不应就绪: %+v", e)
 		}
 	}
 
@@ -2251,15 +2249,15 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 	wantStatus(t, resp, http.StatusOK)
 	detailB := decodeBody[api.TaskDetail](t, resp)
 	if len(detailB.Inputs) != 1 || !detailB.Inputs[0].Ready {
-		t.Fatalf("当前内容生效后输入应自动就绪: %+v", detailB.Inputs)
+		t.Fatalf("来源任务完成后输入应自动就绪: %+v", detailB.Inputs)
 	}
-	if detailB.Inputs[0].CurrentFileId == nil {
-		t.Fatalf("边上应关联当前交付物: %+v", detailB.Inputs[0])
+	// 裁决 #163＋J1：边展示来源任务全部当前文件，类型与大小由服务端派生。
+	if detailB.Inputs[0].SourceCurrentFiles == nil || len(*detailB.Inputs[0].SourceCurrentFiles) != 1 {
+		t.Fatalf("边上应带来源任务全部当前文件: %+v", detailB.Inputs[0])
 	}
-	// 裁决 J1（#142）：类型与大小由服务端派生，关系列表「当前交付物」列直接消费。
-	if detailB.Inputs[0].CurrentFileTypeLabel == nil || *detailB.Inputs[0].CurrentFileTypeLabel == "" ||
-		detailB.Inputs[0].CurrentFileSize == nil || *detailB.Inputs[0].CurrentFileSize <= 0 {
-		t.Fatalf("边上应带当前内容的类型文案与大小: %+v", detailB.Inputs[0])
+	scf := (*detailB.Inputs[0].SourceCurrentFiles)[0]
+	if scf.FileTypeLabel == "" || scf.FileSize <= 0 || scf.FileName == "" {
+		t.Fatalf("来源当前文件应带类型文案与大小: %+v", scf)
 	}
 	if detailB.Task.Status != api.TaskStatusNotStarted {
 		t.Fatalf("输入就绪后应回未开始显示: %+v", detailB.Task.Status)
@@ -2733,13 +2731,9 @@ func TestMultiSourceInputs(t *testing.T) {
 		}
 	}
 
-	// 同一次选择不可重复、多选时不能指定交付物项、不能选自身、不能空选
-	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskA), nil)
-	wantStatus(t, resp, http.StatusOK)
-	dA := decodeBody[api.TaskDetail](t, resp).Deliverables[0].Id
+	// 同一次选择不可重复、不能选自身、不能空选
 	for _, bad := range []api.CreateTaskInputRequest{
 		{Necessity: api.Required, EdgeType: api.Information, SourceTaskIds: []int64{taskA, taskA}},
-		{Necessity: api.Required, EdgeType: api.Information, SourceTaskIds: []int64{taskA, taskB2}, DeliverableId: &dA},
 		{Necessity: api.Required, EdgeType: api.Information, SourceTaskIds: []int64{taskA, taskC}},
 		{Necessity: api.Required, EdgeType: api.Information, SourceTaskIds: []int64{}},
 	} {
@@ -2917,14 +2911,11 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 		}
 	}
 
-	// 下游挂一条来自上游任务的必要输入：上游未交付 ⇒ 上游未就绪卡点，待行动人为上游负责人 bob。
-	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, upstream.Id), nil)
-	wantStatus(t, resp, http.StatusOK)
-	upstreamDeliverable := decodeBody[api.TaskDetail](t, resp).Deliverables[0].Id
+	// 下游挂一条来自上游任务的必要输入：上游未完成 ⇒ 上游未就绪卡点，待行动人为上游负责人 bob。
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, downstream.Id),
 		api.CreateTaskInputRequest{
 			Necessity: api.Required, EdgeType: api.HardPrerequisite,
-			SourceTaskIds: []int64{upstream.Id}, DeliverableId: &upstreamDeliverable,
+			SourceTaskIds: []int64{upstream.Id},
 		})
 	pendingInput := wantStructureAccepted(t, resp)
 	approveStructureChange(t, bob, base, created.Id, downstream.Id, pendingInput)
@@ -3024,11 +3015,14 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 	wantStatus(t, resp, http.StatusNotFound)
 	resp.Body.Close()
 
-	// 自动解除：上游任务走完终审、当前内容生效后，上游未就绪卡点消失，下游超期卡点仍在。
+	// 自动解除：上游任务走完终审（已完成）后，上游未就绪卡点消失，下游超期卡点仍在。
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, upstream.Id),
 		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, upstream.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	upstreamDeliverable := decodeBody[api.TaskDetail](t, resp).Deliverables[0].Id
 	uploadCandidate(t, bob, tasksURL, upstream.Id, upstreamDeliverable, api.UploadCandidateRequest{FileName: "现场数据包.zip"}, "candidate-bytes")
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, upstream.Id),
 		api.SubmitCompletionRequest{Note: "数据包齐"})
@@ -3397,7 +3391,7 @@ func TestArtifacts(t *testing.T) {
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, downstreamID),
 		api.CreateTaskInputRequest{
 			Necessity: api.Required, EdgeType: api.HardPrerequisite,
-			SourceTaskIds: []int64{taskID}, DeliverableId: &dA,
+			SourceTaskIds: []int64{taskID},
 		})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
