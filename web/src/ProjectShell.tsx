@@ -1,34 +1,27 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Badge, Button, Input, Popover } from "antd";
+import { Alert, Button, Input, Modal, Popover, message } from "antd";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import Icon from "./icons";
+import NotificationBell from "./NotificationBell";
 import type { IconName } from "./icons";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
-type ProjectStatus = components["schemas"]["ProjectStatus"];
-type Notification = components["schemas"]["Notification"];
 
-const STATUS_LABEL: Record<ProjectStatus, string> = {
-  not_started: "未开始",
-  in_progress: "进行中",
-  completed: "已完成",
-  archived: "已归档",
-};
 
 // 项目内页面共用壳层：浅色侧边栏 + 顶栏（原型 index.html 结构）。
 // 侧边栏自上而下：brand → project-switch（项目切换）→ main-nav → sidebar-foot（项目设置）。
 const NAV_ITEMS: { key: string; label: string; path: string; icon: IconName }[] = [
   { key: "overview", label: "项目总览", path: "", icon: "overview" },
-  { key: "okr", label: "OKR 管理", path: "/okr", icon: "target" },
+  // #125：「OKR 管理」并入项目总览——/okr 是总览页头进入的全页管理模式，不再单列导航。
   { key: "tasks", label: "全部任务", path: "/tasks", icon: "list" },
   { key: "graph", label: "协作关系", path: "/graph", icon: "graph" },
   { key: "mywork", label: "我的工作", path: "/my-work", icon: "inbox" },
-  { key: "artifacts", label: "成果", path: "/artifacts", icon: "archive" },
-  { key: "reports", label: "报告", path: "/reports", icon: "report" },
+  { key: "artifacts", label: "成果归档", path: "/artifacts", icon: "archive" },
+  { key: "reports", label: "项目报告", path: "/reports", icon: "report" },
 ];
 
 // 项目切换浮层（原型 .project-switch 的 project-menu 动作；原型只是单项目占位，此处落成真实切换）。
@@ -51,17 +44,17 @@ function ProjectMenu({
   );
   return (
     <div className="project-menu">
-      {projects.length > 6 && (
-        <Input
-          className="project-menu-search"
-          size="small"
-          allowClear
-          autoFocus
-          placeholder="搜索项目"
-          value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
-        />
-      )}
+      {/* #132：搜索框常驻，任意项目数下打开即聚焦可过滤。 */}
+      <Input
+        className="project-menu-search"
+        size="small"
+        allowClear
+        autoFocus
+        prefix={<Icon name="search" size={15} />}
+        placeholder="搜索项目"
+        value={keyword}
+        onChange={(e) => setKeyword(e.target.value)}
+      />
       <div className="project-menu-list">
         {matched.map((p) => (
           <button
@@ -74,7 +67,7 @@ function ProjectMenu({
             <span className="project-menu-text">
               <b>{p.name}</b>
               <small>
-                {STATUS_LABEL[p.status]}
+                {p.statusLabel}
                 {p.stage ? " · " + p.stage : ""}
               </small>
             </span>
@@ -85,7 +78,7 @@ function ProjectMenu({
       </div>
       <button type="button" className="project-menu-foot" onClick={() => onNavigate("/")}>
         <Icon name="package" size={15} />
-        查看全部项目
+        全部项目
       </button>
     </div>
   );
@@ -96,6 +89,7 @@ export default function ProjectShell({
   project,
   projectId,
   pageLabel,
+  pageWidth,
   onLogout,
   children,
 }: {
@@ -103,11 +97,15 @@ export default function ProjectShell({
   project: Project | null;
   projectId: number;
   pageLabel: string;
+  // 内容区最大宽度分档（基线 §5）：默认 1480，我的工作 1240，图谱 1680。
+  pageWidth?: "narrow" | "wide";
   onLogout: () => void;
   children: ReactNode;
 }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  // 修改口令入口挂在身份浮层里（S3）：改完后端会吊销本人其余会话。
+  const [passwordOpen, setPasswordOpen] = useState(false);
   const logout = async () => {
     await client.POST("/auth/logout");
     onLogout();
@@ -125,68 +123,6 @@ export default function ProjectShell({
     navigate(to);
   };
 
-  // 站内通知：铃铛 + 未读角标，点击条目直达对应任务讨论（AC-36）。
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const loadNotifications = useCallback(async () => {
-    const res = await client.GET("/notifications");
-    if (res.data) setNotifications(res.data);
-  }, []);
-  useEffect(() => {
-    loadNotifications();
-  }, [loadNotifications, pathname]);
-  const unread = notifications.filter((n) => !n.readAt).length;
-
-  const openNotification = async (n: Notification) => {
-    if (n.projectId && n.taskId) {
-      navigate(`/projects/${n.projectId}/tasks?task=${n.taskId}&tab=discussion`);
-    }
-  };
-
-  const markAllRead = async () => {
-    await client.POST("/notifications/read-all");
-    loadNotifications();
-  };
-
-  const notificationPanel = (
-    <div style={{ width: 320, maxHeight: 360, overflow: "auto" }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 6,
-        }}
-      >
-        <b style={{ fontSize: 14 }}>站内通知</b>
-        <Button type="link" size="small" disabled={unread === 0} onClick={markAllRead}>
-          全部已读
-        </Button>
-      </div>
-      {notifications.length === 0 && (
-        <div className="muted" style={{ padding: "18px 0", textAlign: "center", fontSize: 12 }}>
-          暂无通知
-        </div>
-      )}
-      {notifications.map((n) => (
-        <div
-          key={n.id}
-          onClick={() => openNotification(n)}
-          style={{
-            padding: "8px 6px",
-            borderBottom: "1px solid var(--line)",
-            cursor: n.taskId ? "pointer" : "default",
-            opacity: n.readAt ? 0.6 : 1,
-            fontSize: 14,
-          }}
-        >
-          {n.content}
-          <div className="muted" style={{ fontSize: 12 }}>
-            {n.createdAt.slice(0, 16).replace("T", " ")}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
 
   const settingsPath = `/projects/${projectId}/settings`;
   return (
@@ -217,7 +153,7 @@ export default function ProjectShell({
             <span className={"project-dot " + (project?.status ?? "not_started")} />
             <span className="project-switch-text">
               <b>{project?.name ?? "…"}</b>
-              <small>{project?.stage || (project ? STATUS_LABEL[project.status] : "加载中")}</small>
+              <small>{project?.stage || project?.statusLabel || "加载中"}</small>
             </span>
             <Icon name="down" size={15} />
           </button>
@@ -225,22 +161,23 @@ export default function ProjectShell({
         <nav>
           {NAV_ITEMS.map((item) => {
             const to = `/projects/${projectId}${item.path}`;
+            // #125：/okr 是总览页头进入的全页管理模式，侧栏仍高亮「项目总览」。
+            const active =
+              pathname === to ||
+              (item.key === "overview" && pathname === `/projects/${projectId}/okr`);
             return (
-              <Link key={item.key} className={`nav-row ${pathname === to ? "active" : ""}`} to={to}>
+              <Link key={item.key} className={`nav-row ${active ? "active" : ""}`} to={to}>
                 <Icon name={item.icon} />
                 <span>{item.label}</span>
               </Link>
             );
           })}
         </nav>
+        {/* #131：侧栏只留「项目设置」；回项目列表走切换浮层底部的「全部项目」或面包屑。 */}
         <div className="sidebar-foot">
           <Link className={`nav-row ${pathname === settingsPath ? "active" : ""}`} to={settingsPath}>
             <Icon name="settings" />
             <span>项目设置</span>
-          </Link>
-          <Link className="nav-row" to="/">
-            <Icon name="package" />
-            <span>项目列表</span>
           </Link>
         </div>
       </aside>
@@ -252,15 +189,15 @@ export default function ProjectShell({
             <span>{project?.name ?? "…"}</span>
             <span className="sep">/</span>
             <b>{pageLabel}</b>
+            {/* 隐式访客：说清「为什么这里什么都点不了」，派生字段直接消费（#111）。 */}
+            {project?.implicitViewer && (
+              <span className="status-pill" style={{ marginLeft: 8 }} title="公开项目：系统内任何登录用户都可只读浏览与下载，但不能编辑、审批或讨论">
+                {project.visibilityLabel} · 只读浏览
+              </span>
+            )}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <Popover content={notificationPanel} trigger="click" placement="bottomRight">
-              <Badge count={unread} size="small" offset={[-2, 2]}>
-                <button className="icon-btn" type="button" aria-label="站内通知">
-                  <Icon name="bell" />
-                </button>
-              </Badge>
-            </Popover>
+            <NotificationBell />
             <Popover
               trigger="click"
               placement="bottomRight"
@@ -273,6 +210,9 @@ export default function ProjectShell({
                       <small>{user.username}</small>
                     </span>
                   </div>
+                  <Button block style={{ marginBottom: 8 }} onClick={() => setPasswordOpen(true)}>
+                    修改口令
+                  </Button>
                   <Button block onClick={logout}>
                     登出
                   </Button>
@@ -290,8 +230,83 @@ export default function ProjectShell({
             </Popover>
           </div>
         </header>
-        <main className="page">{children}</main>
+        <main className={`page${pageWidth ? ` page-${pageWidth}` : ""}`}>{children}</main>
+        <ChangePasswordModal open={passwordOpen} onClose={() => setPasswordOpen(false)} />
       </section>
     </div>
+  );
+}
+
+// ChangePasswordModal 修改本人登录口令（S3）：成功后本人其余会话立即失效，当前会话保留。
+function ChangePasswordModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setCurrent("");
+      setNext("");
+      setConfirm("");
+      setError(null);
+    }
+  }, [open]);
+
+  const submit = async () => {
+    if (next !== confirm) {
+      setError("两次输入的新口令不一致");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    const res = await client.POST("/auth/change-password", {
+      body: { currentPassword: current, newPassword: next },
+    });
+    setSaving(false);
+    if (res.response.ok) {
+      message.success("口令已修改，本人其余会话已失效");
+      onClose();
+    } else {
+      setError(res.error?.message ?? "修改失败");
+    }
+  };
+
+  return (
+    <Modal
+      title="修改登录口令"
+      open={open}
+      okText="确认修改"
+      cancelText="取消"
+      confirmLoading={saving}
+      okButtonProps={{ disabled: !current || next.length < 8 || !confirm }}
+      onCancel={onClose}
+      onOk={submit}
+    >
+      {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
+      <p className="muted" style={{ marginTop: 0 }}>
+        新口令至少 8 位；修改成功后除当前浏览器外，本人其余登录会话会立即失效。
+      </p>
+      <Input.Password
+        placeholder="当前口令"
+        value={current}
+        onChange={(e) => setCurrent(e.target.value)}
+        style={{ marginBottom: 8 }}
+      />
+      <Input.Password
+        placeholder="新口令（至少 8 位）"
+        value={next}
+        maxLength={128}
+        onChange={(e) => setNext(e.target.value)}
+        style={{ marginBottom: 8 }}
+      />
+      <Input.Password
+        placeholder="再次输入新口令"
+        value={confirm}
+        maxLength={128}
+        onChange={(e) => setConfirm(e.target.value)}
+      />
+    </Modal>
   );
 }

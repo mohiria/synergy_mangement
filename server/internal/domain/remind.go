@@ -12,8 +12,9 @@ import (
 // （刚提交还没到审批超时阈值的审批件、待对接人提供的输入请求、未交付的上游任务）同样
 // 是提醒目标。卡点目标按卡点合成键寻址，等待事项按 wait:<事项类型>:<事项 ID> 寻址。
 
-// ErrRemindCooldown 冷却（MW-13）：同一人对同一任务每天只能提醒一次。
-var ErrRemindCooldown = errors.New("今天已经提醒过这个任务，明天再试")
+// ErrRemindCooldown 冷却（MW-13）：按（发起人、被提醒人、任务）三元组计，
+// 每天次数上限取项目规则设置，默认 1 次。
+var ErrRemindCooldown = errors.New("今天对该成员的提醒次数已用完，明天再试")
 
 // RemindTarget 一个提醒目标。
 type RemindTarget struct {
@@ -211,12 +212,26 @@ func RemindContent(t RemindTarget) string {
 	return content
 }
 
-// RemindAllowed 冷却判定（MW-13）：同一人对同一任务每天 1 次，按自然日切换。
-func RemindAllowed(lastRemindedAt *time.Time, now time.Time) bool {
-	if lastRemindedAt == nil {
+// RemindAllowed 冷却判定（MW-13、AC-60）：按（发起人、被提醒人、任务）三元组计，
+// sentToday 为该三元组当天已发出的提醒次数，limit 取项目规则设置的每日次数上限。
+func RemindAllowed(sentToday, limit int) bool {
+	if limit <= 0 {
+		limit = DefaultRemindDailyLimit
+	}
+	return sentToday < limit
+}
+
+// RemindQuotaLeft 当日配额判定（#129）：该目标今天是否还有能提醒的待行动人——
+// 任一待行动人（当前发起人、该人、目标任务）三元组次数未用完即真，全部用完则假；
+// sentToday 为 nil 表示调用方未接入计数（按不限处理）。canRemind 的显隐 = 权限 && 本判定。
+func RemindQuotaLeft(t RemindTarget, limit int, sentToday func(recipientID, taskID int64) int) bool {
+	if sentToday == nil {
 		return true
 	}
-	y1, m1, d1 := lastRemindedAt.Date()
-	y2, m2, d2 := now.Date()
-	return !(y1 == y2 && m1 == m2 && d1 == d2)
+	for _, id := range dropZeroIDs(t.ActionOwnerIDs) {
+		if RemindAllowed(sentToday(id, t.TaskID), limit) {
+			return true
+		}
+	}
+	return false
 }

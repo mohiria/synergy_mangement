@@ -26,7 +26,7 @@ func (s *Server) CreateDiscussion(w http.ResponseWriter, r *http.Request, projec
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	if !domain.CanDiscuss(actor) {
 		writeForbidden(w)
 		return
@@ -37,7 +37,7 @@ func (s *Server) CreateDiscussion(w http.ResponseWriter, r *http.Request, projec
 	}
 	members, err := s.q.ListProjectMembers(r.Context(), projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	memberSet := make(map[int64]bool, len(members))
@@ -62,21 +62,21 @@ func (s *Server) CreateDiscussion(w http.ResponseWriter, r *http.Request, projec
 	author := currentUser(r)
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
 	qtx := s.q.WithTx(tx)
 	d, err := qtx.CreateDiscussion(r.Context(), store.CreateDiscussionParams{TaskID: taskId, AuthorID: uid, Content: content})
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	mentionSet := make(map[int64]bool, len(mentions))
 	for _, id := range mentions {
 		mentionSet[id] = true
 		if err := qtx.CreateDiscussionMention(r.Context(), store.CreateDiscussionMentionParams{DiscussionID: d.ID, UserID: id}); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 	}
@@ -95,18 +95,18 @@ func (s *Server) CreateDiscussion(w http.ResponseWriter, r *http.Request, projec
 			ProjectID: pgtype.Int8{Int64: projectId, Valid: true},
 			TaskID:    pgtype.Int8{Int64: taskId, Valid: true},
 		}); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	// 返回带派生字段的完整意见（含 @ 姓名）。
 	list, err := s.discussionList(r.Context(), taskId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	for _, item := range list {
@@ -115,13 +115,24 @@ func (s *Server) CreateDiscussion(w http.ResponseWriter, r *http.Request, projec
 			return
 		}
 	}
-	writeInternalError(w)
+	writeInternalError(w, r, err)
 }
 
-func (s *Server) ListNotifications(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.q.ListNotificationsByUser(r.Context(), currentUser(r).ID)
+func (s *Server) ListNotifications(w http.ResponseWriter, r *http.Request, params ListNotificationsParams) {
+	// 分页取（P1）：此前 SQL 硬编码 LIMIT 100，第 100 条之前的消息永久不可达且前端无从知晓。
+	limit := int32(100)
+	if params.Limit != nil {
+		limit = int32(*params.Limit)
+	}
+	beforeID := int64(0)
+	if params.BeforeId != nil {
+		beforeID = *params.BeforeId
+	}
+	rows, err := s.q.ListNotificationsByUser(r.Context(), store.ListNotificationsByUserParams{
+		UserID: currentUser(r).ID, BeforeID: beforeID, RowLimit: limit,
+	})
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	resp := make([]Notification, 0, len(rows))
@@ -139,7 +150,7 @@ func (s *Server) ListNotifications(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) MarkAllNotificationsRead(w http.ResponseWriter, r *http.Request) {
 	if _, err := s.q.MarkAllNotificationsRead(r.Context(), currentUser(r).ID); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

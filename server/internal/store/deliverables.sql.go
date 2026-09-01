@@ -11,6 +11,37 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const commitUploadingFile = `-- name: CommitUploadingFile :one
+UPDATE deliverable_files
+SET state = 'candidate', file_size = $2, uploaded_at = now()
+WHERE id = $1 AND state = 'uploading'
+RETURNING id, deliverable_id, state, file_name, file_type, file_size, object_key, uploaded_by, uploaded_at, effective_at
+`
+
+type CommitUploadingFileParams struct {
+	ID       int64
+	FileSize int64
+}
+
+// 确认上传：uploading → candidate，并按对象存储的真实大小回填。
+func (q *Queries) CommitUploadingFile(ctx context.Context, arg CommitUploadingFileParams) (DeliverableFile, error) {
+	row := q.db.QueryRow(ctx, commitUploadingFile, arg.ID, arg.FileSize)
+	var i DeliverableFile
+	err := row.Scan(
+		&i.ID,
+		&i.DeliverableID,
+		&i.State,
+		&i.FileName,
+		&i.FileType,
+		&i.FileSize,
+		&i.ObjectKey,
+		&i.UploadedBy,
+		&i.UploadedAt,
+		&i.EffectiveAt,
+	)
+	return i, err
+}
+
 const createDeliverable = `-- name: CreateDeliverable :one
 INSERT INTO deliverables (task_id, name, created_by)
 VALUES ($1, $2, $3)
@@ -78,6 +109,37 @@ func (q *Queries) CreateDeliverableFile(ctx context.Context, arg CreateDeliverab
 	return i, err
 }
 
+const deleteDeliverable = `-- name: DeleteDeliverable :many
+WITH keys AS (
+    SELECT object_key FROM deliverable_files WHERE deliverable_id = $1
+), del AS (
+    DELETE FROM deliverables WHERE id = $1
+)
+SELECT object_key FROM keys
+`
+
+// 删除交付物项（裁决 H1，#141）：行由 FK 级联清掉（文件 CASCADE、边 SET NULL），
+// 返回其下全部文件的对象 key 供调用方清理对象存储。
+func (q *Queries) DeleteDeliverable(ctx context.Context, deliverableID int64) ([]string, error) {
+	rows, err := q.db.Query(ctx, deleteDeliverable, deliverableID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var object_key string
+		if err := rows.Scan(&object_key); err != nil {
+			return nil, err
+		}
+		items = append(items, object_key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const deleteDeliverableFile = `-- name: DeleteDeliverableFile :execrows
 DELETE FROM deliverable_files WHERE id = $1
 `
@@ -88,6 +150,33 @@ func (q *Queries) DeleteDeliverableFile(ctx context.Context, id int64) (int64, e
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const deleteStaleUploadingFiles = `-- name: DeleteStaleUploadingFiles :many
+DELETE FROM deliverable_files
+WHERE state = 'uploading' AND uploaded_at < now() - $1::interval
+RETURNING object_key
+`
+
+// 清理迟迟未确认的待上传记录（预签名地址已过期，客户端不会再来 commit）。
+func (q *Queries) DeleteStaleUploadingFiles(ctx context.Context, dollar_1 pgtype.Interval) ([]string, error) {
+	rows, err := q.db.Query(ctx, deleteStaleUploadingFiles, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var object_key string
+		if err := rows.Scan(&object_key); err != nil {
+			return nil, err
+		}
+		items = append(items, object_key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getCandidateFile = `-- name: GetCandidateFile :one
@@ -164,7 +253,8 @@ func (q *Queries) GetDeliverableFileInProject(ctx context.Context, arg GetDelive
 }
 
 const getDeliverableInProject = `-- name: GetDeliverableInProject :one
-SELECT d.id, d.task_id, d.name, d.created_by, d.created_at, t.owner_id AS task_owner_id, t.created_by AS task_created_by, t.status AS task_status
+SELECT d.id, d.task_id, d.name, d.created_by, d.created_at, t.owner_id AS task_owner_id, t.created_by AS task_created_by, t.status AS task_status,
+    t.result_update AS task_result_update
 FROM deliverables d
 JOIN tasks t ON t.id = d.task_id
 JOIN key_results k ON k.id = t.key_result_id
@@ -179,14 +269,15 @@ type GetDeliverableInProjectParams struct {
 }
 
 type GetDeliverableInProjectRow struct {
-	ID            int64
-	TaskID        int64
-	Name          string
-	CreatedBy     int64
-	CreatedAt     pgtype.Timestamptz
-	TaskOwnerID   int64
-	TaskCreatedBy int64
-	TaskStatus    string
+	ID               int64
+	TaskID           int64
+	Name             string
+	CreatedBy        int64
+	CreatedAt        pgtype.Timestamptz
+	TaskOwnerID      int64
+	TaskCreatedBy    int64
+	TaskStatus       string
+	TaskResultUpdate string
 }
 
 func (q *Queries) GetDeliverableInProject(ctx context.Context, arg GetDeliverableInProjectParams) (GetDeliverableInProjectRow, error) {
@@ -201,6 +292,32 @@ func (q *Queries) GetDeliverableInProject(ctx context.Context, arg GetDeliverabl
 		&i.TaskOwnerID,
 		&i.TaskCreatedBy,
 		&i.TaskStatus,
+		&i.TaskResultUpdate,
+	)
+	return i, err
+}
+
+const getUploadingFile = `-- name: GetUploadingFile :one
+SELECT id, deliverable_id, state, file_name, file_type, file_size, object_key, uploaded_by, uploaded_at, effective_at FROM deliverable_files
+WHERE deliverable_id = $1 AND state = 'uploading'
+LIMIT 1
+`
+
+// 已建记录但尚未确认写入对象存储的内容（两阶段提交的中间态）。
+func (q *Queries) GetUploadingFile(ctx context.Context, deliverableID int64) (DeliverableFile, error) {
+	row := q.db.QueryRow(ctx, getUploadingFile, deliverableID)
+	var i DeliverableFile
+	err := row.Scan(
+		&i.ID,
+		&i.DeliverableID,
+		&i.State,
+		&i.FileName,
+		&i.FileType,
+		&i.FileSize,
+		&i.ObjectKey,
+		&i.UploadedBy,
+		&i.UploadedAt,
+		&i.EffectiveAt,
 	)
 	return i, err
 }
@@ -317,6 +434,43 @@ func (q *Queries) ListDeliverablesByTask(ctx context.Context, taskID int64) ([]D
 			&i.Name,
 			&i.CreatedBy,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFilesByDeliverable = `-- name: ListFilesByDeliverable :many
+SELECT id, deliverable_id, state, file_name, file_type, file_size, object_key, uploaded_by, uploaded_at, effective_at FROM deliverable_files
+WHERE deliverable_id = $1
+ORDER BY id
+`
+
+func (q *Queries) ListFilesByDeliverable(ctx context.Context, deliverableID int64) ([]DeliverableFile, error) {
+	rows, err := q.db.Query(ctx, listFilesByDeliverable, deliverableID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []DeliverableFile
+	for rows.Next() {
+		var i DeliverableFile
+		if err := rows.Scan(
+			&i.ID,
+			&i.DeliverableID,
+			&i.State,
+			&i.FileName,
+			&i.FileType,
+			&i.FileSize,
+			&i.ObjectKey,
+			&i.UploadedBy,
+			&i.UploadedAt,
+			&i.EffectiveAt,
 		); err != nil {
 			return nil, err
 		}

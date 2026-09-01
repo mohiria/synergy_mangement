@@ -1,6 +1,10 @@
 package domain
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
 
 // 任务创建邀请状态（词汇表「任务创建邀请」）。
 const (
@@ -17,6 +21,23 @@ var (
 	ErrInviteNotInvitee   = errors.New("只有受邀成员本人可以通过该邀请提交任务")
 	ErrInviteKrMismatch   = errors.New("本批任务中至少要有一项属于邀请指定的 KR")
 )
+
+// NotifyTaskInvite 站内通知类型：任务创建邀请已发出（AC-03、§7.3）。
+const NotifyTaskInvite = "task_invite"
+
+// TaskInviteNotification 组装邀请通知正文（AC-03、§7.3）：带 KR 编号与名称，以及邀请说明。
+// 受邀人不主动打开「我的工作」就不会知道自己被邀请拆任务，这条通知是 AC-03 闭环的一环。
+func TaskInviteNotification(inviterName, krCode, krDescription, note string) string {
+	subject := strings.TrimSpace(inviterName) + "邀请你"
+	if strings.TrimSpace(inviterName) == "" {
+		subject = "你被邀请"
+	}
+	content := fmt.Sprintf("%s在 %s「%s」下创建任务", subject, krCode, krDescription)
+	if n := strings.TrimSpace(note); n != "" {
+		content += "：" + n
+	}
+	return content
+}
 
 // CanInviteForKr 判定能否为某 KR 发出任务创建邀请：该 KR 负责人、项目管理员或项目负责人（词汇表「任务创建邀请」）。
 func CanInviteForKr(a Actor, userID int64, krOwnerID *int64) bool {

@@ -43,7 +43,7 @@ func TestStartTask(t *testing.T) {
 		{"待入池审批不可开始", TaskPendingPoolReview, "", ErrCannotStart},
 		{"进行中不可重复开始", TaskInProgress, "", ErrCannotStart},
 		{"已完成不可开始", TaskCompleted, "", ErrCannotStart},
-		{"已取消不可开始", TaskCancelled, "", ErrCannotStart},
+		{"已关闭不可开始", TaskCancelled, "", ErrCannotStart},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -55,26 +55,37 @@ func TestStartTask(t *testing.T) {
 	}
 }
 
-// §5.1：取消——非终态可取消并保留原因；原因必填。
-func TestCancelTask(t *testing.T) {
-	cases := []struct {
-		name    string
-		status  string
-		reason  string
-		wantErr error
-	}{
-		{"进行中可取消", TaskInProgress, "需求变更不再执行", nil},
-		{"草稿可取消", TaskDraft, "重复创建", nil},
-		{"已完成不可取消", TaskCompleted, "x", ErrCannotCancel},
-		{"已取消不可重复取消", TaskCancelled, "x", ErrCannotCancel},
-		{"原因必填", TaskInProgress, "  ", ErrCancelReasonRequired},
+// AC-63：完成终审通过时进度置 100 并锁定编辑；已完成任务不再接受进度写入。
+func TestProgressLockedAfterCompletion(t *testing.T) {
+	completed := TaskFacts{Status: TaskCompleted, OwnerID: 5, CreatorID: 5, KrOwnerID: i64(7)}
+	if CanUpdateProgress(Actor{Role: RoleMember}, 5, completed) {
+		t.Fatal("已完成任务的进度不应可编辑")
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := CancelTask(tc.status, tc.reason); !errors.Is(got, tc.wantErr) {
-				t.Fatalf("CancelTask(%q, %q) = %v, want %v", tc.status, tc.reason, got, tc.wantErr)
-			}
-		})
+	if CanUpdateProgress(Actor{Role: RoleAdmin}, 9, completed) {
+		t.Fatal("管理员也不应改已完成任务的进度")
+	}
+	if got := CompletedProgress(); got != 100 {
+		t.Fatalf("完成即 100，got %d", got)
+	}
+	// 显示进度同源：已完成一律显示 100，未填显示未填（页面不把 0 说成负责人填的值）。
+	if got := DisplayProgress(TaskCompleted, nil); got == nil || *got != 100 {
+		t.Fatalf("已完成任务应显示 100，got %v", got)
+	}
+	if got := DisplayProgress(TaskInProgress, nil); got != nil {
+		t.Fatalf("未填进度不应虚构，got %v", *got)
+	}
+	if got := DisplayProgress(TaskInProgress, ip(40)); got == nil || *got != 40 {
+		t.Fatalf("已填进度应原样显示，got %v", got)
+	}
+}
+
+// §5.1／AC-57：关闭原因必填。
+func TestValidateCancelReason(t *testing.T) {
+	if err := ValidateCancelReason("需求变更不再执行"); err != nil {
+		t.Fatalf("填了原因不应报错: %v", err)
+	}
+	if err := ValidateCancelReason("  "); !errors.Is(err, ErrCancelReasonRequired) {
+		t.Fatalf("原因必填: %v", err)
 	}
 }
 
@@ -117,21 +128,30 @@ func TestProgressCoverage(t *testing.T) {
 		{"草稿与待审批不计入", []TaskProgressFact{
 			{Status: TaskDraft}, {Status: TaskPendingPoolReview, Progress: ip(50)},
 		}, 0, 0, nil},
-		{"已取消不计入", []TaskProgressFact{
+		// AC-63：已关闭整体剔除，既不进分子也不进分母。
+		{"已关闭不计入", []TaskProgressFact{
 			{Status: TaskCancelled, Progress: ip(80)}, {Status: TaskNotStarted},
-		}, 1, 0, nil},
-		{"未填任务不虚构百分比", []TaskProgressFact{
+		}, 1, 0, ip(0)},
+		// AC-63：未填按 0 计入分子与分母，覆盖度只数真实填写。
+		{"未填按 0 计入", []TaskProgressFact{
 			{Status: TaskInProgress}, {Status: TaskNotStarted},
-		}, 2, 0, nil},
-		{"等权平均且四舍五入", []TaskProgressFact{
+		}, 2, 0, ip(0)},
+		{"未填拉低平均值", []TaskProgressFact{
 			{Status: TaskInProgress, Progress: ip(30)},
 			{Status: TaskInProgress, Progress: ip(45)},
 			{Status: TaskNotStarted},
-		}, 3, 2, ip(38)},
-		{"完成态计入覆盖度", []TaskProgressFact{
-			{Status: TaskCompleted, Progress: ip(100)},
+		}, 3, 2, ip(25)},
+		// AC-63：已完成即 100，不看库里存了什么。
+		{"已完成一律按 100", []TaskProgressFact{
+			{Status: TaskCompleted, Progress: ip(60)},
 			{Status: TaskPendingFinalReview, Progress: ip(90)},
 		}, 2, 2, ip(95)},
+		{"四种任务混合", []TaskProgressFact{
+			{Status: TaskCompleted, Progress: ip(60)},
+			{Status: TaskInProgress, Progress: ip(40)},
+			{Status: TaskNotStarted},
+			{Status: TaskCancelled, Progress: ip(100)},
+		}, 3, 2, ip(47)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -151,7 +171,7 @@ func TestProgressCoverage(t *testing.T) {
 
 // 派生动作标志：开始（负责人/可编辑项目者）、取消（另含创建人）。
 func TestCanStartAndCancelFlags(t *testing.T) {
-	facts := TaskFacts{Status: TaskNotStarted, OwnerID: 5, CreatorID: 3}
+	facts := TaskFacts{Status: TaskNotStarted, OwnerID: 5, CreatorID: 3, KrOwnerID: i64(7)}
 	if !CanStartTask(Actor{Role: RoleMember}, 5, facts) {
 		t.Fatal("负责人应可开始")
 	}
@@ -164,16 +184,19 @@ func TestCanStartAndCancelFlags(t *testing.T) {
 	if CanStartTask(Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskInProgress, OwnerID: 5}) {
 		t.Fatal("进行中不应再显示开始")
 	}
-	if !CanCancelTask(Actor{Role: RoleMember}, 3, facts) {
-		t.Fatal("创建人应可取消")
+	if !CanCancelTask(Actor{Role: RoleMember}, 5, facts, false) {
+		t.Fatal("负责人应可发起关闭")
 	}
-	if !CanCancelTask(Actor{Role: RoleMember}, 5, facts) {
-		t.Fatal("负责人应可取消")
+	if CanCancelTask(Actor{Role: RoleMember}, 3, facts, false) {
+		t.Fatal("创建人不再是取消发起人（AC-57）")
 	}
-	if CanCancelTask(Actor{Role: RoleMember}, 9, facts) {
+	if CanCancelTask(Actor{Role: RoleMember}, 9, facts, false) {
 		t.Fatal("无关成员不应可取消")
 	}
-	if CanCancelTask(Actor{Role: RoleAdmin}, 9, TaskFacts{Status: TaskCompleted, OwnerID: 5}) {
+	if CanCancelTask(Actor{Role: RoleMember}, 5, facts, true) {
+		t.Fatal("有未决审批单时关闭入口应关闭")
+	}
+	if CanCancelTask(Actor{Role: RoleAdmin}, 9, TaskFacts{Status: TaskCompleted, OwnerID: 5, KrOwnerID: i64(7)}, false) {
 		t.Fatal("已完成不应可取消")
 	}
 }

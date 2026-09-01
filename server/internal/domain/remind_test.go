@@ -72,7 +72,7 @@ func TestCanRemind(t *testing.T) {
 		t.Fatal("无关成员不应可提醒")
 	}
 	if CanRemind(Actor{Role: RoleViewer}, 5, target) {
-		t.Fatal("只读成员不应可提醒")
+		t.Fatal("访客不应可提醒")
 	}
 }
 
@@ -95,19 +95,27 @@ func TestRemindContent(t *testing.T) {
 	}
 }
 
-// MW-13 冷却：同一人对同一任务每天 1 次，按自然日切换。
+// MW-13、AC-60 冷却：按（发起人、被提醒人、任务）三元组计当天次数，上限取项目规则设置。
 func TestRemindAllowed(t *testing.T) {
-	now := time.Date(2026, 9, 10, 15, 0, 0, 0, time.UTC)
-	if !RemindAllowed(nil, now) {
-		t.Fatal("从未提醒过应允许")
+	cases := []struct {
+		name      string
+		sentToday int
+		limit     int
+		want      bool
+	}{
+		{"今天还没提醒过", 0, 1, true},
+		{"默认每天 1 次，第二次被拒", 1, 1, false},
+		{"上限放到 3 次，第二次仍允许", 1, 3, true},
+		{"上限放到 3 次，用满后被拒", 3, 3, false},
+		{"上限缺失时按默认 1 次判定", 1, 0, false},
+		{"上限缺失时首次仍允许", 0, 0, true},
 	}
-	sameDay := time.Date(2026, 9, 10, 8, 0, 0, 0, time.UTC)
-	if RemindAllowed(&sameDay, now) {
-		t.Fatal("当天第二次提醒应被拒")
-	}
-	prevDay := time.Date(2026, 9, 9, 23, 59, 0, 0, time.UTC)
-	if !RemindAllowed(&prevDay, now) {
-		t.Fatal("跨自然日应重新允许")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := RemindAllowed(tc.sentToday, tc.limit); got != tc.want {
+				t.Fatalf("RemindAllowed(%d, %d) = %v，期望 %v", tc.sentToday, tc.limit, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -131,7 +139,7 @@ func TestMyWorkWaitingRemindWithoutBlocker(t *testing.T) {
 				KrOwnerName: "李四", State: CompletionPendingFinal, SubmittedAt: recent},
 		},
 		InputRequests: []WorkInputRequestFact{
-			{ID: 41, TaskID: 2, TaskName: "等输入的任务", InputName: "接口口径", ProviderID: 8,
+			{ID: 41, TaskID: 2, TaskName: "等输入的任务", InputName: "接口口径", Necessity: NecessityRequired, ProviderID: 8,
 				TaskOwnerID: me, State: InputRequestPending, Notified: true, CreatedAt: recent},
 		},
 		Upstreams: []WorkUpstreamFact{

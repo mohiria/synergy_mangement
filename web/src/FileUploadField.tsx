@@ -4,6 +4,7 @@ import { Button, Modal, message } from "antd";
 // 统一上传组件（AC-52）：点击或拖拽选择、待上传文件行、文件名点击预览、提交前删除。
 // 组件只持有“本次选择”，真正的上传由调用方在确认提交时发起；
 // 调用方关闭窗口时把 value 置空，未提交的选择即不保留。
+// #120：multiple 模式一次选多个文件（files/onFilesChange 受控），单文件调用方不受影响。
 
 const DEFAULT_ACCEPT = ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.zip";
 const DEFAULT_MAX_MB = 20;
@@ -27,14 +28,20 @@ export function fileTypeLabel(fileName: string): string {
 export default function FileUploadField({
   value,
   onChange,
+  multiple,
+  files,
+  onFilesChange,
   prompt = "点击选择或将文件拖到此处",
   hint,
   accept = DEFAULT_ACCEPT,
   maxMb = DEFAULT_MAX_MB,
   disabled,
 }: {
-  value: File | null;
-  onChange: (file: File | null) => void;
+  value?: File | null;
+  onChange?: (file: File | null) => void;
+  multiple?: boolean;
+  files?: File[];
+  onFilesChange?: (files: File[]) => void;
   prompt?: string;
   hint?: string;
   accept?: string;
@@ -43,31 +50,51 @@ export default function FileUploadField({
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState("");
+  const [preview, setPreview] = useState<{ url: string; file: File } | null>(null);
 
-  const pick = (file?: File | null) => {
-    if (!file) return;
-    if (file.size > maxMb * 1024 * 1024) {
-      message.error(`文件不能超过 ${maxMb}MB`);
-      return;
+  const selected = multiple ? (files ?? []) : value ? [value] : [];
+
+  const pick = (picked: FileList | File[] | null | undefined) => {
+    const list = Array.from(picked ?? []);
+    if (list.length === 0) return;
+    const kept: File[] = [];
+    for (const file of list) {
+      if (file.size > maxMb * 1024 * 1024) {
+        message.error(`「${file.name}」超过 ${maxMb}MB，已跳过`);
+        continue;
+      }
+      kept.push(file);
     }
-    onChange(file);
+    if (kept.length === 0) return;
+    if (multiple) {
+      onFilesChange?.([...(files ?? []), ...kept]);
+    } else {
+      onChange?.(kept[0]);
+    }
   };
-  const openPreview = () => {
-    if (value) setPreviewUrl(URL.createObjectURL(value));
+  const removeAt = (idx: number) => {
+    if (multiple) {
+      onFilesChange?.((files ?? []).filter((_, i) => i !== idx));
+    } else {
+      onChange?.(null);
+    }
+  };
+  const openPreview = (file: File) => {
+    setPreview({ url: URL.createObjectURL(file), file });
   };
   const closePreview = () => {
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setPreviewUrl("");
+    if (preview) URL.revokeObjectURL(preview.url);
+    setPreview(null);
   };
 
-  const isImage = !!value && value.type.startsWith("image/");
-  const isPdf = !!value && (value.type === "application/pdf" || /\.pdf$/i.test(value.name));
+  const isImage = !!preview && preview.file.type.startsWith("image/");
+  const isPdf =
+    !!preview && (preview.file.type === "application/pdf" || /\.pdf$/i.test(preview.file.name));
 
   return (
     <div className="upload-field">
       <div
-        className={`upload-zone${dragging ? " dragging" : ""}${value ? " selected" : ""}`}
+        className={`upload-zone${dragging ? " dragging" : ""}${selected.length > 0 ? " selected" : ""}`}
         role="button"
         tabIndex={disabled ? -1 : 0}
         aria-disabled={disabled}
@@ -86,7 +113,7 @@ export default function FileUploadField({
         onDrop={(e) => {
           e.preventDefault();
           setDragging(false);
-          if (!disabled) pick(e.dataTransfer.files?.[0]);
+          if (!disabled) pick(e.dataTransfer.files);
         }}
       >
         <strong>{prompt}</strong>
@@ -95,31 +122,32 @@ export default function FileUploadField({
           ref={inputRef}
           type="file"
           accept={accept}
+          multiple={multiple}
           style={{ display: "none" }}
           onChange={(e) => {
-            pick(e.target.files?.[0]);
+            pick(e.target.files);
             e.target.value = "";
           }}
         />
       </div>
-      {value && (
-        <div className="upload-file-row">
+      {selected.map((file, idx) => (
+        <div className="upload-file-row" key={`${file.name}-${idx}`}>
           <div>
-            <button type="button" className="upload-file-link" onClick={openPreview}>
-              {value.name}
+            <button type="button" className="upload-file-link" onClick={() => openPreview(file)}>
+              {file.name}
             </button>
             <span>
-              {formatFileSize(value.size)} · {fileTypeLabel(value.name)} · 已准备上传
+              {formatFileSize(file.size)} · {fileTypeLabel(file.name)} · 已准备上传
             </span>
           </div>
-          <Button size="small" disabled={disabled} onClick={() => onChange(null)}>
+          <Button size="small" disabled={disabled} onClick={() => removeAt(idx)}>
             删除
           </Button>
         </div>
-      )}
+      ))}
       <Modal
         title="文件预览"
-        open={!!previewUrl}
+        open={!!preview}
         width={860}
         onCancel={closePreview}
         footer={
@@ -128,28 +156,30 @@ export default function FileUploadField({
           </Button>
         }
       >
-        {value && (
+        {preview && (
           <>
             <p className="muted" style={{ marginTop: 0 }}>
-              {value.name} · {formatFileSize(value.size)}
+              {preview.file.name} · {formatFileSize(preview.file.size)}
             </p>
-            {isImage && <img className="local-preview-image" src={previewUrl} alt={value.name} />}
+            {isImage && (
+              <img className="local-preview-image" src={preview.url} alt={preview.file.name} />
+            )}
             {!isImage && isPdf && (
-              <iframe className="local-preview-frame" src={previewUrl} title={value.name} />
+              <iframe className="local-preview-frame" src={preview.url} title={preview.file.name} />
             )}
             {!isImage && !isPdf && (
               <div className="local-preview-fallback">
-                <b>{value.name}</b>
+                <b>{preview.file.name}</b>
                 <p>
-                  {fileTypeLabel(value.name)} 文件暂不支持在线预览，可先下载确认；
+                  {fileTypeLabel(preview.file.name)} 文件暂不支持在线预览，可先下载确认；
                   <br />
                   提交后该文件才形成业务事实。
                 </p>
                 <Button
                   onClick={() => {
                     const a = document.createElement("a");
-                    a.href = previewUrl;
-                    a.download = value.name;
+                    a.href = preview.url;
+                    a.download = preview.file.name;
                     a.click();
                   }}
                 >

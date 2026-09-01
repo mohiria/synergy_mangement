@@ -11,10 +11,32 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const blockerActivityOpen = `-- name: BlockerActivityOpen :one
+SELECT COALESCE(
+    (SELECT a.kind = 'blocker_opened'
+       FROM task_activities a
+      WHERE a.task_id = $1 AND a.blocker_key = $2
+        AND a.kind IN ('blocker_opened', 'blocker_resolved')
+      ORDER BY a.id DESC LIMIT 1),
+    FALSE)::boolean AS is_open
+`
+
+type BlockerActivityOpenParams struct {
+	TaskID     int64
+	BlockerKey pgtype.Text
+}
+
+// 该卡点当前是否处于「已记出现、尚未记解除」的状态（R9 去重口径：自上次解除以来只记一条出现）。
+func (q *Queries) BlockerActivityOpen(ctx context.Context, arg BlockerActivityOpenParams) (bool, error) {
+	row := q.db.QueryRow(ctx, blockerActivityOpen, arg.TaskID, arg.BlockerKey)
+	var is_open bool
+	err := row.Scan(&is_open)
+	return is_open, err
+}
+
 const createBlockerActivity = `-- name: CreateBlockerActivity :execrows
 INSERT INTO task_activities (task_id, kind, actor_id, summary, occurred_at, blocker_key)
 VALUES ($1, $2, NULL, $3, $4, $5)
-ON CONFLICT DO NOTHING
 `
 
 type CreateBlockerActivityParams struct {
@@ -25,7 +47,7 @@ type CreateBlockerActivityParams struct {
 	BlockerKey pgtype.Text
 }
 
-// 卡点动态：系统派生、无行动人；按 (任务, 类型, 合成键, 发生时刻) 去重，重复插入直接忽略。
+// 卡点动态：系统派生、无行动人。去重由 BlockerActivityOpen 判定，不再靠唯一键。
 func (q *Queries) CreateBlockerActivity(ctx context.Context, arg CreateBlockerActivityParams) (int64, error) {
 	result, err := q.db.Exec(ctx, createBlockerActivity,
 		arg.TaskID,
@@ -74,6 +96,51 @@ func (q *Queries) CreateTaskActivity(ctx context.Context, arg CreateTaskActivity
 		&i.BlockerKey,
 	)
 	return i, err
+}
+
+const listOpenBlockerActivities = `-- name: ListOpenBlockerActivities :many
+SELECT DISTINCT ON (a.task_id, a.blocker_key) a.task_id, a.blocker_key, a.summary, a.kind
+FROM task_activities a
+JOIN tasks t ON t.id = a.task_id
+JOIN key_results k ON k.id = t.key_result_id
+JOIN objectives o ON o.id = k.objective_id
+WHERE a.blocker_key IS NOT NULL
+  AND a.kind IN ('blocker_opened', 'blocker_resolved')
+  AND o.project_id = $1
+ORDER BY a.task_id, a.blocker_key, a.id DESC
+`
+
+type ListOpenBlockerActivitiesRow struct {
+	TaskID     int64
+	BlockerKey pgtype.Text
+	Summary    string
+	Kind       string
+}
+
+// 全库仍处于「出现未解除」的卡点动态（ticker 补偿扫描解除事件用，R9）。
+func (q *Queries) ListOpenBlockerActivities(ctx context.Context, projectID int64) ([]ListOpenBlockerActivitiesRow, error) {
+	rows, err := q.db.Query(ctx, listOpenBlockerActivities, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOpenBlockerActivitiesRow
+	for rows.Next() {
+		var i ListOpenBlockerActivitiesRow
+		if err := rows.Scan(
+			&i.TaskID,
+			&i.BlockerKey,
+			&i.Summary,
+			&i.Kind,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listTaskActivitiesByTask = `-- name: ListTaskActivitiesByTask :many

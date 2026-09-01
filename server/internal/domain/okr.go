@@ -17,12 +17,9 @@ var (
 	ErrKrDescriptionEmpty    = errors.New("KR 描述不能为空")
 	ErrKrDescriptionTooLong  = errors.New("KR 描述不能超过 200 字")
 	ErrKrMetricTooLong       = errors.New("量化指标不能超过 100 字")
-	ErrKrOwnerNotMember      = errors.New("KR 负责人必须是项目成员")
+	ErrKrOwnerNotEligible    = errors.New("KR 负责人必须是项目管理员或项目成员，访客不可")
 	ErrKrPeriodInverted      = errors.New("KR 截止日期不能早于开始日期")
 )
-
-// DefaultKrRiskLevel 新建 KR 的初始风险等级（词汇表：风险等级；创建弹窗不提供设置入口）。
-const DefaultKrRiskLevel = "normal"
 
 // NewKeyResult 待创建的 KR 输入（词汇表：KR）。
 type NewKeyResult struct {
@@ -43,9 +40,14 @@ type OkrBatchItem struct {
 	KeyResults  []NewKeyResult
 }
 
+// eligibleOwner 报告某个项目角色能否承担负责人职责：访客与非成员不可（§3.4、S2）。
+func eligibleOwner(role string) bool {
+	return role == RoleAdmin || role == RoleMember
+}
+
 // ValidateOkrBatch 校验整批 O／KR 创建输入（AC-01）。
-// isMember 报告某用户是否为项目成员，用于 KR 负责人校验（PRD §7.2：匹配现有项目成员）。
-func ValidateOkrBatch(items []OkrBatchItem, isMember func(int64) bool) error {
+// roleOf 返回某用户在本项目的角色，用于 KR 负责人校验（§7.2 匹配现有项目成员；§3.4 排除访客）。
+func ValidateOkrBatch(items []OkrBatchItem, roleOf func(int64) string) error {
 	if len(items) == 0 {
 		return ErrOkrBatchEmpty
 	}
@@ -72,7 +74,7 @@ func ValidateOkrBatch(items []OkrBatchItem, isMember func(int64) bool) error {
 			}
 		}
 		for _, k := range item.KeyResults {
-			if err := validateNewKeyResult(k, isMember); err != nil {
+			if err := validateNewKeyResult(k, roleOf); err != nil {
 				return err
 			}
 		}
@@ -80,7 +82,7 @@ func ValidateOkrBatch(items []OkrBatchItem, isMember func(int64) bool) error {
 	return nil
 }
 
-func validateNewKeyResult(k NewKeyResult, isMember func(int64) bool) error {
+func validateNewKeyResult(k NewKeyResult, roleOf func(int64) string) error {
 	desc := strings.TrimSpace(k.Description)
 	if desc == "" {
 		return ErrKrDescriptionEmpty
@@ -91,8 +93,8 @@ func validateNewKeyResult(k NewKeyResult, isMember func(int64) bool) error {
 	if utf8.RuneCountInString(strings.TrimSpace(k.Metric)) > 100 {
 		return ErrKrMetricTooLong
 	}
-	if k.OwnerID != nil && !isMember(*k.OwnerID) {
-		return ErrKrOwnerNotMember
+	if k.OwnerID != nil && !eligibleOwner(roleOf(*k.OwnerID)) {
+		return ErrKrOwnerNotEligible
 	}
 	if k.Start != nil && k.End != nil && k.End.Before(*k.Start) {
 		return ErrKrPeriodInverted

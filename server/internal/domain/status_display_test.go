@@ -45,7 +45,7 @@ func TestStatusLabel(t *testing.T) {
 		{"终审显示 KR 负责人", TaskPendingFinalReview, "周宁", nil, "待周宁审批"},
 		{"KR 无负责人时退化", TaskPendingFinalReview, "", nil, "待审批"},
 		{"已完成", TaskCompleted, "周宁", nil, "已完成"},
-		{"已取消", TaskCancelled, "周宁", nil, "已取消"},
+		{"已关闭", TaskCancelled, "周宁", nil, "已关闭"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -136,7 +136,7 @@ func TestStageLabel(t *testing.T) {
 		{"等待输入沿用环节名", StageWaitingInput, "周宁", nil, "等待输入"},
 		{"任务执行沿用环节名", StageInProgress, "周宁", nil, "任务执行"},
 		{"已闭环沿用环节名", StageCompleted, "周宁", nil, "已闭环"},
-		{"已取消沿用环节名", StageCancelled, "周宁", nil, "已取消"},
+		{"已关闭沿用环节名", StageCancelled, "周宁", nil, "已关闭"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -144,5 +144,31 @@ func TestStageLabel(t *testing.T) {
 				t.Fatalf("StageLabel(%q) = %q, want %q", tc.stage, got, tc.want)
 			}
 		})
+	}
+}
+
+// F1：四组枚举文案统一由 domain 派生，未知取值退化为安全默认，不回显枚举原文。
+func TestEnumLabels(t *testing.T) {
+	cases := []struct {
+		got  string
+		want string
+	}{
+		{RiskLevelLabel(RiskNormal), "正常"},
+		{RiskLevelLabel(RiskWarning), "预警"},
+		{RiskLevelLabel(RiskHighRisk), "高风险"},
+		{RiskLevelLabel("unknown"), "正常"},
+		{EdgeTypeLabel(EdgeHardPrerequisite), "硬前置交付"},
+		{EdgeTypeLabel(EdgeFeedback), "迭代／反馈"},
+		{EdgeTypeLabel("unknown"), "协作关系"},
+		{ProjectStatusLabel("in_progress"), "进行中"},
+		{ProjectStatusLabel("archived"), "已归档"},
+		{ProjectStatusLabel("unknown"), "未开始"},
+		{MemberRoleLabel(RoleAdmin), "项目管理员"},
+		{MemberRoleLabel(RoleViewer), "访客"},
+	}
+	for _, tc := range cases {
+		if tc.got != tc.want {
+			t.Fatalf("label = %q, want %q", tc.got, tc.want)
+		}
 	}
 }

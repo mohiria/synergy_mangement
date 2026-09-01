@@ -30,14 +30,14 @@ func (s *Server) SubmitFieldChange(w http.ResponseWriter, r *http.Request, proje
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	task, facts, ok := s.fetchTask(w, r, projectId, taskId)
 	if !ok {
 		return
 	}
 	hasPending, err := s.q.HasPendingFieldChange(r.Context(), taskId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	outcome, err := domain.FieldChangeRoute(actor, uid, facts, hasPending)
@@ -48,7 +48,7 @@ func (s *Server) SubmitFieldChange(w http.ResponseWriter, r *http.Request, proje
 		case errors.Is(err, domain.ErrChangePendingExists), errors.Is(err, domain.ErrChangeNotAllowed):
 			writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: err.Error()})
 		default:
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 		}
 		return
 	}
@@ -59,22 +59,21 @@ func (s *Server) SubmitFieldChange(w http.ResponseWriter, r *http.Request, proje
 	}
 	members, err := s.q.ListProjectMembers(r.Context(), projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
-	memberSet := make(map[int64]bool, len(members))
+	roleByID := make(map[int64]string, len(members))
 	for _, m := range members {
-		memberSet[m.UserID] = true
+		roleByID[m.UserID] = m.Role
 	}
 	if err := domain.ValidateKeyFieldChanges(changes, reason, outcome != domain.FieldChangeDirect,
-		func(id int64) bool { return memberSet[id] }, task.StartDate.Time); err != nil {
+		func(id int64) string { return roleByID[id] }, task.StartDate.Time); err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_field_change", Message: err.Error()})
 		return
 	}
-	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
@@ -83,34 +82,34 @@ func (s *Server) SubmitFieldChange(w http.ResponseWriter, r *http.Request, proje
 	case domain.FieldChangeDirect:
 		// 草稿完善：不生成变更单。
 		if _, err := qtx.ApplyTaskKeyFields(r.Context(), applyParams(taskId, changes)); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 	case domain.FieldChangeExempt:
 		if _, err := qtx.CreateFieldChange(r.Context(), createFieldChangeParams(task, uid, reason, changes,
 			domain.FieldChangeApprovedState, true, domain.FieldChangeExemptOpinion,
 			pgtype.Int8{Int64: uid, Valid: true}, pgtype.Timestamptz{Time: s.now(), Valid: true})); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 		if _, err := qtx.ApplyTaskKeyFields(r.Context(), applyParams(taskId, changes)); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 	case domain.FieldChangePending:
 		// 重新提交时清除本人此前的退回待处理事项。
 		if _, err := qtx.ResolveRejectedFieldChanges(r.Context(), store.ResolveRejectedFieldChangesParams{TaskID: taskId, SubmittedBy: uid}); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 		if _, err := qtx.CreateFieldChange(r.Context(), createFieldChangeParams(task, uid, reason, changes,
 			domain.FieldChangePendingState, false, "", pgtype.Int8{}, pgtype.Timestamptz{})); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	// 草稿完善不生成变更单，也就没有可留痕的审批事实；免审直接记「生效」。
@@ -120,7 +119,6 @@ func (s *Server) SubmitFieldChange(w http.ResponseWriter, r *http.Request, proje
 	case domain.FieldChangePending:
 		s.actionActivity(r.Context(), taskId, domain.ActivityFieldChangeSubmitted, uid, reason)
 	}
-	s.recordBlockerChanges(r.Context(), projectId, blockersBefore)
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 
@@ -135,54 +133,79 @@ func (s *Server) DecideFieldChange(w http.ResponseWriter, r *http.Request, proje
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
-	_, facts, ok := s.fetchTask(w, r, projectId, taskId)
-	if !ok {
-		return
-	}
-	fc, err := s.q.GetFieldChange(r.Context(), store.GetFieldChangeParams{ID: changeId, TaskID: taskId})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, Error{Code: "change_not_found", Message: "变更单不存在"})
-		} else {
-			writeInternalError(w)
-		}
-		return
-	}
-	if err := domain.DecideFieldChangeRule(fc.State, facts.KrOwnerID, uid); err != nil {
-		if errors.Is(err, domain.ErrChangeNotPending) {
-			writeJSON(w, http.StatusConflict, Error{Code: "change_state_conflict", Message: err.Error()})
-		} else {
-			writeJSON(w, http.StatusForbidden, Error{Code: "forbidden", Message: err.Error()})
-		}
-		return
-	}
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	opinion := ""
 	if req.Opinion != nil {
 		opinion = strings.TrimSpace(*req.Opinion)
 	}
 	approve := req.Decision == FieldChangeDecisionRequestDecisionApproved
-	blockersBefore := s.blockerSnapshot(r.Context(), projectId)
-	newState := domain.FieldChangeRejectedState
-	if approve {
-		newState = domain.FieldChangeApprovedState
-	}
+
+	// 规则与写入同事务：先锁任务行再重读事实与变更单，避免变更被批准到已终止的任务上（R2／R3）。
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
 	qtx := s.q.WithTx(tx)
+	_, facts, ok := lockTaskFacts(r, w, qtx, projectId, taskId)
+	if !ok {
+		return
+	}
+	fc, err := qtx.GetFieldChange(r.Context(), store.GetFieldChangeParams{ID: changeId, TaskID: taskId})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, Error{Code: "change_not_found", Message: "变更单不存在"})
+		} else {
+			writeInternalError(w, r, err)
+		}
+		return
+	}
+	if err := domain.DecideFieldChangeRule(actor, fc.State, facts, uid, approve, opinion); err != nil {
+		if errors.Is(err, domain.ErrChangeNotPending) {
+			writeJSON(w, http.StatusConflict, Error{Code: "change_state_conflict", Message: err.Error()})
+		} else if errors.Is(err, domain.ErrChangeTaskTerminal) {
+			writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: err.Error()})
+		} else if errors.Is(err, domain.ErrRejectOpinionRequired) {
+			writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "opinion_required", Message: err.Error()})
+		} else {
+			writeJSON(w, http.StatusForbidden, Error{Code: "forbidden", Message: err.Error()})
+		}
+		return
+	}
+	newState := domain.FieldChangeRejectedState
+	if approve {
+		newState = domain.FieldChangeApprovedState
+	}
 	if _, err := qtx.DecideFieldChange(r.Context(), store.DecideFieldChangeParams{
 		ID: changeId, State: newState, Opinion: opinion, DecidedBy: pgtype.Int8{Int64: uid, Valid: true},
 	}); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
+	isCancel := fc.ChangeType == domain.FieldChangeTypeCancel
+	isStructure := fc.ChangeType == domain.FieldChangeTypeStructure
 	if approve {
-		// AC-23：通过后拟议值成为当前值。
-		if _, err := qtx.ApplyTaskKeyFields(r.Context(), store.ApplyTaskKeyFieldsParams{
+		if isStructure {
+			// AC-23：结构变更（输入、输入源、输出、接收方）到这一刻才真正写入。
+			var p structurePayload
+			if err := json.Unmarshal(fc.Payload, &p); err != nil {
+				writeInternalError(w, r, err)
+				return
+			}
+			if !s.applyStructureOrFail(w, r, qtx, projectId, taskId, fc.SubmittedBy, p) {
+				return
+			}
+		} else if isCancel {
+			// AC-57：关闭单通过后任务进入已关闭并保留原因。
+			if _, err := qtx.UpdateTaskStatusWithReason(r.Context(), store.UpdateTaskStatusWithReasonParams{
+				ID: taskId, Status: domain.TaskCancelled, CancelReason: fc.Reason,
+			}); err != nil {
+				writeInternalError(w, r, err)
+				return
+			}
+		} else if _, err := qtx.ApplyTaskKeyFields(r.Context(), store.ApplyTaskKeyFieldsParams{
+			// AC-23：通过后拟议值成为当前值。
 			ID:                 taskId,
 			Name:               fc.NewName,
 			Description:        fc.NewDescription,
@@ -190,20 +213,24 @@ func (s *Server) DecideFieldChange(w http.ResponseWriter, r *http.Request, proje
 			OwnerID:            fc.NewOwnerID,
 			EndDate:            fc.NewEndDate,
 		}); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
-	if approve {
+	switch {
+	case isCancel && approve:
+		s.actionActivity(r.Context(), taskId, domain.ActivityCancelApproved, uid, opinion)
+	case isCancel:
+		s.actionActivity(r.Context(), taskId, domain.ActivityCancelRejected, uid, opinion)
+	case approve:
 		s.actionActivity(r.Context(), taskId, domain.ActivityFieldChangeApproved, uid, opinion)
-	} else {
+	default:
 		s.actionActivity(r.Context(), taskId, domain.ActivityFieldChangeRejected, uid, opinion)
 	}
-	s.recordBlockerChanges(r.Context(), projectId, blockersBefore)
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 
@@ -213,7 +240,7 @@ func (s *Server) AbandonFieldChange(w http.ResponseWriter, r *http.Request, proj
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	if _, _, ok := s.fetchTask(w, r, projectId, taskId); !ok {
 		return
 	}
@@ -222,7 +249,7 @@ func (s *Server) AbandonFieldChange(w http.ResponseWriter, r *http.Request, proj
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, Error{Code: "change_not_found", Message: "变更单不存在"})
 		} else {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 		}
 		return
 	}
@@ -235,7 +262,7 @@ func (s *Server) AbandonFieldChange(w http.ResponseWriter, r *http.Request, proj
 		return
 	}
 	if _, err := s.q.ResolveFieldChange(r.Context(), changeId); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	s.actionActivity(r.Context(), taskId, domain.ActivityFieldChangeAbandoned, uid, "")
@@ -284,6 +311,7 @@ func createFieldChangeParams(task store.GetTaskInProjectRow, uid int64, reason s
 	p := store.CreateFieldChangeParams{
 		TaskID: task.ID, SubmittedBy: uid, Reason: reason, State: state,
 		Exempt: exempt, Opinion: opinion, DecidedBy: decidedBy, DecidedAt: decidedAt,
+		ChangeType:            domain.FieldChangeTypeKeyFields,
 		NewName:               toPgTextPtr(c.Name),
 		NewDescription:        toPgTextPtr(c.Description),
 		NewCompletionCriteria: toPgTextPtr(c.CompletionCriteria),
@@ -334,6 +362,21 @@ func (s *Server) fieldChangeView(ctx context.Context, fc store.FieldChangeReques
 			diffs = append(diffs, FieldChangeDiff{Field: field, Label: label, OldValue: oldV.String, NewValue: newV.String})
 		}
 	}
+	if len(fc.Payload) > 0 {
+		var p structurePayload
+		if err := json.Unmarshal(fc.Payload, &p); err == nil && p.Op != "" {
+			diffs = append(diffs, FieldChangeDiff{
+				Field: p.Op, Label: p.Label, OldValue: p.OldValue, NewValue: p.NewValue,
+			})
+		}
+	}
+	if fc.NewStatus.Valid {
+		diffs = append(diffs, FieldChangeDiff{
+			Field: "status", Label: "任务状态",
+			OldValue: domain.StatusLabel(fc.OldStatus.String, "", nil),
+			NewValue: domain.StatusLabel(fc.NewStatus.String, "", nil),
+		})
+	}
 	addText("name", "任务名称", fc.OldName, fc.NewName)
 	addText("description", "任务说明", fc.OldDescription, fc.NewDescription)
 	addText("completionCriteria", "完成标准", fc.OldCompletionCriteria, fc.NewCompletionCriteria)
@@ -347,15 +390,20 @@ func (s *Server) fieldChangeView(ctx context.Context, fc store.FieldChangeReques
 		}
 		diffs = append(diffs, FieldChangeDiff{Field: "endDate", Label: "截止时间", OldValue: old, NewValue: fc.NewEndDate.Time.Format("2006-01-02")})
 	}
-	canDecide := domain.DecideFieldChangeRule(fc.State, facts.KrOwnerID, userID) == nil
+	canDecide := domain.DecideFieldChangeRule(actor, fc.State, facts, userID, true, "") == nil
 	canAbandon := domain.CanAbandonFieldChange(actor, userID, fc.SubmittedBy, fc.State, fc.Resolved)
 	// AC-04：待审批显示「待{所属 KR 负责人姓名}审批」。
 	krOwnerName := ""
 	if facts.KrOwnerID != nil {
 		krOwnerName = nameOf(pgtype.Int8{Int64: *facts.KrOwnerID, Valid: true})
 	}
+	changeType := FieldChangeType(fc.ChangeType)
+	if changeType == "" {
+		changeType = FieldChangeType(domain.FieldChangeTypeKeyFields)
+	}
 	out := FieldChange{
 		Id:              fc.ID,
+		ChangeType:      changeType,
 		State:           FieldChangeState(fc.State),
 		StateLabel:      domain.FieldChangeStateLabel(fc.State, fc.Exempt, krOwnerName),
 		Reason:          fc.Reason,

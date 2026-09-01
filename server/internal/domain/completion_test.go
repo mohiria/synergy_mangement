@@ -71,7 +71,7 @@ func TestDecideCompletionRule(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			status, err := DecideCompletionRule(tc.t, tc.actor, tc.approve, tc.opinion)
+			status, err := DecideCompletionRule(Actor{Role: RoleMember}, tc.t, tc.actor, tc.approve, tc.opinion)
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("DecideCompletionRule() err = %v, want %v", err, tc.wantErr)
 			}

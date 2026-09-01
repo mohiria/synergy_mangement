@@ -55,6 +55,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/change-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 修改本人登录口令（S3）；改完除当前会话外，本人其余会话全部失效 */
+        post: operations["changePassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/me": {
         parameters: {
             query?: never;
@@ -108,6 +125,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        /** 项目规则设置（审批超时阈值、临期阈值、一键提醒频次上限） */
+        get: operations["getProjectSettings"];
+        /** 修改项目规则设置（仅项目管理员） */
+        put: operations["updateProjectSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/members": {
         parameters: {
             query?: never;
@@ -120,8 +157,12 @@ export interface paths {
         /** 项目成员列表（含成员角色） */
         get: operations["listProjectMembers"];
         put?: never;
-        /** 将用户加入项目并赋予成员角色（仅项目管理员／项目负责人） */
-        post: operations["addProjectMember"];
+        /**
+         * 将一名或多名用户加入项目并赋予同一成员角色（仅项目管理员／项目负责人）
+         * @description 一次提交建立全部成员关系并返回逐人结果：已在项目内或用户不存在的按人跳过，
+         *     不牵连名单里的其余人；名单为空或角色不合法整批拒绝。
+         */
+        post: operations["addProjectMembers"];
         delete?: never;
         options?: never;
         head?: never;
@@ -142,7 +183,7 @@ export interface paths {
         /** 调整成员角色（仅项目管理员／项目负责人） */
         put: operations["updateProjectMemberRole"];
         post?: never;
-        /** 将成员移出项目（仅项目管理员／项目负责人） */
+        /** 将成员移出项目（仅项目管理员／项目负责人；此人仍在担任 KR 负责人、任务负责人、成果审核人、接收方或输入对接人时返回 409 并列出待交接项，AC-61） */
         delete: operations["removeProjectMember"];
         options?: never;
         head?: never;
@@ -169,6 +210,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/objectives/{objectiveId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                objectiveId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除 O（AC-65；仅项目管理员，且 O 下没有 KR） */
+        delete: operations["deleteObjective"];
+        options?: never;
+        head?: never;
+        /** 编辑 O（AC-65；仅项目管理员） */
+        patch: operations["updateObjective"];
+        trace?: never;
+    };
+    "/projects/{projectId}/key-results/{keyResultId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                keyResultId: number;
+            };
+            cookie?: never;
+        };
+        /** 更换 KR 负责人前的确认信息（AC-61；返回该 KR 下未决审批单条数） */
+        get: operations["getKrHandoverPreview"];
+        put?: never;
+        post?: never;
+        /** 删除 KR（AC-65；仅项目管理员，且 KR 下没有任务，含已完成与已取消） */
+        delete: operations["deleteKeyResult"];
+        options?: never;
+        head?: never;
+        /** 编辑 KR（AC-61、AC-65；项目管理员或本 KR 负责人；负责人不可置空，更换时可转交未决审批） */
+        patch: operations["updateKeyResult"];
+        trace?: never;
+    };
     "/projects/{projectId}/tasks": {
         parameters: {
             query?: never;
@@ -178,7 +262,7 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** 项目全部任务（含派生动作标志与最近一次入池审批单） */
+        /** 项目任务（含派生动作标志与最近一次入池审批单）；支持服务端裁剪，避免大项目整表下发 */
         get: operations["listTasks"];
         put?: never;
         /** 表格式批量创建任务草稿（可选一并提交入池；KR 负责人本人创建免审直接进入未开始，AC-26） */
@@ -261,7 +345,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 手工流转任务状态：开始执行或取消（AC-12；完成走三道审批，不在此端点） */
+        /** 手工流转任务状态：开始执行（AC-12；完成走三道审批、取消走取消申请，均不在此端点） */
         post: operations["updateTaskStatus"];
         delete?: never;
         options?: never;
@@ -283,6 +367,46 @@ export interface paths {
         /** 更新或清除任务的可选进度百分比（AC-12；系统不产生虚构百分比） */
         put: operations["updateTaskProgress"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/tasks/{taskId}/cancellation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 发起任务取消申请（AC-57；复用关键字段变更单，进所属 KR 负责人待我审批，KR 负责人本人免审即时生效） */
+        post: operations["requestTaskCancellation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/tasks/{taskId}/result-update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 发起成果更新（AC-66；已完成任务的负责人重新开放候选交付物上传并走同一道完成审批。 任务生命周期状态保持“已完成”，不是重新打开任务；与任务上其他未决审批单互斥，已取消任务不可发起） */
+        post: operations["startResultUpdate"];
         delete?: never;
         options?: never;
         head?: never;
@@ -363,9 +487,30 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 为任务新增交付物项（任务负责人／创建人／可编辑项目者；非终态任务） */
+        /** 为任务新增交付物项（裁决 H1：提交完成申请前即时生效、不走审批；完成申请在审期间冻结） */
         post: operations["createDeliverable"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/tasks/{taskId}/deliverables/{deliverableId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+                deliverableId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除交付物项（裁决 H1：限有编辑权限者；有当前内容的项不可删须走成果更新，完成申请在审期间冻结；候选对象文件同步清理） */
+        delete: operations["deleteDeliverable"];
         options?: never;
         head?: never;
         patch?: never;
@@ -386,6 +531,109 @@ export interface paths {
         put?: never;
         /** 登记候选交付物内容并取得预签名上传地址（任务负责人；重复调用覆盖未提交审核的候选） */
         post: operations["uploadCandidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/tasks/{taskId}/deliverables/{deliverableId}/candidate/commit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+                deliverableId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 确认候选内容已写入对象存储（两阶段提交第二步；服务端校验对象存在后才转为候选） */
+        post: operations["commitCandidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/tasks/{taskId}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 登记过程文件或重要外部材料并取得预签名上传地址（§7.7；两阶段提交第一步）。 这两类文件不进入完成审批，也不作为下游正式输入，只可按需选进成果包 */
+        post: operations["uploadTaskFile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/tasks/{taskId}/files/{fileId}/commit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+                fileId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 确认过程文件／外部材料已写入对象存储（两阶段提交第二步；服务端校验对象存在后才可见） */
+        post: operations["commitTaskFile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/tasks/{taskId}/files/{fileId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+                fileId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除过程文件或重要外部材料（这两类文件不进审批，删除直接生效并留痕） */
+        delete: operations["deleteTaskFile"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/task-files/{fileId}/download-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                fileId: number;
+            };
+            cookie?: never;
+        };
+        /** 取得过程文件／外部材料的预签名下载地址（全体项目成员可查看、下载，§3.3） */
+        get: operations["getTaskFileDownloadUrl"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -423,8 +671,28 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** 配置接收方（按需字段，与输入／输出配置同口径直接生效；模块 PRD §8.6、MW-09） */
+        /** 配置接收方（AC-23；接收方属关键字段，已入池任务进所属 KR 负责人审批；模块 PRD §8.6、MW-09） */
         put: operations["setTaskReceivers"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/tasks/{taskId}/participants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 配置参与人（PRD §9.2 按需字段）：不属关键字段，修改直接生效并留痕，不走审批 */
+        put: operations["setTaskParticipants"];
         post?: never;
         delete?: never;
         options?: never;
@@ -463,7 +731,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** 调整中间审核人配置（非关键字段可直接调整，§5.2.B；审核中与终态不可） */
+        /** 调整成果审核人配置（非关键字段可直接调整，§5.2.B；审核中与终态不可） */
         put: operations["setTaskReviewers"];
         post?: never;
         delete?: never;
@@ -484,7 +752,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 提交完成申请（AC-13；无中间审核时直接进入待 KR 终审；含全部候选交付物与提交说明） */
+        /** 提交完成申请（AC-13；未配置成果审核人时直接进入待 KR 终审；含全部候选交付物与提交说明） */
         post: operations["submitCompletion"];
         delete?: never;
         options?: never;
@@ -525,7 +793,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 新增输入要求并自动建立「来源任务 → 目标任务」交付物边（AC-28；可一次多选来源任务，AC-53；任务负责人／可编辑项目者） */
+        /** 新增输入要求并自动建立「来源任务 → 目标任务」交付物边（AC-28；可一次多选来源任务，AC-53）；输入与输入源属关键字段，已入池任务进所属 KR 负责人审批（AC-23） */
         post: operations["createTaskInput"];
         delete?: never;
         options?: never;
@@ -545,7 +813,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 指定项目成员提供输入（AC-29；可一次多选对接人，AC-53）：为每名对接人建立「成员 → 目标任务」交付物边并生成输入请求；任务已入池时立即发站内通知，否则待入池审批通过后发送 */
+        /** 指定项目成员提供输入（AC-29；可一次多选对接人，AC-53）：为每名对接人建立「成员 → 目标任务」交付物边并生成输入请求；输入源属关键字段，已入池任务进所属 KR 负责人审批（AC-23），生效后任务已入池即发站内通知 */
         post: operations["createMemberInput"];
         delete?: never;
         options?: never;
@@ -593,6 +861,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/input-requests/{requestId}/commit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                requestId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 确认输入附件已写入对象存储（两阶段提交第二步；校验通过后输入才转为已提供） */
+        post: operations["commitInputRequestFile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/input-requests/{requestId}/file-url": {
         parameters: {
             query?: never;
@@ -626,7 +914,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** 解除交付物边（目标任务负责人／可编辑项目者） */
+        /** 解除交付物边（AC-23；输入源属关键字段，已入池任务进所属 KR 负责人审批） */
         delete: operations["removeEdge"];
         options?: never;
         head?: never;
@@ -642,8 +930,46 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** 项目全部交付物边（关系数据源；图谱与列表 */
+        /** 项目交付物边（关系数据源；图谱与列表复用）；支持服务端裁剪，避免大项目整表下发 */
         get: operations["listEdges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/import-records": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        /** 导入记录（§7.9、AC-68；仅项目管理员）——每次表格导入留存操作人、时间、源文件名、 本次新建的 O／KR／任务数量与结果；失败的一次同样留记录。只读 */
+        get: operations["listImportRecords"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/audit-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        /** 项目操作审计（§10.4；仅项目管理员）——由写路径装饰器统一记录，新增写路径自动覆盖 */
+        get: operations["listAuditLogs"];
         put?: never;
         post?: never;
         delete?: never;
@@ -717,7 +1043,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 当前用户的站内通知（最新在前） */
+        /** 当前用户的站内通知（最新在前）；分页取更早的消息，避免第 100 条之前永久不可达（P1） */
         get: operations["listNotifications"];
         put?: never;
         post?: never;
@@ -753,48 +1079,8 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** 统一归档视角（AC-17）：按 O／KR／任务组织当前成果、候选状态与审批记录数 */
+        /** 统一归档视角（AC-17）：按 O／KR／任务组织当前成果、候选状态与审批记录数。 「时间」筛选在服务端裁剪（§7.7 六个筛选维度之一，沿用 #65 的服务端裁剪口径） */
         get: operations["getArtifacts"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/projects/{projectId}/packages": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-            };
-            cookie?: never;
-        };
-        /** 成果包列表（目录与来源清单；全员可查看/下载） */
-        get: operations["listPackages"];
-        put?: never;
-        /** 勾选当前成果生成成果包（AC-18；仅项目管理员／项目负责人） */
-        post: operations["createPackage"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/projects/{projectId}/packages/{packageId}/download": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-                packageId: number;
-            };
-            cookie?: never;
-        };
-        /** 整包下载（AC-18）：按目录解析当前内容并流式打包为 zip */
-        get: operations["downloadPackage"];
         put?: never;
         post?: never;
         delete?: never;
@@ -884,7 +1170,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/projects/{projectId}/tasks/batch-pool-submit": {
+    "/projects/{projectId}/import-tasks": {
         parameters: {
             query?: never;
             header?: never;
@@ -895,27 +1181,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 批量提交入池（AC-25；按 KR 勾选草稿任务整批提交，一个事务） */
-        post: operations["batchSubmitPool"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/projects/{projectId}/tasks/batch-pool-decision": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 批量通过或退回入池审批（AC-25；每个任务须由其所属 KR 负责人处理，一个事务） */
-        post: operations["batchDecidePool"];
+        /**
+         * 任务批量导入（AC-02b）：向已有 KR 下生成任务草稿（仅项目管理员／项目负责人；整批一个事务）
+         * @description 与 O／KR 导入器分开的第二个导入器（裁决 B1）：只导任务，所属 KR 必须已存在。
+         *     字段映射、人员匹配与结构预览在前端完成，此处接收结构化结果；规则复用创建任务的同一份校验。
+         */
+        post: operations["importTasks"];
         delete?: never;
         options?: never;
         head?: never;
@@ -993,6 +1264,15 @@ export interface components {
             /** @description 面向用户的错误说明 */
             message: string;
         };
+        ChangePasswordRequest: {
+            /** Format: password */
+            currentPassword: string;
+            /**
+             * Format: password
+             * @description 新口令，至少 8 位且不能与当前口令相同
+             */
+            newPassword: string;
+        };
         LoginRequest: {
             username: string;
             /** Format: password */
@@ -1016,7 +1296,7 @@ export interface components {
          */
         ProjectStatus: "not_started" | "in_progress" | "completed" | "archived";
         /**
-         * @description 成员角色（项目管理员／普通成员／只读成员），见词汇表「成员角色」
+         * @description 成员角色（项目管理员／项目成员／访客），见词汇表「成员角色」
          * @enum {string}
          */
         MemberRole: "admin" | "member" | "viewer";
@@ -1026,17 +1306,39 @@ export interface components {
             username: string;
             displayName: string;
             role: components["schemas"]["MemberRole"];
+            /** @description 成员角色显示文案（派生字段；前端不按枚举拼文案） */
+            roleLabel?: string;
         };
-        AddProjectMemberRequest: {
+        AddProjectMembersRequest: {
+            /** @description 本次加入的用户 id 名单，全部赋予同一个成员角色；重复的 id 只算一次 */
+            userIds: number[];
+            role: components["schemas"]["MemberRole"];
+        };
+        /** @description 一次批量加入的逐人结果 */
+        AddProjectMembersResult: {
+            /** @description 本次新建立成员关系的人 */
+            added: components["schemas"]["ProjectMember"][];
+            /** @description 未加入的人及原因 */
+            skipped: components["schemas"]["SkippedMember"][];
+        };
+        SkippedMember: {
             /** Format: int64 */
             userId: number;
-            role: components["schemas"]["MemberRole"];
+            /** @description 用户姓名；用户不存在时缺省 */
+            displayName?: string;
+            /**
+             * @description 跳过原因枚举
+             * @enum {string}
+             */
+            reason: "already_member" | "user_not_found";
+            /** @description 跳过原因显示文案（派生字段；前端不按枚举拼文案） */
+            reasonLabel: string;
         };
         UpdateProjectMemberRoleRequest: {
             role: components["schemas"]["MemberRole"];
         };
         /**
-         * @description 风险等级（正常／预警／高风险），见词汇表「风险等级」；不由任务生命周期状态自动推导
+         * @description 风险等级（正常／预警／高风险），见词汇表「风险等级」；读时派生值，不落库、无写入路径（KR 取「下级任务未解除卡点最高等级、超期、临期」的最大值，PRD §5.7）
          * @enum {string}
          */
         RiskLevel: "normal" | "warning" | "high_risk";
@@ -1045,6 +1347,10 @@ export interface components {
             id: number;
             /** Format: int64 */
             objectiveId: number;
+            /** @description KR 展示编号，形如 KR1.1（AC-64；创建时分配并持久保存） */
+            code: string;
+            /** @description 风险等级显示文案（派生字段；与 statusLabel／kindLabel 同惯例，前端不按枚举拼文案） */
+            riskLevelLabel: string;
             /** @description KR 描述 */
             description: string;
             /** @description 量化指标，选填 */
@@ -1069,26 +1375,61 @@ export interface components {
             riskLevel: components["schemas"]["RiskLevel"];
             sortOrder: number;
             progressSummary?: components["schemas"]["ProgressSummary"];
-            /** @description 预警／高风险的一行原因（派生字段；来自 KR 下任务的开放卡点，AC-05） */
+            /** @description 预警／高风险的一行原因（派生字段；与 riskLevel 同源，来自抬高等级的那条卡点或临期／超期事实。正常态不返回，AC-05） */
             riskNote?: string;
             /** @description KR 下任务的派生卡点数量（派生字段；图谱 KR 节点展示，AC-08） */
             openBlockerCount?: number;
+            /** @description KR 下未关闭任务作为接收方的未就绪交付物边数（派生字段；#150 风险队列未就绪摘要，模块 PRD §5.2。参考型输入一并计入；已完成／已取消的接收方不计；为 0 时不返回，CR-22） */
+            notReadyCount?: number;
+            /** @description KR 下任务数量（派生字段；OKR 表「任务」列，含已完成与已取消，AC-65） */
+            taskCount?: number;
+            /** @description 当前用户能否编辑本 KR（派生字段；项目管理员或本 KR 负责人，AC-65） */
+            canEdit?: boolean;
+            /** @description 当前用户能否删除本 KR（派生字段；仅项目管理员且 KR 下无任务，AC-65） */
+            canDelete?: boolean;
+            topBlocker?: components["schemas"]["TopBlocker"];
         };
-        /** @description KR 层进度数据覆盖度（词汇表「进度数据覆盖度」）；只统计已入池且未取消的任务，平均值任务等权 */
+        /** @description KR 下风险最高的一条卡点（派生字段；#122 风险队列按 KR 聚合的副行）。挑选规则在域层： 等级高者优先，同级按等待更久（Since 更早）者优先。KR 下无卡点时不返回 */
+        TopBlocker: {
+            /** Format: int64 */
+            taskId: number;
+            /** @description 任务展示编号（如 T1.2.3） */
+            taskCode: string;
+            kind: components["schemas"]["BlockerKind"];
+            /** @description 卡点类型中文名（派生字段） */
+            kindLabel: string;
+            /** @description 一行摘要（与卡点 reason 同源） */
+            summary: string;
+            level: components["schemas"]["RiskLevel"];
+        };
+        /** @description 一条受影响的 O／KR（系统推导，协作关系 PRD §8.1） */
+        ImpactedTarget: {
+            /** Format: int64 */
+            keyResultId: number;
+            krDescription: string;
+            /** Format: int64 */
+            objectiveId: number;
+            objectiveTitle: string;
+        };
+        /** @description KR 层进度汇总与数据覆盖度（词汇表「进度数据覆盖度」；AC-63）：统计已入池且未取消的任务， 已取消整体剔除；平均值任务等权、未填按 0 计入、已完成按 100 */
         ProgressSummary: {
+            /** @description 参与汇总的任务数（已入池且未取消），即平均值的分母 */
             totalTasks: number;
+            /** @description 其中由负责人真实填写进度的任务数（已完成计入），说明平均值里有多少来自真实填写 */
             filledTasks: number;
-            /** @description 已填写任务的等权平均（四舍五入）；无已填任务时不返回 */
+            /** @description 任务等权平均（四舍五入）；未填按 0、已完成按 100 计入。没有参与汇总的任务时不返回 */
             averageProgress?: number;
         };
         UpdateTaskStatusRequest: {
             /**
-             * @description 手工流转目标：开始执行（未开始／等待输入 → 进行中）或取消（非终态 → 已取消，需原因）
+             * @description 手工流转目标：开始执行（未开始／等待输入 → 进行中）；取消走 /cancellation（AC-57）
              * @enum {string}
              */
-            status: "in_progress" | "cancelled";
-            /** @description 取消原因；status 为 cancelled 时必填 */
-            reason?: string;
+            status: "in_progress";
+        };
+        TaskCancellationRequest: {
+            /** @description 取消原因，必填（AC-57） */
+            reason: string;
         };
         UpdateTaskProgressRequest: {
             /** @description 省略或 null 表示清除进度，回到只展示状态 */
@@ -1097,6 +1438,8 @@ export interface components {
         Objective: {
             /** Format: int64 */
             id: number;
+            /** @description O 展示编号，自然数形如 O1（AC-64；创建时分配并持久保存，删除同级对象后不重排） */
+            code: string;
             /** Format: int64 */
             projectId: number;
             /** @description O 标题 */
@@ -1105,6 +1448,45 @@ export interface components {
             description?: string;
             sortOrder: number;
             keyResults: components["schemas"]["KeyResult"][];
+            /** @description O 的风险等级（**只读派生字段，接口不接受写入**；AC-59、§5.7）：只取下级 KR 风险的 最大值，不叠加 O 自身的临期与超期 */
+            riskLevel: components["schemas"]["RiskLevel"];
+            /** @description 风险等级显示文案（派生字段） */
+            riskLevelLabel: string;
+            /** @description 风险原因一行（派生字段，与等级同源；正常时不返回） */
+            riskNote?: string;
+            /** @description 当前用户能否编辑本 O（派生字段；仅项目管理员，AC-65） */
+            canEdit?: boolean;
+            /** @description 当前用户能否删除本 O（派生字段；仅项目管理员且 O 下无 KR，AC-65） */
+            canDelete?: boolean;
+        };
+        /** @description 编辑 O（AC-65）：只传要改的字段 */
+        UpdateObjectiveRequest: {
+            title?: string;
+            description?: string;
+        };
+        /** @description 编辑 KR（AC-61、AC-65）：只传要改的字段；ownerId 不可置空 */
+        UpdateKeyResultRequest: {
+            description?: string;
+            metric?: string;
+            /**
+             * Format: int64
+             * @description 新的 KR 负责人（非只读项目成员）；不可置空
+             */
+            ownerId?: number;
+            /** Format: date */
+            startDate?: string;
+            /** Format: date */
+            endDate?: string;
+            /**
+             * @description 更换负责人时是否把该 KR 下的未决审批单转交继任者（AC-61）。 默认转交并向继任者发站内通知；取消勾选则保留给原负责人处理
+             * @default true
+             */
+            transferPendingApprovals: boolean;
+        };
+        /** @description 更换 KR 负责人前的确认信息（AC-61）：该 KR 下当前有多少未决审批单 */
+        KrHandoverPreview: {
+            /** @description 待入池审批、待处理变更单与待终审完成申请的合计条数 */
+            pendingApprovals: number;
         };
         CreateKeyResultInput: {
             description: string;
@@ -1130,11 +1512,21 @@ export interface components {
         CreateOkrBatchRequest: {
             items: components["schemas"]["CreateOkrBatchItem"][];
         };
+        /** @description 批量创建结果（#125）：最新 O/KR 列表 + 本次站内通知的负责人数（去重、不含操作者本人） */
+        CreateOkrBatchResponse: {
+            objectives: components["schemas"]["Objective"][];
+            notifiedCount: number;
+        };
         /**
          * @description 任务生命周期状态（词汇表「任务生命周期状态」）；页面主状态汇总，审批原始状态在审批单中
          * @enum {string}
          */
         TaskStatus: "draft" | "pending_pool_review" | "not_started" | "waiting_input" | "in_progress" | "pending_intermediate_review" | "pending_final_review" | "completed" | "cancelled";
+        /**
+         * @description 成果更新进程（词汇表「成果更新」；派生自任务事实，接口不接受直接写入）： none＝无；open＝已发起、候选内容尚未随完成申请提交；reviewing＝已提交，或签或 KR 终审在审。 整个过程中任务生命周期状态保持 completed
+         * @enum {string}
+         */
+        ResultUpdateState: "none" | "open" | "reviewing";
         /**
          * @description 入池审批单状态（词汇表「入池审批单」）；未提交即无审批单
          * @enum {string}
@@ -1163,6 +1555,8 @@ export interface components {
             id: number;
             /** Format: int64 */
             keyResultId: number;
+            /** @description 任务展示编号，形如 T1.1.1（AC-64；创建时分配并持久保存，删除同级任务后不重排） */
+            code: string;
             name: string;
             /**
              * Format: int64
@@ -1195,16 +1589,16 @@ export interface components {
              */
             pendingActorId?: number;
             pendingActorName?: string;
-            /** @description 可选进度百分比（词汇表「任务进度」）；未填写时不返回，前端只展示状态 */
+            /** @description 可选进度百分比（词汇表「任务进度」）；已完成任务一律 100 且不可编辑，未填写时不返回、前端只展示状态（AC-63） */
             progress?: number;
             /** @description 取消原因（已取消任务保留，PRD §5.1） */
             cancelReason?: string;
             poolReview?: components["schemas"]["PoolReview"];
             /** @description 当前用户能否开始执行本任务（派生字段；负责人／可编辑项目者，未开始或等待输入时） */
             canStart: boolean;
-            /** @description 当前用户能否更新本任务进度（派生字段；负责人／可编辑项目者，执行中状态） */
+            /** @description 当前用户能否更新本任务进度（派生字段；负责人／可编辑项目者，仅进行中；完成后锁定为 100，AC-63） */
             canUpdateProgress: boolean;
-            /** @description 当前用户能否取消本任务（派生字段；负责人／创建人／可编辑项目者，非终态） */
+            /** @description 当前用户能否发起取消申请（派生字段；任务负责人／项目管理员，非终态且任务上没有未决审批单，AC-57） */
             canCancel: boolean;
             /** @description 最近一张需要关注的变更单（待审批＝拟议值标示，或退回未处理＝退回待处理事项）；无则不返回 */
             fieldChange?: components["schemas"]["FieldChange"];
@@ -1212,11 +1606,20 @@ export interface components {
             deliverableNames?: string[];
             /** @description 当前用户能否编辑任务／提交关键字段修改（派生字段） */
             canProposeFieldChange: boolean;
+            /**
+             * @description 就地编辑的保存路由（#138 裁决 E1；派生自 FieldChangeRoute，前端不复算规则）： direct=草稿直接生效；exempt=KR 负责人本人免审即时生效；approval=生成变更单进入审批 （保存时须填修改原因）。不可编辑时不返回（以 canProposeFieldChange 为准）
+             * @enum {string}
+             */
+            fieldEditMode?: "direct" | "exempt" | "approval";
+            /** @description 本任务上未决审批单条数（派生字段；入池、关键字段变更／取消、完成申请合计，前端不再自行相加） */
+            pendingReviewCount?: number;
+            /** @description 当前用户能否提交任务讨论（派生字段；全体项目内成员含访客，公开项目的隐式访客不可，见词汇表「隐式访客」） */
+            canDiscuss?: boolean;
             /** @description 当前用户能否配置任务交付物项（派生字段；负责人／创建人／可编辑项目者，非终态） */
             canManageDeliverables?: boolean;
             /** @description 当前用户能否提交完成申请（派生字段；负责人，进行中且有候选内容） */
             canSubmitCompletion?: boolean;
-            /** @description 当前用户能否调整中间审核人配置（派生字段；负责人／创建人／可编辑项目者，审核中与终态不可） */
+            /** @description 当前用户能否调整成果审核人配置（派生字段；负责人／创建人／可编辑项目者，审核中与终态不可） */
             canManageReviewers?: boolean;
             /** @description 当前派生卡点数量（派生字段） */
             openBlockerCount?: number;
@@ -1233,6 +1636,13 @@ export interface components {
             canManageReceivers?: boolean;
             /** @description 当前用户是否有本任务的待接收项待确认（派生字段；MW-09） */
             canConfirmReceipt?: boolean;
+            /** @description 参与人名单（词汇表「参与人」；PRD §9.2 按需字段）：任务上除负责人以外的协作者， 只作展示与检索——不产生待办、不进审批链、不影响权限、不参与我的工作归组与排序。 未配置时为空数组 */
+            participants?: components["schemas"]["ReviewerInfo"][];
+            /** @description 当前用户能否配置参与人（派生字段；负责人／创建人／可编辑项目者，终态不可） */
+            canManageParticipants?: boolean;
+            resultUpdate?: components["schemas"]["ResultUpdateState"];
+            /** @description 当前用户能否对本任务发起成果更新（派生字段；AC-66：任务负责人／项目管理员， 任务已完成、无在途成果更新且没有其他未决审批单） */
+            canStartResultUpdate?: boolean;
         };
         CreateTaskItem: {
             /** Format: int64 */
@@ -1273,11 +1683,13 @@ export interface components {
             fieldChanges: components["schemas"]["FieldChange"][];
             /** @description 交付物项列表（含当前内容与候选审核提示，AC-32／AC-33） */
             deliverables: components["schemas"]["Deliverable"][];
+            /** @description 任务下的过程文件与重要外部材料（§7.7）：不进入完成审批、不作为下游正式输入， 可按需选进成果包；未配置时为空数组 */
+            files?: components["schemas"]["TaskFile"][];
             /** @description 任务讨论意见，按时间正序（AC-35／AC-36） */
             discussions: components["schemas"]["Discussion"][];
             /** @description 完成申请记录，最新在前（AC-13／AC-15／AC-38～40） */
             completionReviews: components["schemas"]["CompletionReview"][];
-            /** @description 任务级中间审核人配置（或签组；提交完成申请时快照进申请） */
+            /** @description 任务级成果审核人配置（或签组；提交完成申请时快照进申请） */
             reviewers: components["schemas"]["ReviewerInfo"][];
             /** @description 本任务当前派生的结构化卡点（AC-11） */
             blockers: components["schemas"]["Blocker"][];
@@ -1285,6 +1697,8 @@ export interface components {
             inputs: components["schemas"]["DeliverableEdge"][];
             /** @description 从本任务出发的交付物边（直接下游） */
             outputs: components["schemas"]["DeliverableEdge"][];
+            /** @description 受影响 O／KR（系统推导；协作关系 PRD §8.1）：从本任务出发沿下游硬前置交付物边传递闭包， 收集途经任务所属的 KR 及其 O。反馈、参考输入与普通双向协作不计入；不含本任务所属 KR */
+            impactedTargets: components["schemas"]["ImpactedTarget"][];
             /** @description 协作关系摘要——直接上游分组（词汇表；派生字段，无关系时为空数组，前端按空组隐藏） */
             upstream: components["schemas"]["TaskRelation"][];
             /** @description 协作关系摘要——直接下游分组（词汇表；派生字段，无关系时为空数组，前端按空组隐藏） */
@@ -1324,6 +1738,8 @@ export interface components {
             /** @description 对方任务所属 KR 描述（派生字段） */
             krDescription: string;
             edgeType: components["schemas"]["EdgeType"];
+            /** @description 关系类型显示文案（派生字段；前端不按枚举拼文案） */
+            edgeTypeLabel?: string;
             /** @description 对方任务负责人姓名（派生字段） */
             ownerName: string;
             /** @description 对方任务状态显示文案（AC-04；派生字段） */
@@ -1342,10 +1758,16 @@ export interface components {
             oldValue: string;
             newValue: string;
         };
+        /**
+         * @description 变更类型（PRD §5.2.B）：关键字段修改（标题／说明／量化标准／负责人／截止时间）、 结构变更（输入、输入源、输出、接收方）或任务取消申请，三者复用同一张变更单
+         * @enum {string}
+         */
+        FieldChangeType: "key_fields" | "structure" | "cancel";
         /** @description 关键字段变更单（词汇表）；rejected 且 resolved=false 即「退回待处理事项」 */
         FieldChange: {
             /** Format: int64 */
             id: number;
+            changeType: components["schemas"]["FieldChangeType"];
             state: components["schemas"]["FieldChangeState"];
             /** @description 面向用户的显示文案（AC-04；派生字段）：待审批为“待{所属 KR 负责人姓名}审批”，免审为“免审生效”，其余为“已通过／已退回” */
             stateLabel: string;
@@ -1390,12 +1812,52 @@ export interface components {
             decision: "approved" | "rejected";
             opinion?: string;
         };
+        CommitUploadRequest: {
+            /**
+             * Format: int64
+             * @description 第一步返回的内容记录 id
+             */
+            fileId: number;
+        };
+        /** @description 关系列表「当前交付物」列的来源任务当前内容摘要（裁决 J1，#142） */
+        EdgeCurrentFile: {
+            /**
+             * Format: int64
+             * @description 已生效当前内容文件（#149 边详情预览／下载入口；经 /files/{fileId}/download-url 取地址）
+             */
+            fileId: number;
+            fileName: string;
+            /** @description 文件类型显示文案（派生字段） */
+            fileTypeLabel: string;
+            /**
+             * Format: int64
+             * @description 文件大小（字节）
+             */
+            fileSize: number;
+        };
+        /** @description 交付物承接的关系边引用（词汇表「交付物边」）：本交付物是这条边的来源内容 */
+        DeliverableEdgeRef: {
+            /** Format: int64 */
+            edgeId: number;
+            edgeType: components["schemas"]["EdgeType"];
+            /** @description 交付物边类型显示文案（派生字段） */
+            edgeTypeLabel: string;
+            /**
+             * Format: int64
+             * @description 下游（接收）任务
+             */
+            targetTaskId: number;
+            targetTaskName: string;
+        };
         /** @description 交付物内容（词汇表「交付物」；当前已生效或候选审核中） */
         DeliverableFile: {
             /** Format: int64 */
             id: number;
-            /** @enum {string} */
-            state: "current" | "candidate";
+            /**
+             * @description uploading 表示已建记录但文件尚未确认写入对象存储，未确认前不参与就绪判定
+             * @enum {string}
+             */
+            state: "current" | "candidate" | "uploading";
             fileName: string;
             fileType?: string;
             /**
@@ -1421,11 +1883,34 @@ export interface components {
             taskId: number;
             name: string;
             current?: components["schemas"]["DeliverableFile"];
-            /** @description 审核中的候选内容；任务概况只提示不展示内容（AC-33） */
+            /** @description 候选内容；是否在审看 contentState——已上传未提交时是「待提交审核」。 任务概况只提示不展示内容（AC-33） */
             candidate?: components["schemas"]["DeliverableFile"];
+            /**
+             * @description 内容状态（读时派生，不落库；AC-17、AC-67）：empty＝未提交；pending_submit＝候选内容已上传但 尚未随完成申请提交（「待提交审核」，不进入任何审批）；reviewing＝候选已随完成申请提交在审； effective＝当前内容已生效；updating＝已生效之上还有在审的候选。 「在审」以存在未决完成申请为准，不以候选文件在不在为准
+             * @enum {string}
+             */
+            contentState: "empty" | "pending_submit" | "reviewing" | "effective" | "updating";
+            /** @description 内容状态显示文案（派生字段） */
+            contentStateLabel: string;
+            /**
+             * Format: date-time
+             * @description 提交／生效时间：有当前内容取生效时刻，否则取候选提交时刻（派生字段）
+             */
+            contentStateAt?: string;
+            /** @description 本交付物承接的来源关系边（AC-17 归档视角需在列表层可见可点） */
+            edges: components["schemas"]["DeliverableEdgeRef"][];
+            /** @description 当前用户能否删除本项（派生字段，裁决 H1）：有编辑权限、任务在草稿或执行类状态、 且本项没有当前内容时为 true；已发布的项删除须走成果更新重传 */
+            canDelete: boolean;
         };
+        /**
+         * @description 新增交付物项（裁决 G1）：不收项名，入口就是选文件。
+         *     项名由服务端按文件名派生（去掉最后一段扩展名，见 domain.DeliverableName）；
+         *     同一任务下重名会被拒绝（invalid_deliverable），同一件成果的新版本走已有项的重传候选内容。
+         *     本请求只建项，不登记内容：客户端在项建立后再走 candidate 两阶段上传。
+         */
         CreateDeliverableRequest: {
-            name: string;
+            /** @description 用户选中的文件名，项名由它派生 */
+            fileName: string;
         };
         UploadCandidateRequest: {
             fileName: string;
@@ -1435,6 +1920,48 @@ export interface components {
         };
         UploadCandidateResponse: {
             file: components["schemas"]["DeliverableFile"];
+            /** @description MinIO 预签名 PUT 地址，客户端直接上传文件内容 */
+            uploadUrl: string;
+        };
+        /**
+         * @description 任务文件类型（词汇表「过程文件」「重要外部材料」；§7.7 文件对象边界表）： process＝过程文件，任务执行过程中产生、不作为正式成果提交审核； external＝重要外部材料，项目外部提供、经内部协调人代为录入。 两者都不进入完成审批、不作为下游任务的正式输入（外部材料可作输入证据， 但不把输入置为就绪），可以按需选进成果包
+         * @enum {string}
+         */
+        TaskFileKind: "process" | "external";
+        /** @description 任务下的过程文件或重要外部材料（§7.7；与交付物同走两阶段提交，未确认写入的记录不返回） */
+        TaskFile: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            taskId: number;
+            kind: components["schemas"]["TaskFileKind"];
+            /** @description 类型显示文案（派生字段） */
+            kindLabel: string;
+            fileName: string;
+            fileType?: string;
+            /** Format: int64 */
+            fileSize?: number;
+            /** @description 背景说明，选填 */
+            note?: string;
+            /** @description 上传人姓名（派生字段） */
+            uploadedByName?: string;
+            /** Format: date-time */
+            uploadedAt: string;
+        };
+        UploadTaskFileRequest: {
+            kind: components["schemas"]["TaskFileKind"];
+            fileName: string;
+            fileType?: string;
+            /**
+             * Format: int64
+             * @description 客户端自报大小，仅作提示；确认时以对象存储的真实大小为准
+             */
+            fileSize?: number;
+            /** @description 背景说明，选填 */
+            note?: string;
+        };
+        UploadTaskFileResponse: {
+            file: components["schemas"]["TaskFile"];
             /** @description MinIO 预签名 PUT 地址，客户端直接上传文件内容 */
             uploadUrl: string;
         };
@@ -1492,9 +2019,14 @@ export interface components {
         DeliverableEdge: {
             /** Format: int64 */
             id: number;
-            /** @description 输入／交付物名称 */
+            /**
+             * @description 输入源的可读标识（派生字段，裁决 F1）：来源是已有任务时为「编号 · 任务名」，
+             *     来源是指定项目成员时为「所需内容」摘要。读时现算，不由客户端提供。
+             */
             name: string;
             edgeType: components["schemas"]["EdgeType"];
+            /** @description 交付物边类型显示文案（派生字段；前端不按枚举拼文案） */
+            edgeTypeLabel?: string;
             necessity: components["schemas"]["Necessity"];
             /**
              * Format: int64
@@ -1502,6 +2034,8 @@ export interface components {
              */
             sourceTaskId?: number;
             sourceTaskName?: string;
+            /** @description 来源任务编号（派生字段，形如 T1.1.1）；来源为指定项目成员时缺省，与 sourceTaskId 同缺省 */
+            sourceTaskCode?: string;
             sourceTaskStatus?: components["schemas"]["TaskStatus"];
             /** @description 来源任务状态显示文案（AC-04；派生字段，与 sourceTaskStatus 同缺省） */
             sourceTaskStatusLabel?: string;
@@ -1522,6 +2056,15 @@ export interface components {
              */
             currentFileId?: number;
             currentFileName?: string;
+            /**
+             * Format: int64
+             * @description 已生效当前内容的文件大小（字节；与 currentFileName 同源，裁决 J1）
+             */
+            currentFileSize?: number;
+            /** @description 已生效当前内容的文件类型显示文案（派生字段，裁决 J1；前端不按扩展名自己算） */
+            currentFileTypeLabel?: string;
+            /** @description 来源任务全部已生效当前内容（裁决 J1）：边未绑定具体交付物项时， 关系列表「当前交付物」列按此显示——一项显示「类型 · 大小」， 多项显示「N 项」并悬停列出各项「文件名 · 大小」 */
+            sourceCurrentFiles?: components["schemas"]["EdgeCurrentFile"][];
             /** @description 关系就绪状态（AC-48）：仅当前内容生效时就绪；候选不提前满足输入 */
             ready: boolean;
             /** @description 审核期间存在候选更新（不改变原有就绪状态） */
@@ -1540,10 +2083,11 @@ export interface components {
             /** @description 位于硬前置关键路径上（派生字段，AC-10）；日期不足时不派生（此时仅硬依赖链） */
             onCriticalPath?: boolean;
         };
-        /** @description 新增输入要求（来源＝系统内已有任务，AC-28；可一次多选来源任务，AC-53） */
+        /**
+         * @description 新增输入要求（来源＝系统内已有任务，AC-28；可一次多选来源任务，AC-53）。
+         *     不收输入名称：输入源的可读标识由来源任务派生（裁决 F1），见 DeliverableEdge.name。
+         */
         CreateTaskInputRequest: {
-            /** @description 输入名称 */
-            name: string;
             necessity: components["schemas"]["Necessity"];
             edgeType: components["schemas"]["EdgeType"];
             /** @description 来源任务（AC-53 多选）；确认后按选择顺序分别建立「来源任务 → 目标任务」交付物边，不可重复 */
@@ -1588,20 +2132,56 @@ export interface components {
         /** @description 表格导入（AC-02）：字段映射与人员匹配在前端完成，此处提交结构化结果；整批一个事务 */
         ImportRequest: {
             items: components["schemas"]["ImportItem"][];
+            /** @description 源文件名（§7.9 导入记录留存用；AC-68） */
+            sourceFileName?: string;
+        };
+        /** @description 一次表格导入的业务事实（词汇表「导入记录」；§7.9、AC-68）。与通用操作审计并列而非重复： 审计不含文件名与影响计数，也不记失败的那一次 */
+        ImportRecord: {
+            /** Format: int64 */
+            id: number;
+            /** @description 操作人姓名（派生字段） */
+            operatorName: string;
+            /** Format: date-time */
+            importedAt: string;
+            sourceFileName?: string;
+            /** @description 本次真实新建的 O 数 */
+            objectiveCount: number;
+            /** @description 本次真实新建的 KR 数 */
+            keyResultCount: number;
+            /** @description 本次真实新建的任务数 */
+            taskCount: number;
+            /**
+             * @description 导入结果；失败绝不写成功
+             * @enum {string}
+             */
+            result: "success" | "partial" | "failed";
+            /** @description 结果显示文案（派生字段） */
+            resultLabel: string;
+            /** @description 失败摘要；成功时为空 */
+            failureSummary?: string;
+        };
+        /** @description 任务批量导入（AC-02b）：按所属 KR 分组提交，整批一个事务 */
+        ImportTasksRequest: {
+            items: components["schemas"]["ImportTaskGroup"][];
+            /** @description 源文件名，随导入记录留存（AC-68） */
+            sourceFileName?: string;
+        };
+        ImportTaskGroup: {
+            /**
+             * Format: int64
+             * @description 所属 KR；前端按 KR 编号定位后传 id，编号不存在的行不会到这里
+             */
+            keyResultId: number;
+            tasks: components["schemas"]["ImportTaskItem"][];
+        };
+        ImportTasksResult: {
+            /** @description 本次生成的任务草稿（按 KR 批量提交入池，AC-25） */
+            tasks: components["schemas"]["Task"][];
         };
         ImportResult: {
             objectives: components["schemas"]["Objective"][];
             /** @description 导入生成的任务草稿（待按 KR 批量提交入池，AC-25） */
             tasks: components["schemas"]["Task"][];
-        };
-        BatchPoolSubmitRequest: {
-            taskIds: number[];
-        };
-        BatchPoolDecisionRequest: {
-            taskIds: number[];
-            /** @enum {string} */
-            decision: "approved" | "rejected";
-            opinion?: string;
         };
         /**
          * @description 报告时间范围（PRD §7.8）
@@ -1673,55 +2253,49 @@ export interface components {
         ArtifactTask: {
             /** Format: int64 */
             taskId: number;
+            /** @description 任务展示编号，形如 T1.1.1（AC-64；派生字段） */
+            code: string;
             name: string;
+            /** @description 任务负责人姓名（派生字段） */
+            ownerName: string;
+            /** @description 接收方展示文案（词汇表「接收方」；空接收方为「未配置」，#124；派生字段） */
+            receiverLabel: string;
             status: components["schemas"]["TaskStatus"];
             /** @description 状态显示文案（AC-04；派生字段） */
             statusLabel: string;
+            /**
+             * @description 归档文件状态两档（裁决 G1，#140；派生字段）：所属任务已完成＝已发布，其余＝未发布
+             * @enum {string}
+             */
+            fileState?: "published" | "unpublished";
+            /** @description 文件状态显示文案（派生字段） */
+            fileStateLabel?: string;
             /** @description 完成审核记录条数（详情在任务抽屉审核 Tab） */
             reviewCount: number;
             deliverables: components["schemas"]["Deliverable"][];
+            /** @description 本任务下的过程文件与重要外部材料（§7.7；归档按「文件类型」维筛选用） */
+            files?: components["schemas"]["TaskFile"][];
         };
+        /** @description 归档视角的 KR 分组（AC-17）：成果按 KR 归集，组头给出 KR 负责人与交付物数量 */
         ArtifactKr: {
             /** Format: int64 */
             keyResultId: number;
+            /** @description KR 展示编号，形如 KR1.1（AC-64；派生字段） */
+            code: string;
             description: string;
+            /** @description KR 负责人姓名（派生字段） */
+            ownerName: string;
+            /** @description 本 KR 下交付物项总数（派生字段） */
+            deliverableCount: number;
             tasks: components["schemas"]["ArtifactTask"][];
         };
         ArtifactObjective: {
             /** Format: int64 */
             objectiveId: number;
+            /** @description O 展示编号，形如 O1（AC-64；派生字段） */
+            code: string;
             title: string;
             krs: components["schemas"]["ArtifactKr"][];
-        };
-        /** @description 成果包目录项：引用交付物项并解析为当前内容（不复制旧文件，AC-18） */
-        PackageItem: {
-            /** Format: int64 */
-            deliverableId: number;
-            deliverableName: string;
-            taskName: string;
-            /**
-             * Format: int64
-             * @description 当前内容（被覆盖后自动解析为新内容；无当前内容时缺省）
-             */
-            fileId?: number;
-            fileName?: string;
-            /** Format: date-time */
-            effectiveAt?: string;
-        };
-        /** @description 轻量成果包（词汇表「成果包」） */
-        ArtifactPackage: {
-            /** Format: int64 */
-            id: number;
-            name: string;
-            createdByName?: string;
-            /** Format: date-time */
-            createdAt: string;
-            items: components["schemas"]["PackageItem"][];
-        };
-        CreatePackageRequest: {
-            name: string;
-            /** @description 勾选的当前成果（须有已生效当前内容的交付物项） */
-            deliverableIds: number[];
         };
         /** @description 我的工作事项（词汇表「我的工作事项」）；卡片派生事实，动作在任务详情抽屉完成 */
         WorkItem: {
@@ -1757,11 +2331,27 @@ export interface components {
             drawerTab?: string;
             /** @description 卡片文字按钮文案（我的工作 PRD §5.3、AC-55；派生字段）：本人要办的三组为「去处理」，等待他人与卡点为「查看详情」 */
             actionLabel: string;
-            /** @description 卡片能否直接一键提醒当前待行动人（MW-13；派生字段）；按 refKey 指向的提醒目标寻址，不提醒本人、访客不可，冷却为同一人对同一任务每天 1 次 */
+            /** @description 卡片能否直接一键提醒当前待行动人（MW-13；派生字段）；按 refKey 指向的提醒目标寻址，不提醒本人、访客不可，提醒频次上限为同一人对同一任务每天 1 次 */
             canRemind: boolean;
         };
-        /** @description 我的工作五分组（AC-16；KR 终审归入待我审批） */
+        /** @description 我的工作身份卡（模块 PRD §3.1）：当前用户在本项目的身份与仍承担的职责 */
+        WorkIdentity: {
+            /** Format: int64 */
+            userId: number;
+            username: string;
+            displayName: string;
+            /** @description 成员角色；项目负责人可以不在成员表里，此时缺省 */
+            role?: components["schemas"]["MemberRole"];
+            /** @description 身份显示文案（派生字段；非成员的项目负责人显示为「项目负责人」） */
+            roleLabel: string;
+            /** @description 当前承担的职责标签，顺序固定（派生字段；口径与移出成员的职责占位同源） */
+            responsibilities: string[];
+            /** @description 职责一行文案；一项不担时为「当前未承担行动职责」（派生字段） */
+            responsibilitiesLabel: string;
+        };
+        /** @description 我的工作五分组（AC-16；KR 终审归入待我审批）与身份卡 */
         MyWork: {
+            identity: components["schemas"]["WorkIdentity"];
             pending: components["schemas"]["WorkItem"][];
             approvals: components["schemas"]["WorkItem"][];
             receipts: components["schemas"]["WorkItem"][];
@@ -1773,6 +2363,23 @@ export interface components {
          * @enum {string}
          */
         BlockerKind: "upstream_unready" | "task_overdue" | "approval_timeout" | "interlock";
+        /** @description 一条项目操作审计（§10.4、R8）：谁在什么时候对哪个对象做了什么写操作 */
+        AuditLog: {
+            /** Format: int64 */
+            id: number;
+            /** @description 动作名（派生字段；未登记路由退化为通用词，但留痕本身不缺） */
+            action: string;
+            method: string;
+            /** @description 契约路由模板 */
+            route: string;
+            /** @description 直接对象类型（tasks／members／edges…） */
+            objectType?: string;
+            /** Format: int64 */
+            objectId?: number;
+            actorName?: string;
+            /** Format: date-time */
+            occurredAt: string;
+        };
         /** @description 结构化卡点（词汇表）；由四类结构化事实读时派生，不落库、无人工上报与手动解除，触发条件消失即消失 */
         Blocker: {
             /** @description 派生卡点的合成键（形如 task_overdue:42、upstream_unready:edge:17）；一键提醒按此寻址 */
@@ -1787,11 +2394,13 @@ export interface components {
             missing: string;
             /** @description 阻塞原因 */
             reason: string;
-            /** @description 当前待行动人（或签中间审核、互锁环内 KR 负责人可为多人） */
+            /** @description 当前待行动人（成果审核（或签）、互锁环内 KR 负责人可为多人） */
             actionOwnerIds: number[];
             actionOwnerNames: string[];
             /** @description 按事实严重度派生的预警或高风险（结构化卡点不使用 normal） */
             level: components["schemas"]["RiskLevel"];
+            /** @description 风险等级显示文案（派生字段；前端不按枚举拼文案） */
+            levelLabel?: string;
             /**
              * Format: date-time
              * @description 卡点产生时间（触发事实成立的时点）
@@ -1807,10 +2416,10 @@ export interface components {
             targetKey: string;
         };
         /**
-         * @description 输入请求状态（词汇表「输入请求」；PRD §5.5）
+         * @description 输入请求状态（词汇表「输入请求」；PRD §5.5）。uploading：已登记待上传，文件确认写入后才转 provided
          * @enum {string}
          */
-        InputRequestState: "pending" | "accepted" | "provided";
+        InputRequestState: "pending" | "accepted" | "provided" | "uploading";
         /** @description 指定项目成员的输入请求（附着在成员 → 目标任务的交付物边上） */
         InputRequest: {
             /** Format: int64 */
@@ -1840,9 +2449,11 @@ export interface components {
             /** @description 当前用户能否提交内容（派生字段；对接人本人且已接收） */
             canProvide?: boolean;
         };
-        /** @description 新增输入要求（来源＝指定项目成员，AC-29；可一次多选对接人，AC-53） */
+        /**
+         * @description 新增输入要求（来源＝指定项目成员，AC-29；可一次多选对接人，AC-53）。
+         *     不收输入名称：输入源的可读标识取「所需内容」摘要（裁决 F1），见 DeliverableEdge.name。
+         */
         CreateMemberInputRequest: {
-            name: string;
             necessity: components["schemas"]["Necessity"];
             /** @description 对接人（非只读项目成员，AC-53 多选）；每人分别建边并生成输入请求与通知，不可重复 */
             providerIds: number[];
@@ -1912,8 +2523,12 @@ export interface components {
             /** @description scope=members 时的接收方名单（至少一人，须为项目成员）；其余取值忽略 */
             userIds?: number[];
         };
+        SetParticipantsRequest: {
+            /** @description 参与人名单（可为空表示清空）；须为项目成员，且不含任务负责人本人 */
+            userIds: number[];
+        };
         SetReviewersRequest: {
-            /** @description 中间审核人（或签组；可为空表示不配置）；须为非只读项目成员 */
+            /** @description 成果审核人（或签组；可为空表示不配置）；须为非只读项目成员 */
             userIds: number[];
         };
         /** @description 完成申请（词汇表）；整体通过或整体退回 */
@@ -1934,14 +2549,14 @@ export interface components {
             submittedAt?: string;
             /** Format: date-time */
             decidedAt?: string;
-            /** @description 中间审核组快照（或签；AC-14） */
+            /** @description 成果审核组快照（或签；AC-14） */
             reviewers?: components["schemas"]["ReviewerInfo"][];
             /** @description 或签通过的处理人姓名（派生字段） */
             intermediateByName?: string;
             /** Format: date-time */
             intermediateAt?: string;
             intermediateOpinion?: string;
-            /** @description 当前用户能否处理本申请（派生字段；中间审核中为或签组成员，待 KR 终审时仅所属 KR 负责人，AC-37） */
+            /** @description 当前用户能否处理本申请（派生字段；成果审核中为或签组成员，待 KR 终审时仅所属 KR 负责人，AC-37） */
             canDecide?: boolean;
         };
         SubmitCompletionRequest: {
@@ -2007,6 +2622,8 @@ export interface components {
             /** @description 项目负责人姓名（派生字段，前端直接展示） */
             ownerName: string;
             status: components["schemas"]["ProjectStatus"];
+            /** @description 项目状态显示文案（派生字段；前端不按枚举拼文案） */
+            statusLabel?: string;
             /** @description 业务里程碑标签，自由文本，选填 */
             stage?: string;
             /** Format: date */
@@ -2019,6 +2636,38 @@ export interface components {
             canEdit: boolean;
             /** @description 当前用户能否管理本项目成员和权限（派生字段，同上） */
             canManageMembers: boolean;
+            visibility: components["schemas"]["ProjectVisibility"];
+            /** @description 项目可见性显示文案（派生字段；前端不按枚举拼文案） */
+            visibilityLabel: string;
+            /**
+             * @description 当前用户是靠项目公开才看得见本项目的隐式访客（派生字段，词汇表「隐式访客」）。
+             *     true 时此人不是项目成员：只读全部、写动作一律 403、不发讨论、不进人员选择器。
+             *     项目列表按它区分「我参与的」与「公开可见的」，前端不自己算。
+             */
+            implicitViewer: boolean;
+        };
+        /**
+         * @description 项目可见性（词汇表「项目可见性」；裁决 D1）：
+         *     private ＝ 只有项目成员与项目负责人可读；public ＝ 系统内任何登录用户获得隐式访客身份（只读）。
+         *     仅项目负责人与项目管理员可改。
+         * @enum {string}
+         */
+        ProjectVisibility: "private" | "public";
+        /** @description 项目规则设置（主 PRD §7.9；AC-60）。按项目生效，均有默认值，仅项目管理员可改。 */
+        ProjectSettings: {
+            /** @description 审批超时阈值 N（天），三道审批共用；审批件在当前环节等待达到 N×24 小时即超时。默认 3 */
+            approvalTimeoutDays: number;
+            /** @description 临期阈值（天），指距任务截止日期的天数，用于风险等级的预警判定。默认 3 */
+            dueSoonDays: number;
+            /** @description 一键提醒频次上限，同一发起人对同一被提醒人的同一任务每天可提醒次数。默认 1 */
+            remindDailyLimit: number;
+            /** @description 当前用户能否修改本项目的规则设置（派生字段，仅项目管理员为 true） */
+            canEdit: boolean;
+        };
+        UpdateProjectSettingsRequest: {
+            approvalTimeoutDays: number;
+            dueSoonDays: number;
+            remindDailyLimit: number;
         };
         CreateProjectRequest: {
             name: string;
@@ -2031,6 +2680,7 @@ export interface components {
             plannedEndDate?: string;
         };
         UpdateProjectRequest: {
+            visibility: components["schemas"]["ProjectVisibility"];
             name: string;
             /** Format: int64 */
             ownerId: number;
@@ -2169,6 +2819,30 @@ export interface operations {
             };
         };
     };
+    changePassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangePasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description 已修改，其余会话已吊销 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
     getCurrentUser: {
         parameters: {
             query?: never;
@@ -2291,6 +2965,60 @@ export interface operations {
             422: components["responses"]["ValidationError"];
         };
     };
+    getProjectSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 规则设置 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateProjectSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateProjectSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description 修改成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
     listProjectMembers: {
         parameters: {
             query?: never;
@@ -2315,7 +3043,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    addProjectMember: {
+    addProjectMembers: {
         parameters: {
             query?: never;
             header?: never;
@@ -2326,23 +3054,22 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AddProjectMemberRequest"];
+                "application/json": components["schemas"]["AddProjectMembersRequest"];
             };
         };
         responses: {
-            /** @description 已加入 */
+            /** @description 已处理（逐人结果见响应体，added 可能为空） */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProjectMember"];
+                    "application/json": components["schemas"]["AddProjectMembersResult"];
                 };
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
             422: components["responses"]["ValidationError"];
         };
     };
@@ -2399,6 +3126,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     listObjectives: {
@@ -2440,13 +3168,151 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 创建成功，返回项目最新的完整 O／KR 列表 */
+            /** @description 创建成功，返回项目最新的完整 O／KR 列表与本次已通知的负责人数（#125） */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Objective"][];
+                    "application/json": components["schemas"]["CreateOkrBatchResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    deleteObjective: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                objectiveId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    updateObjective: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                objectiveId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateObjectiveRequest"];
+            };
+        };
+        responses: {
+            /** @description 已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Objective"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    getKrHandoverPreview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                keyResultId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 未决审批单条数 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KrHandoverPreview"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteKeyResult: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                keyResultId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    updateKeyResult: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                keyResultId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateKeyResultRequest"];
+            };
+        };
+        responses: {
+            /** @description 已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KeyResult"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -2457,7 +3323,14 @@ export interface operations {
     };
     listTasks: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 只返回该 KR 下的任务（服务端裁剪，P1） */
+                krId?: number;
+                /** @description 是否包含已完成任务；缺省为 true（与既有「显示已完成」开关同口径，已取消一律返回） */
+                includeCompleted?: boolean;
+                /** @description 最多返回条数；缺省不限 */
+                limit?: number;
+            };
             header?: never;
             path: {
                 projectId: number;
@@ -2658,6 +3531,66 @@ export interface operations {
             422: components["responses"]["ValidationError"];
         };
     };
+    requestTaskCancellation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskCancellationRequest"];
+            };
+        };
+        responses: {
+            /** @description 已受理，返回任务最新状态（免审时已为已取消，否则仍为原状态并带待审批取消单） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Task"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    startResultUpdate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已发起，返回任务最新状态（status 仍为 completed，resultUpdate 变为 open） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Task"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
     submitFieldChange: {
         parameters: {
             query?: never;
@@ -2767,13 +3700,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 已创建 */
-            201: {
+            /** @description 交付物项已创建，返回任务最新状态 */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Deliverable"];
+                    "application/json": components["schemas"]["Task"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -2781,6 +3714,34 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["ValidationError"];
+        };
+    };
+    deleteDeliverable: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+                deliverableId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 交付物项已删除，返回任务最新状态 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Task"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     uploadCandidate: {
@@ -2816,9 +3777,160 @@ export interface operations {
             422: components["responses"]["ValidationError"];
         };
     };
-    getFileDownloadUrl: {
+    commitCandidate: {
         parameters: {
             query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+                deliverableId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CommitUploadRequest"];
+            };
+        };
+        responses: {
+            /** @description 已确认，内容成为候选 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliverableFile"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    uploadTaskFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadTaskFileRequest"];
+            };
+        };
+        responses: {
+            /** @description 已登记，客户端用 uploadUrl 直传文件 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadTaskFileResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    commitTaskFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+                fileId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已确认 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskFile"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    deleteTaskFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+                fileId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getTaskFileDownloadUrl: {
+        parameters: {
+            query?: {
+                /** @description 内容处置（#124）：attachment（默认，下载）或 inline（浏览器内联预览） */
+                disposition?: "attachment" | "inline";
+            };
+            header?: never;
+            path: {
+                projectId: number;
+                fileId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 预签名地址 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DownloadUrlResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getFileDownloadUrl: {
+        parameters: {
+            query?: {
+                /** @description 内容处置（#124）：attachment（默认，下载）或 inline（浏览器内联预览） */
+                disposition?: "attachment" | "inline";
+            };
             header?: never;
             path: {
                 projectId: number;
@@ -2857,7 +3969,39 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 已配置，返回任务最新事实 */
+            /** @description 已受理，返回任务最新事实（进入审批时配置未变，任务上带待审批变更单） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Task"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    setTaskParticipants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                taskId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetParticipantsRequest"];
+            };
+        };
+        responses: {
+            /** @description 已保存，返回任务最新事实 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -3012,13 +4156,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 已建立（按 sourceTaskIds 顺序返回新建的各条交付物边） */
-            201: {
+            /** @description 已受理，返回任务最新状态（进入审批时边尚未建立，任务上带待审批变更单） */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DeliverableEdge"][];
+                    "application/json": components["schemas"]["Task"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -3043,13 +4187,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 已建立（按 providerIds 顺序返回新建的各条交付物边） */
-            201: {
+            /** @description 已受理，返回任务最新状态（进入审批时边与输入请求尚未建立，任务上带待审批变更单） */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DeliverableEdge"][];
+                    "application/json": components["schemas"]["Task"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -3117,6 +4261,33 @@ export interface operations {
             422: components["responses"]["ValidationError"];
         };
     };
+    commitInputRequestFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+                requestId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已确认，输入转为已提供 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InputRequest"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
     getInputRequestFileUrl: {
         parameters: {
             query?: never;
@@ -3154,21 +4325,28 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description 已解除 */
-            204: {
+            /** @description 已受理，返回目标任务最新状态（进入审批时边仍在，任务上带待审批变更单） */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["Task"];
+                };
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
         };
     };
     listEdges: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 只返回两端任一端落在该 KR 下的边（服务端裁剪，P1） */
+                krId?: number;
+            };
             header?: never;
             path: {
                 projectId: number;
@@ -3187,6 +4365,58 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listImportRecords: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 导入记录，最新在前 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportRecord"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listAuditLogs: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                projectId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 审计记录，最新在前 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditLog"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
@@ -3276,7 +4506,11 @@ export interface operations {
     };
     listNotifications: {
         parameters: {
-            query?: never;
+            query?: {
+                limit?: number;
+                /** @description 只返回 id 小于该值的通知（翻到更早一页） */
+                beforeId?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3316,7 +4550,12 @@ export interface operations {
     };
     getArtifacts: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 只返回该日期（含）之后有内容的项：交付物比对内容状态时间（contentStateAt， 有当前内容取生效时刻、否则取候选提交时刻），过程文件与外部材料比对上传时间； 两者皆无时间的项在给了时间区间后不返回 */
+                from?: string;
+                /** @description 只返回该日期（含）之前有内容的项；与 from 可单给 */
+                to?: string;
+            };
             header?: never;
             path: {
                 projectId: number;
@@ -3336,94 +4575,6 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
-        };
-    };
-    listPackages: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 成果包列表 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ArtifactPackage"][];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    createPackage: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreatePackageRequest"];
-            };
-        };
-        responses: {
-            /** @description 已生成 */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ArtifactPackage"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    downloadPackage: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-                packageId: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description zip 文件 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/zip": string;
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-            /** @description 文件服务不可用 */
-            502: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
         };
     };
     getReport: {
@@ -3545,7 +4696,7 @@ export interface operations {
             422: components["responses"]["ValidationError"];
         };
     };
-    batchSubmitPool: {
+    importTasks: {
         parameters: {
             query?: never;
             header?: never;
@@ -3556,54 +4707,22 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["BatchPoolSubmitRequest"];
+                "application/json": components["schemas"]["ImportTasksRequest"];
             };
         };
         responses: {
-            /** @description 已提交，返回项目最新任务列表 */
-            200: {
+            /** @description 导入成功 */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Task"][];
+                    "application/json": components["schemas"]["ImportTasksResult"];
                 };
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    batchDecidePool: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["BatchPoolDecisionRequest"];
-            };
-        };
-        responses: {
-            /** @description 已处理，返回项目最新任务列表 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Task"][];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
             422: components["responses"]["ValidationError"];
         };
     };

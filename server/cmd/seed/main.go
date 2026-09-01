@@ -182,7 +182,7 @@ func summarize(ctx context.Context, conn *pgx.Conn, password string) error {
 		"pool_reviews", "completion_reviews", "field_change_requests", "task_invites",
 		"deliverables", "deliverable_files", "deliverable_edges", "input_requests",
 		"task_receivers", "task_receipts", "discussions", "notifications",
-		"task_activities", "artifact_packages", "remind_logs",
+		"task_activities", "remind_logs",
 	}
 	total := 0
 	var b strings.Builder

@@ -17,6 +17,22 @@ const (
 	ReceiverScopeAll     = "all"
 )
 
+// receiverScopeLabels 接收方范围的中文显示文案（变更单差异行与页面共用）。
+var receiverScopeLabels = map[string]string{
+	// #124：空接收方显示「未配置」（原「不配置」），归档列表与抽屉共用。
+	ReceiverScopeNone:    "未配置",
+	ReceiverScopeMembers: "指定成员",
+	ReceiverScopeAll:     "所有项目成员",
+}
+
+// ReceiverScopeLabel 接收方范围显示文案（派生字段）；未知取值不回显枚举原文。
+func ReceiverScopeLabel(scope string) string {
+	if label, ok := receiverScopeLabels[scope]; ok {
+		return label
+	}
+	return "未配置"
+}
+
 var (
 	ErrReceiverScopeInvalid = errors.New("接收方范围取值非法")
 	ErrReceiverEmpty        = errors.New("指定成员为接收方时至少选择一人")
@@ -37,7 +53,7 @@ type ReceiptFact struct {
 }
 
 // ValidateReceivers 校验接收方配置：范围合法；指定成员时至少一人且均为项目成员。
-// 接收方只查看、下载与确认接收，不拥有审核权（主 PRD §3.1），因此只读成员也可以是接收方。
+// 接收方只查看、下载与确认接收，不拥有审核权（主 PRD §3.1），因此访客也可以是接收方。
 func ValidateReceivers(scope string, ids []int64, isMember func(int64) bool) error {
 	switch scope {
 	case ReceiverScopeNone, ReceiverScopeAll:
@@ -85,8 +101,9 @@ func ReceiptTargets(scope string, receiverIDs, memberIDs []int64) []int64 {
 }
 
 // CanConfirmReceipt 判定能否确认接收：仅接收方本人、且尚未确认（接收方无审核权，不提供退回）。
-func CanConfirmReceipt(userID int64, r ReceiptFact) error {
-	if r.UserID != userID {
+func CanConfirmReceipt(a Actor, userID int64, r ReceiptFact) error {
+	// 隐式访客不落成员表，不可能被指定为接收方（#111）：即便手上有 ID 也当作不是本人的。
+	if a.Implicit || r.UserID != userID {
 		return ErrReceiptNotMine
 	}
 	if r.ConfirmedAt != nil {

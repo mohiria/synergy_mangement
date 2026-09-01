@@ -1,11 +1,12 @@
 -- name: CreateFieldChange :one
 INSERT INTO field_change_requests (
     task_id, submitted_by, reason, state, exempt, opinion, decided_by, decided_at,
+    change_type, old_status, new_status, payload,
     old_name, new_name, old_description, new_description,
     old_completion_criteria, new_completion_criteria,
     old_owner_id, new_owner_id, old_end_date, new_end_date
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
 RETURNING *;
 
 -- name: GetFieldChange :one

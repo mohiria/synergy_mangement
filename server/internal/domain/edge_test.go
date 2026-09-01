@@ -12,13 +12,12 @@ func TestValidateNewEdge(t *testing.T) {
 		e    NewEdge
 		want error
 	}{
-		{"合法硬前置", NewEdge{Name: "现场数据包", EdgeType: EdgeHardPrerequisite, Necessity: NecessityRequired, SourceTaskID: i64(2), TargetTaskID: 1}, nil},
-		{"合法参考信息输入", NewEdge{Name: "行业报告", EdgeType: EdgeInformation, Necessity: NecessityReference, SourceTaskID: i64(2), TargetTaskID: 1}, nil},
-		{"名称为空", NewEdge{Name: " ", EdgeType: EdgeInformation, Necessity: NecessityRequired, SourceTaskID: i64(2), TargetTaskID: 1}, ErrEdgeNameEmpty},
-		{"类型非法", NewEdge{Name: "x", EdgeType: "loop", Necessity: NecessityRequired, SourceTaskID: i64(2), TargetTaskID: 1}, ErrEdgeTypeInvalid},
-		{"必要性非法", NewEdge{Name: "x", EdgeType: EdgeInformation, Necessity: "optional", SourceTaskID: i64(2), TargetTaskID: 1}, ErrNecessityInvalid},
-		{"自环禁止", NewEdge{Name: "x", EdgeType: EdgeInformation, Necessity: NecessityRequired, SourceTaskID: i64(1), TargetTaskID: 1}, ErrEdgeSelfLoop},
-		{"无来源禁止", NewEdge{Name: "x", EdgeType: EdgeInformation, Necessity: NecessityRequired, TargetTaskID: 1}, ErrEdgeSourceMissing},
+		{"合法硬前置", NewEdge{EdgeType: EdgeHardPrerequisite, Necessity: NecessityRequired, SourceTaskID: i64(2), TargetTaskID: 1}, nil},
+		{"合法参考信息输入", NewEdge{EdgeType: EdgeInformation, Necessity: NecessityReference, SourceTaskID: i64(2), TargetTaskID: 1}, nil},
+		{"类型非法", NewEdge{EdgeType: "loop", Necessity: NecessityRequired, SourceTaskID: i64(2), TargetTaskID: 1}, ErrEdgeTypeInvalid},
+		{"必要性非法", NewEdge{EdgeType: EdgeInformation, Necessity: "optional", SourceTaskID: i64(2), TargetTaskID: 1}, ErrNecessityInvalid},
+		{"自环禁止", NewEdge{EdgeType: EdgeInformation, Necessity: NecessityRequired, SourceTaskID: i64(1), TargetTaskID: 1}, ErrEdgeSelfLoop},
+		{"无来源禁止", NewEdge{EdgeType: EdgeInformation, Necessity: NecessityRequired, TargetTaskID: 1}, ErrEdgeSourceMissing},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -62,7 +61,8 @@ func TestEdgeReady(t *testing.T) {
 	}
 }
 
-// §4.4.7／§5.1：必要输入未就绪时页面显示「等待输入」；参考输入不影响；执行外状态不改写。
+// §4.4.7／§5.1、AC-58：「等待输入」只在未开始阶段叠加，任务一进入进行中即消失；
+// 参考输入不影响；执行外状态不改写。
 func TestDeriveDisplayStatus(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -71,7 +71,7 @@ func TestDeriveDisplayStatus(t *testing.T) {
 		want     string
 	}{
 		{"未开始且必要输入未到", TaskNotStarted, true, TaskWaitingInput},
-		{"进行中且必要输入未到", TaskInProgress, true, TaskWaitingInput},
+		{"进行中不再叠加等待输入", TaskInProgress, true, TaskInProgress},
 		{"进行中输入已就绪", TaskInProgress, false, TaskInProgress},
 		{"草稿不改写", TaskDraft, true, TaskDraft},
 		{"待终审不改写", TaskPendingFinalReview, true, TaskPendingFinalReview},
@@ -88,7 +88,7 @@ func TestDeriveDisplayStatus(t *testing.T) {
 
 // AC-53：一次配置可多选来源任务——至少一个、不可重复、逐条沿用单边校验；指定交付物项时只能单选。
 func TestValidateNewTaskInputs(t *testing.T) {
-	base := NewTaskInputs{Name: "现场数据包", EdgeType: EdgeHardPrerequisite, Necessity: NecessityRequired, SourceTaskIDs: []int64{2, 3, 4}, TargetTaskID: 1}
+	base := NewTaskInputs{EdgeType: EdgeHardPrerequisite, Necessity: NecessityRequired, SourceTaskIDs: []int64{2, 3, 4}, TargetTaskID: 1}
 	cases := []struct {
 		name string
 		mut  func(*NewTaskInputs)
@@ -99,7 +99,6 @@ func TestValidateNewTaskInputs(t *testing.T) {
 		{"未选来源", func(in *NewTaskInputs) { in.SourceTaskIDs = nil }, ErrEdgeSourceMissing},
 		{"来源重复", func(in *NewTaskInputs) { in.SourceTaskIDs = []int64{2, 3, 2} }, ErrEdgeSourceDuplicated},
 		{"含自身", func(in *NewTaskInputs) { in.SourceTaskIDs = []int64{2, 1} }, ErrEdgeSelfLoop},
-		{"名称为空", func(in *NewTaskInputs) { in.Name = "  " }, ErrEdgeNameEmpty},
 		{"类型非法", func(in *NewTaskInputs) { in.EdgeType = "loop" }, ErrEdgeTypeInvalid},
 		{"必要性非法", func(in *NewTaskInputs) { in.Necessity = "optional" }, ErrNecessityInvalid},
 		{"单来源可指定交付物项", func(in *NewTaskInputs) { in.SourceTaskIDs = []int64{2}; in.HasDeliverable = true }, nil},

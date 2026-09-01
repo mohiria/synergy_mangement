@@ -25,6 +25,10 @@ createRoot(document.getElementById("root")!).render(
           colorBorder: "#ccd3de",
           colorBorderSecondary: "#e2e6ed",
           borderRadius: 4,
+          // 4px 圆角契约对小尺寸组件也生效：通知徽标 .ant-badge-count-sm 默认吃
+          // borderRadiusSM，不设会渲染成 7px（U9）。
+          borderRadiusSM: 4,
+          borderRadiusXS: 4,
           controlHeight: 36,
           fontSize: 14,
           fontFamily:

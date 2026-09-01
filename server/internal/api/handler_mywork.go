@@ -11,24 +11,37 @@ import (
 // 我的工作五分组（AC-16）。事实装配在此，分组规则在 domain.MyWork。
 
 func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int64) {
-	uid := currentUser(r).ID
+	me := currentUser(r)
+	uid := me.ID
 	ctx := r.Context()
 
 	proj, ok := s.fetchProject(w, r, projectId)
 	if !ok {
 		return
 	}
-	facts := domain.MyWorkFacts{UserID: uid, Actor: projectActor(uid, proj.OwnerID, proj.MyRole), Now: s.now()}
+	// 一键提醒当日配额（#129）：一次取回本人今天的提醒计数，canRemind 显隐把配额算进去。
+	remindCounts, err := s.remindCountsToday(ctx, uid)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	// 审批件超期标红的阈值取项目规则设置，与「审批超时」卡点同源（R12、AC-60）。
+	facts := domain.MyWorkFacts{
+		UserID: uid, Actor: projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility), Now: s.now(),
+		ApprovalTimeoutDays: projectSettingsOf(proj).ApprovalTimeoutDays,
+		RemindDailyLimit:    projectSettingsOf(proj).RemindDailyLimit,
+		RemindSentToday:     remindCounts,
+	}
 
 	// 交付物边与输入请求：上游事实、未就绪标记、对接人视角。
 	edgeRows, err := s.q.ListEdgesByProject(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	requestRows, err := s.q.ListInputRequestsByProject(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	unreadyNoteByTask := unreadyRequiredInputs(edgeRows, requestRows)
@@ -37,22 +50,22 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 	// 任务事实（含显示状态与退回注记）。
 	taskRows, err := s.q.ListProjectTasks(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	poolRows, err := s.q.LatestPoolReviewsByProject(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	changeRows, err := s.q.LatestFieldChangesByProject(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	completionRows, err := s.q.LatestCompletionReviewsByProject(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	for _, t := range taskRows {
@@ -104,7 +117,8 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 			}
 			facts.PoolReviews = append(facts.PoolReviews, fact)
 		case domain.PoolReviewRejected:
-			if tf, ok := taskFactByID[pr.TaskID]; ok && tf.DisplayStatus == domain.TaskDraft && pr.Opinion != "" {
+			// 入组只看「草稿 + 存在退回审批单」；意见是展示字段，不参与归类（MW-05）。
+			if tf, ok := taskFactByID[pr.TaskID]; ok && tf.DisplayStatus == domain.TaskDraft {
 				op := pr.Opinion
 				tf.PoolRejected = &op
 			}
@@ -117,6 +131,7 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 			fact := domain.WorkApprovalFact{
 				ID: fc.ID, TaskID: fc.TaskID, TaskName: name, SubmittedBy: fc.SubmittedBy,
 				KrOwnerID: krOwnerOf(fc.TaskID), KrOwnerName: krOwnerNameByTask[fc.TaskID],
+				ChangeType: fc.ChangeType,
 			}
 			if fc.SubmittedAt.Valid {
 				fact.SubmittedAt = fc.SubmittedAt.Time
@@ -149,7 +164,7 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 		if cr.State == domain.CompletionIntermediate {
 			rvs, err := s.q.ListReviewReviewers(ctx, cr.ID)
 			if err != nil {
-				writeInternalError(w)
+				writeInternalError(w, r, err)
 				return
 			}
 			for _, rv := range rvs {
@@ -177,12 +192,14 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 			ProviderID: ir.ProviderID, State: ir.State, ContentNote: ir.ContentNote,
 			Notified: ir.NotifiedAt.Valid,
 		}
+		// 必要性取所在交付物边：参考输入不进任何分组、不计入徽标（模块 PRD §4.2 规则 8）。
 		if ir.CreatedAt.Valid {
 			fact.CreatedAt = ir.CreatedAt.Time
 		}
 		if idx, ok := edgeByID[ir.EdgeID]; ok {
 			e := edgeRows[idx]
 			fact.InputName = e.Name
+			fact.Necessity = e.Necessity
 			if e.ExpectedDate.Valid {
 				exp := e.ExpectedDate.Time
 				fact.Expected = &exp
@@ -212,19 +229,23 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 	// 邀请与卡点。
 	inviteRows, err := s.q.ListProjectTaskInvites(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	krRows, err := s.q.ListKeyResultsByProject(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	krDescByID := map[int64]string{}
 	for _, k := range krRows {
 		krDescByID[k.ID] = k.Description
 	}
+	hasPendingInvite := false
 	for _, iv := range inviteRows {
+		if iv.InviteeID == uid && iv.State == domain.TaskInvitePending {
+			hasPendingInvite = true
+		}
 		facts.Invites = append(facts.Invites, domain.WorkInviteFact{
 			ID: iv.ID, KrDescription: krDescByID[iv.KeyResultID], InviteeID: iv.InviteeID,
 			State: iv.State, Note: iv.Note, CreatedAt: iv.CreatedAt.Time,
@@ -233,7 +254,7 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 	// 待接收项与接收记录（MW-09）：分组只按「本人且未确认」筛选，名单在终审通过时已落库。
 	receiptRows, err := s.q.ListReceiptsByProject(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	for _, rc := range receiptRows {
@@ -252,13 +273,34 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 	}
 	blockers, err := s.projectBlockers(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	facts.Blockers = blockers
 
+	// 身份卡（模块 PRD §3.1）：职责事实与「移出成员前必须交接」同源，见 memberDuties。
+	duties, err := s.memberDuties(ctx, projectId, uid)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	responsibilities := domain.WorkResponsibilities(duties, proj.OwnerID == uid, hasPendingInvite)
+	identity := WorkIdentity{
+		UserId:                uid,
+		Username:              me.Username,
+		DisplayName:           me.DisplayName,
+		RoleLabel:             domain.WorkIdentityRoleLabel(proj.MyRole.String, proj.OwnerID == uid),
+		Responsibilities:      responsibilities,
+		ResponsibilitiesLabel: domain.WorkResponsibilitiesLabel(responsibilities),
+	}
+	if proj.MyRole.Valid {
+		role := MemberRole(proj.MyRole.String)
+		identity.Role = &role
+	}
+
 	groups := domain.MyWork(facts)
 	writeJSON(w, http.StatusOK, MyWork{
+		Identity:  identity,
 		Pending:   toWorkItems(groups.Pending),
 		Approvals: toWorkItems(groups.Approvals),
 		Receipts:  toWorkItems(groups.Receipts),

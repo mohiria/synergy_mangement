@@ -12,7 +12,7 @@ import (
 // V4.5 起卡点全部由结构化事实读时派生：没有人工上报、协调人、手动解除，
 // 触发条件消失即自动解除。四类触发与待行动人：
 //
-//	上游未就绪 | 必要输入未就绪且任务已到开始时间 | 上游任务负责人／输入对接人 | 输入就绪
+//	上游未就绪 | 必要输入未就绪、已到开始时间且任务尚未开始 | 上游任务负责人／输入对接人 | 输入就绪或任务开始
 //	任务超期   | 截止已过且未完成                 | 任务负责人                 | 完成或改期生效
 //	审批超时   | 当前环节等待达到 N×24 小时       | 该审批人（或签为各审核人） | 审批处理或审批单关闭
 //	硬依赖互锁 | 硬前置交付物边成环               | 环内各任务所属 KR 负责人   | 任一边被改掉
@@ -69,7 +69,7 @@ type BlockerApprovalFact struct {
 // BlockerFacts 派生卡点的全部输入事实。
 type BlockerFacts struct {
 	Now                 time.Time
-	ApprovalTimeoutDays int // 项目级审批超时阈值 N，非正数时取默认值
+	ApprovalTimeoutDays int // 项目级审批超时阈值 N（规则设置，AC-60），非正数时取默认值
 	Tasks               []BlockerTaskFact
 	Inputs              []BlockerInputFact
 	Approvals           []BlockerApprovalFact
@@ -101,7 +101,7 @@ type Blocker struct {
 var approvalStageLabels = map[string]string{
 	"pool_review":         "入池审批",
 	"field_change":        "关键字段变更审批",
-	"intermediate_review": "中间审核",
+	"intermediate_review": "成果审核",
 	"final_review":        "KR 终审",
 }
 
@@ -112,7 +112,7 @@ var approvalStageLabels = map[string]string{
 func DeriveBlockers(f BlockerFacts) []Blocker {
 	n := f.ApprovalTimeoutDays
 	if n <= 0 {
-		n = ApprovalTimeoutDays
+		n = DefaultApprovalTimeoutDays
 	}
 	taskByID := make(map[int64]BlockerTaskFact, len(f.Tasks))
 	for _, t := range f.Tasks {
@@ -139,14 +139,17 @@ func DeriveBlockers(f BlockerFacts) []Blocker {
 		if in.Ready || in.Necessity != NecessityRequired {
 			continue
 		}
-		if t.StartDate == nil || f.Now.Before(*t.StartDate) {
+		if t.Status != TaskNotStarted && t.Status != TaskWaitingInput {
+			continue // AC-58：任务一旦开始，上游未就绪自动解除，下游可先行开工
+		}
+		if !Started(t.StartDate, f.Now) {
 			continue // 未到开始时间的输入缺失只是风险信号（模块 PRD §8.7）
 		}
 		b := Blocker{
 			Key:        fmt.Sprintf("%s:edge:%d", BlockerUpstreamUnready, in.EdgeID),
 			Kind:       BlockerUpstreamUnready,
 			Missing:    in.InputName,
-			Level:      blockerLevel(t.EndDate != nil && f.Now.After(*t.EndDate)),
+			Level:      blockerLevel(Overdue(t.EndDate, f.Now)),
 			Since:      *t.StartDate,
 			OccurredAt: *t.StartDate,
 		}
@@ -168,7 +171,7 @@ func DeriveBlockers(f BlockerFacts) []Blocker {
 
 	// —— 任务超期 ——
 	for _, t := range f.Tasks {
-		if !blockerTaskInExecution(t.Status) || t.EndDate == nil || !f.Now.After(*t.EndDate) {
+		if !blockerTaskInExecution(t.Status) || !Overdue(t.EndDate, f.Now) {
 			continue
 		}
 		add(t, Blocker{

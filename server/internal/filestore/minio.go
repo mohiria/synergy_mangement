@@ -15,8 +15,9 @@ import (
 // Store 文件存取接口：预签名上传／下载、对象读取（成果包打包）与删除。
 type Store interface {
 	PresignPut(ctx context.Context, key string, expiry time.Duration) (string, error)
-	PresignGet(ctx context.Context, key, downloadName string, expiry time.Duration) (string, error)
+	PresignGet(ctx context.Context, key, downloadName string, inline bool, expiry time.Duration) (string, error)
 	Get(ctx context.Context, key string) (io.ReadCloser, error)
+	Stat(ctx context.Context, key string) (int64, error)
 	Put(ctx context.Context, key string, r io.Reader, size int64) error
 	Remove(ctx context.Context, key string) error
 }
@@ -67,10 +68,15 @@ func (m *Minio) PresignPut(ctx context.Context, key string, expiry time.Duration
 	return u.String(), nil
 }
 
-func (m *Minio) PresignGet(ctx context.Context, key, downloadName string, expiry time.Duration) (string, error) {
+// PresignGet 预签名下载地址；inline 为真时按浏览器内联预览下发（#124），否则强制下载。
+func (m *Minio) PresignGet(ctx context.Context, key, downloadName string, inline bool, expiry time.Duration) (string, error) {
 	params := url.Values{}
 	if downloadName != "" {
-		params.Set("response-content-disposition", fmt.Sprintf("attachment; filename=%q", downloadName))
+		disposition := "attachment"
+		if inline {
+			disposition = "inline"
+		}
+		params.Set("response-content-disposition", fmt.Sprintf("%s; filename=%q", disposition, downloadName))
 	}
 	u, err := m.presign.PresignedGetObject(ctx, m.bucket, key, expiry, params)
 	if err != nil {
@@ -95,6 +101,16 @@ func (m *Minio) Get(ctx context.Context, key string) (io.ReadCloser, error) {
 		return nil, err
 	}
 	return obj, nil
+}
+
+// Stat 返回对象大小；对象不存在时返回错误。用于上传两阶段提交的确认步骤：
+// 预签名直传绕过服务端，只有回来 Stat 一次才知道文件是否真的写进了对象存储。
+func (m *Minio) Stat(ctx context.Context, key string) (int64, error) {
+	info, err := m.client.StatObject(ctx, m.bucket, key, minio.StatObjectOptions{})
+	if err != nil {
+		return 0, err
+	}
+	return info.Size, nil
 }
 
 // Put 直接写入对象（服务端生成内容或测试种子用）。

@@ -22,18 +22,18 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
-// Defines values for BatchPoolDecisionRequestDecision.
+// Defines values for ArtifactTaskFileState.
 const (
-	BatchPoolDecisionRequestDecisionApproved BatchPoolDecisionRequestDecision = "approved"
-	BatchPoolDecisionRequestDecisionRejected BatchPoolDecisionRequestDecision = "rejected"
+	Published   ArtifactTaskFileState = "published"
+	Unpublished ArtifactTaskFileState = "unpublished"
 )
 
-// Valid indicates whether the value is a known member of the BatchPoolDecisionRequestDecision enum.
-func (e BatchPoolDecisionRequestDecision) Valid() bool {
+// Valid indicates whether the value is a known member of the ArtifactTaskFileState enum.
+func (e ArtifactTaskFileState) Valid() bool {
 	switch e {
-	case BatchPoolDecisionRequestDecisionApproved:
+	case Published:
 		return true
-	case BatchPoolDecisionRequestDecisionRejected:
+	case Unpublished:
 		return true
 	default:
 		return false
@@ -106,18 +106,48 @@ func (e CompletionReviewState) Valid() bool {
 	}
 }
 
+// Defines values for DeliverableContentState.
+const (
+	DeliverableContentStateEffective     DeliverableContentState = "effective"
+	DeliverableContentStateEmpty         DeliverableContentState = "empty"
+	DeliverableContentStatePendingSubmit DeliverableContentState = "pending_submit"
+	DeliverableContentStateReviewing     DeliverableContentState = "reviewing"
+	DeliverableContentStateUpdating      DeliverableContentState = "updating"
+)
+
+// Valid indicates whether the value is a known member of the DeliverableContentState enum.
+func (e DeliverableContentState) Valid() bool {
+	switch e {
+	case DeliverableContentStateEffective:
+		return true
+	case DeliverableContentStateEmpty:
+		return true
+	case DeliverableContentStatePendingSubmit:
+		return true
+	case DeliverableContentStateReviewing:
+		return true
+	case DeliverableContentStateUpdating:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DeliverableFileState.
 const (
-	Candidate DeliverableFileState = "candidate"
-	Current   DeliverableFileState = "current"
+	DeliverableFileStateCandidate DeliverableFileState = "candidate"
+	DeliverableFileStateCurrent   DeliverableFileState = "current"
+	DeliverableFileStateUploading DeliverableFileState = "uploading"
 )
 
 // Valid indicates whether the value is a known member of the DeliverableFileState enum.
 func (e DeliverableFileState) Valid() bool {
 	switch e {
-	case Candidate:
+	case DeliverableFileStateCandidate:
 		return true
-	case Current:
+	case DeliverableFileStateCurrent:
+		return true
+	case DeliverableFileStateUploading:
 		return true
 	default:
 		return false
@@ -187,6 +217,27 @@ func (e FieldChangeState) Valid() bool {
 	}
 }
 
+// Defines values for FieldChangeType.
+const (
+	Cancel    FieldChangeType = "cancel"
+	KeyFields FieldChangeType = "key_fields"
+	Structure FieldChangeType = "structure"
+)
+
+// Valid indicates whether the value is a known member of the FieldChangeType enum.
+func (e FieldChangeType) Valid() bool {
+	switch e {
+	case Cancel:
+		return true
+	case KeyFields:
+		return true
+	case Structure:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for HealthStatus.
 const (
 	Ok HealthStatus = "ok"
@@ -202,11 +253,33 @@ func (e HealthStatus) Valid() bool {
 	}
 }
 
+// Defines values for ImportRecordResult.
+const (
+	Failed  ImportRecordResult = "failed"
+	Partial ImportRecordResult = "partial"
+	Success ImportRecordResult = "success"
+)
+
+// Valid indicates whether the value is a known member of the ImportRecordResult enum.
+func (e ImportRecordResult) Valid() bool {
+	switch e {
+	case Failed:
+		return true
+	case Partial:
+		return true
+	case Success:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for InputRequestState.
 const (
-	InputRequestStateAccepted InputRequestState = "accepted"
-	InputRequestStatePending  InputRequestState = "pending"
-	InputRequestStateProvided InputRequestState = "provided"
+	InputRequestStateAccepted  InputRequestState = "accepted"
+	InputRequestStatePending   InputRequestState = "pending"
+	InputRequestStateProvided  InputRequestState = "provided"
+	InputRequestStateUploading InputRequestState = "uploading"
 )
 
 // Valid indicates whether the value is a known member of the InputRequestState enum.
@@ -217,6 +290,8 @@ func (e InputRequestState) Valid() bool {
 	case InputRequestStatePending:
 		return true
 	case InputRequestStateProvided:
+		return true
+	case InputRequestStateUploading:
 		return true
 	default:
 		return false
@@ -325,6 +400,24 @@ func (e ProjectStatus) Valid() bool {
 	}
 }
 
+// Defines values for ProjectVisibility.
+const (
+	Private ProjectVisibility = "private"
+	Public  ProjectVisibility = "public"
+)
+
+// Valid indicates whether the value is a known member of the ProjectVisibility enum.
+func (e ProjectVisibility) Valid() bool {
+	switch e {
+	case Private:
+		return true
+	case Public:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ReceiverScope.
 const (
 	ReceiverScopeAll     ReceiverScope = "all"
@@ -370,6 +463,27 @@ func (e ReportRange) Valid() bool {
 	}
 }
 
+// Defines values for ResultUpdateState.
+const (
+	ResultUpdateStateNone      ResultUpdateState = "none"
+	ResultUpdateStateOpen      ResultUpdateState = "open"
+	ResultUpdateStateReviewing ResultUpdateState = "reviewing"
+)
+
+// Valid indicates whether the value is a known member of the ResultUpdateState enum.
+func (e ResultUpdateState) Valid() bool {
+	switch e {
+	case ResultUpdateStateNone:
+		return true
+	case ResultUpdateStateOpen:
+		return true
+	case ResultUpdateStateReviewing:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RiskLevel.
 const (
 	HighRisk RiskLevel = "high_risk"
@@ -385,6 +499,45 @@ func (e RiskLevel) Valid() bool {
 	case Normal:
 		return true
 	case Warning:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SkippedMemberReason.
+const (
+	AlreadyMember SkippedMemberReason = "already_member"
+	UserNotFound  SkippedMemberReason = "user_not_found"
+)
+
+// Valid indicates whether the value is a known member of the SkippedMemberReason enum.
+func (e SkippedMemberReason) Valid() bool {
+	switch e {
+	case AlreadyMember:
+		return true
+	case UserNotFound:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TaskFieldEditMode.
+const (
+	Approval TaskFieldEditMode = "approval"
+	Direct   TaskFieldEditMode = "direct"
+	Exempt   TaskFieldEditMode = "exempt"
+)
+
+// Valid indicates whether the value is a known member of the TaskFieldEditMode enum.
+func (e TaskFieldEditMode) Valid() bool {
+	switch e {
+	case Approval:
+		return true
+	case Direct:
+		return true
+	case Exempt:
 		return true
 	default:
 		return false
@@ -436,6 +589,24 @@ func (e TaskActivityKind) Valid() bool {
 	case PoolSubmitted:
 		return true
 	case ReceiptConfirmed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TaskFileKind.
+const (
+	External TaskFileKind = "external"
+	Process  TaskFileKind = "process"
+)
+
+// Valid indicates whether the value is a known member of the TaskFileKind enum.
+func (e TaskFileKind) Valid() bool {
+	switch e {
+	case External:
+		return true
+	case Process:
 		return true
 	default:
 		return false
@@ -504,15 +675,12 @@ func (e TaskStatus) Valid() bool {
 
 // Defines values for UpdateTaskStatusRequestStatus.
 const (
-	UpdateTaskStatusRequestStatusCancelled  UpdateTaskStatusRequestStatus = "cancelled"
 	UpdateTaskStatusRequestStatusInProgress UpdateTaskStatusRequestStatus = "in_progress"
 )
 
 // Valid indicates whether the value is a known member of the UpdateTaskStatusRequestStatus enum.
 func (e UpdateTaskStatusRequestStatus) Valid() bool {
 	switch e {
-	case UpdateTaskStatusRequestStatusCancelled:
-		return true
 	case UpdateTaskStatusRequestStatusInProgress:
 		return true
 	default:
@@ -520,40 +688,105 @@ func (e UpdateTaskStatusRequestStatus) Valid() bool {
 	}
 }
 
-// AddProjectMemberRequest defines model for AddProjectMemberRequest.
-type AddProjectMemberRequest struct {
-	// Role 成员角色（项目管理员／普通成员／只读成员），见词汇表「成员角色」
-	Role   MemberRole `json:"role"`
-	UserId int64      `json:"userId"`
+// Defines values for GetFileDownloadUrlParamsDisposition.
+const (
+	GetFileDownloadUrlParamsDispositionAttachment GetFileDownloadUrlParamsDisposition = "attachment"
+	GetFileDownloadUrlParamsDispositionInline     GetFileDownloadUrlParamsDisposition = "inline"
+)
+
+// Valid indicates whether the value is a known member of the GetFileDownloadUrlParamsDisposition enum.
+func (e GetFileDownloadUrlParamsDisposition) Valid() bool {
+	switch e {
+	case GetFileDownloadUrlParamsDispositionAttachment:
+		return true
+	case GetFileDownloadUrlParamsDispositionInline:
+		return true
+	default:
+		return false
+	}
 }
 
-// ArtifactKr defines model for ArtifactKr.
+// Defines values for GetTaskFileDownloadUrlParamsDisposition.
+const (
+	GetTaskFileDownloadUrlParamsDispositionAttachment GetTaskFileDownloadUrlParamsDisposition = "attachment"
+	GetTaskFileDownloadUrlParamsDispositionInline     GetTaskFileDownloadUrlParamsDisposition = "inline"
+)
+
+// Valid indicates whether the value is a known member of the GetTaskFileDownloadUrlParamsDisposition enum.
+func (e GetTaskFileDownloadUrlParamsDisposition) Valid() bool {
+	switch e {
+	case GetTaskFileDownloadUrlParamsDispositionAttachment:
+		return true
+	case GetTaskFileDownloadUrlParamsDispositionInline:
+		return true
+	default:
+		return false
+	}
+}
+
+// AddProjectMembersRequest defines model for AddProjectMembersRequest.
+type AddProjectMembersRequest struct {
+	// Role 成员角色（项目管理员／项目成员／访客），见词汇表「成员角色」
+	Role MemberRole `json:"role"`
+
+	// UserIds 本次加入的用户 id 名单，全部赋予同一个成员角色；重复的 id 只算一次
+	UserIds []int64 `json:"userIds"`
+}
+
+// AddProjectMembersResult 一次批量加入的逐人结果
+type AddProjectMembersResult struct {
+	// Added 本次新建立成员关系的人
+	Added []ProjectMember `json:"added"`
+
+	// Skipped 未加入的人及原因
+	Skipped []SkippedMember `json:"skipped"`
+}
+
+// ArtifactKr 归档视角的 KR 分组（AC-17）：成果按 KR 归集，组头给出 KR 负责人与交付物数量
 type ArtifactKr struct {
-	Description string         `json:"description"`
-	KeyResultId int64          `json:"keyResultId"`
-	Tasks       []ArtifactTask `json:"tasks"`
+	// Code KR 展示编号，形如 KR1.1（AC-64；派生字段）
+	Code string `json:"code"`
+
+	// DeliverableCount 本 KR 下交付物项总数（派生字段）
+	DeliverableCount int    `json:"deliverableCount"`
+	Description      string `json:"description"`
+	KeyResultId      int64  `json:"keyResultId"`
+
+	// OwnerName KR 负责人姓名（派生字段）
+	OwnerName string         `json:"ownerName"`
+	Tasks     []ArtifactTask `json:"tasks"`
 }
 
 // ArtifactObjective defines model for ArtifactObjective.
 type ArtifactObjective struct {
+	// Code O 展示编号，形如 O1（AC-64；派生字段）
+	Code        string       `json:"code"`
 	Krs         []ArtifactKr `json:"krs"`
 	ObjectiveId int64        `json:"objectiveId"`
 	Title       string       `json:"title"`
 }
 
-// ArtifactPackage 轻量成果包（词汇表「成果包」）
-type ArtifactPackage struct {
-	CreatedAt     time.Time     `json:"createdAt"`
-	CreatedByName *string       `json:"createdByName,omitempty"`
-	Id            int64         `json:"id"`
-	Items         []PackageItem `json:"items"`
-	Name          string        `json:"name"`
-}
-
 // ArtifactTask 归档视角的任务节点（AC-17）：当前成果、候选状态与审批记录数，无历史版本入口
 type ArtifactTask struct {
+	// Code 任务展示编号，形如 T1.1.1（AC-64；派生字段）
+	Code         string        `json:"code"`
 	Deliverables []Deliverable `json:"deliverables"`
-	Name         string        `json:"name"`
+
+	// FileState 归档文件状态两档（裁决 G1，#140；派生字段）：所属任务已完成＝已发布，其余＝未发布
+	FileState *ArtifactTaskFileState `json:"fileState,omitempty"`
+
+	// FileStateLabel 文件状态显示文案（派生字段）
+	FileStateLabel *string `json:"fileStateLabel,omitempty"`
+
+	// Files 本任务下的过程文件与重要外部材料（§7.7；归档按「文件类型」维筛选用）
+	Files *[]TaskFile `json:"files,omitempty"`
+	Name  string      `json:"name"`
+
+	// OwnerName 任务负责人姓名（派生字段）
+	OwnerName string `json:"ownerName"`
+
+	// ReceiverLabel 接收方展示文案（词汇表「接收方」；空接收方为「未配置」，#124；派生字段）
+	ReceiverLabel string `json:"receiverLabel"`
 
 	// ReviewCount 完成审核记录条数（详情在任务抽屉审核 Tab）
 	ReviewCount int `json:"reviewCount"`
@@ -566,24 +799,29 @@ type ArtifactTask struct {
 	TaskId      int64  `json:"taskId"`
 }
 
-// BatchPoolDecisionRequest defines model for BatchPoolDecisionRequest.
-type BatchPoolDecisionRequest struct {
-	Decision BatchPoolDecisionRequestDecision `json:"decision"`
-	Opinion  *string                          `json:"opinion,omitempty"`
-	TaskIds  []int64                          `json:"taskIds"`
-}
+// ArtifactTaskFileState 归档文件状态两档（裁决 G1，#140；派生字段）：所属任务已完成＝已发布，其余＝未发布
+type ArtifactTaskFileState string
 
-// BatchPoolDecisionRequestDecision defines model for BatchPoolDecisionRequest.Decision.
-type BatchPoolDecisionRequestDecision string
+// AuditLog 一条项目操作审计（§10.4、R8）：谁在什么时候对哪个对象做了什么写操作
+type AuditLog struct {
+	// Action 动作名（派生字段；未登记路由退化为通用词，但留痕本身不缺）
+	Action    string  `json:"action"`
+	ActorName *string `json:"actorName,omitempty"`
+	Id        int64   `json:"id"`
+	Method    string  `json:"method"`
+	ObjectId  *int64  `json:"objectId,omitempty"`
 
-// BatchPoolSubmitRequest defines model for BatchPoolSubmitRequest.
-type BatchPoolSubmitRequest struct {
-	TaskIds []int64 `json:"taskIds"`
+	// ObjectType 直接对象类型（tasks／members／edges…）
+	ObjectType *string   `json:"objectType,omitempty"`
+	OccurredAt time.Time `json:"occurredAt"`
+
+	// Route 契约路由模板
+	Route string `json:"route"`
 }
 
 // Blocker 结构化卡点（词汇表）；由四类结构化事实读时派生，不落库、无人工上报与手动解除，触发条件消失即消失
 type Blocker struct {
-	// ActionOwnerIds 当前待行动人（或签中间审核、互锁环内 KR 负责人可为多人）
+	// ActionOwnerIds 当前待行动人（成果审核（或签）、互锁环内 KR 负责人可为多人）
 	ActionOwnerIds   []int64  `json:"actionOwnerIds"`
 	ActionOwnerNames []string `json:"actionOwnerNames"`
 
@@ -602,8 +840,11 @@ type Blocker struct {
 	// KindLabel 四类卡点的中文类型名（派生字段）；行级显示消费本字段，前端不按枚举拼文案
 	KindLabel string `json:"kindLabel"`
 
-	// Level 风险等级（正常／预警／高风险），见词汇表「风险等级」；不由任务生命周期状态自动推导
+	// Level 风险等级（正常／预警／高风险），见词汇表「风险等级」；读时派生值，不落库、无写入路径（KR 取「下级任务未解除卡点最高等级、超期、临期」的最大值，PRD §5.7）
 	Level RiskLevel `json:"level"`
+
+	// LevelLabel 风险等级显示文案（派生字段；前端不按枚举拼文案）
+	LevelLabel *string `json:"levelLabel,omitempty"`
 
 	// Missing 缺失的输入或条件
 	Missing string `json:"missing"`
@@ -620,6 +861,20 @@ type Blocker struct {
 // BlockerKind 四类派生卡点（词汇表「结构化卡点」；我的工作 PRD §8.7）
 type BlockerKind string
 
+// ChangePasswordRequest defines model for ChangePasswordRequest.
+type ChangePasswordRequest struct {
+	CurrentPassword string `json:"currentPassword"`
+
+	// NewPassword 新口令，至少 8 位且不能与当前口令相同
+	NewPassword string `json:"newPassword"`
+}
+
+// CommitUploadRequest defines model for CommitUploadRequest.
+type CommitUploadRequest struct {
+	// FileId 第一步返回的内容记录 id
+	FileId int64 `json:"fileId"`
+}
+
 // CompletionDecisionRequest defines model for CompletionDecisionRequest.
 type CompletionDecisionRequest struct {
 	Decision CompletionDecisionRequestDecision `json:"decision"`
@@ -633,7 +888,7 @@ type CompletionDecisionRequestDecision string
 
 // CompletionReview 完成申请（词汇表）；整体通过或整体退回
 type CompletionReview struct {
-	// CanDecide 当前用户能否处理本申请（派生字段；中间审核中为或签组成员，待 KR 终审时仅所属 KR 负责人，AC-37）
+	// CanDecide 当前用户能否处理本申请（派生字段；成果审核中为或签组成员，待 KR 终审时仅所属 KR 负责人，AC-37）
 	CanDecide      *bool      `json:"canDecide,omitempty"`
 	DecidedAt      *time.Time `json:"decidedAt,omitempty"`
 	DecidedByName  *string    `json:"decidedByName,omitempty"`
@@ -651,7 +906,7 @@ type CompletionReview struct {
 	// Opinion 审核意见；退回意见必填（AC-38）
 	Opinion *string `json:"opinion,omitempty"`
 
-	// Reviewers 中间审核组快照（或签；AC-14）
+	// Reviewers 成果审核组快照（或签；AC-14）
 	Reviewers *[]ReviewerInfo `json:"reviewers,omitempty"`
 
 	// State 完成申请状态（词汇表「完成申请」；PRD §5.2.C）
@@ -676,9 +931,13 @@ type CompletionReviewItem struct {
 // CompletionReviewState 完成申请状态（词汇表「完成申请」；PRD §5.2.C）
 type CompletionReviewState string
 
-// CreateDeliverableRequest defines model for CreateDeliverableRequest.
+// CreateDeliverableRequest 新增交付物项（裁决 G1）：不收项名，入口就是选文件。
+// 项名由服务端按文件名派生（去掉最后一段扩展名，见 domain.DeliverableName）；
+// 同一任务下重名会被拒绝（invalid_deliverable），同一件成果的新版本走已有项的重传候选内容。
+// 本请求只建项，不登记内容：客户端在项建立后再走 candidate 两阶段上传。
 type CreateDeliverableRequest struct {
-	Name string `json:"name"`
+	// FileName 用户选中的文件名，项名由它派生
+	FileName string `json:"fileName"`
 }
 
 // CreateDiscussionRequest defines model for CreateDiscussionRequest.
@@ -700,14 +959,14 @@ type CreateKeyResultInput struct {
 	StartDate *openapi_types.Date `json:"startDate,omitempty"`
 }
 
-// CreateMemberInputRequest 新增输入要求（来源＝指定项目成员，AC-29；可一次多选对接人，AC-53）
+// CreateMemberInputRequest 新增输入要求（来源＝指定项目成员，AC-29；可一次多选对接人，AC-53）。
+// 不收输入名称：输入源的可读标识取「所需内容」摘要（裁决 F1），见 DeliverableEdge.name。
 type CreateMemberInputRequest struct {
 	// ContentNote 所需内容（§9.1 必填）
 	ContentNote string `json:"contentNote"`
 
 	// ExpectedDate 期望时间（§9.1 必填）
 	ExpectedDate openapi_types.Date `json:"expectedDate"`
-	Name         string             `json:"name"`
 
 	// Necessity 输入必要性（必要／参考）
 	Necessity Necessity `json:"necessity"`
@@ -729,11 +988,10 @@ type CreateOkrBatchRequest struct {
 	Items []CreateOkrBatchItem `json:"items"`
 }
 
-// CreatePackageRequest defines model for CreatePackageRequest.
-type CreatePackageRequest struct {
-	// DeliverableIds 勾选的当前成果（须有已生效当前内容的交付物项）
-	DeliverableIds []int64 `json:"deliverableIds"`
-	Name           string  `json:"name"`
+// CreateOkrBatchResponse 批量创建结果（#125）：最新 O/KR 列表 + 本次站内通知的负责人数（去重、不含操作者本人）
+type CreateOkrBatchResponse struct {
+	NotifiedCount int         `json:"notifiedCount"`
+	Objectives    []Objective `json:"objectives"`
 }
 
 // CreateProjectRequest defines model for CreateProjectRequest.
@@ -756,7 +1014,8 @@ type CreateTaskBatchRequest struct {
 	TaskInviteId *int64 `json:"taskInviteId,omitempty"`
 }
 
-// CreateTaskInputRequest 新增输入要求（来源＝系统内已有任务，AC-28；可一次多选来源任务，AC-53）
+// CreateTaskInputRequest 新增输入要求（来源＝系统内已有任务，AC-28；可一次多选来源任务，AC-53）。
+// 不收输入名称：输入源的可读标识由来源任务派生（裁决 F1），见 DeliverableEdge.name。
 type CreateTaskInputRequest struct {
 	// DeliverableId 来源任务的交付物项（选填；未选时以边本身表达结构化条件；仅在只选一个来源任务时可指定）
 	DeliverableId *int64 `json:"deliverableId,omitempty"`
@@ -764,9 +1023,6 @@ type CreateTaskInputRequest struct {
 	// EdgeType 交付物边类型（PRD §4.3；词汇表「交付物边」）
 	EdgeType     EdgeType            `json:"edgeType"`
 	ExpectedDate *openapi_types.Date `json:"expectedDate,omitempty"`
-
-	// Name 输入名称
-	Name string `json:"name"`
 
 	// Necessity 输入必要性（必要／参考）
 	Necessity Necessity `json:"necessity"`
@@ -808,15 +1064,33 @@ type CurrentUser struct {
 
 // Deliverable 交付物项：至多一份当前内容与一份候选内容，无版本号与历史（PRD §5.3）
 type Deliverable struct {
+	// CanDelete 当前用户能否删除本项（派生字段，裁决 H1）：有编辑权限、任务在草稿或执行类状态、 且本项没有当前内容时为 true；已发布的项删除须走成果更新重传
+	CanDelete bool `json:"canDelete"`
+
 	// Candidate 交付物内容（词汇表「交付物」；当前已生效或候选审核中）
 	Candidate *DeliverableFile `json:"candidate,omitempty"`
 
+	// ContentState 内容状态（读时派生，不落库；AC-17、AC-67）：empty＝未提交；pending_submit＝候选内容已上传但 尚未随完成申请提交（「待提交审核」，不进入任何审批）；reviewing＝候选已随完成申请提交在审； effective＝当前内容已生效；updating＝已生效之上还有在审的候选。 「在审」以存在未决完成申请为准，不以候选文件在不在为准
+	ContentState DeliverableContentState `json:"contentState"`
+
+	// ContentStateAt 提交／生效时间：有当前内容取生效时刻，否则取候选提交时刻（派生字段）
+	ContentStateAt *time.Time `json:"contentStateAt,omitempty"`
+
+	// ContentStateLabel 内容状态显示文案（派生字段）
+	ContentStateLabel string `json:"contentStateLabel"`
+
 	// Current 交付物内容（词汇表「交付物」；当前已生效或候选审核中）
 	Current *DeliverableFile `json:"current,omitempty"`
-	Id      int64            `json:"id"`
-	Name    string           `json:"name"`
-	TaskId  int64            `json:"taskId"`
+
+	// Edges 本交付物承接的来源关系边（AC-17 归档视角需在列表层可见可点）
+	Edges  []DeliverableEdgeRef `json:"edges"`
+	Id     int64                `json:"id"`
+	Name   string               `json:"name"`
+	TaskId int64                `json:"taskId"`
 }
+
+// DeliverableContentState 内容状态（读时派生，不落库；AC-17、AC-67）：empty＝未提交；pending_submit＝候选内容已上传但 尚未随完成申请提交（「待提交审核」，不进入任何审批）；reviewing＝候选已随完成申请提交在审； effective＝当前内容已生效；updating＝已生效之上还有在审的候选。 「在审」以存在未决完成申请为准，不以候选文件在不在为准
+type DeliverableContentState string
 
 // DeliverableEdge 交付物边（词汇表）；边上关联当前与候选交付物，就绪状态派生（AC-48）
 type DeliverableEdge struct {
@@ -827,12 +1101,21 @@ type DeliverableEdge struct {
 	CurrentFileId   *int64  `json:"currentFileId,omitempty"`
 	CurrentFileName *string `json:"currentFileName,omitempty"`
 
+	// CurrentFileSize 已生效当前内容的文件大小（字节；与 currentFileName 同源，裁决 J1）
+	CurrentFileSize *int64 `json:"currentFileSize,omitempty"`
+
+	// CurrentFileTypeLabel 已生效当前内容的文件类型显示文案（派生字段，裁决 J1；前端不按扩展名自己算）
+	CurrentFileTypeLabel *string `json:"currentFileTypeLabel,omitempty"`
+
 	// DeliverableId 对应来源任务的交付物项
 	DeliverableId   *int64  `json:"deliverableId,omitempty"`
 	DeliverableName *string `json:"deliverableName,omitempty"`
 
 	// EdgeType 交付物边类型（PRD §4.3；词汇表「交付物边」）
 	EdgeType EdgeType `json:"edgeType"`
+
+	// EdgeTypeLabel 交付物边类型显示文案（派生字段；前端不按枚举拼文案）
+	EdgeTypeLabel *string `json:"edgeTypeLabel,omitempty"`
 
 	// ExpectedDate 期望时间
 	ExpectedDate *openapi_types.Date `json:"expectedDate,omitempty"`
@@ -847,7 +1130,8 @@ type DeliverableEdge struct {
 	// InterlockRisk 硬前置循环互锁风险（派生字段，AC-10）；循环部分暂停关键路径计算
 	InterlockRisk *bool `json:"interlockRisk,omitempty"`
 
-	// Name 输入／交付物名称
+	// Name 输入源的可读标识（派生字段，裁决 F1）：来源是已有任务时为「编号 · 任务名」，
+	// 来源是指定项目成员时为「所需内容」摘要。读时现算，不由客户端提供。
 	Name string `json:"name"`
 
 	// Necessity 输入必要性（必要／参考）
@@ -859,8 +1143,14 @@ type DeliverableEdge struct {
 	// Ready 关系就绪状态（AC-48）：仅当前内容生效时就绪；候选不提前满足输入
 	Ready bool `json:"ready"`
 
+	// SourceCurrentFiles 来源任务全部已生效当前内容（裁决 J1）：边未绑定具体交付物项时， 关系列表「当前交付物」列按此显示——一项显示「类型 · 大小」， 多项显示「N 项」并悬停列出各项「文件名 · 大小」
+	SourceCurrentFiles *[]EdgeCurrentFile `json:"sourceCurrentFiles,omitempty"`
+
 	// SourceOwnerName 提供方姓名（派生字段）
 	SourceOwnerName *string `json:"sourceOwnerName,omitempty"`
+
+	// SourceTaskCode 来源任务编号（派生字段，形如 T1.1.1）；来源为指定项目成员时缺省，与 sourceTaskId 同缺省
+	SourceTaskCode *string `json:"sourceTaskCode,omitempty"`
 
 	// SourceTaskId 来源任务（来源为指定项目成员时缺省，见
 	SourceTaskId   *int64  `json:"sourceTaskId,omitempty"`
@@ -875,6 +1165,21 @@ type DeliverableEdge struct {
 	TargetTaskName        *string `json:"targetTaskName,omitempty"`
 }
 
+// DeliverableEdgeRef 交付物承接的关系边引用（词汇表「交付物边」）：本交付物是这条边的来源内容
+type DeliverableEdgeRef struct {
+	EdgeId int64 `json:"edgeId"`
+
+	// EdgeType 交付物边类型（PRD §4.3；词汇表「交付物边」）
+	EdgeType EdgeType `json:"edgeType"`
+
+	// EdgeTypeLabel 交付物边类型显示文案（派生字段）
+	EdgeTypeLabel string `json:"edgeTypeLabel"`
+
+	// TargetTaskId 下游（接收）任务
+	TargetTaskId   int64  `json:"targetTaskId"`
+	TargetTaskName string `json:"targetTaskName"`
+}
+
 // DeliverableFile 交付物内容（词汇表「交付物」；当前已生效或候选审核中）
 type DeliverableFile struct {
 	// EffectiveAt 当前内容的生效时间（终审通过时刻）
@@ -882,9 +1187,11 @@ type DeliverableFile struct {
 	FileName    string     `json:"fileName"`
 
 	// FileSize 字节数
-	FileSize   *int64               `json:"fileSize,omitempty"`
-	FileType   *string              `json:"fileType,omitempty"`
-	Id         int64                `json:"id"`
+	FileSize *int64  `json:"fileSize,omitempty"`
+	FileType *string `json:"fileType,omitempty"`
+	Id       int64   `json:"id"`
+
+	// State uploading 表示已建记录但文件尚未确认写入对象存储，未确认前不参与就绪判定
 	State      DeliverableFileState `json:"state"`
 	UploadedAt *time.Time           `json:"uploadedAt,omitempty"`
 
@@ -892,7 +1199,7 @@ type DeliverableFile struct {
 	UploadedByName *string `json:"uploadedByName,omitempty"`
 }
 
-// DeliverableFileState defines model for DeliverableFile.State.
+// DeliverableFileState uploading 表示已建记录但文件尚未确认写入对象存储，未确认前不参与就绪判定
 type DeliverableFileState string
 
 // Discussion 任务讨论意见（词汇表「任务讨论」）；提交后不可编辑或删除
@@ -914,6 +1221,19 @@ type DownloadUrlResponse struct {
 	Url string `json:"url"`
 }
 
+// EdgeCurrentFile 关系列表「当前交付物」列的来源任务当前内容摘要（裁决 J1，#142）
+type EdgeCurrentFile struct {
+	// FileId 已生效当前内容文件（#149 边详情预览／下载入口；经 /files/{fileId}/download-url 取地址）
+	FileId   int64  `json:"fileId"`
+	FileName string `json:"fileName"`
+
+	// FileSize 文件大小（字节）
+	FileSize int64 `json:"fileSize"`
+
+	// FileTypeLabel 文件类型显示文案（派生字段）
+	FileTypeLabel string `json:"fileTypeLabel"`
+}
+
 // EdgeType 交付物边类型（PRD §4.3；词汇表「交付物边」）
 type EdgeType string
 
@@ -932,7 +1252,10 @@ type FieldChange struct {
 	CanAbandon *bool `json:"canAbandon,omitempty"`
 
 	// CanDecide 当前用户能否处理本变更单（派生字段；仅所属 KR 负责人且待审批）
-	CanDecide     *bool             `json:"canDecide,omitempty"`
+	CanDecide *bool `json:"canDecide,omitempty"`
+
+	// ChangeType 变更类型（PRD §5.2.B）：关键字段修改（标题／说明／量化标准／负责人／截止时间）、 结构变更（输入、输入源、输出、接收方）或任务取消申请，三者复用同一张变更单
+	ChangeType    FieldChangeType   `json:"changeType"`
 	Changes       []FieldChangeDiff `json:"changes"`
 	DecidedAt     *time.Time        `json:"decidedAt,omitempty"`
 	DecidedByName *string           `json:"decidedByName,omitempty"`
@@ -981,6 +1304,9 @@ type FieldChangeDiff struct {
 // FieldChangeState defines model for FieldChangeState.
 type FieldChangeState string
 
+// FieldChangeType 变更类型（PRD §5.2.B）：关键字段修改（标题／说明／量化标准／负责人／截止时间）、 结构变更（输入、输入源、输出、接收方）或任务取消申请，三者复用同一张变更单
+type FieldChangeType string
+
 // Health defines model for Health.
 type Health struct {
 	Status HealthStatus `json:"status"`
@@ -988,6 +1314,14 @@ type Health struct {
 
 // HealthStatus defines model for Health.Status.
 type HealthStatus string
+
+// ImpactedTarget 一条受影响的 O／KR（系统推导，协作关系 PRD §8.1）
+type ImpactedTarget struct {
+	KeyResultId    int64  `json:"keyResultId"`
+	KrDescription  string `json:"krDescription"`
+	ObjectiveId    int64  `json:"objectiveId"`
+	ObjectiveTitle string `json:"objectiveTitle"`
+}
 
 // ImportItem 二选一：title 新建 O，或 objectiveId 挂到已有 O
 type ImportItem struct {
@@ -1007,9 +1341,42 @@ type ImportKrItem struct {
 	Tasks       *[]ImportTaskItem   `json:"tasks,omitempty"`
 }
 
+// ImportRecord 一次表格导入的业务事实（词汇表「导入记录」；§7.9、AC-68）。与通用操作审计并列而非重复： 审计不含文件名与影响计数，也不记失败的那一次
+type ImportRecord struct {
+	// FailureSummary 失败摘要；成功时为空
+	FailureSummary *string   `json:"failureSummary,omitempty"`
+	Id             int64     `json:"id"`
+	ImportedAt     time.Time `json:"importedAt"`
+
+	// KeyResultCount 本次真实新建的 KR 数
+	KeyResultCount int `json:"keyResultCount"`
+
+	// ObjectiveCount 本次真实新建的 O 数
+	ObjectiveCount int `json:"objectiveCount"`
+
+	// OperatorName 操作人姓名（派生字段）
+	OperatorName string `json:"operatorName"`
+
+	// Result 导入结果；失败绝不写成功
+	Result ImportRecordResult `json:"result"`
+
+	// ResultLabel 结果显示文案（派生字段）
+	ResultLabel    string  `json:"resultLabel"`
+	SourceFileName *string `json:"sourceFileName,omitempty"`
+
+	// TaskCount 本次真实新建的任务数
+	TaskCount int `json:"taskCount"`
+}
+
+// ImportRecordResult 导入结果；失败绝不写成功
+type ImportRecordResult string
+
 // ImportRequest 表格导入（AC-02）：字段映射与人员匹配在前端完成，此处提交结构化结果；整批一个事务
 type ImportRequest struct {
 	Items []ImportItem `json:"items"`
+
+	// SourceFileName 源文件名（§7.9 导入记录留存用；AC-68）
+	SourceFileName *string `json:"sourceFileName,omitempty"`
 }
 
 // ImportResult defines model for ImportResult.
@@ -1020,6 +1387,13 @@ type ImportResult struct {
 	Tasks []Task `json:"tasks"`
 }
 
+// ImportTaskGroup defines model for ImportTaskGroup.
+type ImportTaskGroup struct {
+	// KeyResultId 所属 KR；前端按 KR 编号定位后传 id，编号不存在的行不会到这里
+	KeyResultId int64            `json:"keyResultId"`
+	Tasks       []ImportTaskItem `json:"tasks"`
+}
+
 // ImportTaskItem defines model for ImportTaskItem.
 type ImportTaskItem struct {
 	EndDate             openapi_types.Date `json:"endDate"`
@@ -1027,6 +1401,20 @@ type ImportTaskItem struct {
 	Name                string             `json:"name"`
 	OwnerId             int64              `json:"ownerId"`
 	StartDate           openapi_types.Date `json:"startDate"`
+}
+
+// ImportTasksRequest 任务批量导入（AC-02b）：按所属 KR 分组提交，整批一个事务
+type ImportTasksRequest struct {
+	Items []ImportTaskGroup `json:"items"`
+
+	// SourceFileName 源文件名，随导入记录留存（AC-68）
+	SourceFileName *string `json:"sourceFileName,omitempty"`
+}
+
+// ImportTasksResult defines model for ImportTasksResult.
+type ImportTasksResult struct {
+	// Tasks 本次生成的任务草稿（按 KR 批量提交入池，AC-25）
+	Tasks []Task `json:"tasks"`
 }
 
 // InputRequest 指定项目成员的输入请求（附着在成员 → 目标任务的交付物边上）
@@ -1054,15 +1442,24 @@ type InputRequest struct {
 	ProviderId   int64   `json:"providerId"`
 	ProviderName string  `json:"providerName"`
 
-	// State 输入请求状态（词汇表「输入请求」；PRD §5.5）
+	// State 输入请求状态（词汇表「输入请求」；PRD §5.5）。uploading：已登记待上传，文件确认写入后才转 provided
 	State InputRequestState `json:"state"`
 }
 
-// InputRequestState 输入请求状态（词汇表「输入请求」；PRD §5.5）
+// InputRequestState 输入请求状态（词汇表「输入请求」；PRD §5.5）。uploading：已登记待上传，文件确认写入后才转 provided
 type InputRequestState string
 
 // KeyResult defines model for KeyResult.
 type KeyResult struct {
+	// CanDelete 当前用户能否删除本 KR（派生字段；仅项目管理员且 KR 下无任务，AC-65）
+	CanDelete *bool `json:"canDelete,omitempty"`
+
+	// CanEdit 当前用户能否编辑本 KR（派生字段；项目管理员或本 KR 负责人，AC-65）
+	CanEdit *bool `json:"canEdit,omitempty"`
+
+	// Code KR 展示编号，形如 KR1.1（AC-64；创建时分配并持久保存）
+	Code string `json:"code"`
+
 	// Description KR 描述
 	Description string `json:"description"`
 
@@ -1071,8 +1468,11 @@ type KeyResult struct {
 	Id      int64               `json:"id"`
 
 	// Metric 量化指标，选填
-	Metric      *string `json:"metric,omitempty"`
-	ObjectiveId int64   `json:"objectiveId"`
+	Metric *string `json:"metric,omitempty"`
+
+	// NotReadyCount KR 下未关闭任务作为接收方的未就绪交付物边数（派生字段；#150 风险队列未就绪摘要，模块 PRD §5.2。参考型输入一并计入；已完成／已取消的接收方不计；为 0 时不返回，CR-22）
+	NotReadyCount *int  `json:"notReadyCount,omitempty"`
+	ObjectiveId   int64 `json:"objectiveId"`
 
 	// OpenBlockerCount KR 下任务的派生卡点数量（派生字段；图谱 KR 节点展示，AC-08）
 	OpenBlockerCount *int `json:"openBlockerCount,omitempty"`
@@ -1083,18 +1483,33 @@ type KeyResult struct {
 	// OwnerName KR 负责人姓名（派生字段）
 	OwnerName *string `json:"ownerName,omitempty"`
 
-	// ProgressSummary KR 层进度数据覆盖度（词汇表「进度数据覆盖度」）；只统计已入池且未取消的任务，平均值任务等权
+	// ProgressSummary KR 层进度汇总与数据覆盖度（词汇表「进度数据覆盖度」；AC-63）：统计已入池且未取消的任务， 已取消整体剔除；平均值任务等权、未填按 0 计入、已完成按 100
 	ProgressSummary *ProgressSummary `json:"progressSummary,omitempty"`
 
-	// RiskLevel 风险等级（正常／预警／高风险），见词汇表「风险等级」；不由任务生命周期状态自动推导
+	// RiskLevel 风险等级（正常／预警／高风险），见词汇表「风险等级」；读时派生值，不落库、无写入路径（KR 取「下级任务未解除卡点最高等级、超期、临期」的最大值，PRD §5.7）
 	RiskLevel RiskLevel `json:"riskLevel"`
 
-	// RiskNote 预警／高风险的一行原因（派生字段；来自 KR 下任务的开放卡点，AC-05）
+	// RiskLevelLabel 风险等级显示文案（派生字段；与 statusLabel／kindLabel 同惯例，前端不按枚举拼文案）
+	RiskLevelLabel string `json:"riskLevelLabel"`
+
+	// RiskNote 预警／高风险的一行原因（派生字段；与 riskLevel 同源，来自抬高等级的那条卡点或临期／超期事实。正常态不返回，AC-05）
 	RiskNote  *string `json:"riskNote,omitempty"`
 	SortOrder int     `json:"sortOrder"`
 
 	// StartDate 周期开始日期
 	StartDate *openapi_types.Date `json:"startDate,omitempty"`
+
+	// TaskCount KR 下任务数量（派生字段；OKR 表「任务」列，含已完成与已取消，AC-65）
+	TaskCount *int `json:"taskCount,omitempty"`
+
+	// TopBlocker KR 下风险最高的一条卡点（派生字段；#122 风险队列按 KR 聚合的副行）。挑选规则在域层： 等级高者优先，同级按等待更久（Since 更早）者优先。KR 下无卡点时不返回
+	TopBlocker *TopBlocker `json:"topBlocker,omitempty"`
+}
+
+// KrHandoverPreview 更换 KR 负责人前的确认信息（AC-61）：该 KR 下当前有多少未决审批单
+type KrHandoverPreview struct {
+	// PendingApprovals 待入池审批、待处理变更单与待终审完成申请的合计条数
+	PendingApprovals int `json:"pendingApprovals"`
 }
 
 // LoginRequest defines model for LoginRequest.
@@ -1103,16 +1518,19 @@ type LoginRequest struct {
 	Username string `json:"username"`
 }
 
-// MemberRole 成员角色（项目管理员／普通成员／只读成员），见词汇表「成员角色」
+// MemberRole 成员角色（项目管理员／项目成员／访客），见词汇表「成员角色」
 type MemberRole string
 
-// MyWork 我的工作五分组（AC-16；KR 终审归入待我审批）
+// MyWork 我的工作五分组（AC-16；KR 终审归入待我审批）与身份卡
 type MyWork struct {
 	Approvals []WorkItem `json:"approvals"`
 	Blockers  []WorkItem `json:"blockers"`
-	Pending   []WorkItem `json:"pending"`
-	Receipts  []WorkItem `json:"receipts"`
-	Waiting   []WorkItem `json:"waiting"`
+
+	// Identity 我的工作身份卡（模块 PRD §3.1）：当前用户在本项目的身份与仍承担的职责
+	Identity WorkIdentity `json:"identity"`
+	Pending  []WorkItem   `json:"pending"`
+	Receipts []WorkItem   `json:"receipts"`
+	Waiting  []WorkItem   `json:"waiting"`
 }
 
 // Necessity 输入必要性（必要／参考）
@@ -1133,27 +1551,33 @@ type Notification struct {
 
 // Objective defines model for Objective.
 type Objective struct {
+	// CanDelete 当前用户能否删除本 O（派生字段；仅项目管理员且 O 下无 KR，AC-65）
+	CanDelete *bool `json:"canDelete,omitempty"`
+
+	// CanEdit 当前用户能否编辑本 O（派生字段；仅项目管理员，AC-65）
+	CanEdit *bool `json:"canEdit,omitempty"`
+
+	// Code O 展示编号，自然数形如 O1（AC-64；创建时分配并持久保存，删除同级对象后不重排）
+	Code string `json:"code"`
+
 	// Description O 说明，选填
 	Description *string     `json:"description,omitempty"`
 	Id          int64       `json:"id"`
 	KeyResults  []KeyResult `json:"keyResults"`
 	ProjectId   int64       `json:"projectId"`
-	SortOrder   int         `json:"sortOrder"`
+
+	// RiskLevel 风险等级（正常／预警／高风险），见词汇表「风险等级」；读时派生值，不落库、无写入路径（KR 取「下级任务未解除卡点最高等级、超期、临期」的最大值，PRD §5.7）
+	RiskLevel RiskLevel `json:"riskLevel"`
+
+	// RiskLevelLabel 风险等级显示文案（派生字段）
+	RiskLevelLabel string `json:"riskLevelLabel"`
+
+	// RiskNote 风险原因一行（派生字段，与等级同源；正常时不返回）
+	RiskNote  *string `json:"riskNote,omitempty"`
+	SortOrder int     `json:"sortOrder"`
 
 	// Title O 标题
 	Title string `json:"title"`
-}
-
-// PackageItem 成果包目录项：引用交付物项并解析为当前内容（不复制旧文件，AC-18）
-type PackageItem struct {
-	DeliverableId   int64      `json:"deliverableId"`
-	DeliverableName string     `json:"deliverableName"`
-	EffectiveAt     *time.Time `json:"effectiveAt,omitempty"`
-
-	// FileId 当前内容（被覆盖后自动解析为新内容；无当前内容时缺省）
-	FileId   *int64  `json:"fileId,omitempty"`
-	FileName *string `json:"fileName,omitempty"`
-	TaskName string  `json:"taskName"`
 }
 
 // PoolReview 任务最近一次入池审批单
@@ -1192,12 +1616,16 @@ type PoolReviewDecisionRequestDecision string
 // PoolReviewStatus 入池审批单状态（词汇表「入池审批单」）；未提交即无审批单
 type PoolReviewStatus string
 
-// ProgressSummary KR 层进度数据覆盖度（词汇表「进度数据覆盖度」）；只统计已入池且未取消的任务，平均值任务等权
+// ProgressSummary KR 层进度汇总与数据覆盖度（词汇表「进度数据覆盖度」；AC-63）：统计已入池且未取消的任务， 已取消整体剔除；平均值任务等权、未填按 0 计入、已完成按 100
 type ProgressSummary struct {
-	// AverageProgress 已填写任务的等权平均（四舍五入）；无已填任务时不返回
+	// AverageProgress 任务等权平均（四舍五入）；未填按 0、已完成按 100 计入。没有参与汇总的任务时不返回
 	AverageProgress *int `json:"averageProgress,omitempty"`
-	FilledTasks     int  `json:"filledTasks"`
-	TotalTasks      int  `json:"totalTasks"`
+
+	// FilledTasks 其中由负责人真实填写进度的任务数（已完成计入），说明平均值里有多少来自真实填写
+	FilledTasks int `json:"filledTasks"`
+
+	// TotalTasks 参与汇总的任务数（已入池且未取消），即平均值的分母
+	TotalTasks int `json:"totalTasks"`
 }
 
 // Project defines model for Project.
@@ -1209,7 +1637,12 @@ type Project struct {
 	CanManageMembers bool      `json:"canManageMembers"`
 	CreatedAt        time.Time `json:"createdAt"`
 	Id               int64     `json:"id"`
-	Name             string    `json:"name"`
+
+	// ImplicitViewer 当前用户是靠项目公开才看得见本项目的隐式访客（派生字段，词汇表「隐式访客」）。
+	// true 时此人不是项目成员：只读全部、写动作一律 403、不发讨论、不进人员选择器。
+	// 项目列表按它区分「我参与的」与「公开可见的」，前端不自己算。
+	ImplicitViewer bool   `json:"implicitViewer"`
+	Name           string `json:"name"`
 
 	// OwnerId 项目负责人（单人；与项目管理员为独立角色）
 	OwnerId int64 `json:"ownerId"`
@@ -1224,20 +1657,54 @@ type Project struct {
 
 	// Status 项目状态（未开始／进行中／已完成／已归档），与自由文本“阶段”正交
 	Status ProjectStatus `json:"status"`
+
+	// StatusLabel 项目状态显示文案（派生字段；前端不按枚举拼文案）
+	StatusLabel *string `json:"statusLabel,omitempty"`
+
+	// Visibility 项目可见性（词汇表「项目可见性」；裁决 D1）：
+	// private ＝ 只有项目成员与项目负责人可读；public ＝ 系统内任何登录用户获得隐式访客身份（只读）。
+	// 仅项目负责人与项目管理员可改。
+	Visibility ProjectVisibility `json:"visibility"`
+
+	// VisibilityLabel 项目可见性显示文案（派生字段；前端不按枚举拼文案）
+	VisibilityLabel string `json:"visibilityLabel"`
 }
 
 // ProjectMember defines model for ProjectMember.
 type ProjectMember struct {
 	DisplayName string `json:"displayName"`
 
-	// Role 成员角色（项目管理员／普通成员／只读成员），见词汇表「成员角色」
-	Role     MemberRole `json:"role"`
-	UserId   int64      `json:"userId"`
-	Username string     `json:"username"`
+	// Role 成员角色（项目管理员／项目成员／访客），见词汇表「成员角色」
+	Role MemberRole `json:"role"`
+
+	// RoleLabel 成员角色显示文案（派生字段；前端不按枚举拼文案）
+	RoleLabel *string `json:"roleLabel,omitempty"`
+	UserId    int64   `json:"userId"`
+	Username  string  `json:"username"`
+}
+
+// ProjectSettings 项目规则设置（主 PRD §7.9；AC-60）。按项目生效，均有默认值，仅项目管理员可改。
+type ProjectSettings struct {
+	// ApprovalTimeoutDays 审批超时阈值 N（天），三道审批共用；审批件在当前环节等待达到 N×24 小时即超时。默认 3
+	ApprovalTimeoutDays int `json:"approvalTimeoutDays"`
+
+	// CanEdit 当前用户能否修改本项目的规则设置（派生字段，仅项目管理员为 true）
+	CanEdit bool `json:"canEdit"`
+
+	// DueSoonDays 临期阈值（天），指距任务截止日期的天数，用于风险等级的预警判定。默认 3
+	DueSoonDays int `json:"dueSoonDays"`
+
+	// RemindDailyLimit 一键提醒频次上限，同一发起人对同一被提醒人的同一任务每天可提醒次数。默认 1
+	RemindDailyLimit int `json:"remindDailyLimit"`
 }
 
 // ProjectStatus 项目状态（未开始／进行中／已完成／已归档），与自由文本“阶段”正交
 type ProjectStatus string
+
+// ProjectVisibility 项目可见性（词汇表「项目可见性」；裁决 D1）：
+// private ＝ 只有项目成员与项目负责人可读；public ＝ 系统内任何登录用户获得隐式访客身份（只读）。
+// 仅项目负责人与项目管理员可改。
+type ProjectVisibility string
 
 // ProvideInputRequest defines model for ProvideInputRequest.
 type ProvideInputRequest struct {
@@ -1300,7 +1767,7 @@ type ReportBlocker struct {
 	// KindLabel 四类卡点的中文类型名（派生字段）
 	KindLabel string `json:"kindLabel"`
 
-	// Level 风险等级（正常／预警／高风险），见词汇表「风险等级」；不由任务生命周期状态自动推导
+	// Level 风险等级（正常／预警／高风险），见词汇表「风险等级」；读时派生值，不落库、无写入路径（KR 取「下级任务未解除卡点最高等级、超期、临期」的最大值，PRD §5.7）
 	Level    RiskLevel  `json:"level"`
 	Missing  string     `json:"missing"`
 	Reason   string     `json:"reason"`
@@ -1326,7 +1793,7 @@ type ReportKrProgress struct {
 	FilledTasks      int    `json:"filledTasks"`
 	KeyResultId      int64  `json:"keyResultId"`
 
-	// RiskLevel 风险等级（正常／预警／高风险），见词汇表「风险等级」；不由任务生命周期状态自动推导
+	// RiskLevel 风险等级（正常／预警／高风险），见词汇表「风险等级」；读时派生值，不落库、无写入路径（KR 取「下级任务未解除卡点最高等级、超期、临期」的最大值，PRD §5.7）
 	RiskLevel  RiskLevel `json:"riskLevel"`
 	TotalTasks int       `json:"totalTasks"`
 }
@@ -1351,14 +1818,23 @@ type ReportNextStep struct {
 // ReportRange 报告时间范围（PRD §7.8）
 type ReportRange string
 
+// ResultUpdateState 成果更新进程（词汇表「成果更新」；派生自任务事实，接口不接受直接写入）： none＝无；open＝已发起、候选内容尚未随完成申请提交；reviewing＝已提交，或签或 KR 终审在审。 整个过程中任务生命周期状态保持 completed
+type ResultUpdateState string
+
 // ReviewerInfo defines model for ReviewerInfo.
 type ReviewerInfo struct {
 	DisplayName string `json:"displayName"`
 	UserId      int64  `json:"userId"`
 }
 
-// RiskLevel 风险等级（正常／预警／高风险），见词汇表「风险等级」；不由任务生命周期状态自动推导
+// RiskLevel 风险等级（正常／预警／高风险），见词汇表「风险等级」；读时派生值，不落库、无写入路径（KR 取「下级任务未解除卡点最高等级、超期、临期」的最大值，PRD §5.7）
 type RiskLevel string
+
+// SetParticipantsRequest defines model for SetParticipantsRequest.
+type SetParticipantsRequest struct {
+	// UserIds 参与人名单（可为空表示清空）；须为项目成员，且不含任务负责人本人
+	UserIds []int64 `json:"userIds"`
+}
 
 // SetReceiversRequest defines model for SetReceiversRequest.
 type SetReceiversRequest struct {
@@ -1371,9 +1847,25 @@ type SetReceiversRequest struct {
 
 // SetReviewersRequest defines model for SetReviewersRequest.
 type SetReviewersRequest struct {
-	// UserIds 中间审核人（或签组；可为空表示不配置）；须为非只读项目成员
+	// UserIds 成果审核人（或签组；可为空表示不配置）；须为非只读项目成员
 	UserIds []int64 `json:"userIds"`
 }
+
+// SkippedMember defines model for SkippedMember.
+type SkippedMember struct {
+	// DisplayName 用户姓名；用户不存在时缺省
+	DisplayName *string `json:"displayName,omitempty"`
+
+	// Reason 跳过原因枚举
+	Reason SkippedMemberReason `json:"reason"`
+
+	// ReasonLabel 跳过原因显示文案（派生字段；前端不按枚举拼文案）
+	ReasonLabel string `json:"reasonLabel"`
+	UserId      int64  `json:"userId"`
+}
+
+// SkippedMemberReason 跳过原因枚举
+type SkippedMemberReason string
 
 // SubmitCompletionRequest defines model for SubmitCompletionRequest.
 type SubmitCompletionRequest struct {
@@ -1398,7 +1890,7 @@ type SubmitFieldChangeRequest struct {
 
 // Task defines model for Task.
 type Task struct {
-	// CanCancel 当前用户能否取消本任务（派生字段；负责人／创建人／可编辑项目者，非终态）
+	// CanCancel 当前用户能否发起取消申请（派生字段；任务负责人／项目管理员，非终态且任务上没有未决审批单，AC-57）
 	CanCancel bool `json:"canCancel"`
 
 	// CanConfirmReceipt 当前用户是否有本任务的待接收项待确认（派生字段；MW-09）
@@ -1407,13 +1899,19 @@ type Task struct {
 	// CanDecidePoolReview 当前用户能否处理本任务的入池审批（派生字段；仅所属 KR 负责人）
 	CanDecidePoolReview bool `json:"canDecidePoolReview"`
 
+	// CanDiscuss 当前用户能否提交任务讨论（派生字段；全体项目内成员含访客，公开项目的隐式访客不可，见词汇表「隐式访客」）
+	CanDiscuss *bool `json:"canDiscuss,omitempty"`
+
 	// CanManageDeliverables 当前用户能否配置任务交付物项（派生字段；负责人／创建人／可编辑项目者，非终态）
 	CanManageDeliverables *bool `json:"canManageDeliverables,omitempty"`
+
+	// CanManageParticipants 当前用户能否配置参与人（派生字段；负责人／创建人／可编辑项目者，终态不可）
+	CanManageParticipants *bool `json:"canManageParticipants,omitempty"`
 
 	// CanManageReceivers 当前用户能否配置接收方（派生字段；与输入／输出配置同口径：负责人／创建人／可编辑项目者，终态不可）
 	CanManageReceivers *bool `json:"canManageReceivers,omitempty"`
 
-	// CanManageReviewers 当前用户能否调整中间审核人配置（派生字段；负责人／创建人／可编辑项目者，审核中与终态不可）
+	// CanManageReviewers 当前用户能否调整成果审核人配置（派生字段；负责人／创建人／可编辑项目者，审核中与终态不可）
 	CanManageReviewers *bool `json:"canManageReviewers,omitempty"`
 
 	// CanProposeFieldChange 当前用户能否编辑任务／提交关键字段修改（派生字段）
@@ -1422,13 +1920,16 @@ type Task struct {
 	// CanStart 当前用户能否开始执行本任务（派生字段；负责人／可编辑项目者，未开始或等待输入时）
 	CanStart bool `json:"canStart"`
 
+	// CanStartResultUpdate 当前用户能否对本任务发起成果更新（派生字段；AC-66：任务负责人／项目管理员， 任务已完成、无在途成果更新且没有其他未决审批单）
+	CanStartResultUpdate *bool `json:"canStartResultUpdate,omitempty"`
+
 	// CanSubmitCompletion 当前用户能否提交完成申请（派生字段；负责人，进行中且有候选内容）
 	CanSubmitCompletion *bool `json:"canSubmitCompletion,omitempty"`
 
 	// CanSubmitPoolReview 当前用户能否提交本任务入池（派生字段；草稿且为创建人／负责人／可编辑项目者）
 	CanSubmitPoolReview bool `json:"canSubmitPoolReview"`
 
-	// CanUpdateProgress 当前用户能否更新本任务进度（派生字段；负责人／可编辑项目者，执行中状态）
+	// CanUpdateProgress 当前用户能否更新本任务进度（派生字段；负责人／可编辑项目者，仅进行中；完成后锁定为 100，AC-63）
 	CanUpdateProgress bool `json:"canUpdateProgress"`
 
 	// CanUploadCandidate 当前用户能否登记候选交付物内容（派生字段；负责人，执行类状态）
@@ -1436,6 +1937,9 @@ type Task struct {
 
 	// CancelReason 取消原因（已取消任务保留，PRD §5.1）
 	CancelReason *string `json:"cancelReason,omitempty"`
+
+	// Code 任务展示编号，形如 T1.1.1（AC-64；创建时分配并持久保存，删除同级任务后不重排）
+	Code string `json:"code"`
 
 	// CompletionCriteria 完成标准，选填
 	CompletionCriteria *string `json:"completionCriteria,omitempty"`
@@ -1452,9 +1956,12 @@ type Task struct {
 
 	// FieldChange 关键字段变更单（词汇表）；rejected 且 resolved=false 即「退回待处理事项」
 	FieldChange *FieldChange `json:"fieldChange,omitempty"`
-	Id          int64        `json:"id"`
-	KeyResultId int64        `json:"keyResultId"`
-	Name        string       `json:"name"`
+
+	// FieldEditMode 就地编辑的保存路由（#138 裁决 E1；派生自 FieldChangeRoute，前端不复算规则）： direct=草稿直接生效；exempt=KR 负责人本人免审即时生效；approval=生成变更单进入审批 （保存时须填修改原因）。不可编辑时不返回（以 canProposeFieldChange 为准）
+	FieldEditMode *TaskFieldEditMode `json:"fieldEditMode,omitempty"`
+	Id            int64              `json:"id"`
+	KeyResultId   int64              `json:"keyResultId"`
+	Name          string             `json:"name"`
 
 	// OpenBlockerCount 当前派生卡点数量（派生字段）
 	OpenBlockerCount *int `json:"openBlockerCount,omitempty"`
@@ -1465,22 +1972,31 @@ type Task struct {
 	// OwnerName 任务负责人姓名（派生字段）
 	OwnerName string `json:"ownerName"`
 
+	// Participants 参与人名单（词汇表「参与人」；PRD §9.2 按需字段）：任务上除负责人以外的协作者， 只作展示与检索——不产生待办、不进审批链、不影响权限、不参与我的工作归组与排序。 未配置时为空数组
+	Participants *[]ReviewerInfo `json:"participants,omitempty"`
+
 	// PendingActorId 待行动人（词汇表「待行动人」；派生字段，无待行动人时不返回）
 	PendingActorId   *int64  `json:"pendingActorId,omitempty"`
 	PendingActorName *string `json:"pendingActorName,omitempty"`
 
+	// PendingReviewCount 本任务上未决审批单条数（派生字段；入池、关键字段变更／取消、完成申请合计，前端不再自行相加）
+	PendingReviewCount *int `json:"pendingReviewCount,omitempty"`
+
 	// PoolReview 任务最近一次入池审批单
 	PoolReview *PoolReview `json:"poolReview,omitempty"`
 
-	// Progress 可选进度百分比（词汇表「任务进度」）；未填写时不返回，前端只展示状态
+	// Progress 可选进度百分比（词汇表「任务进度」）；已完成任务一律 100 且不可编辑，未填写时不返回、前端只展示状态（AC-63）
 	Progress *int `json:"progress,omitempty"`
 
 	// ReceiverScope 接收方范围（词汇表「接收方」；模块 PRD §8.6）：不配置、指定成员或所有项目成员
 	ReceiverScope ReceiverScope `json:"receiverScope"`
 
 	// Receivers 指定成员为接收方时的名单（receiverScope=members；其余取值为空数组）
-	Receivers *[]ReviewerInfo    `json:"receivers,omitempty"`
-	StartDate openapi_types.Date `json:"startDate"`
+	Receivers *[]ReviewerInfo `json:"receivers,omitempty"`
+
+	// ResultUpdate 成果更新进程（词汇表「成果更新」；派生自任务事实，接口不接受直接写入）： none＝无；open＝已发起、候选内容尚未随完成申请提交；reviewing＝已提交，或签或 KR 终审在审。 整个过程中任务生命周期状态保持 completed
+	ResultUpdate *ResultUpdateState `json:"resultUpdate,omitempty"`
+	StartDate    openapi_types.Date `json:"startDate"`
 
 	// Status 任务生命周期状态（词汇表「任务生命周期状态」）；页面主状态汇总，审批原始状态在审批单中
 	Status TaskStatus `json:"status"`
@@ -1491,6 +2007,9 @@ type Task struct {
 	// UpdatedAt 任务最后更新时间（任务详情页头展示，AC-50）
 	UpdatedAt time.Time `json:"updatedAt"`
 }
+
+// TaskFieldEditMode 就地编辑的保存路由（#138 裁决 E1；派生自 FieldChangeRoute，前端不复算规则）： direct=草稿直接生效；exempt=KR 负责人本人免审即时生效；approval=生成变更单进入审批 （保存时须填修改原因）。不可编辑时不返回（以 canProposeFieldChange 为准）
+type TaskFieldEditMode string
 
 // TaskActivity 任务动态的一条事实（词汇表「任务动态」）：已经发生、不可撤销，只记录不派生，不可编辑或删除
 type TaskActivity struct {
@@ -1511,6 +2030,12 @@ type TaskActivity struct {
 
 // TaskActivityKind 任务动态类型（ADR 0002）；blocker_* 为系统派生，无行动人
 type TaskActivityKind string
+
+// TaskCancellationRequest defines model for TaskCancellationRequest.
+type TaskCancellationRequest struct {
+	// Reason 取消原因，必填（AC-57）
+	Reason string `json:"reason"`
+}
 
 // TaskDetail 任务详情抽屉数据（AC-31／AC-34）：任务事实、O／KR 归属与全部审核记录
 type TaskDetail struct {
@@ -1535,6 +2060,12 @@ type TaskDetail struct {
 	// FieldChanges 关键字段变更单记录，最新在前（词汇表「关键字段变更单」）
 	FieldChanges []FieldChange `json:"fieldChanges"`
 
+	// Files 任务下的过程文件与重要外部材料（§7.7）：不进入完成审批、不作为下游正式输入， 可按需选进成果包；未配置时为空数组
+	Files *[]TaskFile `json:"files,omitempty"`
+
+	// ImpactedTargets 受影响 O／KR（系统推导；协作关系 PRD §8.1）：从本任务出发沿下游硬前置交付物边传递闭包， 收集途经任务所属的 KR 及其 O。反馈、参考输入与普通双向协作不计入；不含本任务所属 KR
+	ImpactedTargets []ImpactedTarget `json:"impactedTargets"`
+
 	// Inputs 指向本任务的交付物边（必要输入与参考输入，AC-07／28）
 	Inputs []DeliverableEdge `json:"inputs"`
 
@@ -1553,13 +2084,38 @@ type TaskDetail struct {
 	// Receipts 待接收项与接收记录（词汇表「接收记录」；终审通过后按当时接收方名单逐人生成，MW-09）
 	Receipts []TaskReceipt `json:"receipts"`
 
-	// Reviewers 任务级中间审核人配置（或签组；提交完成申请时快照进申请）
+	// Reviewers 任务级成果审核人配置（或签组；提交完成申请时快照进申请）
 	Reviewers []ReviewerInfo `json:"reviewers"`
 	Task      Task           `json:"task"`
 
 	// Upstream 协作关系摘要——直接上游分组（词汇表；派生字段，无关系时为空数组，前端按空组隐藏）
 	Upstream []TaskRelation `json:"upstream"`
 }
+
+// TaskFile 任务下的过程文件或重要外部材料（§7.7；与交付物同走两阶段提交，未确认写入的记录不返回）
+type TaskFile struct {
+	FileName string  `json:"fileName"`
+	FileSize *int64  `json:"fileSize,omitempty"`
+	FileType *string `json:"fileType,omitempty"`
+	Id       int64   `json:"id"`
+
+	// Kind 任务文件类型（词汇表「过程文件」「重要外部材料」；§7.7 文件对象边界表）： process＝过程文件，任务执行过程中产生、不作为正式成果提交审核； external＝重要外部材料，项目外部提供、经内部协调人代为录入。 两者都不进入完成审批、不作为下游任务的正式输入（外部材料可作输入证据， 但不把输入置为就绪），可以按需选进成果包
+	Kind TaskFileKind `json:"kind"`
+
+	// KindLabel 类型显示文案（派生字段）
+	KindLabel string `json:"kindLabel"`
+
+	// Note 背景说明，选填
+	Note       *string   `json:"note,omitempty"`
+	TaskId     int64     `json:"taskId"`
+	UploadedAt time.Time `json:"uploadedAt"`
+
+	// UploadedByName 上传人姓名（派生字段）
+	UploadedByName *string `json:"uploadedByName,omitempty"`
+}
+
+// TaskFileKind 任务文件类型（词汇表「过程文件」「重要外部材料」；§7.7 文件对象边界表）： process＝过程文件，任务执行过程中产生、不作为正式成果提交审核； external＝重要外部材料，项目外部提供、经内部协调人代为录入。 两者都不进入完成审批、不作为下游任务的正式输入（外部材料可作输入证据， 但不把输入置为就绪），可以按需选进成果包
+type TaskFileKind string
 
 // TaskInvite defines model for TaskInvite.
 type TaskInvite struct {
@@ -1605,6 +2161,9 @@ type TaskRelation struct {
 	// EdgeType 交付物边类型（PRD §4.3；词汇表「交付物边」）
 	EdgeType EdgeType `json:"edgeType"`
 
+	// EdgeTypeLabel 关系类型显示文案（派生字段；前端不按枚举拼文案）
+	EdgeTypeLabel *string `json:"edgeTypeLabel,omitempty"`
+
 	// KrDescription 对方任务所属 KR 描述（派生字段）
 	KrDescription string `json:"krDescription"`
 
@@ -1625,9 +2184,48 @@ type TaskRelation struct {
 // TaskStatus 任务生命周期状态（词汇表「任务生命周期状态」）；页面主状态汇总，审批原始状态在审批单中
 type TaskStatus string
 
+// TopBlocker KR 下风险最高的一条卡点（派生字段；#122 风险队列按 KR 聚合的副行）。挑选规则在域层： 等级高者优先，同级按等待更久（Since 更早）者优先。KR 下无卡点时不返回
+type TopBlocker struct {
+	// Kind 四类派生卡点（词汇表「结构化卡点」；我的工作 PRD §8.7）
+	Kind BlockerKind `json:"kind"`
+
+	// KindLabel 卡点类型中文名（派生字段）
+	KindLabel string `json:"kindLabel"`
+
+	// Level 风险等级（正常／预警／高风险），见词汇表「风险等级」；读时派生值，不落库、无写入路径（KR 取「下级任务未解除卡点最高等级、超期、临期」的最大值，PRD §5.7）
+	Level RiskLevel `json:"level"`
+
+	// Summary 一行摘要（与卡点 reason 同源）
+	Summary string `json:"summary"`
+
+	// TaskCode 任务展示编号（如 T1.2.3）
+	TaskCode string `json:"taskCode"`
+	TaskId   int64  `json:"taskId"`
+}
+
+// UpdateKeyResultRequest 编辑 KR（AC-61、AC-65）：只传要改的字段；ownerId 不可置空
+type UpdateKeyResultRequest struct {
+	Description *string             `json:"description,omitempty"`
+	EndDate     *openapi_types.Date `json:"endDate,omitempty"`
+	Metric      *string             `json:"metric,omitempty"`
+
+	// OwnerId 新的 KR 负责人（非只读项目成员）；不可置空
+	OwnerId   *int64              `json:"ownerId,omitempty"`
+	StartDate *openapi_types.Date `json:"startDate,omitempty"`
+
+	// TransferPendingApprovals 更换负责人时是否把该 KR 下的未决审批单转交继任者（AC-61）。 默认转交并向继任者发站内通知；取消勾选则保留给原负责人处理
+	TransferPendingApprovals *bool `json:"transferPendingApprovals,omitempty"`
+}
+
+// UpdateObjectiveRequest 编辑 O（AC-65）：只传要改的字段
+type UpdateObjectiveRequest struct {
+	Description *string `json:"description,omitempty"`
+	Title       *string `json:"title,omitempty"`
+}
+
 // UpdateProjectMemberRoleRequest defines model for UpdateProjectMemberRoleRequest.
 type UpdateProjectMemberRoleRequest struct {
-	// Role 成员角色（项目管理员／普通成员／只读成员），见词汇表「成员角色」
+	// Role 成员角色（项目管理员／项目成员／访客），见词汇表「成员角色」
 	Role MemberRole `json:"role"`
 }
 
@@ -1641,6 +2239,18 @@ type UpdateProjectRequest struct {
 
 	// Status 项目状态（未开始／进行中／已完成／已归档），与自由文本“阶段”正交
 	Status ProjectStatus `json:"status"`
+
+	// Visibility 项目可见性（词汇表「项目可见性」；裁决 D1）：
+	// private ＝ 只有项目成员与项目负责人可读；public ＝ 系统内任何登录用户获得隐式访客身份（只读）。
+	// 仅项目负责人与项目管理员可改。
+	Visibility ProjectVisibility `json:"visibility"`
+}
+
+// UpdateProjectSettingsRequest defines model for UpdateProjectSettingsRequest.
+type UpdateProjectSettingsRequest struct {
+	ApprovalTimeoutDays int `json:"approvalTimeoutDays"`
+	DueSoonDays         int `json:"dueSoonDays"`
+	RemindDailyLimit    int `json:"remindDailyLimit"`
 }
 
 // UpdateTaskProgressRequest defines model for UpdateTaskProgressRequest.
@@ -1651,14 +2261,11 @@ type UpdateTaskProgressRequest struct {
 
 // UpdateTaskStatusRequest defines model for UpdateTaskStatusRequest.
 type UpdateTaskStatusRequest struct {
-	// Reason 取消原因；status 为 cancelled 时必填
-	Reason *string `json:"reason,omitempty"`
-
-	// Status 手工流转目标：开始执行（未开始／等待输入 → 进行中）或取消（非终态 → 已取消，需原因）
+	// Status 手工流转目标：开始执行（未开始／等待输入 → 进行中）；取消走 /cancellation（AC-57）
 	Status UpdateTaskStatusRequestStatus `json:"status"`
 }
 
-// UpdateTaskStatusRequestStatus 手工流转目标：开始执行（未开始／等待输入 → 进行中）或取消（非终态 → 已取消，需原因）
+// UpdateTaskStatusRequestStatus 手工流转目标：开始执行（未开始／等待输入 → 进行中）；取消走 /cancellation（AC-57）
 type UpdateTaskStatusRequestStatus string
 
 // UploadCandidateRequest defines model for UploadCandidateRequest.
@@ -1677,6 +2284,30 @@ type UploadCandidateResponse struct {
 	UploadUrl string `json:"uploadUrl"`
 }
 
+// UploadTaskFileRequest defines model for UploadTaskFileRequest.
+type UploadTaskFileRequest struct {
+	FileName string `json:"fileName"`
+
+	// FileSize 客户端自报大小，仅作提示；确认时以对象存储的真实大小为准
+	FileSize *int64  `json:"fileSize,omitempty"`
+	FileType *string `json:"fileType,omitempty"`
+
+	// Kind 任务文件类型（词汇表「过程文件」「重要外部材料」；§7.7 文件对象边界表）： process＝过程文件，任务执行过程中产生、不作为正式成果提交审核； external＝重要外部材料，项目外部提供、经内部协调人代为录入。 两者都不进入完成审批、不作为下游任务的正式输入（外部材料可作输入证据， 但不把输入置为就绪），可以按需选进成果包
+	Kind TaskFileKind `json:"kind"`
+
+	// Note 背景说明，选填
+	Note *string `json:"note,omitempty"`
+}
+
+// UploadTaskFileResponse defines model for UploadTaskFileResponse.
+type UploadTaskFileResponse struct {
+	// File 任务下的过程文件或重要外部材料（§7.7；与交付物同走两阶段提交，未确认写入的记录不返回）
+	File TaskFile `json:"file"`
+
+	// UploadUrl MinIO 预签名 PUT 地址，客户端直接上传文件内容
+	UploadUrl string `json:"uploadUrl"`
+}
+
 // UserSummary defines model for UserSummary.
 type UserSummary struct {
 	DisplayName string `json:"displayName"`
@@ -1684,12 +2315,31 @@ type UserSummary struct {
 	Username    string `json:"username"`
 }
 
+// WorkIdentity 我的工作身份卡（模块 PRD §3.1）：当前用户在本项目的身份与仍承担的职责
+type WorkIdentity struct {
+	DisplayName string `json:"displayName"`
+
+	// Responsibilities 当前承担的职责标签，顺序固定（派生字段；口径与移出成员的职责占位同源）
+	Responsibilities []string `json:"responsibilities"`
+
+	// ResponsibilitiesLabel 职责一行文案；一项不担时为「当前未承担行动职责」（派生字段）
+	ResponsibilitiesLabel string `json:"responsibilitiesLabel"`
+
+	// Role 成员角色（项目管理员／项目成员／访客），见词汇表「成员角色」
+	Role *MemberRole `json:"role,omitempty"`
+
+	// RoleLabel 身份显示文案（派生字段；非成员的项目负责人显示为「项目负责人」）
+	RoleLabel string `json:"roleLabel"`
+	UserId    int64  `json:"userId"`
+	Username  string `json:"username"`
+}
+
 // WorkItem 我的工作事项（词汇表「我的工作事项」）；卡片派生事实，动作在任务详情抽屉完成
 type WorkItem struct {
 	// ActionLabel 卡片文字按钮文案（我的工作 PRD §5.3、AC-55；派生字段）：本人要办的三组为「去处理」，等待他人与卡点为「查看详情」
 	ActionLabel string `json:"actionLabel"`
 
-	// CanRemind 卡片能否直接一键提醒当前待行动人（MW-13；派生字段）；按 refKey 指向的提醒目标寻址，不提醒本人、访客不可，冷却为同一人对同一任务每天 1 次
+	// CanRemind 卡片能否直接一键提醒当前待行动人（MW-13；派生字段）；按 refKey 指向的提醒目标寻址，不提醒本人、访客不可，提醒频次上限为同一人对同一任务每天 1 次
 	CanRemind bool `json:"canRemind"`
 
 	// DrawerTab 建议打开的任务详情 Tab（overview/audit/discussion）
@@ -1744,6 +2394,43 @@ type Unauthorized = Error
 // ValidationError defines model for ValidationError.
 type ValidationError = Error
 
+// ListNotificationsParams defines parameters for ListNotifications.
+type ListNotificationsParams struct {
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// BeforeId 只返回 id 小于该值的通知（翻到更早一页）
+	BeforeId *int64 `form:"beforeId,omitempty" json:"beforeId,omitempty"`
+}
+
+// GetArtifactsParams defines parameters for GetArtifacts.
+type GetArtifactsParams struct {
+	// From 只返回该日期（含）之后有内容的项：交付物比对内容状态时间（contentStateAt， 有当前内容取生效时刻、否则取候选提交时刻），过程文件与外部材料比对上传时间； 两者皆无时间的项在给了时间区间后不返回
+	From *openapi_types.Date `form:"from,omitempty" json:"from,omitempty"`
+
+	// To 只返回该日期（含）之前有内容的项；与 from 可单给
+	To *openapi_types.Date `form:"to,omitempty" json:"to,omitempty"`
+}
+
+// ListAuditLogsParams defines parameters for ListAuditLogs.
+type ListAuditLogsParams struct {
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListEdgesParams defines parameters for ListEdges.
+type ListEdgesParams struct {
+	// KrId 只返回两端任一端落在该 KR 下的边（服务端裁剪，P1）
+	KrId *int64 `form:"krId,omitempty" json:"krId,omitempty"`
+}
+
+// GetFileDownloadUrlParams defines parameters for GetFileDownloadUrl.
+type GetFileDownloadUrlParams struct {
+	// Disposition 内容处置（#124）：attachment（默认，下载）或 inline（浏览器内联预览）
+	Disposition *GetFileDownloadUrlParamsDisposition `form:"disposition,omitempty" json:"disposition,omitempty"`
+}
+
+// GetFileDownloadUrlParamsDisposition defines parameters for GetFileDownloadUrl.
+type GetFileDownloadUrlParamsDisposition string
+
 // GetReportParams defines parameters for GetReport.
 type GetReportParams struct {
 	Range *ReportRange `form:"range,omitempty" json:"range,omitempty"`
@@ -1754,6 +2441,30 @@ type ExportReportParams struct {
 	Range  *ReportRange `form:"range,omitempty" json:"range,omitempty"`
 	Format string       `form:"format" json:"format"`
 }
+
+// GetTaskFileDownloadUrlParams defines parameters for GetTaskFileDownloadUrl.
+type GetTaskFileDownloadUrlParams struct {
+	// Disposition 内容处置（#124）：attachment（默认，下载）或 inline（浏览器内联预览）
+	Disposition *GetTaskFileDownloadUrlParamsDisposition `form:"disposition,omitempty" json:"disposition,omitempty"`
+}
+
+// GetTaskFileDownloadUrlParamsDisposition defines parameters for GetTaskFileDownloadUrl.
+type GetTaskFileDownloadUrlParamsDisposition string
+
+// ListTasksParams defines parameters for ListTasks.
+type ListTasksParams struct {
+	// KrId 只返回该 KR 下的任务（服务端裁剪，P1）
+	KrId *int64 `form:"krId,omitempty" json:"krId,omitempty"`
+
+	// IncludeCompleted 是否包含已完成任务；缺省为 true（与既有「显示已完成」开关同口径，已取消一律返回）
+	IncludeCompleted *bool `form:"includeCompleted,omitempty" json:"includeCompleted,omitempty"`
+
+	// Limit 最多返回条数；缺省不限
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ChangePasswordJSONRequestBody defines body for ChangePassword for application/json ContentType.
+type ChangePasswordJSONRequestBody = ChangePasswordRequest
 
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
@@ -1767,11 +2478,17 @@ type UpdateProjectJSONRequestBody = UpdateProjectRequest
 // ImportTableJSONRequestBody defines body for ImportTable for application/json ContentType.
 type ImportTableJSONRequestBody = ImportRequest
 
+// ImportTasksJSONRequestBody defines body for ImportTasks for application/json ContentType.
+type ImportTasksJSONRequestBody = ImportTasksRequest
+
 // ProvideInputJSONRequestBody defines body for ProvideInput for application/json ContentType.
 type ProvideInputJSONRequestBody = ProvideInputRequest
 
-// AddProjectMemberJSONRequestBody defines body for AddProjectMember for application/json ContentType.
-type AddProjectMemberJSONRequestBody = AddProjectMemberRequest
+// UpdateKeyResultJSONRequestBody defines body for UpdateKeyResult for application/json ContentType.
+type UpdateKeyResultJSONRequestBody = UpdateKeyResultRequest
+
+// AddProjectMembersJSONRequestBody defines body for AddProjectMembers for application/json ContentType.
+type AddProjectMembersJSONRequestBody = AddProjectMembersRequest
 
 // UpdateProjectMemberRoleJSONRequestBody defines body for UpdateProjectMemberRole for application/json ContentType.
 type UpdateProjectMemberRoleJSONRequestBody = UpdateProjectMemberRoleRequest
@@ -1779,11 +2496,14 @@ type UpdateProjectMemberRoleJSONRequestBody = UpdateProjectMemberRoleRequest
 // CreateOkrBatchJSONRequestBody defines body for CreateOkrBatch for application/json ContentType.
 type CreateOkrBatchJSONRequestBody = CreateOkrBatchRequest
 
-// CreatePackageJSONRequestBody defines body for CreatePackage for application/json ContentType.
-type CreatePackageJSONRequestBody = CreatePackageRequest
+// UpdateObjectiveJSONRequestBody defines body for UpdateObjective for application/json ContentType.
+type UpdateObjectiveJSONRequestBody = UpdateObjectiveRequest
 
 // CreateReminderJSONRequestBody defines body for CreateReminder for application/json ContentType.
 type CreateReminderJSONRequestBody = RemindRequest
+
+// UpdateProjectSettingsJSONRequestBody defines body for UpdateProjectSettings for application/json ContentType.
+type UpdateProjectSettingsJSONRequestBody = UpdateProjectSettingsRequest
 
 // CreateTaskInvitesJSONRequestBody defines body for CreateTaskInvites for application/json ContentType.
 type CreateTaskInvitesJSONRequestBody = CreateTaskInvitesRequest
@@ -1791,11 +2511,8 @@ type CreateTaskInvitesJSONRequestBody = CreateTaskInvitesRequest
 // CreateTaskBatchJSONRequestBody defines body for CreateTaskBatch for application/json ContentType.
 type CreateTaskBatchJSONRequestBody = CreateTaskBatchRequest
 
-// BatchDecidePoolJSONRequestBody defines body for BatchDecidePool for application/json ContentType.
-type BatchDecidePoolJSONRequestBody = BatchPoolDecisionRequest
-
-// BatchSubmitPoolJSONRequestBody defines body for BatchSubmitPool for application/json ContentType.
-type BatchSubmitPoolJSONRequestBody = BatchPoolSubmitRequest
+// RequestTaskCancellationJSONRequestBody defines body for RequestTaskCancellation for application/json ContentType.
+type RequestTaskCancellationJSONRequestBody = TaskCancellationRequest
 
 // SubmitCompletionJSONRequestBody defines body for SubmitCompletion for application/json ContentType.
 type SubmitCompletionJSONRequestBody = SubmitCompletionRequest
@@ -1809,6 +2526,9 @@ type CreateDeliverableJSONRequestBody = CreateDeliverableRequest
 // UploadCandidateJSONRequestBody defines body for UploadCandidate for application/json ContentType.
 type UploadCandidateJSONRequestBody = UploadCandidateRequest
 
+// CommitCandidateJSONRequestBody defines body for CommitCandidate for application/json ContentType.
+type CommitCandidateJSONRequestBody = CommitUploadRequest
+
 // CreateDiscussionJSONRequestBody defines body for CreateDiscussion for application/json ContentType.
 type CreateDiscussionJSONRequestBody = CreateDiscussionRequest
 
@@ -1818,11 +2538,17 @@ type SubmitFieldChangeJSONRequestBody = SubmitFieldChangeRequest
 // DecideFieldChangeJSONRequestBody defines body for DecideFieldChange for application/json ContentType.
 type DecideFieldChangeJSONRequestBody = FieldChangeDecisionRequest
 
+// UploadTaskFileJSONRequestBody defines body for UploadTaskFile for application/json ContentType.
+type UploadTaskFileJSONRequestBody = UploadTaskFileRequest
+
 // CreateTaskInputJSONRequestBody defines body for CreateTaskInput for application/json ContentType.
 type CreateTaskInputJSONRequestBody = CreateTaskInputRequest
 
 // CreateMemberInputJSONRequestBody defines body for CreateMemberInput for application/json ContentType.
 type CreateMemberInputJSONRequestBody = CreateMemberInputRequest
+
+// SetTaskParticipantsJSONRequestBody defines body for SetTaskParticipants for application/json ContentType.
+type SetTaskParticipantsJSONRequestBody = SetParticipantsRequest
 
 // DecideTaskPoolReviewJSONRequestBody defines body for DecideTaskPoolReview for application/json ContentType.
 type DecideTaskPoolReviewJSONRequestBody = PoolReviewDecisionRequest
@@ -1841,6 +2567,9 @@ type UpdateTaskStatusJSONRequestBody = UpdateTaskStatusRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// ChangePassword 修改本人登录口令（S3）；改完除当前会话外，本人其余会话全部失效
+	// (POST /auth/change-password)
+	ChangePassword(w http.ResponseWriter, r *http.Request)
 	// Login 登录，成功后通过 HttpOnly Cookie 建立会话
 	// (POST /auth/login)
 	Login(w http.ResponseWriter, r *http.Request)
@@ -1853,9 +2582,9 @@ type ServerInterface interface {
 	// GetHealthz 健康检查
 	// (GET /healthz)
 	GetHealthz(w http.ResponseWriter, r *http.Request)
-	// ListNotifications 当前用户的站内通知（最新在前）
+	// ListNotifications 当前用户的站内通知（最新在前）；分页取更早的消息，避免第 100 条之前永久不可达（P1）
 	// (GET /notifications)
-	ListNotifications(w http.ResponseWriter, r *http.Request)
+	ListNotifications(w http.ResponseWriter, r *http.Request, params ListNotificationsParams)
 	// MarkAllNotificationsRead 将当前用户全部通知标记为已读
 	// (POST /notifications/read-all)
 	MarkAllNotificationsRead(w http.ResponseWriter, r *http.Request)
@@ -1871,40 +2600,61 @@ type ServerInterface interface {
 	// UpdateProject 更新项目（全量字段）
 	// (PUT /projects/{projectId})
 	UpdateProject(w http.ResponseWriter, r *http.Request, projectId int64)
-	// GetArtifacts 统一归档视角（AC-17）：按 O／KR／任务组织当前成果、候选状态与审批记录数
+	// GetArtifacts 统一归档视角（AC-17）：按 O／KR／任务组织当前成果、候选状态与审批记录数。 「时间」筛选在服务端裁剪（§7.7 六个筛选维度之一，沿用 #65 的服务端裁剪口径）
 	// (GET /projects/{projectId}/artifacts)
-	GetArtifacts(w http.ResponseWriter, r *http.Request, projectId int64)
+	GetArtifacts(w http.ResponseWriter, r *http.Request, projectId int64, params GetArtifactsParams)
+	// ListAuditLogs 项目操作审计（§10.4；仅项目管理员）——由写路径装饰器统一记录，新增写路径自动覆盖
+	// (GET /projects/{projectId}/audit-logs)
+	ListAuditLogs(w http.ResponseWriter, r *http.Request, projectId int64, params ListAuditLogsParams)
 	// ListBlockers 项目当前派生的结构化卡点（风险队列数据源；四类结构化事实读时派生）
 	// (GET /projects/{projectId}/blockers)
 	ListBlockers(w http.ResponseWriter, r *http.Request, projectId int64)
-	// ListEdges 项目全部交付物边（关系数据源；图谱与列表
+	// ListEdges 项目交付物边（关系数据源；图谱与列表复用）；支持服务端裁剪，避免大项目整表下发
 	// (GET /projects/{projectId}/edges)
-	ListEdges(w http.ResponseWriter, r *http.Request, projectId int64)
-	// RemoveEdge 解除交付物边（目标任务负责人／可编辑项目者）
+	ListEdges(w http.ResponseWriter, r *http.Request, projectId int64, params ListEdgesParams)
+	// RemoveEdge 解除交付物边（AC-23；输入源属关键字段，已入池任务进所属 KR 负责人审批）
 	// (DELETE /projects/{projectId}/edges/{edgeId})
 	RemoveEdge(w http.ResponseWriter, r *http.Request, projectId int64, edgeId int64)
 	// GetFileDownloadUrl 取得交付物内容的预签名下载地址（全体项目成员可查看／下载当前与候选内容，§3.3）
 	// (GET /projects/{projectId}/files/{fileId}/download-url)
-	GetFileDownloadUrl(w http.ResponseWriter, r *http.Request, projectId int64, fileId int64)
+	GetFileDownloadUrl(w http.ResponseWriter, r *http.Request, projectId int64, fileId int64, params GetFileDownloadUrlParams)
 	// ImportTable 表格导入（AC-02）：生成 O／KR 与任务草稿（仅项目管理员／项目负责人；整批一个事务）
 	// (POST /projects/{projectId}/import)
 	ImportTable(w http.ResponseWriter, r *http.Request, projectId int64)
+	// ListImportRecords 导入记录（§7.9、AC-68；仅项目管理员）——每次表格导入留存操作人、时间、源文件名、 本次新建的 O／KR／任务数量与结果；失败的一次同样留记录。只读
+	// (GET /projects/{projectId}/import-records)
+	ListImportRecords(w http.ResponseWriter, r *http.Request, projectId int64)
+	// ImportTasks 任务批量导入（AC-02b）：向已有 KR 下生成任务草稿（仅项目管理员／项目负责人；整批一个事务）
+	// (POST /projects/{projectId}/import-tasks)
+	ImportTasks(w http.ResponseWriter, r *http.Request, projectId int64)
 	// AcceptInputRequest 对接人同意接收（AC-30）；接收只表示承担责任，不代表输入就绪
 	// (POST /projects/{projectId}/input-requests/{requestId}/accept)
 	AcceptInputRequest(w http.ResponseWriter, r *http.Request, projectId int64, requestId int64)
+	// CommitInputRequestFile 确认输入附件已写入对象存储（两阶段提交第二步；校验通过后输入才转为已提供）
+	// (POST /projects/{projectId}/input-requests/{requestId}/commit)
+	CommitInputRequestFile(w http.ResponseWriter, r *http.Request, projectId int64, requestId int64)
 	// GetInputRequestFileUrl 输入请求已提交文件的预签名下载地址
 	// (GET /projects/{projectId}/input-requests/{requestId}/file-url)
 	GetInputRequestFileUrl(w http.ResponseWriter, r *http.Request, projectId int64, requestId int64)
 	// ProvideInput 对接人提交内容或文件（AC-30）；提交后输入请求变为已提供，目标任务输入更新为就绪
 	// (POST /projects/{projectId}/input-requests/{requestId}/provide)
 	ProvideInput(w http.ResponseWriter, r *http.Request, projectId int64, requestId int64)
+	// DeleteKeyResult 删除 KR（AC-65；仅项目管理员，且 KR 下没有任务，含已完成与已取消）
+	// (DELETE /projects/{projectId}/key-results/{keyResultId})
+	DeleteKeyResult(w http.ResponseWriter, r *http.Request, projectId int64, keyResultId int64)
+	// GetKrHandoverPreview 更换 KR 负责人前的确认信息（AC-61；返回该 KR 下未决审批单条数）
+	// (GET /projects/{projectId}/key-results/{keyResultId})
+	GetKrHandoverPreview(w http.ResponseWriter, r *http.Request, projectId int64, keyResultId int64)
+	// UpdateKeyResult 编辑 KR（AC-61、AC-65；项目管理员或本 KR 负责人；负责人不可置空，更换时可转交未决审批）
+	// (PATCH /projects/{projectId}/key-results/{keyResultId})
+	UpdateKeyResult(w http.ResponseWriter, r *http.Request, projectId int64, keyResultId int64)
 	// ListProjectMembers 项目成员列表（含成员角色）
 	// (GET /projects/{projectId}/members)
 	ListProjectMembers(w http.ResponseWriter, r *http.Request, projectId int64)
-	// AddProjectMember 将用户加入项目并赋予成员角色（仅项目管理员／项目负责人）
+	// AddProjectMembers 将一名或多名用户加入项目并赋予同一成员角色（仅项目管理员／项目负责人）
 	// (POST /projects/{projectId}/members)
-	AddProjectMember(w http.ResponseWriter, r *http.Request, projectId int64)
-	// RemoveProjectMember 将成员移出项目（仅项目管理员／项目负责人）
+	AddProjectMembers(w http.ResponseWriter, r *http.Request, projectId int64)
+	// RemoveProjectMember 将成员移出项目（仅项目管理员／项目负责人；此人仍在担任 KR 负责人、任务负责人、成果审核人、接收方或输入对接人时返回 409 并列出待交接项，AC-61）
 	// (DELETE /projects/{projectId}/members/{userId})
 	RemoveProjectMember(w http.ResponseWriter, r *http.Request, projectId int64, userId int64)
 	// UpdateProjectMemberRole 调整成员角色（仅项目管理员／项目负责人）
@@ -1919,15 +2669,12 @@ type ServerInterface interface {
 	// CreateOkrBatch 表格式批量创建 O／KR（仅项目管理员／项目负责人；整批一个事务，全部成功或全部失败）
 	// (POST /projects/{projectId}/objectives)
 	CreateOkrBatch(w http.ResponseWriter, r *http.Request, projectId int64)
-	// ListPackages 成果包列表（目录与来源清单；全员可查看/下载）
-	// (GET /projects/{projectId}/packages)
-	ListPackages(w http.ResponseWriter, r *http.Request, projectId int64)
-	// CreatePackage 勾选当前成果生成成果包（AC-18；仅项目管理员／项目负责人）
-	// (POST /projects/{projectId}/packages)
-	CreatePackage(w http.ResponseWriter, r *http.Request, projectId int64)
-	// DownloadPackage 整包下载（AC-18）：按目录解析当前内容并流式打包为 zip
-	// (GET /projects/{projectId}/packages/{packageId}/download)
-	DownloadPackage(w http.ResponseWriter, r *http.Request, projectId int64, packageId int64)
+	// DeleteObjective 删除 O（AC-65；仅项目管理员，且 O 下没有 KR）
+	// (DELETE /projects/{projectId}/objectives/{objectiveId})
+	DeleteObjective(w http.ResponseWriter, r *http.Request, projectId int64, objectiveId int64)
+	// UpdateObjective 编辑 O（AC-65；仅项目管理员）
+	// (PATCH /projects/{projectId}/objectives/{objectiveId})
+	UpdateObjective(w http.ResponseWriter, r *http.Request, projectId int64, objectiveId int64)
 	// CreateReminder 一键提醒当前待行动人（AC-11、MW-13）：目标既可以是派生卡点，也可以是尚未成卡点的等待事项（审批件、输入请求、上游任务）；通知自动带入任务、缺失输入、截止时间与下游影响
 	// (POST /projects/{projectId}/reminders)
 	CreateReminder(w http.ResponseWriter, r *http.Request, projectId int64)
@@ -1937,6 +2684,15 @@ type ServerInterface interface {
 	// ExportReport 导出报告（AC-20）：经 Gotenberg 渲染为正式 PDF 或移动端长图
 	// (GET /projects/{projectId}/report/export)
 	ExportReport(w http.ResponseWriter, r *http.Request, projectId int64, params ExportReportParams)
+	// GetProjectSettings 项目规则设置（审批超时阈值、临期阈值、一键提醒频次上限）
+	// (GET /projects/{projectId}/settings)
+	GetProjectSettings(w http.ResponseWriter, r *http.Request, projectId int64)
+	// UpdateProjectSettings 修改项目规则设置（仅项目管理员）
+	// (PUT /projects/{projectId}/settings)
+	UpdateProjectSettings(w http.ResponseWriter, r *http.Request, projectId int64)
+	// GetTaskFileDownloadUrl 取得过程文件／外部材料的预签名下载地址（全体项目成员可查看、下载，§3.3）
+	// (GET /projects/{projectId}/task-files/{fileId}/download-url)
+	GetTaskFileDownloadUrl(w http.ResponseWriter, r *http.Request, projectId int64, fileId int64, params GetTaskFileDownloadUrlParams)
 	// ListTaskInvites 项目内全部任务创建邀请（含派生动作标志）
 	// (GET /projects/{projectId}/task-invites)
 	ListTaskInvites(w http.ResponseWriter, r *http.Request, projectId int64)
@@ -1946,22 +2702,19 @@ type ServerInterface interface {
 	// RevokeTaskInvite 撤回待处理的任务创建邀请（邀请人／项目管理员／项目负责人）
 	// (POST /projects/{projectId}/task-invites/{inviteId}/revoke)
 	RevokeTaskInvite(w http.ResponseWriter, r *http.Request, projectId int64, inviteId int64)
-	// ListTasks 项目全部任务（含派生动作标志与最近一次入池审批单）
+	// ListTasks 项目任务（含派生动作标志与最近一次入池审批单）；支持服务端裁剪，避免大项目整表下发
 	// (GET /projects/{projectId}/tasks)
-	ListTasks(w http.ResponseWriter, r *http.Request, projectId int64)
+	ListTasks(w http.ResponseWriter, r *http.Request, projectId int64, params ListTasksParams)
 	// CreateTaskBatch 表格式批量创建任务草稿（可选一并提交入池；KR 负责人本人创建免审直接进入未开始，AC-26）
 	// (POST /projects/{projectId}/tasks)
 	CreateTaskBatch(w http.ResponseWriter, r *http.Request, projectId int64)
-	// BatchDecidePool 批量通过或退回入池审批（AC-25；每个任务须由其所属 KR 负责人处理，一个事务）
-	// (POST /projects/{projectId}/tasks/batch-pool-decision)
-	BatchDecidePool(w http.ResponseWriter, r *http.Request, projectId int64)
-	// BatchSubmitPool 批量提交入池（AC-25；按 KR 勾选草稿任务整批提交，一个事务）
-	// (POST /projects/{projectId}/tasks/batch-pool-submit)
-	BatchSubmitPool(w http.ResponseWriter, r *http.Request, projectId int64)
 	// GetTaskDetail 任务详情（AC-31／AC-34；全体项目成员可查看，操作按钮按派生权限标志出现）
 	// (GET /projects/{projectId}/tasks/{taskId})
 	GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64)
-	// SubmitCompletion 提交完成申请（AC-13；无中间审核时直接进入待 KR 终审；含全部候选交付物与提交说明）
+	// RequestTaskCancellation 发起任务取消申请（AC-57；复用关键字段变更单，进所属 KR 负责人待我审批，KR 负责人本人免审即时生效）
+	// (POST /projects/{projectId}/tasks/{taskId}/cancellation)
+	RequestTaskCancellation(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64)
+	// SubmitCompletion 提交完成申请（AC-13；未配置成果审核人时直接进入待 KR 终审；含全部候选交付物与提交说明）
 	// (POST /projects/{projectId}/tasks/{taskId}/completion-reviews)
 	SubmitCompletion(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64)
 	// DecideCompletion KR 负责人终审（AC-15／39／40）：通过则候选整体覆盖对应当前内容且旧文件永久删除、任务完成；退回则删除候选、任务回到进行中
@@ -1970,12 +2723,18 @@ type ServerInterface interface {
 	// ConfirmTaskReceipt 接收方确认接收，待接收项退出「待我接收」并形成接收记录（MW-09；接收方无审核权，不提供退回）
 	// (POST /projects/{projectId}/tasks/{taskId}/confirm-receipt)
 	ConfirmTaskReceipt(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64)
-	// CreateDeliverable 为任务新增交付物项（任务负责人／创建人／可编辑项目者；非终态任务）
+	// CreateDeliverable 为任务新增交付物项（裁决 H1：提交完成申请前即时生效、不走审批；完成申请在审期间冻结）
 	// (POST /projects/{projectId}/tasks/{taskId}/deliverables)
 	CreateDeliverable(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64)
+	// DeleteDeliverable 删除交付物项（裁决 H1：限有编辑权限者；有当前内容的项不可删须走成果更新，完成申请在审期间冻结；候选对象文件同步清理）
+	// (DELETE /projects/{projectId}/tasks/{taskId}/deliverables/{deliverableId})
+	DeleteDeliverable(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64, deliverableId int64)
 	// UploadCandidate 登记候选交付物内容并取得预签名上传地址（任务负责人；重复调用覆盖未提交审核的候选）
 	// (POST /projects/{projectId}/tasks/{taskId}/deliverables/{deliverableId}/candidate)
 	UploadCandidate(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64, deliverableId int64)
+	// CommitCandidate 确认候选内容已写入对象存储（两阶段提交第二步；服务端校验对象存在后才转为候选）
+	// (POST /projects/{projectId}/tasks/{taskId}/deliverables/{deliverableId}/candidate/commit)
+	CommitCandidate(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64, deliverableId int64)
 	// CreateDiscussion 提交任务讨论意见（全体项目成员含只读；提交后不可编辑或删除；通知任务负责人与被 @ 成员）
 	// (POST /projects/{projectId}/tasks/{taskId}/discussions)
 	CreateDiscussion(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64)
@@ -1988,28 +2747,43 @@ type ServerInterface interface {
 	// DecideFieldChange 所属 KR 负责人通过或退回关键字段修改（AC-23；通过后拟议值生效，退回后拟议值作废）
 	// (POST /projects/{projectId}/tasks/{taskId}/field-changes/{changeId}/decision)
 	DecideFieldChange(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64, changeId int64)
-	// CreateTaskInput 新增输入要求并自动建立「来源任务 → 目标任务」交付物边（AC-28；可一次多选来源任务，AC-53；任务负责人／可编辑项目者）
+	// UploadTaskFile 登记过程文件或重要外部材料并取得预签名上传地址（§7.7；两阶段提交第一步）。 这两类文件不进入完成审批，也不作为下游正式输入，只可按需选进成果包
+	// (POST /projects/{projectId}/tasks/{taskId}/files)
+	UploadTaskFile(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64)
+	// DeleteTaskFile 删除过程文件或重要外部材料（这两类文件不进审批，删除直接生效并留痕）
+	// (DELETE /projects/{projectId}/tasks/{taskId}/files/{fileId})
+	DeleteTaskFile(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64, fileId int64)
+	// CommitTaskFile 确认过程文件／外部材料已写入对象存储（两阶段提交第二步；服务端校验对象存在后才可见）
+	// (POST /projects/{projectId}/tasks/{taskId}/files/{fileId}/commit)
+	CommitTaskFile(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64, fileId int64)
+	// CreateTaskInput 新增输入要求并自动建立「来源任务 → 目标任务」交付物边（AC-28；可一次多选来源任务，AC-53）；输入与输入源属关键字段，已入池任务进所属 KR 负责人审批（AC-23）
 	// (POST /projects/{projectId}/tasks/{taskId}/inputs)
 	CreateTaskInput(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64)
-	// CreateMemberInput 指定项目成员提供输入（AC-29；可一次多选对接人，AC-53）：为每名对接人建立「成员 → 目标任务」交付物边并生成输入请求；任务已入池时立即发站内通知，否则待入池审批通过后发送
+	// CreateMemberInput 指定项目成员提供输入（AC-29；可一次多选对接人，AC-53）：为每名对接人建立「成员 → 目标任务」交付物边并生成输入请求；输入源属关键字段，已入池任务进所属 KR 负责人审批（AC-23），生效后任务已入池即发站内通知
 	// (POST /projects/{projectId}/tasks/{taskId}/member-inputs)
 	CreateMemberInput(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64)
+	// SetTaskParticipants 配置参与人（PRD §9.2 按需字段）：不属关键字段，修改直接生效并留痕，不走审批
+	// (PUT /projects/{projectId}/tasks/{taskId}/participants)
+	SetTaskParticipants(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64)
 	// DecideTaskPoolReview 所属 KR 负责人通过或退回入池审批（AC-04；管理员不能替代 KR 负责人）
 	// (POST /projects/{projectId}/tasks/{taskId}/pool-review-decision)
 	DecideTaskPoolReview(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64)
 	// UpdateTaskProgress 更新或清除任务的可选进度百分比（AC-12；系统不产生虚构百分比）
 	// (PUT /projects/{projectId}/tasks/{taskId}/progress)
 	UpdateTaskProgress(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64)
-	// SetTaskReceivers 配置接收方（按需字段，与输入／输出配置同口径直接生效；模块 PRD §8.6、MW-09）
+	// SetTaskReceivers 配置接收方（AC-23；接收方属关键字段，已入池任务进所属 KR 负责人审批；模块 PRD §8.6、MW-09）
 	// (PUT /projects/{projectId}/tasks/{taskId}/receivers)
 	SetTaskReceivers(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64)
-	// SetTaskReviewers 调整中间审核人配置（非关键字段可直接调整，§5.2.B；审核中与终态不可）
+	// StartResultUpdate 发起成果更新（AC-66；已完成任务的负责人重新开放候选交付物上传并走同一道完成审批。 任务生命周期状态保持“已完成”，不是重新打开任务；与任务上其他未决审批单互斥，已取消任务不可发起）
+	// (POST /projects/{projectId}/tasks/{taskId}/result-update)
+	StartResultUpdate(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64)
+	// SetTaskReviewers 调整成果审核人配置（非关键字段可直接调整，§5.2.B；审核中与终态不可）
 	// (PUT /projects/{projectId}/tasks/{taskId}/reviewers)
 	SetTaskReviewers(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64)
 	// SubmitTaskPoolReview 将草稿任务提交所属 KR 负责人入池审批（AC-04；退回后可修改重新提交）
 	// (POST /projects/{projectId}/tasks/{taskId}/submit-pool-review)
 	SubmitTaskPoolReview(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64)
-	// UpdateTaskStatus 手工流转任务状态：开始执行或取消（AC-12；完成走三道审批，不在此端点）
+	// UpdateTaskStatus 手工流转任务状态：开始执行（AC-12；完成走三道审批、取消走取消申请，均不在此端点）
 	// (POST /projects/{projectId}/tasks/{taskId}/update-status)
 	UpdateTaskStatus(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64)
 	// ListUsers 全部用户（用于人员选择）
@@ -2025,6 +2799,20 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// ChangePassword operation middleware
+func (siw *ServerInterfaceWrapper) ChangePassword(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ChangePassword(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // Login operation middleware
 func (siw *ServerInterfaceWrapper) Login(w http.ResponseWriter, r *http.Request) {
@@ -2085,8 +2873,40 @@ func (siw *ServerInterfaceWrapper) GetHealthz(w http.ResponseWriter, r *http.Req
 // ListNotifications operation middleware
 func (siw *ServerInterfaceWrapper) ListNotifications(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListNotificationsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "beforeId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "beforeId", r.URL.Query(), &params.BeforeId, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "beforeId"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "beforeId", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListNotifications(w, r)
+		siw.Handler.ListNotifications(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2205,8 +3025,79 @@ func (siw *ServerInterfaceWrapper) GetArtifacts(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetArtifactsParams
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetArtifacts(w, r, projectId)
+		siw.Handler.GetArtifacts(w, r, projectId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListAuditLogs operation middleware
+func (siw *ServerInterfaceWrapper) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListAuditLogsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAuditLogs(w, r, projectId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2257,8 +3148,24 @@ func (siw *ServerInterfaceWrapper) ListEdges(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListEdgesParams
+
+	// ------------- Optional query parameter "krId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "krId", r.URL.Query(), &params.KrId, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "krId"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "krId", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListEdges(w, r, projectId)
+		siw.Handler.ListEdges(w, r, projectId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2327,8 +3234,24 @@ func (siw *ServerInterfaceWrapper) GetFileDownloadUrl(w http.ResponseWriter, r *
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetFileDownloadUrlParams
+
+	// ------------- Optional query parameter "disposition" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "disposition", r.URL.Query(), &params.Disposition, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "disposition"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "disposition", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetFileDownloadUrl(w, r, projectId, fileId)
+		siw.Handler.GetFileDownloadUrl(w, r, projectId, fileId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2364,6 +3287,58 @@ func (siw *ServerInterfaceWrapper) ImportTable(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
+// ListImportRecords operation middleware
+func (siw *ServerInterfaceWrapper) ListImportRecords(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListImportRecords(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ImportTasks operation middleware
+func (siw *ServerInterfaceWrapper) ImportTasks(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ImportTasks(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // AcceptInputRequest operation middleware
 func (siw *ServerInterfaceWrapper) AcceptInputRequest(w http.ResponseWriter, r *http.Request) {
 
@@ -2390,6 +3365,41 @@ func (siw *ServerInterfaceWrapper) AcceptInputRequest(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.AcceptInputRequest(w, r, projectId, requestId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CommitInputRequestFile operation middleware
+func (siw *ServerInterfaceWrapper) CommitInputRequestFile(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "requestId" -------------
+	var requestId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "requestId", r.PathValue("requestId"), &requestId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "requestId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CommitInputRequestFile(w, r, projectId, requestId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2469,6 +3479,111 @@ func (siw *ServerInterfaceWrapper) ProvideInput(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// DeleteKeyResult operation middleware
+func (siw *ServerInterfaceWrapper) DeleteKeyResult(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "keyResultId" -------------
+	var keyResultId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "keyResultId", r.PathValue("keyResultId"), &keyResultId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "keyResultId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteKeyResult(w, r, projectId, keyResultId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetKrHandoverPreview operation middleware
+func (siw *ServerInterfaceWrapper) GetKrHandoverPreview(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "keyResultId" -------------
+	var keyResultId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "keyResultId", r.PathValue("keyResultId"), &keyResultId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "keyResultId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetKrHandoverPreview(w, r, projectId, keyResultId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateKeyResult operation middleware
+func (siw *ServerInterfaceWrapper) UpdateKeyResult(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "keyResultId" -------------
+	var keyResultId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "keyResultId", r.PathValue("keyResultId"), &keyResultId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "keyResultId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateKeyResult(w, r, projectId, keyResultId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListProjectMembers operation middleware
 func (siw *ServerInterfaceWrapper) ListProjectMembers(w http.ResponseWriter, r *http.Request) {
 
@@ -2495,8 +3610,8 @@ func (siw *ServerInterfaceWrapper) ListProjectMembers(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
-// AddProjectMember operation middleware
-func (siw *ServerInterfaceWrapper) AddProjectMember(w http.ResponseWriter, r *http.Request) {
+// AddProjectMembers operation middleware
+func (siw *ServerInterfaceWrapper) AddProjectMembers(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -2511,7 +3626,7 @@ func (siw *ServerInterfaceWrapper) AddProjectMember(w http.ResponseWriter, r *ht
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.AddProjectMember(w, r, projectId)
+		siw.Handler.AddProjectMembers(w, r, projectId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2669,8 +3784,8 @@ func (siw *ServerInterfaceWrapper) CreateOkrBatch(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
-// ListPackages operation middleware
-func (siw *ServerInterfaceWrapper) ListPackages(w http.ResponseWriter, r *http.Request) {
+// DeleteObjective operation middleware
+func (siw *ServerInterfaceWrapper) DeleteObjective(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -2684,8 +3799,17 @@ func (siw *ServerInterfaceWrapper) ListPackages(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// ------------- Path parameter "objectiveId" -------------
+	var objectiveId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "objectiveId", r.PathValue("objectiveId"), &objectiveId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "objectiveId", Err: err})
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListPackages(w, r, projectId)
+		siw.Handler.DeleteObjective(w, r, projectId, objectiveId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2695,8 +3819,8 @@ func (siw *ServerInterfaceWrapper) ListPackages(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
-// CreatePackage operation middleware
-func (siw *ServerInterfaceWrapper) CreatePackage(w http.ResponseWriter, r *http.Request) {
+// UpdateObjective operation middleware
+func (siw *ServerInterfaceWrapper) UpdateObjective(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -2710,43 +3834,17 @@ func (siw *ServerInterfaceWrapper) CreatePackage(w http.ResponseWriter, r *http.
 		return
 	}
 
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.CreatePackage(w, r, projectId)
-	}))
+	// ------------- Path parameter "objectiveId" -------------
+	var objectiveId int64
 
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// DownloadPackage operation middleware
-func (siw *ServerInterfaceWrapper) DownloadPackage(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "projectId" -------------
-	var projectId int64
-
-	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	err = runtime.BindStyledParameterWithOptions("simple", "objectiveId", r.PathValue("objectiveId"), &objectiveId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
 	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
-		return
-	}
-
-	// ------------- Path parameter "packageId" -------------
-	var packageId int64
-
-	err = runtime.BindStyledParameterWithOptions("simple", "packageId", r.PathValue("packageId"), &packageId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "packageId", Err: err})
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "objectiveId", Err: err})
 		return
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DownloadPackage(w, r, projectId, packageId)
+		siw.Handler.UpdateObjective(w, r, projectId, objectiveId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2879,6 +3977,109 @@ func (siw *ServerInterfaceWrapper) ExportReport(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// GetProjectSettings operation middleware
+func (siw *ServerInterfaceWrapper) GetProjectSettings(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetProjectSettings(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateProjectSettings operation middleware
+func (siw *ServerInterfaceWrapper) UpdateProjectSettings(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateProjectSettings(w, r, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetTaskFileDownloadUrl operation middleware
+func (siw *ServerInterfaceWrapper) GetTaskFileDownloadUrl(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "fileId" -------------
+	var fileId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "fileId", r.PathValue("fileId"), &fileId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "fileId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetTaskFileDownloadUrlParams
+
+	// ------------- Optional query parameter "disposition" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "disposition", r.URL.Query(), &params.Disposition, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "disposition"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "disposition", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetTaskFileDownloadUrl(w, r, projectId, fileId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListTaskInvites operation middleware
 func (siw *ServerInterfaceWrapper) ListTaskInvites(w http.ResponseWriter, r *http.Request) {
 
@@ -2981,8 +4182,50 @@ func (siw *ServerInterfaceWrapper) ListTasks(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListTasksParams
+
+	// ------------- Optional query parameter "krId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "krId", r.URL.Query(), &params.KrId, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "krId"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "krId", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "includeCompleted" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "includeCompleted", r.URL.Query(), &params.IncludeCompleted, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "includeCompleted"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "includeCompleted", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListTasks(w, r, projectId)
+		siw.Handler.ListTasks(w, r, projectId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3018,58 +4261,6 @@ func (siw *ServerInterfaceWrapper) CreateTaskBatch(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
-// BatchDecidePool operation middleware
-func (siw *ServerInterfaceWrapper) BatchDecidePool(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "projectId" -------------
-	var projectId int64
-
-	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.BatchDecidePool(w, r, projectId)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// BatchSubmitPool operation middleware
-func (siw *ServerInterfaceWrapper) BatchSubmitPool(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "projectId" -------------
-	var projectId int64
-
-	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.BatchSubmitPool(w, r, projectId)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
 // GetTaskDetail operation middleware
 func (siw *ServerInterfaceWrapper) GetTaskDetail(w http.ResponseWriter, r *http.Request) {
 
@@ -3096,6 +4287,41 @@ func (siw *ServerInterfaceWrapper) GetTaskDetail(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetTaskDetail(w, r, projectId, taskId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RequestTaskCancellation operation middleware
+func (siw *ServerInterfaceWrapper) RequestTaskCancellation(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "taskId" -------------
+	var taskId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "taskId", r.PathValue("taskId"), &taskId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "taskId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RequestTaskCancellation(w, r, projectId, taskId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3254,6 +4480,50 @@ func (siw *ServerInterfaceWrapper) CreateDeliverable(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// DeleteDeliverable operation middleware
+func (siw *ServerInterfaceWrapper) DeleteDeliverable(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "taskId" -------------
+	var taskId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "taskId", r.PathValue("taskId"), &taskId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "taskId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "deliverableId" -------------
+	var deliverableId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "deliverableId", r.PathValue("deliverableId"), &deliverableId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "deliverableId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteDeliverable(w, r, projectId, taskId, deliverableId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // UploadCandidate operation middleware
 func (siw *ServerInterfaceWrapper) UploadCandidate(w http.ResponseWriter, r *http.Request) {
 
@@ -3289,6 +4559,50 @@ func (siw *ServerInterfaceWrapper) UploadCandidate(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UploadCandidate(w, r, projectId, taskId, deliverableId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CommitCandidate operation middleware
+func (siw *ServerInterfaceWrapper) CommitCandidate(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "taskId" -------------
+	var taskId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "taskId", r.PathValue("taskId"), &taskId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "taskId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "deliverableId" -------------
+	var deliverableId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "deliverableId", r.PathValue("deliverableId"), &deliverableId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "deliverableId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CommitCandidate(w, r, projectId, taskId, deliverableId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3456,6 +4770,129 @@ func (siw *ServerInterfaceWrapper) DecideFieldChange(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// UploadTaskFile operation middleware
+func (siw *ServerInterfaceWrapper) UploadTaskFile(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "taskId" -------------
+	var taskId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "taskId", r.PathValue("taskId"), &taskId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "taskId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UploadTaskFile(w, r, projectId, taskId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteTaskFile operation middleware
+func (siw *ServerInterfaceWrapper) DeleteTaskFile(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "taskId" -------------
+	var taskId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "taskId", r.PathValue("taskId"), &taskId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "taskId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "fileId" -------------
+	var fileId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "fileId", r.PathValue("fileId"), &fileId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "fileId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteTaskFile(w, r, projectId, taskId, fileId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CommitTaskFile operation middleware
+func (siw *ServerInterfaceWrapper) CommitTaskFile(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "taskId" -------------
+	var taskId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "taskId", r.PathValue("taskId"), &taskId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "taskId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "fileId" -------------
+	var fileId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "fileId", r.PathValue("fileId"), &fileId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "fileId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CommitTaskFile(w, r, projectId, taskId, fileId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // CreateTaskInput operation middleware
 func (siw *ServerInterfaceWrapper) CreateTaskInput(w http.ResponseWriter, r *http.Request) {
 
@@ -3517,6 +4954,41 @@ func (siw *ServerInterfaceWrapper) CreateMemberInput(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateMemberInput(w, r, projectId, taskId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetTaskParticipants operation middleware
+func (siw *ServerInterfaceWrapper) SetTaskParticipants(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "taskId" -------------
+	var taskId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "taskId", r.PathValue("taskId"), &taskId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "taskId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetTaskParticipants(w, r, projectId, taskId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3622,6 +5094,41 @@ func (siw *ServerInterfaceWrapper) SetTaskReceivers(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetTaskReceivers(w, r, projectId, taskId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartResultUpdate operation middleware
+func (siw *ServerInterfaceWrapper) StartResultUpdate(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "taskId" -------------
+	var taskId int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "taskId", r.PathValue("taskId"), &taskId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "taskId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartResultUpdate(w, r, projectId, taskId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3873,17 +5380,25 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/healthz", wrapper.GetHealthz)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/login", wrapper.Login)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/logout", wrapper.Logout)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/change-password", wrapper.ChangePassword)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/me", wrapper.GetCurrentUser)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects", wrapper.ListProjects)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects", wrapper.CreateProject)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}", wrapper.GetProject)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/projects/{projectId}", wrapper.UpdateProject)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}/settings", wrapper.GetProjectSettings)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/projects/{projectId}/settings", wrapper.UpdateProjectSettings)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}/members", wrapper.ListProjectMembers)
-	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/members", wrapper.AddProjectMember)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/members", wrapper.AddProjectMembers)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/projects/{projectId}/members/{userId}", wrapper.RemoveProjectMember)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/projects/{projectId}/members/{userId}", wrapper.UpdateProjectMemberRole)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}/objectives", wrapper.ListObjectives)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/objectives", wrapper.CreateOkrBatch)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/projects/{projectId}/objectives/{objectiveId}", wrapper.DeleteObjective)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/projects/{projectId}/objectives/{objectiveId}", wrapper.UpdateObjective)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/projects/{projectId}/key-results/{keyResultId}", wrapper.DeleteKeyResult)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}/key-results/{keyResultId}", wrapper.GetKrHandoverPreview)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/projects/{projectId}/key-results/{keyResultId}", wrapper.UpdateKeyResult)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}/tasks", wrapper.ListTasks)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/tasks", wrapper.CreateTaskBatch)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/submit-pool-review", wrapper.SubmitTaskPoolReview)
@@ -3891,13 +5406,22 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}", wrapper.GetTaskDetail)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/update-status", wrapper.UpdateTaskStatus)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/progress", wrapper.UpdateTaskProgress)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/cancellation", wrapper.RequestTaskCancellation)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/result-update", wrapper.StartResultUpdate)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/field-changes", wrapper.SubmitFieldChange)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/field-changes/{changeId}/decision", wrapper.DecideFieldChange)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/field-changes/{changeId}/abandon", wrapper.AbandonFieldChange)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/deliverables", wrapper.CreateDeliverable)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/deliverables/{deliverableId}", wrapper.DeleteDeliverable)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/deliverables/{deliverableId}/candidate", wrapper.UploadCandidate)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/deliverables/{deliverableId}/candidate/commit", wrapper.CommitCandidate)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/files", wrapper.UploadTaskFile)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/files/{fileId}/commit", wrapper.CommitTaskFile)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/files/{fileId}", wrapper.DeleteTaskFile)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}/task-files/{fileId}/download-url", wrapper.GetTaskFileDownloadUrl)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}/files/{fileId}/download-url", wrapper.GetFileDownloadUrl)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/receivers", wrapper.SetTaskReceivers)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/participants", wrapper.SetTaskParticipants)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/confirm-receipt", wrapper.ConfirmTaskReceipt)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/reviewers", wrapper.SetTaskReviewers)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/completion-reviews", wrapper.SubmitCompletion)
@@ -3906,24 +5430,23 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/member-inputs", wrapper.CreateMemberInput)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/input-requests/{requestId}/accept", wrapper.AcceptInputRequest)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/input-requests/{requestId}/provide", wrapper.ProvideInput)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/input-requests/{requestId}/commit", wrapper.CommitInputRequestFile)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}/input-requests/{requestId}/file-url", wrapper.GetInputRequestFileUrl)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/projects/{projectId}/edges/{edgeId}", wrapper.RemoveEdge)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}/edges", wrapper.ListEdges)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}/import-records", wrapper.ListImportRecords)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}/audit-logs", wrapper.ListAuditLogs)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}/blockers", wrapper.ListBlockers)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/reminders", wrapper.CreateReminder)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/tasks/{taskId}/discussions", wrapper.CreateDiscussion)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/notifications", wrapper.ListNotifications)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/notifications/read-all", wrapper.MarkAllNotificationsRead)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}/artifacts", wrapper.GetArtifacts)
-	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}/packages", wrapper.ListPackages)
-	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/packages", wrapper.CreatePackage)
-	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}/packages/{packageId}/download", wrapper.DownloadPackage)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}/report", wrapper.GetReport)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}/report/export", wrapper.ExportReport)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}/my-work", wrapper.GetMyWork)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/import", wrapper.ImportTable)
-	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/tasks/batch-pool-submit", wrapper.BatchSubmitPool)
-	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/tasks/batch-pool-decision", wrapper.BatchDecidePool)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/import-tasks", wrapper.ImportTasks)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/projects/{projectId}/task-invites", wrapper.ListTaskInvites)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/task-invites", wrapper.CreateTaskInvites)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/projects/{projectId}/task-invites/{inviteId}/revoke", wrapper.RevokeTaskInvite)
@@ -3937,281 +5460,427 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
+	"/P8BAAD//w==",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

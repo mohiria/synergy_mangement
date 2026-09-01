@@ -44,7 +44,7 @@ func StatusLabel(status, krOwnerName string, reviewerNames []string) string {
 	case TaskCompleted:
 		return "已完成"
 	case TaskCancelled:
-		return "已取消"
+		return "已关闭"
 	}
 	return status
 }
@@ -101,10 +101,10 @@ const (
 	StageNotStarted         = "待开始执行"
 	StageWaitingInput       = "等待输入"
 	StageInProgress         = "任务执行"
-	StageIntermediateReview = "中间或签审核"
+	StageIntermediateReview = "成果审核（或签）"
 	StageFinalReview        = "KR 终审"
 	StageCompleted          = "已闭环"
-	StageCancelled          = "已取消"
+	StageCancelled          = "已关闭"
 )
 
 // StageLabel 当前环节的面向用户显示文案（AC-04）：审批等待环节按当前审批人姓名显示，
@@ -117,4 +117,65 @@ func StageLabel(stage, krOwnerName string, reviewerNames []string) string {
 		return ApprovalWaitingLabel(reviewerNames)
 	}
 	return stage
+}
+
+// 枚举显示文案统一在 domain 派生（F1）：与 StatusLabel／BlockerKindLabel 同惯例，
+// 前端不再各写一份映射表，免得同一枚举在不同页面出现不同说法。
+
+var riskLevelLabels = map[string]string{
+	RiskNormal:   "正常",
+	RiskWarning:  "预警",
+	RiskHighRisk: "高风险",
+}
+
+// RiskLevelLabel 风险等级显示文案。
+func RiskLevelLabel(level string) string {
+	if label, ok := riskLevelLabels[level]; ok {
+		return label
+	}
+	return "正常"
+}
+
+var edgeTypeLabels = map[string]string{
+	EdgeHardPrerequisite: "硬前置交付",
+	EdgeInformation:      "信息输入",
+	EdgeHandover:         "正式成果接收",
+	EdgeFeedback:         "迭代／反馈",
+}
+
+// EdgeTypeLabel 交付物边类型显示文案。
+func EdgeTypeLabel(edgeType string) string {
+	if label, ok := edgeTypeLabels[edgeType]; ok {
+		return label
+	}
+	return "协作关系"
+}
+
+var projectStatusLabels = map[string]string{
+	"not_started": "未开始",
+	"in_progress": "进行中",
+	"completed":   "已完成",
+	"archived":    "已归档",
+}
+
+// ProjectStatusLabel 项目状态显示文案。
+func ProjectStatusLabel(status string) string {
+	if label, ok := projectStatusLabels[status]; ok {
+		return label
+	}
+	return "未开始"
+}
+
+var memberRoleLabels = map[string]string{
+	RoleAdmin:  "项目管理员",
+	RoleMember: "项目成员",
+	RoleViewer: "访客",
+}
+
+// MemberRoleLabel 成员角色显示文案。
+func MemberRoleLabel(role string) string {
+	if label, ok := memberRoleLabels[role]; ok {
+		return label
+	}
+	return role
 }

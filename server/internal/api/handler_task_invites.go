@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"synergy/server/internal/domain"
 	"synergy/server/internal/store"
@@ -21,9 +22,9 @@ func (s *Server) ListTaskInvites(w http.ResponseWriter, r *http.Request, project
 		return
 	}
 	uid := currentUser(r).ID
-	resp, err := s.taskInviteList(r.Context(), projectId, uid, projectActor(uid, proj.OwnerID, proj.MyRole))
+	resp, err := s.taskInviteList(r.Context(), projectId, uid, projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility))
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -40,14 +41,14 @@ func (s *Server) CreateTaskInvites(w http.ResponseWriter, r *http.Request, proje
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	kr, err := s.q.GetKeyResultInProject(r.Context(), store.GetKeyResultInProjectParams{ID: req.KeyResultId, ProjectID: projectId})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_key_result", Message: "所属 KR 不存在"})
 			return
 		}
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	if !domain.CanInviteForKr(actor, uid, fromPgInt8(kr.OwnerID)) {
@@ -56,7 +57,7 @@ func (s *Server) CreateTaskInvites(w http.ResponseWriter, r *http.Request, proje
 	}
 	members, err := s.q.ListProjectMembers(r.Context(), projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	roleByID := make(map[int64]string, len(members))
@@ -82,11 +83,15 @@ func (s *Server) CreateTaskInvites(w http.ResponseWriter, r *http.Request, proje
 	}
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
 	qtx := s.q.WithTx(tx)
+	// AC-03：通知与邀请同事务——邀请进了「待我处理」却没有通知，受邀人不主动打开
+	// 「我的工作」就不知道自己被邀请拆任务。撤回邀请不补发（与 #5 的撤回口径一致）。
+	krCode := domain.KeyResultCode(int(kr.ObjectiveCodeSeq), int(kr.CodeSeq))
+	inviteContent := domain.TaskInviteNotification(currentUser(r).DisplayName, krCode, kr.Description, note)
 	for _, inviteeID := range invitees {
 		if _, err := qtx.CreateTaskInvite(r.Context(), store.CreateTaskInviteParams{
 			KeyResultID: req.KeyResultId,
@@ -94,17 +99,26 @@ func (s *Server) CreateTaskInvites(w http.ResponseWriter, r *http.Request, proje
 			InviteeID:   inviteeID,
 			Note:        note,
 		}); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
+			return
+		}
+		if _, err := qtx.CreateNotification(r.Context(), store.CreateNotificationParams{
+			UserID:    inviteeID,
+			Kind:      domain.NotifyTaskInvite,
+			Content:   inviteContent,
+			ProjectID: pgtype.Int8{Int64: projectId, Valid: true},
+		}); err != nil {
+			writeInternalError(w, r, err)
 			return
 		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	resp, err := s.taskInviteList(r.Context(), projectId, uid, actor)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, resp)
@@ -116,13 +130,13 @@ func (s *Server) RevokeTaskInvite(w http.ResponseWriter, r *http.Request, projec
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	invite, err := s.q.GetTaskInviteInProject(r.Context(), store.GetTaskInviteInProjectParams{ID: inviteId, ProjectID: projectId})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, Error{Code: "invite_not_found", Message: "邀请不存在"})
 		} else {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 		}
 		return
 	}
@@ -135,12 +149,12 @@ func (s *Server) RevokeTaskInvite(w http.ResponseWriter, r *http.Request, projec
 		return
 	}
 	if _, err := s.q.UpdateTaskInviteState(r.Context(), store.UpdateTaskInviteStateParams{ID: inviteId, State: domain.TaskInviteRevoked}); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	list, err := s.taskInviteList(r.Context(), projectId, uid, actor)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	for _, item := range list {
@@ -149,7 +163,7 @@ func (s *Server) RevokeTaskInvite(w http.ResponseWriter, r *http.Request, projec
 			return
 		}
 	}
-	writeInternalError(w)
+	writeInternalError(w, r, err)
 }
 
 // taskInviteList 组装项目内全部邀请及派生动作标志。

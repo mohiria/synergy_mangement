@@ -149,26 +149,13 @@ OVERRIDING SYSTEM VALUE VALUES
 (4, 12, 8,  14, '看板试运行阶段的坐席反馈收集，麻烦你建任务跟一下。',     'pending',   now() - interval '3 days'),
 (5, 10, 12, 14, '投诉场景 UAT 你来组织，先建任务。',                     'revoked',   now() - interval '24 days');
 
--- ── 成果包 ────────────────────────────────────────────────────────────────────
-INSERT INTO artifact_packages (id, project_id, name, created_by, created_at)
+-- ── 一键提醒留痕（冷却按发起人、被提醒人、任务三元组计次）────────────────────
+-- recipient_id 与 05_collab.sql 的 blocker_remind 通知一一对应。
+INSERT INTO remind_logs (id, task_id, sender_id, recipient_id, target_key, remind_date, created_at)
 OVERRIDING SYSTEM VALUE VALUES
-(1, 1, '迁移评估阶段成果包',       2,  now() - interval '130 days'),
-(2, 1, '割接评审材料包',           2,  now() - interval '9 days'),
-(3, 2, '中台一期契约与口径材料包', 7,  now() - interval '20 days'),
-(4, 4, '等保整改归档包',           11, now() - interval '135 days');
-
-INSERT INTO artifact_package_items (package_id, deliverable_id) VALUES
-    (1, 1), (1, 2), (1, 3), (1, 4), (1, 10),
-    (2, 11), (2, 12), (2, 17),
-    (3, 22), (3, 23), (3, 24), (3, 35),
-    (4, 42), (4, 43), (4, 44), (4, 45), (4, 46), (4, 47), (4, 48), (4, 49);
-
--- ── 一键提醒留痕（同一人对同一任务每天一次）──────────────────────────────────
-INSERT INTO remind_logs (id, task_id, sender_id, target_key, remind_date, created_at)
-OVERRIDING SYSTEM VALUE VALUES
-(1, 6,  2,  'task_overdue:6',                    current_date - 1, now() - interval '1 day'  + interval '2 hours'),
-(2, 22, 11, 'task_overdue:22',                   current_date,     now() - interval '5 hours'),
-(3, 29, 12, 'upstream_unready:edge:21',          current_date - 1, now() - interval '1 day'  + interval '4 hours'),
-(4, 23, 9,  'approval_timeout:pool_review:24',   current_date,     now() - interval '3 hours'),
-(5, 14, 2,  'approval_timeout:final_review:24',  current_date - 2, now() - interval '2 days' + interval '3 hours'),
-(6, 9,  4,  'wait:input_request:1',              current_date - 1, now() - interval '1 day'  + interval '6 hours');
+(1, 6,  2,  4,  'task_overdue:6',                    current_date - 1, now() - interval '1 day'  + interval '2 hours'),
+(2, 22, 11, 9,  'task_overdue:22',                   current_date,     now() - interval '5 hours'),
+(3, 29, 12, 4,  'upstream_unready:edge:21',          current_date - 1, now() - interval '1 day'  + interval '4 hours'),
+(4, 23, 9,  11, 'approval_timeout:pool_review:24',   current_date,     now() - interval '3 hours'),
+(5, 14, 2,  2,  'approval_timeout:final_review:24',  current_date - 2, now() - interval '2 days' + interval '3 hours'),
+(6, 9,  4,  9,  'wait:input_request:1',              current_date - 1, now() - interval '1 day'  + interval '6 hours');

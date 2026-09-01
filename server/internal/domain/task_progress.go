@@ -8,7 +8,7 @@ import (
 var (
 	ErrProgressOutOfRange   = errors.New("进度百分比必须在 0～100 之间")
 	ErrCannotStart          = errors.New("当前状态不能开始执行")
-	ErrCannotCancel         = errors.New("已完成或已取消的任务不能取消")
+	ErrCannotCancel         = errors.New("已完成或已关闭的任务不能取消")
 	ErrCancelReasonRequired = errors.New("取消任务需要填写原因")
 )
 
@@ -41,11 +41,9 @@ func StartTask(status string) (string, error) {
 	return TaskInProgress, nil
 }
 
-// CancelTask 取消任务：非终态可取消并保留原因（PRD §5.1「任务不再执行并保留原因」）。
-func CancelTask(status, reason string) error {
-	if status == TaskCompleted || status == TaskCancelled {
-		return ErrCannotCancel
-	}
+// ValidateCancelReason 关闭原因必填（PRD §5.1「任务不再执行并保留原因」；AC-57）。
+// 能否取消由 CancelRoute 判定，本函数只管原因。
+func ValidateCancelReason(reason string) error {
 	if strings.TrimSpace(reason) == "" {
 		return ErrCancelReasonRequired
 	}
@@ -53,16 +51,18 @@ func CancelTask(status, reason string) error {
 }
 
 // CanUpdateProgress 判定能否更新进度：负责人填写真实情况（§5.6），管理员／项目负责人可全局纠错；
-// 仅执行中状态可改（未开始不产生进度，完成态由终审定论）。
+// 仅执行中状态可改——未开始不产生进度，已完成由终审定论并锁定为 100（AC-63）。
 func CanUpdateProgress(a Actor, userID int64, t TaskFacts) bool {
-	if t.Status != TaskInProgress {
+	if !CanWriteProject(a) || t.Status != TaskInProgress {
 		return false
 	}
 	return userID == t.OwnerID || CanEditProject(a)
 }
 
-// ProgressCoverage 计算 KR 层进度数据覆盖度：只统计已入池且未取消的任务，
-// 平均值任务等权、只算已填任务、四舍五入；不为未填任务虚构百分比（AC-12）。
+// ProgressCoverage 计算 KR 层进度汇总与数据覆盖度（AC-12、AC-63、§5.6）：
+// 统计范围是已入池且未取消的任务，已关闭整体剔除（不进分子也不进分母）；
+// 分母为该范围内全部任务、任务等权，未填按 0 计入，已完成一律按 100；
+// FilledTasks 只数真实填写，用来说明这个平均值里有多少来自负责人填的值。
 func ProgressCoverage(tasks []TaskProgressFact) ProgressSummaryFacts {
 	out := ProgressSummaryFacts{}
 	sum := 0
@@ -72,13 +72,19 @@ func ProgressCoverage(tasks []TaskProgressFact) ProgressSummaryFacts {
 			continue
 		}
 		out.TotalTasks++
+		if t.Status == TaskCompleted {
+			// 完成即 100：任务只有一个进度事实，不看库里存了什么。
+			sum += CompletedProgress()
+			out.FilledTasks++
+			continue
+		}
 		if t.Progress != nil {
 			out.FilledTasks++
 			sum += *t.Progress
 		}
 	}
-	if out.FilledTasks > 0 {
-		avg := (sum + out.FilledTasks/2) / out.FilledTasks
+	if out.TotalTasks > 0 {
+		avg := (sum + out.TotalTasks/2) / out.TotalTasks
 		out.AverageProgress = &avg
 	}
 	return out
@@ -86,16 +92,30 @@ func ProgressCoverage(tasks []TaskProgressFact) ProgressSummaryFacts {
 
 // CanStartTask 判定能否开始执行（派生动作标志）：任务负责人或可编辑项目者，且状态允许。
 func CanStartTask(a Actor, userID int64, t TaskFacts) bool {
+	if !CanWriteProject(a) {
+		return false
+	}
 	if _, err := StartTask(t.Status); err != nil {
 		return false
 	}
 	return userID == t.OwnerID || CanEditProject(a)
 }
 
-// CanCancelTask 判定能否取消（派生动作标志）：负责人／创建人／可编辑项目者，非终态。
-func CanCancelTask(a Actor, userID int64, t TaskFacts) bool {
-	if t.Status == TaskCompleted || t.Status == TaskCancelled {
-		return false
+// CanCancelTask 判定能否发起关闭申请（派生动作标志，AC-57）：口径与 CancelRoute 同源。
+func CanCancelTask(a Actor, userID int64, t TaskFacts, hasPendingChange bool) bool {
+	_, err := CancelRoute(a, userID, t, hasPendingChange)
+	return err == nil
+}
+
+// CompletedProgress 完成终审通过时写入并锁定的进度（AC-63：完成即 100%）。
+func CompletedProgress() int { return 100 }
+
+// DisplayProgress 页面展示用的进度（AC-63、§5.6）：已完成一律 100；
+// 其余状态原样返回负责人填的值，未填就是未填——不把汇总里的 0 显示成负责人填的值。
+func DisplayProgress(status string, stored *int) *int {
+	if status == TaskCompleted {
+		v := CompletedProgress()
+		return &v
 	}
-	return userID == t.OwnerID || userID == t.CreatorID || CanEditProject(a)
+	return stored
 }

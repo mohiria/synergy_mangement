@@ -11,10 +11,76 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countKeyResultsByObjective = `-- name: CountKeyResultsByObjective :one
+SELECT COUNT(*) AS n FROM key_results WHERE objective_id = $1
+`
+
+func (q *Queries) CountKeyResultsByObjective(ctx context.Context, objectiveID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countKeyResultsByObjective, objectiveID)
+	var n int64
+	err := row.Scan(&n)
+	return n, err
+}
+
+const countPendingApprovalsByKeyResult = `-- name: CountPendingApprovalsByKeyResult :one
+SELECT (
+    (SELECT COUNT(*) FROM tasks t WHERE t.key_result_id = $1 AND t.status = 'pending_pool_review')
+  + (SELECT COUNT(*) FROM field_change_requests fc
+        JOIN tasks t ON t.id = fc.task_id
+        WHERE t.key_result_id = $1 AND fc.state = 'pending')
+  + (SELECT COUNT(*) FROM tasks t WHERE t.key_result_id = $1 AND t.status = 'pending_final_review')
+) AS n
+`
+
+// 该 KR 下未决审批单条数：待入池审批、待处理变更单、待终审完成申请（AC-61 交接确认）。
+func (q *Queries) CountPendingApprovalsByKeyResult(ctx context.Context, keyResultID int64) (int32, error) {
+	row := q.db.QueryRow(ctx, countPendingApprovalsByKeyResult, keyResultID)
+	var n int32
+	err := row.Scan(&n)
+	return n, err
+}
+
+const countTasksByKeyResultInProject = `-- name: CountTasksByKeyResultInProject :many
+SELECT kr.id AS key_result_id, COUNT(t.id) AS n
+FROM key_results kr
+JOIN objectives o ON o.id = kr.objective_id
+LEFT JOIN tasks t ON t.key_result_id = kr.id
+WHERE o.project_id = $1
+GROUP BY kr.id
+`
+
+type CountTasksByKeyResultInProjectRow struct {
+	KeyResultID int64
+	N           int64
+}
+
+// 每个 KR 下的任务数（含已完成与已取消，AC-65 删除守卫与 OKR 表「任务」列共用）。
+func (q *Queries) CountTasksByKeyResultInProject(ctx context.Context, projectID int64) ([]CountTasksByKeyResultInProjectRow, error) {
+	rows, err := q.db.Query(ctx, countTasksByKeyResultInProject, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountTasksByKeyResultInProjectRow
+	for rows.Next() {
+		var i CountTasksByKeyResultInProjectRow
+		if err := rows.Scan(&i.KeyResultID, &i.N); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createKeyResult = `-- name: CreateKeyResult :one
-INSERT INTO key_results (objective_id, description, metric, owner_id, start_date, end_date, risk_level, sort_order)
-VALUES ($1, $2, $3, $4, $5, $6, $7, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM key_results WHERE objective_id = $1))
-RETURNING id, objective_id, description, metric, owner_id, start_date, end_date, risk_level, sort_order, created_at
+INSERT INTO key_results (objective_id, description, metric, owner_id, start_date, end_date, sort_order, code_seq)
+VALUES ($1, $2, $3, $4, $5, $6,
+    (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM key_results WHERE objective_id = $1),
+    (SELECT COALESCE(MAX(code_seq), 0) + 1 FROM key_results WHERE objective_id = $1))
+RETURNING id, objective_id, description, metric, owner_id, start_date, end_date, sort_order, created_at, code_seq
 `
 
 type CreateKeyResultParams struct {
@@ -24,7 +90,6 @@ type CreateKeyResultParams struct {
 	OwnerID     pgtype.Int8
 	StartDate   pgtype.Date
 	EndDate     pgtype.Date
-	RiskLevel   string
 }
 
 func (q *Queries) CreateKeyResult(ctx context.Context, arg CreateKeyResultParams) (KeyResult, error) {
@@ -35,7 +100,6 @@ func (q *Queries) CreateKeyResult(ctx context.Context, arg CreateKeyResultParams
 		arg.OwnerID,
 		arg.StartDate,
 		arg.EndDate,
-		arg.RiskLevel,
 	)
 	var i KeyResult
 	err := row.Scan(
@@ -46,17 +110,19 @@ func (q *Queries) CreateKeyResult(ctx context.Context, arg CreateKeyResultParams
 		&i.OwnerID,
 		&i.StartDate,
 		&i.EndDate,
-		&i.RiskLevel,
 		&i.SortOrder,
 		&i.CreatedAt,
+		&i.CodeSeq,
 	)
 	return i, err
 }
 
 const createObjective = `-- name: CreateObjective :one
-INSERT INTO objectives (project_id, title, description, sort_order)
-VALUES ($1, $2, $3, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM objectives WHERE project_id = $1))
-RETURNING id, project_id, title, description, sort_order, created_at
+INSERT INTO objectives (project_id, title, description, sort_order, code_seq)
+VALUES ($1, $2, $3,
+    (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM objectives WHERE project_id = $1),
+    (SELECT COALESCE(MAX(code_seq), 0) + 1 FROM objectives WHERE project_id = $1))
+RETURNING id, project_id, title, description, sort_order, created_at, code_seq
 `
 
 type CreateObjectiveParams struct {
@@ -65,7 +131,8 @@ type CreateObjectiveParams struct {
 	Description string
 }
 
-// 排序追加到项目末尾；批量创建在同一事务内串行执行，MAX+1 不会互相踩踏。
+// 排序与编号序号都追加到项目末尾；批量创建在同一事务内串行执行，MAX+1 不会互相踩踏。
+// code_seq 取历史最大值加一，不复用被删 O 的序号（AC-64）。
 func (q *Queries) CreateObjective(ctx context.Context, arg CreateObjectiveParams) (Objective, error) {
 	row := q.db.QueryRow(ctx, createObjective, arg.ProjectID, arg.Title, arg.Description)
 	var i Objective
@@ -76,12 +143,42 @@ func (q *Queries) CreateObjective(ctx context.Context, arg CreateObjectiveParams
 		&i.Description,
 		&i.SortOrder,
 		&i.CreatedAt,
+		&i.CodeSeq,
 	)
 	return i, err
 }
 
+const deleteKeyResult = `-- name: DeleteKeyResult :execrows
+DELETE FROM key_results WHERE id = $1
+`
+
+func (q *Queries) DeleteKeyResult(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteKeyResult, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteObjective = `-- name: DeleteObjective :execrows
+DELETE FROM objectives WHERE id = $1 AND project_id = $2
+`
+
+type DeleteObjectiveParams struct {
+	ID        int64
+	ProjectID int64
+}
+
+func (q *Queries) DeleteObjective(ctx context.Context, arg DeleteObjectiveParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteObjective, arg.ID, arg.ProjectID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getObjective = `-- name: GetObjective :one
-SELECT id, project_id, title, description, sort_order, created_at FROM objectives
+SELECT id, project_id, title, description, sort_order, created_at, code_seq FROM objectives
 WHERE id = $1 AND project_id = $2
 `
 
@@ -100,12 +197,49 @@ func (q *Queries) GetObjective(ctx context.Context, arg GetObjectiveParams) (Obj
 		&i.Description,
 		&i.SortOrder,
 		&i.CreatedAt,
+		&i.CodeSeq,
 	)
 	return i, err
 }
 
+const listInputProviderDutiesOf = `-- name: ListInputProviderDutiesOf :many
+SELECT DISTINCT e.name
+FROM input_requests ir
+JOIN deliverable_edges e ON e.id = ir.edge_id
+JOIN tasks t ON t.id = e.target_task_id
+JOIN key_results kr ON kr.id = t.key_result_id
+JOIN objectives o ON o.id = kr.objective_id
+WHERE o.project_id = $1 AND ir.provider_id = $2
+  AND ir.state <> 'provided' AND t.status NOT IN ('completed', 'cancelled')
+`
+
+type ListInputProviderDutiesOfParams struct {
+	ProjectID  int64
+	ProviderID int64
+}
+
+func (q *Queries) ListInputProviderDutiesOf(ctx context.Context, arg ListInputProviderDutiesOfParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listInputProviderDutiesOf, arg.ProjectID, arg.ProviderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		items = append(items, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listKeyResultsByProject = `-- name: ListKeyResultsByProject :many
-SELECT kr.id, kr.objective_id, kr.description, kr.metric, kr.owner_id, kr.start_date, kr.end_date, kr.risk_level, kr.sort_order, kr.created_at, u.display_name AS owner_name
+SELECT kr.id, kr.objective_id, kr.description, kr.metric, kr.owner_id, kr.start_date, kr.end_date, kr.sort_order, kr.created_at, kr.code_seq, u.display_name AS owner_name, o.code_seq AS objective_code_seq
 FROM key_results kr
 JOIN objectives o ON o.id = kr.objective_id
 LEFT JOIN users u ON u.id = kr.owner_id
@@ -114,17 +248,18 @@ ORDER BY kr.sort_order, kr.id
 `
 
 type ListKeyResultsByProjectRow struct {
-	ID          int64
-	ObjectiveID int64
-	Description string
-	Metric      string
-	OwnerID     pgtype.Int8
-	StartDate   pgtype.Date
-	EndDate     pgtype.Date
-	RiskLevel   string
-	SortOrder   int32
-	CreatedAt   pgtype.Timestamptz
-	OwnerName   pgtype.Text
+	ID               int64
+	ObjectiveID      int64
+	Description      string
+	Metric           string
+	OwnerID          pgtype.Int8
+	StartDate        pgtype.Date
+	EndDate          pgtype.Date
+	SortOrder        int32
+	CreatedAt        pgtype.Timestamptz
+	CodeSeq          int32
+	OwnerName        pgtype.Text
+	ObjectiveCodeSeq int32
 }
 
 // owner_name：KR 负责人姓名（派生字段，前端直接展示；未指定负责人时为 NULL）。
@@ -145,10 +280,11 @@ func (q *Queries) ListKeyResultsByProject(ctx context.Context, projectID int64) 
 			&i.OwnerID,
 			&i.StartDate,
 			&i.EndDate,
-			&i.RiskLevel,
 			&i.SortOrder,
 			&i.CreatedAt,
+			&i.CodeSeq,
 			&i.OwnerName,
+			&i.ObjectiveCodeSeq,
 		); err != nil {
 			return nil, err
 		}
@@ -160,8 +296,45 @@ func (q *Queries) ListKeyResultsByProject(ctx context.Context, projectID int64) 
 	return items, nil
 }
 
+const listKeyResultsOwnedBy = `-- name: ListKeyResultsOwnedBy :many
+SELECT kr.id, kr.description
+FROM key_results kr
+JOIN objectives o ON o.id = kr.objective_id
+WHERE o.project_id = $1 AND kr.owner_id = $2
+`
+
+type ListKeyResultsOwnedByParams struct {
+	ProjectID int64
+	OwnerID   pgtype.Int8
+}
+
+type ListKeyResultsOwnedByRow struct {
+	ID          int64
+	Description string
+}
+
+func (q *Queries) ListKeyResultsOwnedBy(ctx context.Context, arg ListKeyResultsOwnedByParams) ([]ListKeyResultsOwnedByRow, error) {
+	rows, err := q.db.Query(ctx, listKeyResultsOwnedBy, arg.ProjectID, arg.OwnerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListKeyResultsOwnedByRow
+	for rows.Next() {
+		var i ListKeyResultsOwnedByRow
+		if err := rows.Scan(&i.ID, &i.Description); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listObjectives = `-- name: ListObjectives :many
-SELECT id, project_id, title, description, sort_order, created_at FROM objectives
+SELECT id, project_id, title, description, sort_order, created_at, code_seq FROM objectives
 WHERE project_id = $1
 ORDER BY sort_order, id
 `
@@ -182,6 +355,7 @@ func (q *Queries) ListObjectives(ctx context.Context, projectID int64) ([]Object
 			&i.Description,
 			&i.SortOrder,
 			&i.CreatedAt,
+			&i.CodeSeq,
 		); err != nil {
 			return nil, err
 		}
@@ -191,4 +365,191 @@ func (q *Queries) ListObjectives(ctx context.Context, projectID int64) ([]Object
 		return nil, err
 	}
 	return items, nil
+}
+
+const listReceiverDutiesOf = `-- name: ListReceiverDutiesOf :many
+SELECT DISTINCT t.name
+FROM task_receivers rc
+JOIN tasks t ON t.id = rc.task_id
+JOIN key_results kr ON kr.id = t.key_result_id
+JOIN objectives o ON o.id = kr.objective_id
+WHERE o.project_id = $1 AND rc.user_id = $2 AND t.status NOT IN ('completed', 'cancelled')
+`
+
+type ListReceiverDutiesOfParams struct {
+	ProjectID int64
+	UserID    int64
+}
+
+func (q *Queries) ListReceiverDutiesOf(ctx context.Context, arg ListReceiverDutiesOfParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listReceiverDutiesOf, arg.ProjectID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		items = append(items, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReviewerDutiesOf = `-- name: ListReviewerDutiesOf :many
+SELECT DISTINCT t.name
+FROM task_reviewers tr
+JOIN tasks t ON t.id = tr.task_id
+JOIN key_results kr ON kr.id = t.key_result_id
+JOIN objectives o ON o.id = kr.objective_id
+WHERE o.project_id = $1 AND tr.user_id = $2 AND t.status NOT IN ('completed', 'cancelled')
+`
+
+type ListReviewerDutiesOfParams struct {
+	ProjectID int64
+	UserID    int64
+}
+
+func (q *Queries) ListReviewerDutiesOf(ctx context.Context, arg ListReviewerDutiesOfParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listReviewerDutiesOf, arg.ProjectID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		items = append(items, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTasksOwnedBy = `-- name: ListTasksOwnedBy :many
+SELECT t.id, t.name
+FROM tasks t
+JOIN key_results kr ON kr.id = t.key_result_id
+JOIN objectives o ON o.id = kr.objective_id
+WHERE o.project_id = $1 AND t.owner_id = $2 AND t.status NOT IN ('completed', 'cancelled')
+`
+
+type ListTasksOwnedByParams struct {
+	ProjectID int64
+	OwnerID   int64
+}
+
+type ListTasksOwnedByRow struct {
+	ID   int64
+	Name string
+}
+
+func (q *Queries) ListTasksOwnedBy(ctx context.Context, arg ListTasksOwnedByParams) ([]ListTasksOwnedByRow, error) {
+	rows, err := q.db.Query(ctx, listTasksOwnedBy, arg.ProjectID, arg.OwnerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTasksOwnedByRow
+	for rows.Next() {
+		var i ListTasksOwnedByRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateKeyResult = `-- name: UpdateKeyResult :one
+UPDATE key_results
+SET description = COALESCE($1, description),
+    metric = COALESCE($2, metric),
+    owner_id = COALESCE($3, owner_id),
+    start_date = COALESCE($4, start_date),
+    end_date = COALESCE($5, end_date)
+WHERE id = $6
+RETURNING id, objective_id, description, metric, owner_id, start_date, end_date, sort_order, created_at, code_seq
+`
+
+type UpdateKeyResultParams struct {
+	Description pgtype.Text
+	Metric      pgtype.Text
+	OwnerID     pgtype.Int8
+	StartDate   pgtype.Date
+	EndDate     pgtype.Date
+	ID          int64
+}
+
+func (q *Queries) UpdateKeyResult(ctx context.Context, arg UpdateKeyResultParams) (KeyResult, error) {
+	row := q.db.QueryRow(ctx, updateKeyResult,
+		arg.Description,
+		arg.Metric,
+		arg.OwnerID,
+		arg.StartDate,
+		arg.EndDate,
+		arg.ID,
+	)
+	var i KeyResult
+	err := row.Scan(
+		&i.ID,
+		&i.ObjectiveID,
+		&i.Description,
+		&i.Metric,
+		&i.OwnerID,
+		&i.StartDate,
+		&i.EndDate,
+		&i.SortOrder,
+		&i.CreatedAt,
+		&i.CodeSeq,
+	)
+	return i, err
+}
+
+const updateObjective = `-- name: UpdateObjective :one
+UPDATE objectives
+SET title = COALESCE($1, title),
+    description = COALESCE($2, description)
+WHERE id = $3 AND project_id = $4
+RETURNING id, project_id, title, description, sort_order, created_at, code_seq
+`
+
+type UpdateObjectiveParams struct {
+	Title       pgtype.Text
+	Description pgtype.Text
+	ID          int64
+	ProjectID   int64
+}
+
+// 只覆盖拟议的字段（NULL 表示不改，AC-65）。
+func (q *Queries) UpdateObjective(ctx context.Context, arg UpdateObjectiveParams) (Objective, error) {
+	row := q.db.QueryRow(ctx, updateObjective,
+		arg.Title,
+		arg.Description,
+		arg.ID,
+		arg.ProjectID,
+	)
+	var i Objective
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Title,
+		&i.Description,
+		&i.SortOrder,
+		&i.CreatedAt,
+		&i.CodeSeq,
+	)
+	return i, err
 }

@@ -9,8 +9,8 @@ func sptr(s string) *string { return &s }
 
 // §9.1：提交关键字段修改——至少一项拟议值；进入审批时修改原因必填。
 func TestValidateKeyFieldChanges(t *testing.T) {
-	members := map[int64]bool{5: true}
-	isMember := func(id int64) bool { return members[id] }
+	roles := map[int64]string{5: RoleMember, 8: RoleViewer}
+	roleOf := func(id int64) string { return roles[id] }
 	start := date("2026-09-01")
 
 	cases := []struct {
@@ -25,13 +25,14 @@ func TestValidateKeyFieldChanges(t *testing.T) {
 		{"审批路径原因必填", KeyFieldChanges{Name: sptr("新名")}, "  ", true, ErrChangeReasonRequired},
 		{"草稿完善可不填原因", KeyFieldChanges{Name: sptr("新名")}, "", false, nil},
 		{"新名称为空", KeyFieldChanges{Name: sptr("   ")}, "x", true, ErrTaskNameEmpty},
-		{"新负责人非成员", KeyFieldChanges{OwnerID: i64(99)}, "x", true, ErrTaskOwnerNotMember},
+		{"新负责人非成员", KeyFieldChanges{OwnerID: i64(99)}, "x", true, ErrTaskOwnerNotEligible},
+		{"新负责人是访客", KeyFieldChanges{OwnerID: i64(8)}, "x", true, ErrTaskOwnerNotEligible},
 		{"新截止早于开始", KeyFieldChanges{EndDate: day("2026-08-20")}, "x", true, ErrTaskPeriodInverted},
 		{"新截止合法", KeyFieldChanges{EndDate: day("2026-09-15")}, "x", true, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := ValidateKeyFieldChanges(tc.c, tc.reason, tc.needRsn, isMember, start)
+			got := ValidateKeyFieldChanges(tc.c, tc.reason, tc.needRsn, roleOf, start)
 			if !errors.Is(got, tc.want) {
 				t.Fatalf("ValidateKeyFieldChanges() = %v, want %v", got, tc.want)
 			}
@@ -66,7 +67,7 @@ func TestFieldChangeRoute(t *testing.T) {
 		{"待入池审批不可修改", Actor{Role: RoleMember}, 5, facts(TaskPendingPoolReview), false, 0, ErrChangeNotAllowed},
 		{"完成审核中不可修改", Actor{Role: RoleMember}, 5, facts(TaskPendingFinalReview), false, 0, ErrChangeNotAllowed},
 		{"已完成不可修改", Actor{Role: RoleMember}, 5, facts(TaskCompleted), false, 0, ErrChangeNotAllowed},
-		{"已取消不可修改", Actor{Role: RoleAdmin}, 9, facts(TaskCancelled), false, 0, ErrChangeNotAllowed},
+		{"已关闭不可修改", Actor{Role: RoleAdmin}, 9, facts(TaskCancelled), false, 0, ErrChangeNotAllowed},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -81,20 +82,34 @@ func TestFieldChangeRoute(t *testing.T) {
 	}
 }
 
-// AC-23：变更单只能由所属 KR 负责人处理，且仅待审批状态。
+// AC-23：变更单只能由所属 KR 负责人处理，且仅待审批状态；任务已终止时不得再批准（回归：R3）。
 func TestDecideFieldChangeRule(t *testing.T) {
 	krOwner := i64(7)
-	if err := DecideFieldChangeRule("pending", krOwner, 7); err != nil {
+	inProgress := TaskFacts{Status: TaskInProgress, KrOwnerID: krOwner}
+	// MW-18：变更单退回同样必须写清理由。
+	if err := DecideFieldChangeRule(Actor{Role: RoleMember}, "pending", inProgress, 7, false, ""); !errors.Is(err, ErrRejectOpinionRequired) {
+		t.Fatalf("退回不填理由应被拒: %v", err)
+	}
+	if err := DecideFieldChangeRule(Actor{Role: RoleMember}, "pending", inProgress, 7, false, "口径不符"); err != nil {
+		t.Fatalf("带理由退回应通过: %v", err)
+	}
+	if err := DecideFieldChangeRule(Actor{Role: RoleMember}, "pending", inProgress, 7, true, ""); err != nil {
 		t.Fatalf("KR 负责人应可处理: %v", err)
 	}
-	if err := DecideFieldChangeRule("pending", krOwner, 9); !errors.Is(err, ErrNotKrOwner) {
+	if err := DecideFieldChangeRule(Actor{Role: RoleMember}, "pending", inProgress, 9, true, ""); !errors.Is(err, ErrNotKrOwner) {
 		t.Fatalf("非 KR 负责人应被拒: %v", err)
 	}
-	if err := DecideFieldChangeRule("approved", krOwner, 7); !errors.Is(err, ErrChangeNotPending) {
+	if err := DecideFieldChangeRule(Actor{Role: RoleMember}, "approved", inProgress, 7, true, ""); !errors.Is(err, ErrChangeNotPending) {
 		t.Fatalf("已处理变更单应冲突: %v", err)
 	}
-	if err := DecideFieldChangeRule("pending", nil, 7); !errors.Is(err, ErrNotKrOwner) {
+	if err := DecideFieldChangeRule(Actor{Role: RoleMember}, "pending", TaskFacts{Status: TaskInProgress}, 7, true, ""); !errors.Is(err, ErrNotKrOwner) {
 		t.Fatalf("KR 无负责人时应被拒: %v", err)
+	}
+	// 终态任务的未决变更单不得再被批准：批准会改写已完成／已关闭任务的名称、负责人与截止时间。
+	for _, status := range []string{TaskCompleted, TaskCancelled} {
+		if err := DecideFieldChangeRule(Actor{Role: RoleMember}, "pending", TaskFacts{Status: status, KrOwnerID: krOwner}, 7, true, ""); !errors.Is(err, ErrChangeTaskTerminal) {
+			t.Fatalf("任务状态 %s 时应拒绝处理变更单: %v", status, err)
+		}
 	}
 }
 

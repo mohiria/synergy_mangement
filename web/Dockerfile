@@ -3,6 +3,8 @@ WORKDIR /src
 # 同 server/Dockerfile：默认走国内 npm 镜像，版本由 package-lock.json 钉死。
 RUN npm config set registry https://registry.npmmirror.com
 COPY package.json package-lock.json ./
+# xlsx 走仓库内 tarball（file:vendor/…），npm ci 前必须先进上下文。
+COPY vendor ./vendor
 RUN npm ci
 COPY . .
 # 契约类型（src/api/schema.d.ts）是入库的生成物，构建时不重新生成；build 已含 tsc 类型检查。

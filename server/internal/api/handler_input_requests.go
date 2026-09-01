@@ -29,18 +29,14 @@ func (s *Server) CreateMemberInput(w http.ResponseWriter, r *http.Request, proje
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
-	task, facts, ok := s.fetchTask(w, r, projectId, taskId)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
+	_, facts, ok := s.fetchTask(w, r, projectId, taskId)
 	if !ok {
-		return
-	}
-	if !domain.CanConfigureInputs(actor, uid, facts) {
-		writeForbidden(w)
 		return
 	}
 	members, err := s.q.ListProjectMembers(r.Context(), projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	roleByID := make(map[int64]string, len(members))
@@ -48,7 +44,6 @@ func (s *Server) CreateMemberInput(w http.ResponseWriter, r *http.Request, proje
 		roleByID[m.UserID] = m.Role
 	}
 	input := domain.MemberInputs{
-		Name:            strings.TrimSpace(req.Name),
 		Necessity:       string(req.Necessity),
 		ProviderIDs:     req.ProviderIds,
 		ContentNote:     strings.TrimSpace(req.ContentNote),
@@ -58,60 +53,37 @@ func (s *Server) CreateMemberInput(w http.ResponseWriter, r *http.Request, proje
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_member_input", Message: err.Error()})
 		return
 	}
-	// 草稿与待入池审批阶段不提前打扰对接人（§7.3）。
-	pooled := facts.Status != domain.TaskDraft && facts.Status != domain.TaskPendingPoolReview
-	tx, err := s.db.Begin(r.Context())
-	if err != nil {
-		writeInternalError(w)
+	// 输入源是关键字段（§5.2.B、§5.5）：已入池任务指定对接人要经所属 KR 负责人审批，
+	// 审批通过后才建边、生成输入请求并发通知。
+	outcome, ok := s.routeStructureChange(w, r, taskId, actor, uid, facts)
+	if !ok {
 		return
 	}
-	defer func() { _ = tx.Rollback(r.Context()) }()
-	qtx := s.q.WithTx(tx)
-	createdIDs := make([]int64, 0, len(input.ProviderIDs))
-	for _, providerID := range input.ProviderIDs {
-		edge, err := qtx.CreateEdge(r.Context(), store.CreateEdgeParams{
-			TargetTaskID: taskId,
-			SourceUserID: pgtype.Int8{Int64: providerID, Valid: true},
-			Name:         input.Name,
-			EdgeType:     domain.EdgeInformation,
-			Necessity:    input.Necessity,
-			ExpectedDate: pgtype.Date{Time: req.ExpectedDate.Time, Valid: true},
-			CreatedBy:    uid,
-		})
-		if err != nil {
-			writeInternalError(w)
-			return
-		}
-		notified := pgtype.Timestamptz{}
-		if pooled {
-			notified = pgtype.Timestamptz{Time: s.now(), Valid: true}
-		}
-		if _, err := qtx.CreateInputRequest(r.Context(), store.CreateInputRequestParams{
-			EdgeID: edge.ID, ProviderID: providerID, ContentNote: input.ContentNote, NotifiedAt: notified,
-		}); err != nil {
-			writeInternalError(w)
-			return
-		}
-		if pooled {
-			// AC-29：带上下文的站内通知，每名对接人各发一条。
-			if _, err := qtx.CreateNotification(r.Context(), store.CreateNotificationParams{
-				UserID:    providerID,
-				Kind:      domain.NotifyInputRequest,
-				Content:   fmt.Sprintf("请你为任务「%s」提供输入「%s」：%s", task.Name, input.Name, input.ContentNote),
-				ProjectID: pgtype.Int8{Int64: projectId, Valid: true},
-				TaskID:    pgtype.Int8{Int64: taskId, Valid: true},
-			}); err != nil {
-				writeInternalError(w)
-				return
+	providerNames := make([]string, 0, len(input.ProviderIDs))
+	for _, m := range members {
+		for _, id := range input.ProviderIDs {
+			if m.UserID == id {
+				providerNames = append(providerNames, m.DisplayName)
 			}
 		}
-		createdIDs = append(createdIDs, edge.ID)
 	}
-	if err := tx.Commit(r.Context()); err != nil {
-		writeInternalError(w)
+	raw, err := json.Marshal(req)
+	if err != nil {
+		writeInternalError(w, r, err)
 		return
 	}
-	s.writeCreatedEdges(w, r, projectId, uid, actor, createdIDs)
+	payload := structurePayload{
+		Op:       domain.StructureAddMemberInput,
+		Label:    domain.StructureFieldLabel(domain.StructureAddMemberInput),
+		OldValue: "—",
+		NewValue: fmt.Sprintf("新增输入源「%s」，对接人：%s",
+			domain.EdgeDisplayName("", "", input.ContentNote), strings.Join(providerNames, "、")),
+		Request:  raw,
+	}
+	if !s.commitStructureChange(w, r, projectId, taskId, uid, outcome, payload, payload.NewValue) {
+		return
+	}
+	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 
 func (s *Server) AcceptInputRequest(w http.ResponseWriter, r *http.Request, projectId int64, requestId int64) {
@@ -124,7 +96,7 @@ func (s *Server) AcceptInputRequest(w http.ResponseWriter, r *http.Request, proj
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, Error{Code: "request_not_found", Message: "输入请求不存在"})
 		} else {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 		}
 		return
 	}
@@ -138,7 +110,7 @@ func (s *Server) AcceptInputRequest(w http.ResponseWriter, r *http.Request, proj
 	}
 	updated, err := s.q.AcceptInputRequest(r.Context(), requestId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, s.inputRequestView(updated, ir.ProviderName, uid))
@@ -159,7 +131,7 @@ func (s *Server) ProvideInput(w http.ResponseWriter, r *http.Request, projectId 
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, Error{Code: "request_not_found", Message: "输入请求不存在"})
 		} else {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 		}
 		return
 	}
@@ -192,15 +164,21 @@ func (s *Server) ProvideInput(w http.ResponseWriter, r *http.Request, projectId 
 		objectKey = fmt.Sprintf("input-requests/%d/%d-%s", requestId, s.now().UnixNano(), sanitizeObjectName(fileName))
 		uploadURL, err = s.files.PresignPut(r.Context(), objectKey, presignExpiry)
 		if err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 	}
+	// 带附件时先停在 uploading：预签名直传绕过服务端，不等确认就置 provided 等于
+	// 「没传也算已提供」，下游等待输入会被错误解除（R4）。
+	newState := domain.InputRequestProvided
+	if fileName != "" {
+		newState = domain.InputRequestUploading
+	}
 	updated, err := s.q.ProvideInputRequest(r.Context(), store.ProvideInputRequestParams{
-		ID: requestId, ProvidedText: text, FileName: fileName, ObjectKey: objectKey,
+		ID: requestId, ProvidedText: text, FileName: fileName, ObjectKey: objectKey, State: newState,
 	})
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	resp := ProvideInputResponse{Request: s.inputRequestView(updated, ir.ProviderName, uid)}
@@ -208,6 +186,46 @@ func (s *Server) ProvideInput(w http.ResponseWriter, r *http.Request, projectId 
 		resp.UploadUrl = &uploadURL
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// CommitInputRequestFile 两阶段提交第二步：校验附件确已写入对象存储后，uploading → provided（R4）。
+func (s *Server) CommitInputRequestFile(w http.ResponseWriter, r *http.Request, projectId int64, requestId int64) {
+	if _, ok := s.fetchProject(w, r, projectId); !ok {
+		return
+	}
+	uid := currentUser(r).ID
+	ir, err := s.q.GetInputRequestInProject(r.Context(), store.GetInputRequestInProjectParams{ID: requestId, ProjectID: projectId})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, Error{Code: "request_not_found", Message: "输入请求不存在"})
+		} else {
+			writeInternalError(w, r, err)
+		}
+		return
+	}
+	if ir.ProviderID != uid {
+		writeForbidden(w)
+		return
+	}
+	if ir.State != domain.InputRequestUploading || ir.ObjectKey == "" {
+		writeJSON(w, http.StatusConflict, Error{Code: "upload_state_conflict", Message: "没有待确认的上传记录"})
+		return
+	}
+	size, err := s.files.Stat(r.Context(), ir.ObjectKey)
+	if err != nil {
+		writeJSON(w, http.StatusConflict, Error{Code: "upload_not_found", Message: "文件尚未上传完成，请重试"})
+		return
+	}
+	if err := domain.ValidateUploadSize(size); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_file", Message: err.Error()})
+		return
+	}
+	updated, err := s.q.CommitInputRequestUpload(r.Context(), requestId)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.inputRequestView(updated, ir.ProviderName, uid))
 }
 
 func (s *Server) GetInputRequestFileUrl(w http.ResponseWriter, r *http.Request, projectId int64, requestId int64) {
@@ -219,17 +237,17 @@ func (s *Server) GetInputRequestFileUrl(w http.ResponseWriter, r *http.Request, 
 		writeJSON(w, http.StatusNotFound, Error{Code: "file_not_found", Message: "文件不存在"})
 		return
 	}
-	url, err := s.files.PresignGet(r.Context(), ir.ObjectKey, ir.FileName, presignExpiry)
+	url, err := s.files.PresignGet(r.Context(), ir.ObjectKey, ir.FileName, false, presignExpiry)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, DownloadUrlResponse{Url: url})
 }
 
 // notifyPendingInputRequests 入池审批通过后补发对接人通知（AC-29；§7.3 首次入池通过后发送）。
-func (s *Server) notifyPendingInputRequests(r *http.Request, projectID int64, task store.GetTaskInProjectRow) {
-	rows, err := s.q.ListUnnotifiedInputRequestsByTask(r.Context(), task.ID)
+func (s *Server) notifyPendingInputRequests(r *http.Request, projectID, taskID int64, taskName string) {
+	rows, err := s.q.ListUnnotifiedInputRequestsByTask(r.Context(), taskID)
 	if err != nil {
 		return
 	}
@@ -237,9 +255,9 @@ func (s *Server) notifyPendingInputRequests(r *http.Request, projectID int64, ta
 		_, err := s.q.CreateNotification(r.Context(), store.CreateNotificationParams{
 			UserID:    ir.ProviderID,
 			Kind:      domain.NotifyInputRequest,
-			Content:   fmt.Sprintf("请你为任务「%s」提供输入「%s」：%s", task.Name, ir.EdgeName, ir.ContentNote),
+			Content:   fmt.Sprintf("请你为任务「%s」提供输入「%s」：%s", taskName, ir.EdgeName, ir.ContentNote),
 			ProjectID: pgtype.Int8{Int64: projectID, Valid: true},
-			TaskID:    pgtype.Int8{Int64: task.ID, Valid: true},
+			TaskID:    pgtype.Int8{Int64: taskID, Valid: true},
 		})
 		if err == nil {
 			_ = s.q.MarkInputRequestNotified(r.Context(), ir.ID)

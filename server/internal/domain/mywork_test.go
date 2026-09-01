@@ -55,11 +55,11 @@ func TestMyWorkGrouping(t *testing.T) {
 		},
 		InputRequests: []WorkInputRequestFact{
 			// 我是对接人、待接收、已通知 → 待我处理
-			{ID: 41, TaskID: 30, TaskName: "下游任务", InputName: "接口口径", ProviderID: me, TaskOwnerID: 9, State: InputRequestPending, Notified: true, CreatedAt: old},
+			{ID: 41, TaskID: 30, TaskName: "下游任务", InputName: "接口口径", Necessity: NecessityRequired, ProviderID: me, TaskOwnerID: 9, State: InputRequestPending, Notified: true, CreatedAt: old},
 			// 我是对接人但未通知（任务未入池）→ 不出现
-			{ID: 42, TaskID: 31, TaskName: "草稿下游", InputName: "评审意见", ProviderID: me, TaskOwnerID: 9, State: InputRequestPending, Notified: false, CreatedAt: recent},
+			{ID: 42, TaskID: 31, TaskName: "草稿下游", InputName: "评审意见", Necessity: NecessityRequired, ProviderID: me, TaskOwnerID: 9, State: InputRequestPending, Notified: false, CreatedAt: recent},
 			// 我任务上我发起的请求（对接人他人）→ 等待他人
-			{ID: 43, TaskID: 2, TaskName: "被卡任务", InputName: "现场数据包", ProviderID: 9, TaskOwnerID: me, State: InputRequestAccepted, Notified: true, CreatedAt: recent},
+			{ID: 43, TaskID: 2, TaskName: "被卡任务", InputName: "现场数据包", Necessity: NecessityRequired, ProviderID: 9, TaskOwnerID: me, State: InputRequestAccepted, Notified: true, CreatedAt: recent},
 		},
 		Invites: []WorkInviteFact{
 			// 我被邀请且待处理 → 待我处理
@@ -198,20 +198,6 @@ func TestMyWorkWaitingApprovalCopy(t *testing.T) {
 	}
 }
 
-// AC-05：KR 风险一行原因——有开放卡点时取首个卡点事实，否则风险等级非正常时给通用说明。
-func TestKrRiskNote(t *testing.T) {
-	if got := KrRiskNote("normal", nil); got != "" {
-		t.Fatalf("正常且无卡点不应有原因: %q", got)
-	}
-	if got := KrRiskNote("warning", nil); got != "存在待处理的风险因素" {
-		t.Fatalf("预警无卡点应给通用说明: %q", got)
-	}
-	notes := []string{"缺 现场数据包：上游未交付"}
-	if got := KrRiskNote("normal", notes); got != "缺 现场数据包：上游未交付" {
-		t.Fatalf("有卡点应取首个卡点事实: %q", got)
-	}
-}
-
 // AC-19：报告时间范围解析。
 func TestReportRangeFrom(t *testing.T) {
 	now := time.Date(2026, 9, 10, 15, 30, 0, 0, time.UTC)
@@ -251,5 +237,91 @@ func TestMyWorkBlockerStageUsesKindLabel(t *testing.T) {
 	}
 	if g.Blockers[0].Stage != "审批超时" {
 		t.Fatalf("卡点事项环节应为中文类型名，实际 %q", g.Blockers[0].Stage)
+	}
+}
+
+// 身份卡「当前职责」（模块 PRD §3.1；#69）：由成员仍占着的职责事实派生，
+// 顺序固定，从项目级到事项级；没有职责时给明确文案，不留空白。
+func TestWorkResponsibilities(t *testing.T) {
+	full := MemberDuties{
+		KeyResults:     []string{"上线自动验收"},
+		Tasks:          []string{"输出验收方案"},
+		Reviewers:      []string{"回归验证分析"},
+		Receivers:      []string{"外部口径汇总"},
+		InputProviders: []string{"现场数据包"},
+	}
+	cases := []struct {
+		name          string
+		duties        MemberDuties
+		projectOwner  bool
+		pendingInvite bool
+		want          []string
+		wantLabel     string
+	}{
+		{
+			name:      "无任何职责",
+			wantLabel: "当前未承担行动职责",
+		},
+		{
+			name:         "项目负责人排在最前",
+			duties:       MemberDuties{Tasks: []string{"输出验收方案"}},
+			projectOwner: true,
+			want:         []string{"项目负责人", "任务负责人"},
+			wantLabel:    "项目负责人、任务负责人",
+		},
+		{
+			name:          "全部职责按固定顺序排列",
+			duties:        full,
+			projectOwner:  true,
+			pendingInvite: true,
+			want: []string{
+				"项目负责人", "KR 负责人", "任务负责人",
+				"成果审核人", "接收方", "输入对接人", "被邀请人",
+			},
+			wantLabel: "项目负责人、KR 负责人、任务负责人、成果审核人、接收方、输入对接人、被邀请人",
+		},
+		{
+			name:          "只有待处理邀请也算一项职责",
+			pendingInvite: true,
+			want:          []string{"被邀请人"},
+			wantLabel:     "被邀请人",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := WorkResponsibilities(c.duties, c.projectOwner, c.pendingInvite)
+			if len(got) != len(c.want) {
+				t.Fatalf("WorkResponsibilities = %v, want %v", got, c.want)
+			}
+			for i := range got {
+				if got[i] != c.want[i] {
+					t.Fatalf("WorkResponsibilities = %v, want %v", got, c.want)
+				}
+			}
+			if label := WorkResponsibilitiesLabel(got); label != c.wantLabel {
+				t.Fatalf("WorkResponsibilitiesLabel = %q, want %q", label, c.wantLabel)
+			}
+		})
+	}
+}
+
+// 身份卡的身份文案（#69）：项目负责人可以不在成员表里（CanReadProject 允许），
+// 那时不能回显空串，退到「项目负责人」。
+func TestWorkIdentityRoleLabel(t *testing.T) {
+	cases := []struct {
+		role    string
+		isOwner bool
+		want    string
+	}{
+		{RoleAdmin, false, "项目管理员"},
+		{RoleMember, false, "项目成员"},
+		{RoleViewer, true, "访客"},
+		{"", true, "项目负责人"},
+		{"", false, "非项目成员"},
+	}
+	for _, c := range cases {
+		if got := WorkIdentityRoleLabel(c.role, c.isOwner); got != c.want {
+			t.Fatalf("WorkIdentityRoleLabel(%q,%v) = %q, want %q", c.role, c.isOwner, got, c.want)
+		}
 	}
 }

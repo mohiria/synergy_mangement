@@ -71,7 +71,8 @@ func (q *Queries) DeleteEdge(ctx context.Context, id int64) (int64, error) {
 }
 
 const getEdgeInProject = `-- name: GetEdgeInProject :one
-SELECT e.id, e.target_task_id, e.source_task_id, e.source_user_id, e.deliverable_id, e.name, e.edge_type, e.necessity, e.expected_date, e.created_by, e.created_at, tt.owner_id AS target_owner_id, tt.created_by AS target_created_by, tt.status AS target_status
+SELECT e.id, e.target_task_id, e.source_task_id, e.source_user_id, e.deliverable_id, e.name, e.edge_type, e.necessity, e.expected_date, e.created_by, e.created_at, tt.owner_id AS target_owner_id, tt.created_by AS target_created_by, tt.status AS target_status,
+    k.owner_id AS target_kr_owner_id
 FROM deliverable_edges e
 JOIN tasks tt ON tt.id = e.target_task_id
 JOIN key_results k ON k.id = tt.key_result_id
@@ -99,6 +100,7 @@ type GetEdgeInProjectRow struct {
 	TargetOwnerID   int64
 	TargetCreatedBy int64
 	TargetStatus    string
+	TargetKrOwnerID pgtype.Int8
 }
 
 func (q *Queries) GetEdgeInProject(ctx context.Context, arg GetEdgeInProjectParams) (GetEdgeInProjectRow, error) {
@@ -119,8 +121,150 @@ func (q *Queries) GetEdgeInProject(ctx context.Context, arg GetEdgeInProjectPara
 		&i.TargetOwnerID,
 		&i.TargetCreatedBy,
 		&i.TargetStatus,
+		&i.TargetKrOwnerID,
 	)
 	return i, err
+}
+
+const listCurrentFilesByProjectTask = `-- name: ListCurrentFilesByProjectTask :many
+SELECT d.task_id, df.id AS file_id, df.file_name, df.file_size
+FROM deliverable_files df
+JOIN deliverables d ON d.id = df.deliverable_id
+JOIN tasks t ON t.id = d.task_id
+JOIN key_results k ON k.id = t.key_result_id
+JOIN objectives o ON o.id = k.objective_id
+WHERE o.project_id = $1 AND df.state = 'current'
+ORDER BY df.id
+`
+
+type ListCurrentFilesByProjectTaskRow struct {
+	TaskID   int64
+	FileID   int64
+	FileName string
+	FileSize int64
+}
+
+// 裁决 J1（#142）：关系列表「当前交付物」列——项目内各任务全部已生效当前内容，
+// 供边未绑定具体交付物项时按来源任务归组展示。
+func (q *Queries) ListCurrentFilesByProjectTask(ctx context.Context, projectID int64) ([]ListCurrentFilesByProjectTaskRow, error) {
+	rows, err := q.db.Query(ctx, listCurrentFilesByProjectTask, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCurrentFilesByProjectTaskRow
+	for rows.Next() {
+		var i ListCurrentFilesByProjectTaskRow
+		if err := rows.Scan(
+			&i.TaskID,
+			&i.FileID,
+			&i.FileName,
+			&i.FileSize,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEdgeRefsByDeliverableTask = `-- name: ListEdgeRefsByDeliverableTask :many
+SELECT e.id, e.deliverable_id, e.name, e.edge_type, e.target_task_id,
+    tt.name AS target_task_name
+FROM deliverable_edges e
+JOIN tasks tt ON tt.id = e.target_task_id
+JOIN deliverables d ON d.id = e.deliverable_id
+WHERE d.task_id = $1
+ORDER BY e.id
+`
+
+type ListEdgeRefsByDeliverableTaskRow struct {
+	ID             int64
+	DeliverableID  pgtype.Int8
+	Name           string
+	EdgeType       string
+	TargetTaskID   int64
+	TargetTaskName string
+}
+
+// 交付物承接的关系边（AC-17 归档视角「来源关系边」列）：按来源交付物所属任务过滤。
+func (q *Queries) ListEdgeRefsByDeliverableTask(ctx context.Context, taskID int64) ([]ListEdgeRefsByDeliverableTaskRow, error) {
+	rows, err := q.db.Query(ctx, listEdgeRefsByDeliverableTask, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEdgeRefsByDeliverableTaskRow
+	for rows.Next() {
+		var i ListEdgeRefsByDeliverableTaskRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.DeliverableID,
+			&i.Name,
+			&i.EdgeType,
+			&i.TargetTaskID,
+			&i.TargetTaskName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEdgeRefsByProject = `-- name: ListEdgeRefsByProject :many
+SELECT e.id, e.deliverable_id, e.name, e.edge_type, e.target_task_id,
+    tt.name AS target_task_name
+FROM deliverable_edges e
+JOIN tasks tt ON tt.id = e.target_task_id
+JOIN key_results k ON k.id = tt.key_result_id
+JOIN objectives o ON o.id = k.objective_id
+JOIN deliverables d ON d.id = e.deliverable_id
+WHERE o.project_id = $1
+ORDER BY e.id
+`
+
+type ListEdgeRefsByProjectRow struct {
+	ID             int64
+	DeliverableID  pgtype.Int8
+	Name           string
+	EdgeType       string
+	TargetTaskID   int64
+	TargetTaskName string
+}
+
+// 同上，项目全量：归档视角一次性取齐所有交付物的来源关系边。
+func (q *Queries) ListEdgeRefsByProject(ctx context.Context, projectID int64) ([]ListEdgeRefsByProjectRow, error) {
+	rows, err := q.db.Query(ctx, listEdgeRefsByProject, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEdgeRefsByProjectRow
+	for rows.Next() {
+		var i ListEdgeRefsByProjectRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.DeliverableID,
+			&i.Name,
+			&i.EdgeType,
+			&i.TargetTaskID,
+			&i.TargetTaskName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listEdgesByProject = `-- name: ListEdgesByProject :many
@@ -130,7 +274,7 @@ SELECT e.id, e.target_task_id, e.source_task_id, e.source_user_id, e.deliverable
     mu.display_name AS source_user_name,
     tt.name AS target_task_name, tt.owner_id AS target_owner_id, tt.created_by AS target_created_by,
     d.name AS deliverable_name,
-    cf.id AS current_file_id, cf.file_name AS current_file_name,
+    cf.id AS current_file_id, cf.file_name AS current_file_name, cf.file_size AS current_file_size,
     EXISTS (
         SELECT 1 FROM deliverable_files df
         WHERE df.deliverable_id = e.deliverable_id AND df.state = 'candidate'
@@ -171,6 +315,7 @@ type ListEdgesByProjectRow struct {
 	DeliverableName  pgtype.Text
 	CurrentFileID    pgtype.Int8
 	CurrentFileName  pgtype.Text
+	CurrentFileSize  pgtype.Int8
 	HasCandidate     bool
 }
 
@@ -207,8 +352,50 @@ func (q *Queries) ListEdgesByProject(ctx context.Context, projectID int64) ([]Li
 			&i.DeliverableName,
 			&i.CurrentFileID,
 			&i.CurrentFileName,
+			&i.CurrentFileSize,
 			&i.HasCandidate,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listInputReadinessByProject = `-- name: ListInputReadinessByProject :many
+SELECT tt.key_result_id, tt.status AS target_status,
+    EXISTS (
+        SELECT 1 FROM deliverable_files cf
+        WHERE cf.deliverable_id = e.deliverable_id AND cf.state = 'current'
+    ) AS has_current
+FROM deliverable_edges e
+JOIN tasks tt ON tt.id = e.target_task_id
+JOIN key_results k ON k.id = tt.key_result_id
+JOIN objectives o ON o.id = k.objective_id
+WHERE o.project_id = $1
+`
+
+type ListInputReadinessByProjectRow struct {
+	KeyResultID  int64
+	TargetStatus string
+	HasCurrent   bool
+}
+
+// #150 风险队列「未就绪摘要」：项目全部输入边的就绪事实——目标任务所属 KR、
+// 目标任务状态、边上有无已生效当前内容（与 AC-48 就绪同源）；计数规则在 domain。
+func (q *Queries) ListInputReadinessByProject(ctx context.Context, projectID int64) ([]ListInputReadinessByProjectRow, error) {
+	rows, err := q.db.Query(ctx, listInputReadinessByProject, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListInputReadinessByProjectRow
+	for rows.Next() {
+		var i ListInputReadinessByProjectRow
+		if err := rows.Scan(&i.KeyResultID, &i.TargetStatus, &i.HasCurrent); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

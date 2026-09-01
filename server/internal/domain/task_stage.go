@@ -1,7 +1,7 @@
 package domain
 
 // CurrentStage 派生任务的当前环节与待行动人（词汇表「当前环节」「待行动人」）。
-// 中间或签审核的待行动人在 #11 引入审核组后细化；已完成／已取消无待行动人。
+// 成果审核（或签）的待行动人在 #11 引入审核组后细化；已完成／已关闭无待行动人。
 func CurrentStage(t TaskFacts) (string, *int64) {
 	owner := t.OwnerID
 	switch t.Status {

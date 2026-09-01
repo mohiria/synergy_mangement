@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 
@@ -15,7 +16,7 @@ import (
 // 接收方与接收记录（词汇表「接收方」「接收记录」；模块 PRD §8.6；MW-09）。
 // 业务规则在 domain.receiver，handler 仅编排。
 
-// SetTaskReceivers 配置接收方：按需字段，与输入／输出配置同口径直接生效。
+// SetTaskReceivers 配置接收方：接收方属关键字段（§5.2.B），与输入／输出同口径走变更审批。
 func (s *Server) SetTaskReceivers(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64) {
 	var req SetReceiversRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -27,18 +28,23 @@ func (s *Server) SetTaskReceivers(w http.ResponseWriter, r *http.Request, projec
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
-	_, facts, ok := s.fetchTask(w, r, projectId, taskId)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
+	task, facts, ok := s.fetchTask(w, r, projectId, taskId)
 	if !ok {
 		return
 	}
-	if !domain.CanConfigureReceivers(actor, uid, facts) {
-		writeForbidden(w)
+	currentReceivers, err := s.q.ListTaskReceivers(r.Context(), taskId)
+	if err != nil {
+		writeInternalError(w, r, err)
 		return
+	}
+	currentReceiverNames := make([]string, 0, len(currentReceivers))
+	for _, rv := range currentReceivers {
+		currentReceiverNames = append(currentReceiverNames, rv.DisplayName)
 	}
 	members, err := s.q.ListProjectMembers(r.Context(), projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	isMember := make(map[int64]bool, len(members))
@@ -63,32 +69,44 @@ func (s *Server) SetTaskReceivers(w http.ResponseWriter, r *http.Request, projec
 	if scope != domain.ReceiverScopeMembers {
 		ids = nil
 	}
-	tx, err := s.db.Begin(r.Context())
-	if err != nil {
-		writeInternalError(w)
+	// 接收方是关键字段（§5.2.B）：已入池任务改名单要经所属 KR 负责人审批。
+	outcome, ok := s.routeStructureChange(w, r, taskId, actor, uid, facts)
+	if !ok {
 		return
 	}
-	defer func() { _ = tx.Rollback(r.Context()) }()
-	qtx := s.q.WithTx(tx)
-	if _, err := qtx.SetTaskReceiverScope(r.Context(), store.SetTaskReceiverScopeParams{ID: taskId, ReceiverScope: scope}); err != nil {
-		writeInternalError(w)
-		return
+	nameByID := make(map[int64]string, len(members))
+	for _, m := range members {
+		nameByID[m.UserID] = m.DisplayName
 	}
-	if _, err := qtx.ClearTaskReceivers(r.Context(), taskId); err != nil {
-		writeInternalError(w)
-		return
-	}
+	names := make([]string, 0, len(ids))
 	for _, id := range ids {
-		if err := qtx.SetTaskReceiver(r.Context(), store.SetTaskReceiverParams{TaskID: taskId, UserID: id}); err != nil {
-			writeInternalError(w)
-			return
-		}
+		names = append(names, nameByID[id])
 	}
-	if err := tx.Commit(r.Context()); err != nil {
-		writeInternalError(w)
+	raw, err := json.Marshal(SetReceiversRequest{Scope: ReceiverScope(scope), UserIds: &ids})
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	payload := structurePayload{
+		Op:       domain.StructureSetReceivers,
+		Label:    domain.StructureFieldLabel(domain.StructureSetReceivers),
+		OldValue: receiverScopeSummary(task.ReceiverScope, currentReceiverNames),
+		NewValue: receiverScopeSummary(scope, names),
+		Request:  raw,
+	}
+	if !s.commitStructureChange(w, r, projectId, taskId, uid, outcome, payload,
+		"接收方改为"+receiverScopeSummary(scope, names)) {
 		return
 	}
 	s.writeTask(w, r, projectId, taskId, uid, actor)
+}
+
+// receiverScopeSummary 接收方配置的展示文案（变更单差异行用）。
+func receiverScopeSummary(scope string, names []string) string {
+	if scope == domain.ReceiverScopeMembers {
+		return domain.ReceiverScopeLabel(scope) + "：" + strings.Join(names, "、")
+	}
+	return domain.ReceiverScopeLabel(scope)
 }
 
 // ConfirmTaskReceipt 接收方确认接收：待接收项退出「待我接收」并成为接收记录，动作进任务动态。
@@ -98,7 +116,7 @@ func (s *Server) ConfirmTaskReceipt(w http.ResponseWriter, r *http.Request, proj
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	if _, _, ok := s.fetchTask(w, r, projectId, taskId); !ok {
 		return
 	}
@@ -107,7 +125,7 @@ func (s *Server) ConfirmTaskReceipt(w http.ResponseWriter, r *http.Request, proj
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, Error{Code: "receipt_not_found", Message: "没有属于本人的待接收项"})
 		} else {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 		}
 		return
 	}
@@ -116,7 +134,7 @@ func (s *Server) ConfirmTaskReceipt(w http.ResponseWriter, r *http.Request, proj
 		at := row.ConfirmedAt.Time
 		fact.ConfirmedAt = &at
 	}
-	if err := domain.CanConfirmReceipt(uid, fact); err != nil {
+	if err := domain.CanConfirmReceipt(actor, uid, fact); err != nil {
 		switch {
 		case errors.Is(err, domain.ErrReceiptConfirmed):
 			writeJSON(w, http.StatusConflict, Error{Code: "receipt_confirmed", Message: err.Error()})
@@ -126,7 +144,7 @@ func (s *Server) ConfirmTaskReceipt(w http.ResponseWriter, r *http.Request, proj
 		return
 	}
 	if _, err := s.q.ConfirmTaskReceipt(r.Context(), row.ID); err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	s.actionActivity(r.Context(), taskId, domain.ActivityReceiptConfirmed, uid, row.DisplayName)

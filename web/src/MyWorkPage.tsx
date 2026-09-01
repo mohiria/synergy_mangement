@@ -4,6 +4,7 @@ import { Alert, Spin, Tabs, message } from "antd";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import ProjectShell from "./ProjectShell";
+import TaskDrawerHost from "./task-drawer";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
@@ -44,6 +45,15 @@ const KIND_BADGE: Record<string, string> = {
   waiting_completion: "等",
   blocker: "卡",
 };
+
+// 五分组的固定顺序与空态文案（AC-16；KR 终审归入待我审批）。
+const GROUPS = [
+  { key: "pending", label: "待我处理", empty: "暂无需要你处理的事项" },
+  { key: "approvals", label: "待我审批", empty: "暂无等待你审批的事项" },
+  { key: "receipts", label: "待我接收", empty: "暂无待你确认接收的交付物" },
+  { key: "waiting", label: "等待他人", empty: "没有停在他人手里的事项" },
+  { key: "blockers", label: "与我相关的卡点", empty: "没有与你相关的卡点" },
+] as const satisfies readonly { key: keyof Omit<MyWork, "identity">; label: string; empty: string }[];
 
 // 我的工作（AC-16、AC-55、MW-21）：五分组个人行动与等待事实。
 // 卡片正文只显示任务编号与名称、所属 KR、日期和左对齐的任务状态；
@@ -94,29 +104,25 @@ export default function MyWorkPage({
     load();
   }, [load]);
 
-  // KR 展示编号沿全项目顺序派生，任务编号按 id 顺序派生 T1…（与 OKR、全部任务各页一致）。
+  // 编号是持久字段（AC-64）：跨页一致、增删任务后不位移，前端只取不算。
   const krCode = useMemo(() => {
-    let seq = 0;
     const m = new Map<number, string>();
-    objectives.forEach((o) => o.keyResults.forEach((k) => m.set(k.id, `KR${++seq}`)));
+    objectives.forEach((o) => o.keyResults.forEach((k) => m.set(k.id, k.code)));
     return m;
   }, [objectives]);
-  const taskCode = useMemo(() => {
-    const sorted = [...tasks].sort((a, b) => a.id - b.id);
-    return new Map(sorted.map((t, i) => [t.id, `T${i + 1}`]));
-  }, [tasks]);
+  const taskCode = useMemo(() => new Map(tasks.map((t) => [t.id, t.code])), [tasks]);
   const taskById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
 
-  // 卡片只负责定位：一律打开任务详情抽屉，并带上来源分组供抽屉落位（模块 PRD §6.2）。
+  // 卡片只负责定位：在本页原地打开任务详情抽屉，并带上来源分组供抽屉落位（模块 PRD §6.2、#110）。
+  // 抽屉是与全部任务页同一个组件（#109），动作集合完全一致，不另做只读视图。
+  const [drawer, setDrawer] = useState<{ taskId: number; tab: string; source: string } | null>(null);
   const openItem = (item: WorkItem, source: string) => {
     if (!item.taskId) {
+      // 没有关联任务的事项（任务创建邀请）仍去全部任务页处理。
       navigate(`/projects/${projectId}/tasks`);
       return;
     }
-    navigate(
-      `/projects/${projectId}/tasks?task=${item.taskId}` +
-        `&tab=${item.drawerTab ?? "overview"}&from=${source}`,
-    );
+    setDrawer({ taskId: item.taskId, tab: item.drawerTab ?? "overview", source });
   };
 
   const remind = async (item: WorkItem) => {
@@ -152,10 +158,11 @@ export default function MyWorkPage({
               {KIND_BADGE[it.kind] ?? "事"}
             </div>
             <div className="work-main">
-              <h3>{title}</h3>
+              <h3 title={title}>{title}</h3>
+              {/* #130：五组副行统一「KR 编号 · 截止 日期」；输入请求的期望时间也写「截止」。 */}
               <div className="work-meta">
-                <span>{kr}</span>
-                <span>日期 {it.dueDate ?? "—"}</span>
+                <span title={kr}>{kr}</span>
+                <span>· 截止 {it.dueDate ?? "—"}</span>
               </div>
             </div>
             <div className="work-trailing">
@@ -194,6 +201,7 @@ export default function MyWorkPage({
       project={project}
       projectId={projectId}
       pageLabel="我的工作"
+      pageWidth="narrow"
       onLogout={onLogout}
     >
       {notFound ? (
@@ -208,36 +216,47 @@ export default function MyWorkPage({
               <p>按当前职责派生的个人行动与等待事实；处理动作在任务详情抽屉中完成。</p>
             </div>
           </div>
+          {/* 身份卡（模块 PRD §7.2）：姓名、系统权限与当前职责，说明五分组的派生依据。
+              职责文案是 API 派生字段，前端不按事实重算。 */}
+          <section className="work-identity">
+            <div>
+              <span className="avatar" aria-hidden>
+                {work.identity.displayName.slice(0, 1)}
+              </span>
+              <div>
+                <b>{work.identity.displayName}</b>
+                <span>
+                  {work.identity.roleLabel} · @{work.identity.username}
+                </span>
+              </div>
+            </div>
+            <p>
+              <span>当前职责</span>
+              {work.identity.responsibilitiesLabel}
+            </p>
+          </section>
+          {/* 处理完关闭即回到我的工作；抽屉内动作落库后回调刷新，五组归类与计数随之更新。 */}
+          <TaskDrawerHost
+            projectId={projectId}
+            taskId={drawer?.taskId ?? null}
+            initialTab={drawer?.tab}
+            source={drawer?.source}
+            onClose={() => setDrawer(null)}
+            onChanged={load}
+          />
           <div className="work-board">
             <Tabs
               className="work-tabs"
-              items={[
-                {
-                  key: "pending",
-                  label: `待我处理 ${work.pending.length}`,
-                  children: renderGroup(work.pending, "pending", "暂无需要你处理的事项"),
-                },
-                {
-                  key: "approvals",
-                  label: `待我审批 ${work.approvals.length}`,
-                  children: renderGroup(work.approvals, "approvals", "暂无等待你审批的事项"),
-                },
-                {
-                  key: "receipts",
-                  label: `待我接收 ${work.receipts.length}`,
-                  children: renderGroup(work.receipts, "receipts", "暂无待你确认接收的交付物"),
-                },
-                {
-                  key: "waiting",
-                  label: `等待他人 ${work.waiting.length}`,
-                  children: renderGroup(work.waiting, "waiting", "没有停在他人手里的事项"),
-                },
-                {
-                  key: "blockers",
-                  label: `与我相关的卡点 ${work.blockers.length}`,
-                  children: renderGroup(work.blockers, "blockers", "没有与你相关的卡点"),
-                },
-              ]}
+              items={GROUPS.map(({ key, label, empty }) => ({
+                key,
+                label: (
+                  <>
+                    {label}
+                    <span className="pill">{work[key].length}</span>
+                  </>
+                ),
+                children: renderGroup(work[key], key, empty),
+              }))}
             />
           </div>
         </>

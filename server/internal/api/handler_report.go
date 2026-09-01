@@ -38,21 +38,27 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 	}
 	inRange := func(t time.Time) bool { return from == nil || !t.Before(*from) }
 	ctx := r.Context()
+	proj, ok := s.fetchProject(w, r, projectId)
+	if !ok {
+		return Report{}, false
+	}
+	uid := currentUser(r).ID
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 
 	// KR 进展：覆盖度 + 范围内终审通过任务数。
-	objectives, err := s.okrList(ctx, projectId)
+	objectives, err := s.okrList(ctx, projectId, actor, uid)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return Report{}, false
 	}
 	completionRows, err := s.q.LatestCompletionReviewsByProject(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return Report{}, false
 	}
 	taskRows, err := s.q.ListProjectTasks(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return Report{}, false
 	}
 	krByTask := map[int64]int64{}
@@ -66,13 +72,13 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 	// 必要输入未就绪的任务在报告里同样显示「等待输入」（§5.1；与任务列表、我的工作同口径）。
 	unreadyNoteByTask, err := s.unreadyRequiredInputsByProject(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return Report{}, false
 	}
 	// 下一步的状态显示文案（AC-04）：或签中任务取审核组姓名。
 	reviewerRows, err := s.q.IntermediateReviewerNamesByProject(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return Report{}, false
 	}
 	reviewerNamesByTask := map[int64][]string{}
@@ -106,12 +112,12 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 	// 完成成果：范围内生效的当前内容。
 	files, err := s.q.ListDeliverableFilesByProject(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return Report{}, false
 	}
 	deliverables, err := s.q.ListDeliverablesByProject(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return Report{}, false
 	}
 	deliverableName := map[int64]string{}
@@ -137,7 +143,7 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 	// 风险卡点：当前派生的全部卡点（触发条件消失即自动解除，没有历史态可汇总）。
 	derived, err := s.projectBlockers(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return Report{}, false
 	}
 	blockers := []ReportBlocker{}
@@ -159,12 +165,12 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 	// 待决策：停留在审批队列中的事项数。
 	poolRows, err := s.q.LatestPoolReviewsByProject(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return Report{}, false
 	}
 	changeRows, err := s.q.LatestFieldChangesByProject(ctx, projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return Report{}, false
 	}
 	pending := struct {

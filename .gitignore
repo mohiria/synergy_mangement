@@ -18,3 +18,11 @@ references/
 .obsidian/
 .vscode/
 .idea/
+
+# Playwright MCP 的会话快照/日志，属临时产物
+.playwright-mcp/
+
+# Playwright 冒烟的运行产物（失败截图、trace、HTML 报告）
+web/test-results/
+web/playwright-report/
+web/blob-report/

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Alert, Button, Spin } from "antd";
+import { Alert, Button, Spin, message } from "antd";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import ProjectShell from "./ProjectShell";
@@ -39,6 +39,7 @@ export default function ReportsPage({
   const [project, setProject] = useState<Project | null>(null);
   const [report, setReport] = useState<Report | null>(null);
   const [range, setRange] = useState<ReportRange>("week");
+  const [exporting, setExporting] = useState<"image" | "pdf" | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
@@ -68,6 +69,36 @@ export default function ReportsPage({
     load();
   }, [load]);
 
+  // 导出先取回响应再决定去向：失败时后端回 502 JSON，直接 window.open 只会开出一个空白页。
+  const exportReport = async (format: "image" | "pdf") => {
+    setExporting(format);
+    try {
+      const res = await fetch(
+        `/api/v1/projects/${projectId}/report/export?range=${range}&format=${format}`,
+        { credentials: "same-origin" },
+      );
+      if (!res.ok) {
+        let text = "导出失败，请稍后重试";
+        try {
+          const body = (await res.json()) as { message?: string };
+          if (body.message) text = body.message;
+        } catch {
+          // 非 JSON 响应时保留通用文案
+        }
+        message.error(text);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch {
+      message.error("导出失败，请检查网络后重试");
+    } finally {
+      setExporting(null);
+    }
+  };
+
   return (
     <ProjectShell
       user={user}
@@ -90,36 +121,23 @@ export default function ReportsPage({
           </div>
           <div className="toolbar report-toolbar">
             <div className="toolbar-group">
-              {(Object.keys(RANGE_LABEL) as ReportRange[]).map((r) => (
-                <Button
-                  key={r}
-                  size="small"
-                  type={range === r ? "primary" : "default"}
-                  onClick={() => setRange(r)}
-                >
-                  {RANGE_LABEL[r]}
-                </Button>
-              ))}
-              <Button
-                size="small"
-                onClick={() =>
-                  window.open(
-                    `/api/v1/projects/${projectId}/report/export?range=${range}&format=image`,
-                    "_blank",
-                  )
-                }
-              >
+              {/* 时间范围用基线 §6 的 segment（h36 灰底、激活项白底），不是实心蓝底按钮。 */}
+              <div className="segment" role="group" aria-label="报告时间范围">
+                {(Object.keys(RANGE_LABEL) as ReportRange[]).map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    aria-pressed={range === r}
+                    onClick={() => setRange(r)}
+                  >
+                    {RANGE_LABEL[r]}
+                  </button>
+                ))}
+              </div>
+              <Button size="small" loading={exporting === "image"} onClick={() => exportReport("image")}>
                 导出长图
               </Button>
-              <Button
-                size="small"
-                onClick={() =>
-                  window.open(
-                    `/api/v1/projects/${projectId}/report/export?range=${range}&format=pdf`,
-                    "_blank",
-                  )
-                }
-              >
+              <Button size="small" loading={exporting === "pdf"} onClick={() => exportReport("pdf")}>
                 导出 PDF
               </Button>
             </div>
@@ -149,14 +167,14 @@ export default function ReportsPage({
                 <tbody>
                   {report.krProgress.map((k) => (
                     <tr key={k.keyResultId}>
-                      <td>{k.description}</td>
+                      <td title={k.description}>{k.description}</td>
                       <td>
                         <span className={`status-pill risk-${k.riskLevel}`}>
                           {RISK_LABEL[k.riskLevel]}
                         </span>
                       </td>
                       <td>
-                        {k.filledTasks}／{k.totalTasks} 已填进度
+                        {k.filledTasks}／{k.totalTasks} 由负责人填写
                         {k.averageProgress != null && `，平均 ${k.averageProgress}%`}
                       </td>
                       <td>{k.completedInRange} 项</td>
@@ -173,7 +191,7 @@ export default function ReportsPage({
               <div className="empty compact-empty">该范围内没有新生效的当前成果</div>
             )}
             {report.completedDeliverables.map((d, i) => (
-              <div key={i} className="input-fact">
+              <div key={i} className="fact-card fact-card-aux">
                 <div>
                   <b>
                     {d.taskName} / {d.deliverableName}
@@ -193,7 +211,7 @@ export default function ReportsPage({
               <div className="empty compact-empty">没有需要关注的卡点</div>
             )}
             {report.blockers.map((b, i) => (
-              <div key={i} className="input-fact">
+              <div key={i} className="fact-card fact-card-aux">
                 <div>
                   <b>
                     {b.taskName} · {b.kindLabel}：缺 {b.missing}
@@ -225,7 +243,7 @@ export default function ReportsPage({
               <div className="empty compact-empty">未来 7 天内没有临近截止的任务</div>
             )}
             {report.nextSteps.map((n, i) => (
-              <div key={i} className="input-fact">
+              <div key={i} className="fact-card fact-card-aux">
                 <div>
                   <b>
                     {n.taskName}

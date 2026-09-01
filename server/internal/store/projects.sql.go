@@ -15,12 +15,12 @@ const createProject = `-- name: CreateProject :one
 WITH new_project AS (
     INSERT INTO projects (name, created_by, owner_id, status, stage, planned_start_date, planned_end_date)
     VALUES ($1, $2, $3, $4, $5, $6, $7)
-    RETURNING id, name, created_by, created_at, owner_id, status, stage, planned_start_date, planned_end_date
+    RETURNING id, name, created_by, created_at, owner_id, status, stage, planned_start_date, planned_end_date, approval_timeout_days, due_soon_days, remind_daily_limit, visibility
 ), creator_member AS (
     INSERT INTO project_members (project_id, user_id, role)
     SELECT id, created_by, $8 FROM new_project
 )
-SELECT id, name, created_by, created_at, owner_id, status, stage, planned_start_date, planned_end_date FROM new_project
+SELECT id, name, created_by, created_at, owner_id, status, stage, planned_start_date, planned_end_date, approval_timeout_days, due_soon_days, remind_daily_limit, visibility FROM new_project
 `
 
 type CreateProjectParams struct {
@@ -35,15 +35,19 @@ type CreateProjectParams struct {
 }
 
 type CreateProjectRow struct {
-	ID               int64
-	Name             string
-	CreatedBy        int64
-	CreatedAt        pgtype.Timestamptz
-	OwnerID          int64
-	Status           string
-	Stage            pgtype.Text
-	PlannedStartDate pgtype.Date
-	PlannedEndDate   pgtype.Date
+	ID                  int64
+	Name                string
+	CreatedBy           int64
+	CreatedAt           pgtype.Timestamptz
+	OwnerID             int64
+	Status              string
+	Stage               pgtype.Text
+	PlannedStartDate    pgtype.Date
+	PlannedEndDate      pgtype.Date
+	ApprovalTimeoutDays int32
+	DueSoonDays         int32
+	RemindDailyLimit    int32
+	Visibility          string
 }
 
 // 创建项目并在同一语句内把创建人写入成员表（角色由调用方传入，domain 定为 admin）。
@@ -69,12 +73,16 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (C
 		&i.Stage,
 		&i.PlannedStartDate,
 		&i.PlannedEndDate,
+		&i.ApprovalTimeoutDays,
+		&i.DueSoonDays,
+		&i.RemindDailyLimit,
+		&i.Visibility,
 	)
 	return i, err
 }
 
 const getProject = `-- name: GetProject :one
-SELECT p.id, p.name, p.created_by, p.created_at, p.owner_id, p.status, p.stage, p.planned_start_date, p.planned_end_date, u.display_name AS owner_name, m.role AS my_role
+SELECT p.id, p.name, p.created_by, p.created_at, p.owner_id, p.status, p.stage, p.planned_start_date, p.planned_end_date, p.approval_timeout_days, p.due_soon_days, p.remind_daily_limit, p.visibility, u.display_name AS owner_name, m.role AS my_role
 FROM projects p
 JOIN users u ON u.id = p.owner_id
 LEFT JOIN project_members m ON m.project_id = p.id AND m.user_id = $2
@@ -87,17 +95,21 @@ type GetProjectParams struct {
 }
 
 type GetProjectRow struct {
-	ID               int64
-	Name             string
-	CreatedBy        int64
-	CreatedAt        pgtype.Timestamptz
-	OwnerID          int64
-	Status           string
-	Stage            pgtype.Text
-	PlannedStartDate pgtype.Date
-	PlannedEndDate   pgtype.Date
-	OwnerName        string
-	MyRole           pgtype.Text
+	ID                  int64
+	Name                string
+	CreatedBy           int64
+	CreatedAt           pgtype.Timestamptz
+	OwnerID             int64
+	Status              string
+	Stage               pgtype.Text
+	PlannedStartDate    pgtype.Date
+	PlannedEndDate      pgtype.Date
+	ApprovalTimeoutDays int32
+	DueSoonDays         int32
+	RemindDailyLimit    int32
+	Visibility          string
+	OwnerName           string
+	MyRole              pgtype.Text
 }
 
 func (q *Queries) GetProject(ctx context.Context, arg GetProjectParams) (GetProjectRow, error) {
@@ -113,9 +125,32 @@ func (q *Queries) GetProject(ctx context.Context, arg GetProjectParams) (GetProj
 		&i.Stage,
 		&i.PlannedStartDate,
 		&i.PlannedEndDate,
+		&i.ApprovalTimeoutDays,
+		&i.DueSoonDays,
+		&i.RemindDailyLimit,
+		&i.Visibility,
 		&i.OwnerName,
 		&i.MyRole,
 	)
+	return i, err
+}
+
+const getProjectSettings = `-- name: GetProjectSettings :one
+SELECT approval_timeout_days, due_soon_days, remind_daily_limit
+FROM projects WHERE id = $1
+`
+
+type GetProjectSettingsRow struct {
+	ApprovalTimeoutDays int32
+	DueSoonDays         int32
+	RemindDailyLimit    int32
+}
+
+// 规则设置读路径：卡点派生、我的工作与提醒冷却共用同一份值，故与项目读权限分开取。
+func (q *Queries) GetProjectSettings(ctx context.Context, id int64) (GetProjectSettingsRow, error) {
+	row := q.db.QueryRow(ctx, getProjectSettings, id)
+	var i GetProjectSettingsRow
+	err := row.Scan(&i.ApprovalTimeoutDays, &i.DueSoonDays, &i.RemindDailyLimit)
 	return i, err
 }
 
@@ -147,28 +182,35 @@ func (q *Queries) ListActiveProjectIDs(ctx context.Context) ([]int64, error) {
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT p.id, p.name, p.created_by, p.created_at, p.owner_id, p.status, p.stage, p.planned_start_date, p.planned_end_date, u.display_name AS owner_name, m.role AS my_role
+SELECT p.id, p.name, p.created_by, p.created_at, p.owner_id, p.status, p.stage, p.planned_start_date, p.planned_end_date, p.approval_timeout_days, p.due_soon_days, p.remind_daily_limit, p.visibility, u.display_name AS owner_name, m.role AS my_role
 FROM projects p
 JOIN users u ON u.id = p.owner_id
 LEFT JOIN project_members m ON m.project_id = p.id AND m.user_id = $1
+WHERE m.user_id IS NOT NULL OR p.owner_id = $1 OR p.visibility = 'public'
 ORDER BY p.created_at DESC
 `
 
 type ListProjectsRow struct {
-	ID               int64
-	Name             string
-	CreatedBy        int64
-	CreatedAt        pgtype.Timestamptz
-	OwnerID          int64
-	Status           string
-	Stage            pgtype.Text
-	PlannedStartDate pgtype.Date
-	PlannedEndDate   pgtype.Date
-	OwnerName        string
-	MyRole           pgtype.Text
+	ID                  int64
+	Name                string
+	CreatedBy           int64
+	CreatedAt           pgtype.Timestamptz
+	OwnerID             int64
+	Status              string
+	Stage               pgtype.Text
+	PlannedStartDate    pgtype.Date
+	PlannedEndDate      pgtype.Date
+	ApprovalTimeoutDays int32
+	DueSoonDays         int32
+	RemindDailyLimit    int32
+	Visibility          string
+	OwnerName           string
+	MyRole              pgtype.Text
 }
 
 // my_role：当前用户在各项目中的成员角色（非成员为 NULL），供 domain 层判定动作权限。
+// 只返回当前用户可读的项目：项目内成员、项目负责人，以及公开项目（此人在其中是隐式访客，
+// 身份由 domain.ProjectIdentity 判定，本查询只负责把候选行取全，见 #111）。
 func (q *Queries) ListProjects(ctx context.Context, userID int64) ([]ListProjectsRow, error) {
 	rows, err := q.db.Query(ctx, listProjects, userID)
 	if err != nil {
@@ -188,6 +230,10 @@ func (q *Queries) ListProjects(ctx context.Context, userID int64) ([]ListProject
 			&i.Stage,
 			&i.PlannedStartDate,
 			&i.PlannedEndDate,
+			&i.ApprovalTimeoutDays,
+			&i.DueSoonDays,
+			&i.RemindDailyLimit,
+			&i.Visibility,
 			&i.OwnerName,
 			&i.MyRole,
 		); err != nil {
@@ -208,9 +254,10 @@ SET name = $2,
     status = $4,
     stage = $5,
     planned_start_date = $6,
-    planned_end_date = $7
+    planned_end_date = $7,
+    visibility = $8
 WHERE id = $1
-RETURNING id, name, created_by, created_at, owner_id, status, stage, planned_start_date, planned_end_date
+RETURNING id, name, created_by, created_at, owner_id, status, stage, planned_start_date, planned_end_date, approval_timeout_days, due_soon_days, remind_daily_limit, visibility
 `
 
 type UpdateProjectParams struct {
@@ -221,6 +268,7 @@ type UpdateProjectParams struct {
 	Stage            pgtype.Text
 	PlannedStartDate pgtype.Date
 	PlannedEndDate   pgtype.Date
+	Visibility       string
 }
 
 func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error) {
@@ -232,6 +280,7 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		arg.Stage,
 		arg.PlannedStartDate,
 		arg.PlannedEndDate,
+		arg.Visibility,
 	)
 	var i Project
 	err := row.Scan(
@@ -244,6 +293,53 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		&i.Stage,
 		&i.PlannedStartDate,
 		&i.PlannedEndDate,
+		&i.ApprovalTimeoutDays,
+		&i.DueSoonDays,
+		&i.RemindDailyLimit,
+		&i.Visibility,
+	)
+	return i, err
+}
+
+const updateProjectSettings = `-- name: UpdateProjectSettings :one
+UPDATE projects
+SET approval_timeout_days = $2,
+    due_soon_days         = $3,
+    remind_daily_limit    = $4
+WHERE id = $1
+RETURNING id, name, created_by, created_at, owner_id, status, stage, planned_start_date, planned_end_date, approval_timeout_days, due_soon_days, remind_daily_limit, visibility
+`
+
+type UpdateProjectSettingsParams struct {
+	ID                  int64
+	ApprovalTimeoutDays int32
+	DueSoonDays         int32
+	RemindDailyLimit    int32
+}
+
+// 项目规则设置（主 PRD §7.9；AC-60）：审批超时阈值、临期阈值与一键提醒每日次数上限。
+func (q *Queries) UpdateProjectSettings(ctx context.Context, arg UpdateProjectSettingsParams) (Project, error) {
+	row := q.db.QueryRow(ctx, updateProjectSettings,
+		arg.ID,
+		arg.ApprovalTimeoutDays,
+		arg.DueSoonDays,
+		arg.RemindDailyLimit,
+	)
+	var i Project
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.OwnerID,
+		&i.Status,
+		&i.Stage,
+		&i.PlannedStartDate,
+		&i.PlannedEndDate,
+		&i.ApprovalTimeoutDays,
+		&i.DueSoonDays,
+		&i.RemindDailyLimit,
+		&i.Visibility,
 	)
 	return i, err
 }

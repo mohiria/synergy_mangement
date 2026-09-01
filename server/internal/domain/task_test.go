@@ -11,8 +11,8 @@ func date(s string) time.Time { return *day(s) }
 
 // AC-04／AC-26 前置：任务草稿最小骨架校验（PRD §9.1：名称、所属 KR、负责人、开始／截止时间）。
 func TestValidateNewTask(t *testing.T) {
-	members := map[int64]bool{1: true, 2: true}
-	isMember := func(id int64) bool { return members[id] }
+	roles := map[int64]string{1: RoleMember, 2: RoleAdmin, 8: RoleViewer}
+	roleOf := func(id int64) string { return roles[id] }
 	base := NewTask{Name: "验证现场联动异常回退", OwnerID: 1, Start: date("2026-09-12"), End: date("2026-09-21")}
 
 	cases := []struct {
@@ -23,14 +23,15 @@ func TestValidateNewTask(t *testing.T) {
 		{"合法草稿", func(*NewTask) {}, nil},
 		{"名称为空", func(n *NewTask) { n.Name = "   " }, ErrTaskNameEmpty},
 		{"名称超长", func(n *NewTask) { n.Name = string(make([]rune, 0)) + repeat("长", 201) }, ErrTaskNameTooLong},
-		{"负责人不是项目成员", func(n *NewTask) { n.OwnerID = 99 }, ErrTaskOwnerNotMember},
+		{"负责人不是项目成员", func(n *NewTask) { n.OwnerID = 99 }, ErrTaskOwnerNotEligible},
+		{"负责人是访客", func(n *NewTask) { n.OwnerID = 8 }, ErrTaskOwnerNotEligible},
 		{"截止早于开始", func(n *NewTask) { n.End = date("2026-09-01") }, ErrTaskPeriodInverted},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			n := base
 			tc.mut(&n)
-			if got := ValidateNewTask(n, isMember); !errors.Is(got, tc.want) {
+			if got := ValidateNewTask(n, roleOf); !errors.Is(got, tc.want) {
 				t.Fatalf("ValidateNewTask() = %v, want %v", got, tc.want)
 			}
 		})
@@ -45,7 +46,7 @@ func repeat(s string, n int) string {
 	return out
 }
 
-// 权限矩阵 §3.4：创建任务——管理员／负责人／普通成员可建，只读成员与非成员不可。
+// 权限矩阵 §3.4：创建任务——管理员／负责人／项目成员可建，访客与非成员不可。
 func TestCanCreateTask(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -54,8 +55,8 @@ func TestCanCreateTask(t *testing.T) {
 	}{
 		{"项目管理员", Actor{Role: RoleAdmin}, true},
 		{"项目负责人非成员", Actor{IsOwner: true}, true},
-		{"普通成员", Actor{Role: RoleMember}, true},
-		{"只读成员", Actor{Role: RoleViewer}, false},
+		{"项目成员", Actor{Role: RoleMember}, true},
+		{"访客", Actor{Role: RoleViewer}, false},
 		{"非成员", Actor{}, false},
 	}
 	for _, tc := range cases {
@@ -77,7 +78,7 @@ func TestTaskCreationOutcome(t *testing.T) {
 		wantExempt bool
 	}{
 		{"KR 负责人本人创建免审", 7, i64(7), TaskNotStarted, true},
-		{"普通成员创建为草稿", 3, i64(7), TaskDraft, false},
+		{"项目成员创建为草稿", 3, i64(7), TaskDraft, false},
 		{"KR 未指定负责人时创建为草稿", 7, nil, TaskDraft, false},
 	}
 	for _, tc := range cases {
@@ -104,7 +105,7 @@ func TestSubmitPoolReview(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := SubmitPoolReview(tc.t); !errors.Is(got, tc.want) {
+			if got := SubmitPoolReview(tc.t, false); !errors.Is(got, tc.want) {
 				t.Fatalf("SubmitPoolReview() = %v, want %v", got, tc.want)
 			}
 		})
@@ -129,7 +130,7 @@ func TestCanSubmitPoolReview(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := CanSubmitPoolReview(tc.actor, tc.user, tc.t); got != tc.want {
+			if got := CanSubmitPoolReview(tc.actor, tc.user, tc.t, false); got != tc.want {
 				t.Fatalf("CanSubmitPoolReview() = %v, want %v", got, tc.want)
 			}
 		})
@@ -145,18 +146,22 @@ func TestDecidePoolReview(t *testing.T) {
 		t          TaskFacts
 		actor      int64
 		approve    bool
+		opinion    string
 		wantStatus string
 		wantErr    error
 	}{
-		{"KR 负责人通过后进入未开始", pending, 7, true, TaskNotStarted, nil},
-		{"KR 负责人退回后回到草稿", pending, 7, false, TaskDraft, nil},
-		{"非 KR 负责人（含管理员）不可处理", pending, 9, true, "", ErrNotKrOwner},
-		{"任务创建人不可自审", pending, 3, true, "", ErrNotKrOwner},
-		{"非待审批状态不可处理", TaskFacts{Status: TaskDraft, KrOwnerID: i64(7)}, 7, true, "", ErrPoolReviewNotPending},
+		{"KR 负责人通过后进入未开始", pending, 7, true, "", TaskNotStarted, nil},
+		{"KR 负责人带理由退回后回到草稿", pending, 7, false, "范围与 KR 不匹配", TaskDraft, nil},
+		{"非 KR 负责人（含管理员）不可处理", pending, 9, true, "", "", ErrNotKrOwner},
+		{"任务创建人不可自审", pending, 3, true, "", "", ErrNotKrOwner},
+		{"非待审批状态不可处理", TaskFacts{Status: TaskDraft, KrOwnerID: i64(7)}, 7, true, "", "", ErrPoolReviewNotPending},
+		// MW-18：退回必须带理由，与完成审核同口径；否则任务回到草稿后不在任何分组里。
+		{"退回不填理由被拒", pending, 7, false, "", "", ErrRejectOpinionRequired},
+		{"退回理由只有空白被拒", pending, 7, false, "   ", "", ErrRejectOpinionRequired},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			status, err := DecidePoolReview(tc.t, tc.actor, tc.approve)
+			status, err := DecidePoolReview(Actor{Role: RoleMember}, tc.t, tc.actor, tc.approve, tc.opinion)
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("DecidePoolReview() err = %v, want %v", err, tc.wantErr)
 			}
@@ -183,7 +188,7 @@ func TestCanDecidePoolReview(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := CanDecidePoolReview(tc.user, tc.t); got != tc.want {
+			if got := CanDecidePoolReview(Actor{Role: RoleMember}, tc.user, tc.t); got != tc.want {
 				t.Fatalf("CanDecidePoolReview() = %v, want %v", got, tc.want)
 			}
 		})

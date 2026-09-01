@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"synergy/server/internal/domain"
 	"synergy/server/internal/store"
@@ -21,8 +21,10 @@ import (
 // 同一任务的多条输入（AC-53 多来源）各自独立判定，任一必要输入未就绪即等待输入。
 func unreadyRequiredInputs(edges []store.ListEdgesByProjectRow, requests []store.ListInputRequestsByProjectRow) map[int64]string {
 	stateByEdge := make(map[int64]string, len(requests))
+	noteByEdge := make(map[int64]string, len(requests))
 	for _, ir := range requests {
 		stateByEdge[ir.EdgeID] = ir.State
+		noteByEdge[ir.EdgeID] = ir.ContentNote
 	}
 	targets := []int64{}
 	byTarget := map[int64][]domain.InputEdgeState{}
@@ -34,8 +36,12 @@ func unreadyRequiredInputs(edges []store.ListEdgesByProjectRow, requests []store
 		if _, seen := byTarget[e.TargetTaskID]; !seen {
 			targets = append(targets, e.TargetTaskID)
 		}
+		// 缺哪一项按派生标识说（#112）：注记里不带任务编号，读作「缺 <来源任务>」或「缺 <所需内容摘要>」。
 		byTarget[e.TargetTaskID] = append(byTarget[e.TargetTaskID],
-			domain.InputEdgeState{Name: e.Name, Necessity: e.Necessity, Ready: ready})
+			domain.InputEdgeState{
+				Name:      domain.EdgeDisplayName("", e.SourceTaskName.String, noteByEdge[e.ID]),
+				Necessity: e.Necessity, Ready: ready,
+			})
 	}
 	notes := map[int64]string{}
 	for _, taskID := range targets {
@@ -72,17 +78,12 @@ func (s *Server) CreateTaskInput(w http.ResponseWriter, r *http.Request, project
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	_, facts, ok := s.fetchTask(w, r, projectId, taskId)
 	if !ok {
 		return
 	}
-	if !domain.CanConfigureInputs(actor, uid, facts) {
-		writeForbidden(w)
-		return
-	}
 	inputs := domain.NewTaskInputs{
-		Name:           strings.TrimSpace(req.Name),
 		EdgeType:       string(req.EdgeType),
 		Necessity:      string(req.Necessity),
 		SourceTaskIDs:  req.SourceTaskIds,
@@ -100,7 +101,7 @@ func (s *Server) CreateTaskInput(w http.ResponseWriter, r *http.Request, project
 				writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_source_task", Message: "来源任务不存在"})
 				return
 			}
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
 	}
@@ -112,64 +113,33 @@ func (s *Server) CreateTaskInput(w http.ResponseWriter, r *http.Request, project
 			return
 		}
 	}
-	tx, err := s.db.Begin(r.Context())
-	if err != nil {
-		writeInternalError(w)
+	// 输入与输入源是关键字段（§5.2.B）：已入池任务的新增要经所属 KR 负责人审批。
+	outcome, ok := s.routeStructureChange(w, r, taskId, actor, uid, facts)
+	if !ok {
 		return
 	}
-	defer func() { _ = tx.Rollback(r.Context()) }()
-	qtx := s.q.WithTx(tx)
-	createdIDs := make([]int64, 0, len(inputs.SourceTaskIDs))
+	sourceNames := make([]string, 0, len(inputs.SourceTaskIDs))
 	for _, sourceID := range inputs.SourceTaskIDs {
-		created, err := qtx.CreateEdge(r.Context(), store.CreateEdgeParams{
-			TargetTaskID: taskId,
-			SourceTaskID: pgtype.Int8{Int64: sourceID, Valid: true},
-			DeliverableID: func() pgtype.Int8 {
-				if req.DeliverableId == nil {
-					return pgtype.Int8{}
-				}
-				return pgtype.Int8{Int64: *req.DeliverableId, Valid: true}
-			}(),
-			Name:         inputs.Name,
-			EdgeType:     inputs.EdgeType,
-			Necessity:    inputs.Necessity,
-			ExpectedDate: toPgDate(req.ExpectedDate),
-			CreatedBy:    uid,
-		})
-		if err != nil {
-			writeInternalError(w)
-			return
+		if src, err := s.q.GetTaskInProject(r.Context(), store.GetTaskInProjectParams{ID: sourceID, ProjectID: projectId}); err == nil {
+			sourceNames = append(sourceNames, src.Name)
 		}
-		createdIDs = append(createdIDs, created.ID)
 	}
-	if err := tx.Commit(r.Context()); err != nil {
-		writeInternalError(w)
-		return
-	}
-	s.writeCreatedEdges(w, r, projectId, uid, actor, createdIDs)
-}
-
-// writeCreatedEdges 按新建顺序回写各条交付物边视图（AC-53 多来源一次返回多条）。
-func (s *Server) writeCreatedEdges(w http.ResponseWriter, r *http.Request, projectID, userID int64, actor domain.Actor, createdIDs []int64) {
-	views, err := s.edgeViews(r.Context(), projectID, userID, actor)
+	raw, err := json.Marshal(req)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
-	byID := make(map[int64]DeliverableEdge, len(views))
-	for _, v := range views {
-		byID[v.Id] = v
+	payload := structurePayload{
+		Op:       domain.StructureAddTaskInput,
+		Label:    domain.StructureFieldLabel(domain.StructureAddTaskInput),
+		OldValue: "—",
+		NewValue: fmt.Sprintf("新增输入源，来源任务：%s", strings.Join(sourceNames, "、")),
+		Request:  raw,
 	}
-	out := make([]DeliverableEdge, 0, len(createdIDs))
-	for _, id := range createdIDs {
-		v, ok := byID[id]
-		if !ok {
-			writeInternalError(w)
-			return
-		}
-		out = append(out, v)
+	if !s.commitStructureChange(w, r, projectId, taskId, uid, outcome, payload, payload.NewValue) {
+		return
 	}
-	writeJSON(w, http.StatusCreated, out)
+	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 
 func (s *Server) RemoveEdge(w http.ResponseWriter, r *http.Request, projectId int64, edgeId int64) {
@@ -178,40 +148,81 @@ func (s *Server) RemoveEdge(w http.ResponseWriter, r *http.Request, projectId in
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	edge, err := s.q.GetEdgeInProject(r.Context(), store.GetEdgeInProjectParams{ID: edgeId, ProjectID: projectId})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, Error{Code: "edge_not_found", Message: "交付物边不存在"})
 		} else {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 		}
 		return
 	}
-	facts := domain.TaskFacts{Status: edge.TargetStatus, CreatorID: edge.TargetCreatedBy, OwnerID: edge.TargetOwnerID}
-	if !domain.CanConfigureInputs(actor, uid, facts) {
-		writeForbidden(w)
+	facts := domain.TaskFacts{
+		Status: edge.TargetStatus, CreatorID: edge.TargetCreatedBy, OwnerID: edge.TargetOwnerID,
+		KrOwnerID: fromPgInt8(edge.TargetKrOwnerID),
+	}
+	// 解除输入源同样是关键字段变更（§5.5：已入池任务更换来源任务或对接人仍执行审批）。
+	outcome, ok := s.routeStructureChange(w, r, edge.TargetTaskID, actor, uid, facts)
+	if !ok {
 		return
 	}
-	if _, err := s.q.DeleteEdge(r.Context(), edgeId); err != nil {
-		writeInternalError(w)
+	raw, err := json.Marshal(struct {
+		EdgeID int64 `json:"edgeId"`
+	}{EdgeID: edgeId})
+	if err != nil {
+		writeInternalError(w, r, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	payload := structurePayload{
+		Op:       domain.StructureRemoveEdge,
+		Label:    domain.StructureFieldLabel(domain.StructureRemoveEdge),
+		OldValue: edge.Name,
+		NewValue: "解除该输入关系",
+		Request:  raw,
+	}
+	if !s.commitStructureChange(w, r, projectId, edge.TargetTaskID, uid, outcome, payload,
+		fmt.Sprintf("解除输入「%s」", edge.Name)) {
+		return
+	}
+	s.writeTask(w, r, projectId, edge.TargetTaskID, uid, actor)
 }
 
-func (s *Server) ListEdges(w http.ResponseWriter, r *http.Request, projectId int64) {
+func (s *Server) ListEdges(w http.ResponseWriter, r *http.Request, projectId int64, params ListEdgesParams) {
 	proj, ok := s.fetchProject(w, r, projectId)
 	if !ok {
 		return
 	}
 	uid := currentUser(r).ID
-	views, err := s.edgeViews(r.Context(), projectId, uid, projectActor(uid, proj.OwnerID, proj.MyRole))
+	views, err := s.edgeViews(r.Context(), projectId, uid, projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility))
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, views)
+	if params.KrId == nil {
+		writeJSON(w, http.StatusOK, views)
+		return
+	}
+	// 服务端裁剪（P1）：只留两端任一端落在该 KR 下的边——
+	// 与图谱的 KR 任务关系层同口径，跨 KR 的边照样保留，关系不会被裁断。
+	tasks, err := s.q.ListProjectTasks(r.Context(), projectId)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	inKr := map[int64]bool{}
+	for _, t := range tasks {
+		if t.KeyResultID == *params.KrId {
+			inKr[t.ID] = true
+		}
+	}
+	out := make([]DeliverableEdge, 0, len(views))
+	for _, e := range views {
+		if inKr[e.TargetTaskId] || (e.SourceTaskId != nil && inKr[*e.SourceTaskId]) {
+			out = append(out, e)
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // edgeViews 组装项目全部交付物边（就绪状态与动作标志派生）。
@@ -225,8 +236,11 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 		return nil, err
 	}
 	requestByEdge := make(map[int64]store.ListInputRequestsByProjectRow, len(requestRows))
+	// 成员来源的输入源标识取「所需内容」摘要（#112），按边先索引一份。
+	noteByEdge := make(map[int64]string, len(requestRows))
 	for _, ir := range requestRows {
 		requestByEdge[ir.EdgeID] = ir
+		noteByEdge[ir.EdgeID] = ir.ContentNote
 	}
 	// 硬依赖分析（AC-10）：循环互锁与关键路径。工期取任务计划天数（截止-开始+1）。
 	taskRows, err := s.q.ListProjectTasks(ctx, projectID)
@@ -235,8 +249,11 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 	}
 	durations := make(map[int64]int, len(taskRows))
 	krOwnerNameByTask := make(map[int64]string, len(taskRows))
+	// 来源任务编号（#101）：编号是持久字段，由 O／KR／任务三级序号拼出，前端不再自己拼。
+	codeByTask := make(map[int64]string, len(taskRows))
 	for _, t := range taskRows {
 		krOwnerNameByTask[t.ID] = t.KrOwnerName.String
+		codeByTask[t.ID] = domain.TaskCode(int(t.ObjectiveCodeSeq), int(t.KrCodeSeq), int(t.CodeSeq))
 		if t.StartDate.Valid && t.EndDate.Valid {
 			d := int(t.EndDate.Time.Sub(t.StartDate.Time).Hours()/24) + 1
 			if d < 1 {
@@ -254,6 +271,21 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 	for _, rv := range reviewerRows {
 		reviewerNamesByTask[rv.TaskID] = append(reviewerNamesByTask[rv.TaskID], rv.DisplayName)
 	}
+	// 裁决 J1（#142）：「当前交付物」列显示类型与大小；边未绑定具体交付物项时
+	// 按来源任务列出全部已生效当前内容（一项显示「类型 · 大小」，多项显示「N 项」）。
+	currentFileRows, err := s.q.ListCurrentFilesByProjectTask(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	currentFilesByTask := make(map[int64][]EdgeCurrentFile)
+	for _, f := range currentFileRows {
+		currentFilesByTask[f.TaskID] = append(currentFilesByTask[f.TaskID], EdgeCurrentFile{
+			FileId:        f.FileID,
+			FileName:      f.FileName,
+			FileTypeLabel: domain.FileTypeLabel(f.FileName),
+			FileSize:      f.FileSize,
+		})
+	}
 	hardEdges := []domain.HardEdge{}
 	for _, e := range rows {
 		if e.EdgeType == domain.EdgeHardPrerequisite && e.SourceTaskID.Valid {
@@ -269,18 +301,29 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 		facts.Status = domain.TaskInProgress
 		canRemove := domain.CanConfigureInputs(actor, userID, facts)
 		item := DeliverableEdge{
-			Id:           e.ID,
-			Name:         e.Name,
-			EdgeType:     EdgeType(e.EdgeType),
-			Necessity:    Necessity(e.Necessity),
-			TargetTaskId: e.TargetTaskID,
-			Ready:        domain.EdgeReady(hasCurrent, e.HasCandidate),
-			HasCandidate: e.HasCandidate,
-			CanRemove:    &canRemove,
+			Id:            e.ID,
+			Name:          e.Name,
+			EdgeType:      EdgeType(e.EdgeType),
+			EdgeTypeLabel: optString(domain.EdgeTypeLabel(e.EdgeType)),
+			Necessity:     Necessity(e.Necessity),
+			TargetTaskId:  e.TargetTaskID,
+			Ready:         domain.EdgeReady(hasCurrent, e.HasCandidate),
+			HasCandidate:  e.HasCandidate,
+			CanRemove:     &canRemove,
 		}
 		item.TargetTaskName = optString(e.TargetTaskName)
 		item.SourceTaskId = fromPgInt8(e.SourceTaskID)
 		item.SourceTaskName = fromPgText(e.SourceTaskName)
+		sourceCode := ""
+		if e.SourceTaskID.Valid {
+			if code := codeByTask[e.SourceTaskID.Int64]; code != "" {
+				sourceCode = code
+				item.SourceTaskCode = &code
+			}
+		}
+		// 输入源标识读时现算（裁决 F1、#112）：库里的 name 只是建边当时的快照，
+		// 来源任务改名后要跟着变，成员来源则取「所需内容」摘要。
+		item.Name = domain.EdgeDisplayName(sourceCode, e.SourceTaskName.String, noteByEdge[e.ID])
 		if e.SourceTaskStatus.Valid {
 			st := TaskStatus(e.SourceTaskStatus.String)
 			item.SourceTaskStatus = &st
@@ -298,6 +341,13 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 		if e.CurrentFileID.Valid {
 			item.CurrentFileId = &e.CurrentFileID.Int64
 			item.CurrentFileName = fromPgText(e.CurrentFileName)
+			item.CurrentFileSize = &e.CurrentFileSize.Int64
+			label := domain.FileTypeLabel(e.CurrentFileName.String)
+			item.CurrentFileTypeLabel = &label
+		} else if e.SourceTaskID.Valid {
+			if files := currentFilesByTask[e.SourceTaskID.Int64]; len(files) > 0 {
+				item.SourceCurrentFiles = &files
+			}
 		}
 		item.ExpectedDate = fromPgDate(e.ExpectedDate)
 		if e.EdgeType == domain.EdgeHardPrerequisite {

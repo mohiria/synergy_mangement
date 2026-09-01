@@ -78,15 +78,15 @@ func TestReceiptTargets(t *testing.T) {
 func TestCanConfirmReceipt(t *testing.T) {
 	at := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
 	pending := ReceiptFact{ID: 1, TaskID: 8, UserID: 5, GeneratedAt: at}
-	if err := CanConfirmReceipt(5, pending); err != nil {
+	if err := CanConfirmReceipt(Actor{Role: RoleMember}, 5, pending); err != nil {
 		t.Fatalf("接收方本人应可确认: %v", err)
 	}
-	if err := CanConfirmReceipt(9, pending); !errors.Is(err, ErrReceiptNotMine) {
+	if err := CanConfirmReceipt(Actor{Role: RoleMember}, 9, pending); !errors.Is(err, ErrReceiptNotMine) {
 		t.Fatalf("他人确认应被拒: %v", err)
 	}
 	confirmed := pending
 	confirmed.ConfirmedAt = &at
-	if err := CanConfirmReceipt(5, confirmed); !errors.Is(err, ErrReceiptConfirmed) {
+	if err := CanConfirmReceipt(Actor{Role: RoleMember}, 5, confirmed); !errors.Is(err, ErrReceiptConfirmed) {
 		t.Fatalf("重复确认应被拒: %v", err)
 	}
 }

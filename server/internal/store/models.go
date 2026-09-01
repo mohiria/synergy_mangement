@@ -8,17 +8,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type ArtifactPackage struct {
-	ID        int64
-	ProjectID int64
-	Name      string
-	CreatedBy int64
-	CreatedAt pgtype.Timestamptz
-}
-
-type ArtifactPackageItem struct {
-	PackageID     int64
-	DeliverableID int64
+type AuditLog struct {
+	ID         int64
+	ProjectID  int64
+	ActorID    pgtype.Int8
+	Action     string
+	Method     string
+	Route      string
+	ObjectType string
+	ObjectID   pgtype.Int8
+	Summary    string
+	CreatedAt  pgtype.Timestamptz
 }
 
 type CompletionReview struct {
@@ -119,6 +119,23 @@ type FieldChangeRequest struct {
 	SubmittedAt           pgtype.Timestamptz
 	DecidedBy             pgtype.Int8
 	DecidedAt             pgtype.Timestamptz
+	ChangeType            string
+	OldStatus             pgtype.Text
+	NewStatus             pgtype.Text
+	Payload               []byte
+}
+
+type ImportRecord struct {
+	ID             int64
+	ProjectID      int64
+	OperatorID     int64
+	SourceFileName string
+	ObjectiveCount int32
+	KeyResultCount int32
+	TaskCount      int32
+	Result         string
+	FailureSummary string
+	ImportedAt     pgtype.Timestamptz
 }
 
 type InputRequest struct {
@@ -144,9 +161,9 @@ type KeyResult struct {
 	OwnerID     pgtype.Int8
 	StartDate   pgtype.Date
 	EndDate     pgtype.Date
-	RiskLevel   string
 	SortOrder   int32
 	CreatedAt   pgtype.Timestamptz
+	CodeSeq     int32
 }
 
 type Notification struct {
@@ -167,6 +184,15 @@ type Objective struct {
 	Description string
 	SortOrder   int32
 	CreatedAt   pgtype.Timestamptz
+	CodeSeq     int32
+}
+
+type PendingObjectDeletion struct {
+	ObjectKey string
+	Attempts  int32
+	LastError string
+	CreatedAt pgtype.Timestamptz
+	LastTryAt pgtype.Timestamptz
 }
 
 type PoolReview struct {
@@ -182,15 +208,19 @@ type PoolReview struct {
 }
 
 type Project struct {
-	ID               int64
-	Name             string
-	CreatedBy        int64
-	CreatedAt        pgtype.Timestamptz
-	OwnerID          int64
-	Status           string
-	Stage            pgtype.Text
-	PlannedStartDate pgtype.Date
-	PlannedEndDate   pgtype.Date
+	ID                  int64
+	Name                string
+	CreatedBy           int64
+	CreatedAt           pgtype.Timestamptz
+	OwnerID             int64
+	Status              string
+	Stage               pgtype.Text
+	PlannedStartDate    pgtype.Date
+	PlannedEndDate      pgtype.Date
+	ApprovalTimeoutDays int32
+	DueSoonDays         int32
+	RemindDailyLimit    int32
+	Visibility          string
 }
 
 type ProjectMember struct {
@@ -201,12 +231,13 @@ type ProjectMember struct {
 }
 
 type RemindLog struct {
-	ID         int64
-	TaskID     int64
-	SenderID   int64
-	TargetKey  string
-	RemindDate pgtype.Date
-	CreatedAt  pgtype.Timestamptz
+	ID          int64
+	TaskID      int64
+	SenderID    int64
+	TargetKey   string
+	RemindDate  pgtype.Date
+	CreatedAt   pgtype.Timestamptz
+	RecipientID int64
 }
 
 type Session struct {
@@ -232,6 +263,8 @@ type Task struct {
 	CompletionCriteria string
 	UpdatedAt          pgtype.Timestamptz
 	ReceiverScope      string
+	CodeSeq            int32
+	ResultUpdate       string
 }
 
 type TaskActivity struct {
@@ -244,6 +277,20 @@ type TaskActivity struct {
 	BlockerKey pgtype.Text
 }
 
+type TaskFile struct {
+	ID         int64
+	TaskID     int64
+	Kind       string
+	State      string
+	FileName   string
+	FileType   string
+	FileSize   int64
+	ObjectKey  string
+	Note       string
+	UploadedBy int64
+	UploadedAt pgtype.Timestamptz
+}
+
 type TaskInvite struct {
 	ID          int64
 	KeyResultID int64
@@ -252,6 +299,11 @@ type TaskInvite struct {
 	Note        string
 	State       string
 	CreatedAt   pgtype.Timestamptz
+}
+
+type TaskParticipant struct {
+	TaskID int64
+	UserID int64
 }
 
 type TaskReceipt struct {

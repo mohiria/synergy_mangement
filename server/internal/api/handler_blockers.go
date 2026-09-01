@@ -3,12 +3,9 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
-	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"synergy/server/internal/domain"
@@ -24,13 +21,19 @@ func (s *Server) ListBlockers(w http.ResponseWriter, r *http.Request, projectId 
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	blockers, err := s.projectBlockers(r.Context(), projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, blockerViews(blockers, actor, uid))
+	// #129：canRemind 显隐把当日配额算进去，任一待行动人还能提醒才显示按钮。
+	remindCounts, err := s.remindCountsToday(r.Context(), uid)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, blockerViews(blockers, actor, uid, projectSettingsOf(proj).RemindDailyLimit, remindCounts))
 }
 
 // CreateReminder 一键提醒当前待行动人（AC-11、MW-13）。
@@ -46,10 +49,10 @@ func (s *Server) CreateReminder(w http.ResponseWriter, r *http.Request, projectI
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole)
+	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 	targets, err := s.projectRemindTargets(r.Context(), projectId)
 	if err != nil {
-		writeInternalError(w)
+		writeInternalError(w, r, err)
 		return
 	}
 	key := strings.TrimSpace(req.TargetKey)
@@ -69,38 +72,41 @@ func (s *Server) CreateReminder(w http.ResponseWriter, r *http.Request, projectI
 		writeForbidden(w)
 		return
 	}
-	// MW-13 冷却：同一人对同一任务每天 1 次。
-	var lastAt *time.Time
-	last, err := s.q.GetLastRemind(r.Context(), store.GetLastRemindParams{TaskID: target.TaskID, SenderID: uid})
-	switch {
-	case err == nil:
-		if last.CreatedAt.Valid {
-			at := last.CreatedAt.Time
-			lastAt = &at
-		}
-	case errors.Is(err, pgx.ErrNoRows):
-	default:
-		writeInternalError(w)
-		return
-	}
+	// MW-13、AC-60 冷却：按（发起人、被提醒人、任务）三元组计当天次数，上限取项目规则设置；
+	// 换一个被提醒人不受影响，故逐个待行动人判定，全部用满才算被冷却挡下。
 	now := s.now()
-	if !domain.RemindAllowed(lastAt, now) {
+	limit := projectSettingsOf(proj).RemindDailyLimit
+	day := pgtype.Date{Time: now, Valid: true}
+	recipients := make([]int64, 0, len(target.ActionOwnerIDs))
+	for _, ownerID := range target.ActionOwnerIDs {
+		sent, err := s.q.CountRemindsToday(r.Context(), store.CountRemindsTodayParams{
+			TaskID: target.TaskID, SenderID: uid, RecipientID: ownerID, RemindDate: day,
+		})
+		if err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+		if domain.RemindAllowed(int(sent), limit) {
+			recipients = append(recipients, ownerID)
+		}
+	}
+	if len(recipients) == 0 {
 		writeJSON(w, http.StatusConflict, Error{Code: "remind_cooldown", Message: domain.ErrRemindCooldown.Error()})
 		return
 	}
 	content := domain.RemindContent(*target)
-	for _, ownerID := range target.ActionOwnerIDs {
+	for _, ownerID := range recipients {
 		if _, err := s.q.CreateNotification(r.Context(), blockerRemindNotification(ownerID, projectId, target.TaskID, content)); err != nil {
-			writeInternalError(w)
+			writeInternalError(w, r, err)
 			return
 		}
-	}
-	if _, err := s.q.CreateRemindLog(r.Context(), store.CreateRemindLogParams{
-		TaskID: target.TaskID, SenderID: uid, TargetKey: key,
-		RemindDate: pgtype.Date{Time: now, Valid: true},
-	}); err != nil {
-		writeInternalError(w)
-		return
+		if _, err := s.q.CreateRemindLog(r.Context(), store.CreateRemindLogParams{
+			TaskID: target.TaskID, SenderID: uid, RecipientID: ownerID, TargetKey: key,
+			RemindDate: day,
+		}); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -147,11 +153,22 @@ func (s *Server) projectRemindTargets(ctx context.Context, projectID int64) ([]d
 
 // projectBlockers 装配四类结构化事实并派生本项目当前全部卡点。
 func (s *Server) projectBlockers(ctx context.Context, projectID int64) ([]domain.Blocker, error) {
+	// P1：同一次请求内、同一次提交之后的重复派生走缓存（见 blocker_cache.go）。
+	cache := blockerCacheFrom(ctx)
+	if cache != nil {
+		if bs, ok := cache.get(projectID); ok {
+			return bs, nil
+		}
+	}
 	facts, err := s.projectBlockerFacts(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
-	return domain.DeriveBlockers(facts), nil
+	bs := domain.DeriveBlockers(facts)
+	if cache != nil {
+		cache.put(projectID, bs)
+	}
+	return bs, nil
 }
 
 // projectBlockerFacts 装配卡点与提醒目标共用的项目结构化事实。
@@ -181,7 +198,11 @@ func (s *Server) projectBlockerFacts(ctx context.Context, projectID int64) (doma
 		return domain.BlockerFacts{}, err
 	}
 
-	facts := domain.BlockerFacts{Now: s.now()}
+	settings, err := s.projectSettings(ctx, projectID)
+	if err != nil {
+		return domain.BlockerFacts{}, err
+	}
+	facts := domain.BlockerFacts{Now: s.now(), ApprovalTimeoutDays: settings.ApprovalTimeoutDays}
 	krOwnerNameByTask := make(map[int64]string, len(taskRows))
 	for _, t := range taskRows {
 		krOwnerNameByTask[t.ID] = t.KrOwnerName.String
@@ -295,16 +316,18 @@ func approverIDs(tasks []store.ListProjectTasksRow, taskID int64) []int64 {
 	return nil
 }
 
-func blockerViews(bs []domain.Blocker, actor domain.Actor, userID int64) []Blocker {
+func blockerViews(bs []domain.Blocker, actor domain.Actor, userID int64, remindLimit int, remindCounts func(recipientID, taskID int64) int) []Blocker {
 	out := make([]Blocker, 0, len(bs))
 	for _, b := range bs {
-		out = append(out, blockerView(b, actor, userID))
+		out = append(out, blockerView(b, actor, userID, remindLimit, remindCounts))
 	}
 	return out
 }
 
-func blockerView(b domain.Blocker, actor domain.Actor, userID int64) Blocker {
-	canRemind := domain.CanRemindBlocker(actor, userID, b)
+func blockerView(b domain.Blocker, actor domain.Actor, userID int64, remindLimit int, remindCounts func(recipientID, taskID int64) int) Blocker {
+	// #129：权限之外再看当日配额，全部待行动人都用完就不显示按钮。
+	canRemind := domain.CanRemindBlocker(actor, userID, b) &&
+		domain.RemindQuotaLeft(domain.BlockerRemindTarget(b, nil), remindLimit, remindCounts)
 	item := Blocker{
 		Key:              b.Key,
 		Kind:             BlockerKind(b.Kind),
@@ -316,11 +339,29 @@ func blockerView(b domain.Blocker, actor domain.Actor, userID int64) Blocker {
 		ActionOwnerIds:   append([]int64{}, b.ActionOwnerIDs...),
 		ActionOwnerNames: append([]string{}, b.ActionOwnerNames...),
 		Level:            RiskLevel(b.Level),
+		LevelLabel:       optString(domain.RiskLevelLabel(b.Level)),
 		Since:            b.Since,
 		CanRemind:        &canRemind,
 	}
 	item.ImpactNote = optString(b.ImpactNote)
 	return item
+}
+
+// remindCountsToday 当前用户今天的提醒计数（#129）：按（被提醒人、任务）寻址，
+// 一次查询取回，供卡点列表与我的工作的 canRemind 显隐判定。
+func (s *Server) remindCountsToday(ctx context.Context, senderID int64) (func(recipientID, taskID int64) int, error) {
+	rows, err := s.q.ListRemindCountsToday(ctx, store.ListRemindCountsTodayParams{
+		SenderID: senderID, RemindDate: pgtype.Date{Time: s.now(), Valid: true},
+	})
+	if err != nil {
+		return nil, err
+	}
+	type key struct{ recipient, task int64 }
+	m := make(map[key]int, len(rows))
+	for _, row := range rows {
+		m[key{row.RecipientID, row.TaskID}] = int(row.N)
+	}
+	return func(recipientID, taskID int64) int { return m[key{recipientID, taskID}] }, nil
 }
 
 func blockerRemindNotification(userID, projectID, taskID int64, content string) store.CreateNotificationParams {

@@ -1,10 +1,6 @@
 package domain
 
-import (
-	"errors"
-	"strings"
-	"unicode/utf8"
-)
+import "errors"
 
 // 交付物边类型与必要性（词汇表「交付物边」；PRD §4.3）。
 const (
@@ -18,17 +14,14 @@ const (
 )
 
 var (
-	ErrEdgeNameEmpty     = errors.New("输入名称不能为空")
-	ErrEdgeNameTooLong   = errors.New("输入名称不能超过 100 字")
 	ErrEdgeTypeInvalid   = errors.New("交付物边类型不合法")
 	ErrNecessityInvalid  = errors.New("必要性不合法")
 	ErrEdgeSelfLoop      = errors.New("不能以任务自身作为输入来源")
 	ErrEdgeSourceMissing = errors.New("必须指定来源任务或对接成员")
 )
 
-// NewEdge 待建立的交付物边输入。
+// NewEdge 待建立的交付物边输入。名称不在这里——它由已有事实派生（EdgeDisplayName、#112）。
 type NewEdge struct {
-	Name         string
 	EdgeType     string
 	Necessity    string
 	SourceTaskID *int64
@@ -38,13 +31,6 @@ type NewEdge struct {
 
 // ValidateNewEdge 校验交付物边输入（AC-28、§4.4）；循环关系经多任务表达，自环禁止。
 func ValidateNewEdge(e NewEdge) error {
-	name := strings.TrimSpace(e.Name)
-	if name == "" {
-		return ErrEdgeNameEmpty
-	}
-	if utf8.RuneCountInString(name) > 100 {
-		return ErrEdgeNameTooLong
-	}
 	switch e.EdgeType {
 	case EdgeHardPrerequisite, EdgeInformation, EdgeHandover, EdgeFeedback:
 	default:
@@ -69,7 +55,8 @@ func CanConfigureInputs(a Actor, userID int64, t TaskFacts) bool {
 	if t.Status == TaskCompleted || t.Status == TaskCancelled {
 		return false
 	}
-	return userID == t.OwnerID || userID == t.CreatorID || CanEditProject(a)
+	// 裁决 D2（#137）：四角色口径，创建人仅草稿期。
+	return CanEditTaskConfig(a, userID, t)
 }
 
 // EdgeReady 关系就绪状态（AC-48）：只有已生效的当前内容使关系就绪；候选不提前满足输入，
@@ -78,10 +65,11 @@ func EdgeReady(hasCurrent, hasCandidate bool) bool {
 	return hasCurrent
 }
 
-// DeriveDisplayStatus 页面主状态派生（§5.1 等待输入）：执行前后台状态存真实值，
-// 未开始／进行中且必要输入未就绪时汇总显示「等待输入」。
+// DeriveDisplayStatus 页面主状态派生（§5.1、§4.4.7 等待输入；AC-58）：后台状态存真实值，
+// 「等待输入」只在未开始上叠加——任务一旦进入进行中就不再叠加，下游凭部分提交、
+// 中间版本或线下交付先行开工，必要输入未就绪在任何阶段都不阻断动作。
 func DeriveDisplayStatus(stored string, hasUnmetRequiredInput bool) string {
-	if hasUnmetRequiredInput && (stored == TaskNotStarted || stored == TaskInProgress) {
+	if hasUnmetRequiredInput && stored == TaskNotStarted {
 		return TaskWaitingInput
 	}
 	return stored
@@ -94,7 +82,6 @@ var (
 
 // NewTaskInputs 一次配置产生的多条「来源任务 → 目标任务」输入（AC-53：来源任务可多选）。
 type NewTaskInputs struct {
-	Name           string
 	EdgeType       string
 	Necessity      string
 	SourceTaskIDs  []int64
@@ -118,7 +105,7 @@ func ValidateNewTaskInputs(in NewTaskInputs) error {
 		}
 		seen[id] = struct{}{}
 		if err := ValidateNewEdge(NewEdge{
-			Name: in.Name, EdgeType: in.EdgeType, Necessity: in.Necessity,
+			EdgeType: in.EdgeType, Necessity: in.Necessity,
 			SourceTaskID: &id, TargetTaskID: in.TargetTaskID,
 		}); err != nil {
 			return err

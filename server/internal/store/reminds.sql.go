@@ -11,23 +11,51 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countRemindsToday = `-- name: CountRemindsToday :one
+SELECT count(*) FROM remind_logs
+WHERE task_id = $1 AND sender_id = $2 AND recipient_id = $3 AND remind_date = $4
+`
+
+type CountRemindsTodayParams struct {
+	TaskID      int64
+	SenderID    int64
+	RecipientID int64
+	RemindDate  pgtype.Date
+}
+
+// 冷却判定（MW-13、AC-60）：同一发起人对同一被提醒人的同一任务当天已发出的提醒次数；
+// 上限取项目规则设置的 remind_daily_limit，换一个被提醒人不受影响。
+func (q *Queries) CountRemindsToday(ctx context.Context, arg CountRemindsTodayParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countRemindsToday,
+		arg.TaskID,
+		arg.SenderID,
+		arg.RecipientID,
+		arg.RemindDate,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createRemindLog = `-- name: CreateRemindLog :one
-INSERT INTO remind_logs (task_id, sender_id, target_key, remind_date)
-VALUES ($1, $2, $3, $4)
-RETURNING id, task_id, sender_id, target_key, remind_date, created_at
+INSERT INTO remind_logs (task_id, sender_id, recipient_id, target_key, remind_date)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, task_id, sender_id, target_key, remind_date, created_at, recipient_id
 `
 
 type CreateRemindLogParams struct {
-	TaskID     int64
-	SenderID   int64
-	TargetKey  string
-	RemindDate pgtype.Date
+	TaskID      int64
+	SenderID    int64
+	RecipientID int64
+	TargetKey   string
+	RemindDate  pgtype.Date
 }
 
 func (q *Queries) CreateRemindLog(ctx context.Context, arg CreateRemindLogParams) (RemindLog, error) {
 	row := q.db.QueryRow(ctx, createRemindLog,
 		arg.TaskID,
 		arg.SenderID,
+		arg.RecipientID,
 		arg.TargetKey,
 		arg.RemindDate,
 	)
@@ -39,33 +67,46 @@ func (q *Queries) CreateRemindLog(ctx context.Context, arg CreateRemindLogParams
 		&i.TargetKey,
 		&i.RemindDate,
 		&i.CreatedAt,
+		&i.RecipientID,
 	)
 	return i, err
 }
 
-const getLastRemind = `-- name: GetLastRemind :one
-SELECT id, task_id, sender_id, target_key, remind_date, created_at FROM remind_logs
-WHERE task_id = $1 AND sender_id = $2
-ORDER BY id DESC
-LIMIT 1
+const listRemindCountsToday = `-- name: ListRemindCountsToday :many
+SELECT recipient_id, task_id, count(*) AS n FROM remind_logs
+WHERE sender_id = $1 AND remind_date = $2
+GROUP BY recipient_id, task_id
 `
 
-type GetLastRemindParams struct {
-	TaskID   int64
-	SenderID int64
+type ListRemindCountsTodayParams struct {
+	SenderID   int64
+	RemindDate pgtype.Date
 }
 
-// 同一人对同一任务最近一次提醒（冷却判定用）。
-func (q *Queries) GetLastRemind(ctx context.Context, arg GetLastRemindParams) (RemindLog, error) {
-	row := q.db.QueryRow(ctx, getLastRemind, arg.TaskID, arg.SenderID)
-	var i RemindLog
-	err := row.Scan(
-		&i.ID,
-		&i.TaskID,
-		&i.SenderID,
-		&i.TargetKey,
-		&i.RemindDate,
-		&i.CreatedAt,
-	)
-	return i, err
+type ListRemindCountsTodayRow struct {
+	RecipientID int64
+	TaskID      int64
+	N           int64
+}
+
+// 当日配额显隐（#129）：一次取回该发起人今天对（被提醒人、任务）的全部计数，
+// 卡点列表与我的工作按目标逐个判定「任一待行动人未用完即显示按钮」。
+func (q *Queries) ListRemindCountsToday(ctx context.Context, arg ListRemindCountsTodayParams) ([]ListRemindCountsTodayRow, error) {
+	rows, err := q.db.Query(ctx, listRemindCountsToday, arg.SenderID, arg.RemindDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRemindCountsTodayRow
+	for rows.Next() {
+		var i ListRemindCountsTodayRow
+		if err := rows.Scan(&i.RecipientID, &i.TaskID, &i.N); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

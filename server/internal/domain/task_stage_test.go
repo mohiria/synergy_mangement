@@ -18,10 +18,10 @@ func TestCurrentStage(t *testing.T) {
 		{"未开始等负责人开始", facts(TaskNotStarted), "待开始执行", i64(5)},
 		{"等待输入停在负责人", facts(TaskWaitingInput), "等待输入", i64(5)},
 		{"进行中为任务执行", facts(TaskInProgress), "任务执行", i64(5)},
-		{"待中间审核", facts(TaskPendingIntermediateReview), "中间或签审核", nil},
+		{"待成果审核", facts(TaskPendingIntermediateReview), "成果审核（或签）", nil},
 		{"待 KR 终审停在 KR 负责人", facts(TaskPendingFinalReview), "KR 终审", i64(7)},
 		{"已完成即已闭环", facts(TaskCompleted), "已闭环", nil},
-		{"已取消无待行动人", facts(TaskCancelled), "已取消", nil},
+		{"已关闭无待行动人", facts(TaskCancelled), "已关闭", nil},
 		{"KR 无负责人时终审待行动人为空", TaskFacts{Status: TaskPendingFinalReview, OwnerID: 5}, "KR 终审", nil},
 	}
 	for _, tc := range cases {

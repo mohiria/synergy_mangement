@@ -6,12 +6,15 @@ import { client } from "./api/client";
 import type { components } from "./api/schema";
 import DateRangeField from "./DateRangeField";
 import Icon from "./icons";
+import NotificationBell from "./NotificationBell";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
 type ProjectStatus = components["schemas"]["ProjectStatus"];
 type UserSummary = components["schemas"]["UserSummary"];
 
+// 候选项文案：下拉里要列出全部状态，此时还没有对应实体可取派生字案，只能在前端枚举。
+// 已存在实体的显示文案一律取后端的 statusLabel（F1）。
 const STATUS_LABEL: Record<ProjectStatus, string> = {
   not_started: "未开始",
   in_progress: "进行中",
@@ -48,11 +51,12 @@ export default function ProjectsPage({
   const [users, setUsers] = useState<UserSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
-  const [editing, setEditing] = useState<Project | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ProjectStatus | "all">("all");
+  // 归属：我参与的（成员／负责人）与公开可见的（我不是成员，凭项目公开才看得到）。
+  const [scopeFilter, setScopeFilter] = useState<"all" | "mine" | "public">("all");
   const [form] = Form.useForm<ProjectFormValues>();
 
   const load = useCallback(async () => {
@@ -80,40 +84,16 @@ export default function ProjectsPage({
   };
 
   const openCreate = () => {
-    setEditing(null);
     setSaveError(null);
     form.resetFields();
-    setModalOpen(true);
-  };
-
-  const openEdit = (p: Project) => {
-    setEditing(p);
-    setSaveError(null);
-    form.setFieldsValue({
-      name: p.name,
-      ownerId: p.ownerId,
-      status: p.status,
-      stage: p.stage ?? undefined,
-      plan:
-        p.plannedStartDate || p.plannedEndDate
-          ? [
-              p.plannedStartDate ? dayjs(p.plannedStartDate) : null,
-              p.plannedEndDate ? dayjs(p.plannedEndDate) : null,
-            ]
-          : undefined,
-    });
     setModalOpen(true);
   };
 
   const save = async (values: ProjectFormValues) => {
     setSaving(true);
     setSaveError(null);
-    const result = editing
-      ? await client.PUT("/projects/{projectId}", {
-          params: { path: { projectId: editing.id } },
-          body: { ...toBody(values), status: values.status ?? editing.status },
-        })
-      : await client.POST("/projects", { body: toBody(values) });
+    // 这里只建新项目；已有项目的基础信息在项目设置页改（§7.9、#85）。
+    const result = await client.POST("/projects", { body: toBody(values) });
     setSaving(false);
     if (result.data) {
       setModalOpen(false);
@@ -129,15 +109,21 @@ export default function ProjectsPage({
     label: `${u.displayName}（${u.username}）`,
   }));
 
-  // 搜索与状态筛选只作用于展示，不改变服务端返回的事实。
+  // 搜索与筛选只作用于展示，不改变服务端返回的事实。
+  // 「我参与的」排在前面：公开项目对全体登录用户可见，不先排一下会把个人列表淹掉（#111）。
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    return projects.filter((p) => {
-      if (statusFilter !== "all" && p.status !== statusFilter) return false;
-      if (!needle) return true;
-      return (p.name + p.ownerName + (p.stage ?? "")).toLowerCase().includes(needle);
-    });
-  }, [projects, search, statusFilter]);
+    return projects
+      .filter((p) => {
+        if (statusFilter !== "all" && p.status !== statusFilter) return false;
+        if (scopeFilter === "mine" && p.implicitViewer) return false;
+        if (scopeFilter === "public" && !p.implicitViewer) return false;
+        if (!needle) return true;
+        return (p.name + p.ownerName + (p.stage ?? "")).toLowerCase().includes(needle);
+      })
+      .sort((a, b) => Number(a.implicitViewer) - Number(b.implicitViewer));
+  }, [projects, search, statusFilter, scopeFilter]);
+  const publicCount = projects.filter((p) => p.implicitViewer).length;
 
   return (
     <div className="app-shell">
@@ -161,6 +147,8 @@ export default function ProjectsPage({
           <div className="breadcrumbs">
             <b>项目列表</b>
           </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <NotificationBell />
           <Popover
             trigger="click"
             placement="bottomRight"
@@ -188,6 +176,7 @@ export default function ProjectsPage({
               <Icon name="down" size={15} />
             </button>
           </Popover>
+          </div>
         </header>
         <main className="page">
           <div className="page-head">
@@ -203,6 +192,7 @@ export default function ProjectsPage({
             <div className="toolbar-group">
               <Input
                 allowClear
+                prefix={<Icon name="search" size={15} />}
                 style={{ width: 240 }}
                 placeholder="搜索项目、负责人或阶段"
                 value={search}
@@ -220,6 +210,16 @@ export default function ProjectsPage({
                   })),
                 ]}
               />
+              <Select
+                style={{ width: 150 }}
+                value={scopeFilter}
+                onChange={setScopeFilter}
+                options={[
+                  { value: "all" as const, label: "全部项目" },
+                  { value: "mine" as const, label: "我参与的" },
+                  { value: "public" as const, label: `公开可见的${publicCount ? `（${publicCount}）` : ""}` },
+                ]}
+              />
             </div>
             <span className="muted" style={{ fontSize: "var(--type-aux)" }}>
               共 {visible.length} 个项目
@@ -234,13 +234,21 @@ export default function ProjectsPage({
               locale={{ emptyText: projects.length ? "没有匹配的项目" : "暂无项目" }}
               pagination={false}
               columns={[
+                // 列表字段一律单行截断、悬停看全称（#91）；ellipsis 同时把 antd 表格切到固定布局。
                 {
                   title: "项目名称",
                   dataIndex: "name",
+                  ellipsis: { showTitle: false },
                   render: (v: string, p) => (
-                    <Link className="project-name-cell" to={`/projects/${p.id}`}>
+                    <Link
+                      className="project-name-cell"
+                      to={`/projects/${p.id}`}
+                      title={p.implicitViewer ? `${v}（${p.visibilityLabel} · 我不是成员，只读）` : v}
+                    >
                       <span className={"project-dot " + p.status} />
-                      <strong>{v}</strong>
+                      <strong className="cell-text">{v}</strong>
+                      {/* 只标「不是成员」这一种：自己参与的项目公开与否不影响他自己能做什么。 */}
+                      {p.implicitViewer && <span className="status-pill">{p.visibilityLabel} · 只读</span>}
                     </Link>
                   ),
                 },
@@ -248,10 +256,11 @@ export default function ProjectsPage({
                   title: "负责人",
                   dataIndex: "ownerName",
                   width: 150,
+                  ellipsis: { showTitle: false },
                   render: (v: string) => (
-                    <span className="owner-cell">
+                    <span className="owner-cell" title={v}>
                       <span className="avatar">{v.slice(0, 1)}</span>
-                      {v}
+                      <span className="cell-text">{v}</span>
                     </span>
                   ),
                 },
@@ -259,14 +268,16 @@ export default function ProjectsPage({
                   title: "状态",
                   dataIndex: "status",
                   width: 110,
-                  render: (v: ProjectStatus) => (
-                    <span className={`status-pill ${v}`}>{STATUS_LABEL[v]}</span>
+                  // 显示文案取后端派生字段；本页保留的 STATUS_LABEL 只用于筛选与新建的候选项。
+                  render: (v: ProjectStatus, row: Project) => (
+                    <span className={`status-pill ${v}`}>{row.statusLabel}</span>
                   ),
                 },
                 {
                   title: "阶段",
                   dataIndex: "stage",
                   width: 170,
+                  ellipsis: true,
                   render: (v?: string) => v ?? <span className="muted">—</span>,
                 },
                 {
@@ -297,10 +308,12 @@ export default function ProjectsPage({
                       <Link className="link-btn" to={`/projects/${p.id}`}>
                         进入
                       </Link>
+                      {/* 项目基础信息的编辑入口收口到项目设置页（§7.9 首项、#85）：
+                          两处口径一致，这里只留跳转，不再另开一份表单。 */}
                       {p.canEdit && (
-                        <button className="link-btn" type="button" onClick={() => openEdit(p)}>
-                          编辑
-                        </button>
+                        <Link className="link-btn" to={`/projects/${p.id}/settings`}>
+                          设置
+                        </Link>
                       )}
                     </span>
                   ),
@@ -311,7 +324,7 @@ export default function ProjectsPage({
         </main>
       </section>
       <Modal
-        title={editing ? "编辑项目" : "新建项目"}
+        title="新建项目"
         open={modalOpen}
         confirmLoading={saving}
         onOk={() => form.submit()}
@@ -319,9 +332,9 @@ export default function ProjectsPage({
           setModalOpen(false);
           setSaveError(null);
         }}
-        okText={editing ? "保存" : "创建"}
+        okText="创建"
         cancelText="取消"
-        destroyOnClose
+        destroyOnHidden
       >
         {saveError && <Alert type="error" message={saveError} style={{ marginBottom: 16 }} />}
         <Form form={form} layout="vertical" onFinish={save} requiredMark={false}>
@@ -336,16 +349,6 @@ export default function ProjectsPage({
               placeholder="选择负责人"
             />
           </Form.Item>
-          {editing && (
-            <Form.Item name="status" label="状态" rules={[{ required: true, message: "请选择状态" }]}>
-              <Select
-                options={(Object.keys(STATUS_LABEL) as ProjectStatus[]).map((s) => ({
-                  value: s,
-                  label: STATUS_LABEL[s],
-                }))}
-              />
-            </Form.Item>
-          )}
           <Form.Item name="stage" label="阶段（选填）">
             <Input maxLength={50} placeholder="业务里程碑，如：联合联调阶段" />
           </Form.Item>

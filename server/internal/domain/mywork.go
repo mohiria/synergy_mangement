@@ -2,14 +2,12 @@ package domain
 
 import (
 	"sort"
+	"strings"
 	"time"
 )
 
 // 我的工作五分组（词汇表「我的工作事项」；AC-16；模块 PRD §3～5）。
 // 本文件只做纯派生：输入为项目事实切片，输出为五组卡片事实。
-
-// ApprovalTimeoutDays 审批超时阈值 N（默认 3；模块 PRD §5.4）。
-const ApprovalTimeoutDays = 3
 
 type WorkTaskFact struct {
 	ID                  int64
@@ -35,6 +33,8 @@ type WorkApprovalFact struct {
 	SubmittedAt time.Time
 	TaskEnd     *time.Time
 	Summary     string
+	// ChangeType 变更类型，仅关键字段变更单有意义（AC-57：关闭单复用同一张单）。
+	ChangeType string
 }
 
 type WorkCompletionFact struct {
@@ -58,6 +58,7 @@ type WorkInputRequestFact struct {
 	TaskName    string
 	InputName   string
 	ContentNote string
+	Necessity   string
 	ProviderID  int64
 	TaskOwnerID int64
 	State       string
@@ -90,9 +91,16 @@ type WorkUpstreamFact struct {
 }
 
 type MyWorkFacts struct {
-	UserID        int64
-	Actor         Actor
-	Now           time.Time
+	UserID int64
+	Actor  Actor
+	Now    time.Time
+	// ApprovalTimeoutDays 审批超时阈值 N，取项目规则设置（AC-60）；非正数时回落默认值。
+	// 与「审批超时」卡点同源，见 BlockerFacts.ApprovalTimeoutDays。
+	ApprovalTimeoutDays int
+	// 一键提醒当日配额（#129）：canRemind = 权限 && 任一待行动人配额未用完。
+	// RemindSentToday 返回（当前用户、被提醒人、任务）三元组今日已发次数；nil 按不限处理。
+	RemindDailyLimit int
+	RemindSentToday  func(recipientID, taskID int64) int
 	Tasks         []WorkTaskFact
 	PoolReviews   []WorkApprovalFact
 	FieldChanges  []WorkApprovalFact
@@ -123,6 +131,13 @@ type WorkItem struct {
 	CanRemind      bool
 }
 
+// 上游等待项的阶段文案（MW-14、模块 PRD §4.2 规则 6）：
+// 来源任务已关闭时与「尚未交付」分开出文案，提醒该来源的负责人已无意义。
+const (
+	WorkStageUpstreamWaiting   = "等待上游交付"
+	WorkStageUpstreamCancelled = "上游已关闭"
+)
+
 // 卡片动作文案（模块 PRD §5.3；AC-55 只用文字按钮）。
 const (
 	WorkActionHandle = "去处理"
@@ -148,7 +163,7 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 	}
 	me := f.UserID
 
-	// MW-14：任务取消后该任务的审批件与输入请求一并消失（卡点侧由「执行中才派生」自然排除）。
+	// MW-14：任务关闭后该任务的审批件与输入请求一并消失（卡点侧由「执行中才派生」自然排除）。
 	terminal := make(map[int64]bool, len(f.Tasks))
 	for _, t := range f.Tasks {
 		if t.DisplayStatus == TaskCancelled || t.DisplayStatus == TaskCompleted {
@@ -171,12 +186,17 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		}
 		target := WaitRemindTarget(w)
 		item.RefKey = target.Key
-		item.CanRemind = CanRemind(f.Actor, me, target)
+		item.CanRemind = CanRemind(f.Actor, me, target) &&
+			RemindQuotaLeft(target, f.RemindDailyLimit, f.RemindSentToday)
 	}
 
+	timeoutDays := f.ApprovalTimeoutDays
+	if timeoutDays <= 0 {
+		timeoutDays = DefaultApprovalTimeoutDays
+	}
 	waitingDays := func(since time.Time) (*int, bool) {
 		d := int(f.Now.Sub(since).Hours() / 24)
-		return &d, d >= ApprovalTimeoutDays
+		return &d, d >= timeoutDays
 	}
 	tid := func(v int64) *int64 { return &v }
 
@@ -200,8 +220,13 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		}
 		if fc.KrOwnerID != nil && *fc.KrOwnerID == me {
 			days, overdue := waitingDays(fc.SubmittedAt)
+			// AC-57：关闭单复用同一张变更单，卡片前缀区分开，免得审批人看不出这是终止任务。
+			prefix := "[关键字段修改] "
+			if fc.ChangeType == FieldChangeTypeCancel {
+				prefix = "[关闭申请] "
+			}
 			g.Approvals = append(g.Approvals, WorkItem{
-				Kind: "field_change", Title: "[关键字段修改] " + fc.TaskName,
+				Kind: "field_change", Title: prefix + fc.TaskName,
 				TaskID: tid(fc.TaskID), TaskName: fc.TaskName, RefID: tid(fc.ID),
 				Due: fc.TaskEnd, WaitingDays: days, Overdue: overdue, DrawerTab: "audit",
 			})
@@ -217,10 +242,10 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 				if rv == me {
 					days, overdue := waitingDays(cr.SubmittedAt)
 					g.Approvals = append(g.Approvals, WorkItem{
-						Kind: "intermediate_review", Title: "[中间审核] " + cr.TaskName,
+						Kind: "intermediate_review", Title: "[成果审核] " + cr.TaskName,
 						TaskID: tid(cr.TaskID), TaskName: cr.TaskName, RefID: tid(cr.ID),
 						Due: cr.TaskEnd, WaitingDays: days, Overdue: overdue,
-						Stage: "中间或签审核", DrawerTab: "audit",
+						Stage: "成果审核（或签）", DrawerTab: "audit",
 					})
 					break
 				}
@@ -244,9 +269,12 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		if terminal[ir.TaskID] {
 			continue
 		}
+		if ir.Necessity != NecessityRequired {
+			continue // 参考输入不生成本页事项、不计数（模块 PRD §4.2 规则 8）
+		}
 		if ir.ProviderID == me && ir.Notified && (ir.State == InputRequestPending || ir.State == InputRequestAccepted) {
 			days, _ := waitingDays(ir.CreatedAt)
-			overdue := ir.Expected != nil && f.Now.After(*ir.Expected)
+			overdue := Overdue(ir.Expected, f.Now)
 			g.Pending = append(g.Pending, WorkItem{
 				Kind: "input_request", Title: "[输入请求] " + ir.InputName + " → " + ir.TaskName,
 				TaskID: tid(ir.TaskID), TaskName: ir.TaskName, RefID: tid(ir.ID),
@@ -269,7 +297,7 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 			item := WorkItem{
 				Kind: "task", Title: tk.Name, TaskID: tid(tk.ID), TaskName: tk.Name,
 				Due: tk.EndDate, UnreadyNote: tk.UnreadyNote, DrawerTab: "overview",
-				Overdue: tk.EndDate != nil && f.Now.After(*tk.EndDate),
+				Overdue: Overdue(tk.EndDate, f.Now),
 			}
 			// 被退回事项回到提交人的待我处理，卡片带「已退回：理由」（补充规则 3）。
 			switch {
@@ -303,15 +331,24 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 
 	// —— 等待他人（Q5：停在他人队列；及我任务的上游）——
 	for _, up := range f.Upstreams {
+		if terminal[up.TargetTaskID] {
+			continue // MW-14：下游任务进终态后本人不再等待任何上游
+		}
 		if up.TargetOwnerID == me && !up.Ready && up.Necessity == NecessityRequired && up.SourceTaskID != nil {
 			item := WorkItem{
 				Kind: "upstream", Title: "[上游任务] " + up.SourceName + " → " + up.InputName,
 				TaskID: up.SourceTaskID, TaskName: up.SourceName,
-				RefID: tid(up.EdgeID), Stage: "等待上游交付", DrawerTab: "overview",
+				RefID: tid(up.EdgeID), Stage: WorkStageUpstreamWaiting, DrawerTab: "overview",
 			}
-			// 提醒目标针对被卡住的下游任务（与「上游未就绪」卡点同口径），待行动人是上游任务负责人。
-			setWaitRemind(&item, UpstreamWaitFact(up.EdgeID, up.TargetTaskID, up.InputName,
-				up.SourceName, up.SourceOwnerID, up.SourceOwnerName))
+			if src, ok := taskByID[*up.SourceTaskID]; ok && src.DisplayStatus == TaskCancelled {
+				// 来源已关闭：输入仍未就绪，但催上游负责人交付已无意义，只留卡片说明该改指来源
+				// （模块 PRD §4.2 规则 6）。
+				item.Stage = WorkStageUpstreamCancelled
+			} else {
+				// 提醒目标针对被卡住的下游任务（与「上游未就绪」卡点同口径），待行动人是上游任务负责人。
+				setWaitRemind(&item, UpstreamWaitFact(up.EdgeID, up.TargetTaskID, up.InputName,
+					up.SourceName, up.SourceOwnerID, up.SourceOwnerName))
+			}
 			g.Waiting = append(g.Waiting, item)
 		}
 	}
@@ -319,9 +356,12 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		if terminal[ir.TaskID] {
 			continue
 		}
+		if ir.Necessity != NecessityRequired {
+			continue // 与待我处理、提醒目标同口径
+		}
 		if ir.TaskOwnerID == me && ir.ProviderID != me && (ir.State == InputRequestPending || ir.State == InputRequestAccepted) {
 			days, _ := waitingDays(ir.CreatedAt)
-			overdue := ir.Expected != nil && f.Now.After(*ir.Expected)
+			overdue := Overdue(ir.Expected, f.Now)
 			item := WorkItem{
 				Kind: "waiting_input_request", Title: "[输入请求] " + ir.InputName + " → " + ir.TaskName,
 				TaskID: tid(ir.TaskID), TaskName: ir.TaskName, RefID: tid(ir.ID),
@@ -469,9 +509,7 @@ func workUrgency(now time.Time, it WorkItem) int {
 	if it.Due == nil {
 		return workUrgencyUndated
 	}
-	y1, m1, d1 := it.Due.Date()
-	y2, m2, d2 := now.Date()
-	if y1 == y2 && m1 == m2 && d1 == d2 {
+	if DueToday(it.Due, now) {
 		return workUrgencyToday
 	}
 	return workUrgencyDated
@@ -505,21 +543,10 @@ func decorateWorkCards(f MyWorkFacts, g *MyWorkGroups) {
 	for i := range g.Blockers {
 		g.Blockers[i].ActionLabel = WorkActionView
 		if b, ok := byKey[g.Blockers[i].RefKey]; ok {
-			g.Blockers[i].CanRemind = CanRemindBlocker(f.Actor, f.UserID, b)
+			g.Blockers[i].CanRemind = CanRemindBlocker(f.Actor, f.UserID, b) &&
+				RemindQuotaLeft(BlockerRemindTarget(b, nil), f.RemindDailyLimit, f.RemindSentToday)
 		}
 	}
-}
-
-// KrRiskNote 派生 KR 行的一行风险原因（AC-05）：优先取 KR 下任务的首条派生卡点事实；
-// 无卡点但风险等级非正常时给通用说明。
-func KrRiskNote(riskLevel string, blockerNotes []string) string {
-	if len(blockerNotes) > 0 {
-		return blockerNotes[0]
-	}
-	if riskLevel != "normal" {
-		return "存在待处理的风险因素"
-	}
-	return ""
 }
 
 // ErrReportRangeInvalid 报告时间范围非法。
@@ -554,4 +581,53 @@ func singleApprover(id *int64) []int64 {
 		return nil
 	}
 	return []int64{*id}
+}
+
+// 身份卡「当前职责」（模块 PRD §3.1）：回答「我凭什么会收到这些事项」。
+// 事实用的是移出成员时那份职责占位清单（MemberDuties），两处口径同源——
+// 会挡住移出的职责，正是会给人派活的职责。
+
+// workResponsibilityOrder 职责显示顺序：从项目级到事项级，横排一行读得下来。
+var workResponsibilityOrder = []string{
+	"项目负责人", "KR 负责人", "任务负责人", "成果审核人", "接收方", "输入对接人", "被邀请人",
+}
+
+// WorkResponsibilities 派生当前用户在本项目承担的职责标签（读时派生，不落库）。
+func WorkResponsibilities(d MemberDuties, isProjectOwner, hasPendingInvite bool) []string {
+	held := map[string]bool{
+		"项目负责人":  isProjectOwner,
+		"KR 负责人": len(d.KeyResults) > 0,
+		"任务负责人":  len(d.Tasks) > 0,
+		"成果审核人":  len(d.Reviewers) > 0,
+		"接收方":    len(d.Receivers) > 0,
+		"输入对接人":  len(d.InputProviders) > 0,
+		"被邀请人":   hasPendingInvite,
+	}
+	out := []string{}
+	for _, label := range workResponsibilityOrder {
+		if held[label] {
+			out = append(out, label)
+		}
+	}
+	return out
+}
+
+// WorkResponsibilitiesLabel 职责一行文案；一项不担也要说清楚，不留空白。
+func WorkResponsibilitiesLabel(list []string) string {
+	if len(list) == 0 {
+		return "当前未承担行动职责"
+	}
+	return strings.Join(list, "、")
+}
+
+// WorkIdentityRoleLabel 身份卡的身份文案：优先成员角色；项目负责人可以不在成员表里
+// （CanReadProject 认负责人身份），那时不回显空串。
+func WorkIdentityRoleLabel(role string, isProjectOwner bool) string {
+	if label, ok := memberRoleLabels[role]; ok {
+		return label
+	}
+	if isProjectOwner {
+		return "项目负责人"
+	}
+	return "非项目成员"
 }
