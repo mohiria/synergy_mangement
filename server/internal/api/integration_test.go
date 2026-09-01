@@ -3028,6 +3028,12 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 	if len(unready.ActionOwnerIds) != 1 || unready.ActionOwnerIds[0] != bobUser.ID {
 		t.Fatalf("上游未就绪的待行动人应为上游负责人: %+v", unready)
 	}
+	// #167：卡点条目按「编号＋标题＋负责人」展示上游任务，字段由 API 派生。
+	if unready.SourceTaskCode == nil || *unready.SourceTaskCode == "" ||
+		unready.SourceTaskName == nil || *unready.SourceTaskName != "现场数据采集" ||
+		unready.SourceOwnerName == nil || *unready.SourceOwnerName != bobUser.DisplayName {
+		t.Fatalf("卡点应带上游编号/标题/负责人: %+v", unready)
+	}
 	if _, ok := got[overdueKey]; !ok {
 		t.Fatalf("截止已过的任务应派生超期卡点: %+v", got)
 	}

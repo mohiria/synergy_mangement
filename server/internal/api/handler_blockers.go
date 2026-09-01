@@ -200,8 +200,10 @@ func (s *Server) projectBlockerFacts(ctx context.Context, projectID int64) (doma
 	}
 	facts := domain.BlockerFacts{Now: s.now(), ApprovalTimeoutDays: settings.ApprovalTimeoutDays}
 	krOwnerNameByTask := make(map[int64]string, len(taskRows))
+	codeByTask := make(map[int64]string, len(taskRows))
 	for _, t := range taskRows {
 		krOwnerNameByTask[t.ID] = t.KrOwnerName.String
+		codeByTask[t.ID] = domain.TaskCode(int(t.ObjectiveCodeSeq), int(t.KrCodeSeq), int(t.CodeSeq))
 		tf := domain.BlockerTaskFact{
 			ID: t.ID, Name: t.Name, Status: t.Status,
 			OwnerID: t.OwnerID, OwnerName: t.OwnerName,
@@ -231,6 +233,7 @@ func (s *Server) projectBlockerFacts(ctx context.Context, projectID int64) (doma
 		if e.SourceTaskID.Valid {
 			src := e.SourceTaskID.Int64
 			in.SourceTaskID = &src
+			in.SourceTaskCode = codeByTask[src]
 			in.SourceTaskName = e.SourceTaskName.String
 			in.SourceOwnerID = e.SourceOwnerID.Int64
 			in.SourceOwnerName = e.SourceOwnerName.String
@@ -330,6 +333,10 @@ func blockerView(b domain.Blocker, actor domain.Actor, userID int64, remindLimit
 		CanRemind:        &canRemind,
 	}
 	item.ImpactNote = optString(b.ImpactNote)
+	// #167：「上游未就绪」条目按「编号＋标题＋负责人」展示上游任务。
+	item.SourceTaskCode = optString(b.SourceTaskCode)
+	item.SourceTaskName = optString(b.SourceTaskName)
+	item.SourceOwnerName = optString(b.SourceOwnerName)
 	return item
 }
 

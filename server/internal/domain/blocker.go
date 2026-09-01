@@ -48,6 +48,7 @@ type BlockerInputFact struct {
 	Necessity       string
 	Ready           bool
 	SourceTaskID    *int64 // 来源为上游任务
+	SourceTaskCode  string // 上游任务编号（#167，形如 T1.1.1）
 	SourceTaskName  string
 	SourceOwnerID   int64
 	SourceOwnerName string
@@ -96,6 +97,11 @@ type Blocker struct {
 	// InputProviderID 上游未就绪且来源为指定成员时的对接人 ID；其余为 0。
 	// 我的工作用它剔除「等我提供输入」类（与输入请求同源，见模块 PRD §3.2.E）。
 	InputProviderID int64
+	// 上游任务事实（#167）：仅「上游未就绪」且来源为任务时有值——
+	// 卡点条目按「编号＋标题＋负责人」展示，前端只消费不拼算。
+	SourceTaskCode  string
+	SourceTaskName  string
+	SourceOwnerName string
 }
 
 var approvalStageLabels = map[string]string{
@@ -157,6 +163,10 @@ func DeriveBlockers(f BlockerFacts) []Blocker {
 			b.Reason = fmt.Sprintf("上游任务「%s」尚未交付当前内容", in.SourceTaskName)
 			b.ActionOwnerIDs = []int64{in.SourceOwnerID}
 			b.ActionOwnerNames = []string{in.SourceOwnerName}
+			// #167：卡点条目按「编号＋标题＋负责人」展示上游任务。
+			b.SourceTaskCode = in.SourceTaskCode
+			b.SourceTaskName = in.SourceTaskName
+			b.SourceOwnerName = in.SourceOwnerName
 		case in.ProviderID != 0:
 			b.Reason = "输入对接人尚未提供内容"
 			b.ActionOwnerIDs = []int64{in.ProviderID}

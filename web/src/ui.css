@@ -217,6 +217,12 @@ body {
 .pp-check { color: var(--accent); font-weight: 700; flex: none; }
 .pp-empty { padding: 16px 10px; color: var(--muted); font-size: var(--type-aux); text-align: center; }
 
+/* #167：卡点「上游未就绪」条目——编号＋标题＋负责人一行；标题按行宽截断。 */
+.blocker-upstream-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.blocker-upstream-code { flex: none; color: var(--muted); }
+.blocker-upstream-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.blocker-upstream-owner { flex: none; color: var(--muted); }
+
 .page { width: 100%; max-width: 1480px; margin: 0 auto; padding: 28px 32px 48px; }
 /* 内容区宽度分档（基线 §5）：我的工作窄、图谱宽，其余 1480。 */
 .page.page-narrow { max-width: 1240px; }

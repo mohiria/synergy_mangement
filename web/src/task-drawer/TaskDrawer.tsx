@@ -1062,17 +1062,29 @@ export default function TaskDrawer({
           </h3>
           {blockers.map((b) => (
             <div key={b.key} className="fact-card fact-card-aux fact-card-risk">
-              <div>
+              <div style={{ minWidth: 0 }}>
                 <b>
                   {b.kindLabel}:缺 {b.missing}
                   <span className={`status-pill risk-${b.level}`} style={{ marginLeft: 8 }}>
                     {b.levelLabel}
                   </span>
                 </b>
-                <small>
-                  {b.reason} · 待行动人 {b.actionOwnerNames.join("、") || "—"}
-                  {b.impactNote ? ` · ${b.impactNote}` : ""}
-                </small>
+                {/* #167：上游未就绪条目按「编号＋标题＋负责人」展示上游任务，长标题截断、悬停全文。 */}
+                {b.sourceTaskCode ? (
+                  <small
+                    className="blocker-upstream-line"
+                    title={`${b.sourceTaskCode} ${b.sourceTaskName ?? ""} · 负责人 ${b.sourceOwnerName ?? "—"}`}
+                  >
+                    <span className="blocker-upstream-code">{b.sourceTaskCode}</span>
+                    <span className="blocker-upstream-name">{b.sourceTaskName}</span>
+                    <span className="blocker-upstream-owner">{b.sourceOwnerName}</span>
+                  </small>
+                ) : (
+                  <small>
+                    {b.reason} · 待行动人 {b.actionOwnerNames.join("、") || "—"}
+                    {b.impactNote ? ` · ${b.impactNote}` : ""}
+                  </small>
+                )}
               </div>
               <div className="fact-card-actions">
                 {b.canRemind && (

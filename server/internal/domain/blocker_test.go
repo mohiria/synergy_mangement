@@ -40,6 +40,36 @@ func findBlocker(bs []Blocker, key string) *Blocker {
 	return nil
 }
 
+// #167：「上游未就绪」卡点带上游任务编号＋标题＋负责人（派生字段，前端不自行拼算）。
+func TestUpstreamBlockerCarriesSourceFacts(t *testing.T) {
+	f := baseBlockerFacts()
+	f.Tasks[0].Status = TaskNotStarted
+	f.Inputs[0].Ready = false
+	f.Inputs[0].SourceTaskID = ptr64(2)
+	f.Inputs[0].SourceTaskCode = "T1.2.1"
+	f.Inputs[0].SourceTaskName = "地质勘察"
+	f.Inputs[0].SourceOwnerID = 6
+	f.Inputs[0].SourceOwnerName = "孙六"
+	bs := DeriveBlockers(f)
+	b := findBlocker(bs, "upstream_unready:edge:100")
+	if b == nil {
+		t.Fatalf("应派生上游未就绪卡点: %+v", bs)
+	}
+	if b.SourceTaskCode != "T1.2.1" || b.SourceTaskName != "地质勘察" || b.SourceOwnerName != "孙六" {
+		t.Fatalf("卡点应带上游编号＋标题＋负责人: %+v", b)
+	}
+	// 成员来源没有上游任务，三个字段保持缺省。
+	f2 := baseBlockerFacts()
+	f2.Tasks[0].Status = TaskNotStarted
+	f2.Inputs[0].Ready = false
+	f2.Inputs[0].ProviderID = 9
+	f2.Inputs[0].ProviderName = "钱九"
+	b2 := findBlocker(DeriveBlockers(f2), "upstream_unready:edge:100")
+	if b2 == nil || b2.SourceTaskCode != "" || b2.SourceTaskName != "" || b2.SourceOwnerName != "" {
+		t.Fatalf("成员来源不应带上游任务字段: %+v", b2)
+	}
+}
+
 // AC-11：四类结构化事实的进入与退出（我的工作 PRD §8.7）。
 func TestDeriveBlockersEntryAndExit(t *testing.T) {
 	kr7 := int64(7)

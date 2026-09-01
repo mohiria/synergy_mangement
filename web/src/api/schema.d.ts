@@ -2323,6 +2323,12 @@ export interface components {
             impactNote?: string;
             /** @description 当前用户能否一键提醒（派生字段；待行动人本人不可提醒自己，访客不可） */
             canRemind?: boolean;
+            /** @description 上游任务编号（#167；仅「上游未就绪」且来源为任务时返回，形如 T1.1.1；派生字段） */
+            sourceTaskCode?: string;
+            /** @description 上游任务标题（#167；与 sourceTaskCode 同缺省；前端超长截断、悬停显示全文） */
+            sourceTaskName?: string;
+            /** @description 上游任务负责人姓名（#167；与 sourceTaskCode 同缺省；派生字段） */
+            sourceOwnerName?: string;
         };
         RemindRequest: {
             /** @description 提醒目标的合成键；卡点取自卡点列表或任务详情的 key，等待他人事项取自我的工作卡片的 refKey（形如 wait:<事项类型>:<事项 ID>） */
