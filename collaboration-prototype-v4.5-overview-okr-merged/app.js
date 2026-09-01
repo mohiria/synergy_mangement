@@ -1,8 +1,8 @@
 (function () {
   "use strict";
 
-  // PROTOTYPE — V4.4 decisions folded into the existing single-page demo.
-  const STORAGE_KEY = "collaboration-prototype-v4.4-prd-r5";
+  // PROTOTYPE — V4.5 merges the OKR entry into Project Overview while keeping management as a focused page mode.
+  const STORAGE_KEY = "collaboration-prototype-v4.5-overview-okr-merged";
   const IDENTITY_KEY = `${STORAGE_KEY}:identity`;
   const seed = window.PROTOTYPE_SEED;
   const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -58,7 +58,6 @@
 
   const routes = [
     ["overview", "项目总览", "overview"],
-    ["okr", "OKR 管理", "target"],
     ["tasks", "全部任务", "list"],
     ["graph", "协作关系", "graph"],
     ["mywork", "我的工作", "inbox"],
@@ -125,6 +124,7 @@
   const memberName = (id) => getMember(id).displayName || "项目成员";
   const name = (id) => `${memberName(id)}（${getMember(id).role}）`;
   const route = () => (location.hash || "#overview").slice(1).split("?")[0];
+  const isOkrManagementMode = () => route() === "overview" && /(?:^|[?&])mode=okr(?:&|$)/.test((location.hash || "").split("?")[1] || "");
   const isLead = () => ["P01", "P02"].includes(ui.identity);
   const canCreate = () => !["P18", "P01"].includes(ui.identity);
   const canManage = () => ui.identity === "P02";
@@ -181,11 +181,12 @@
     closeLayers();
     renderNav();
     const current = route();
-    const label = ([...routes, ["settings", "项目设置"]].find((x) => x[0] === current) || [current, "项目总览"])[1];
+    if (isOkrManagementMode() && !canManage()) { location.hash = "overview"; return; }
+    const label = isOkrManagementMode() ? "管理 O/KR" : ([...routes, ["settings", "项目设置"]].find((x) => x[0] === current) || [current, "项目总览"])[1];
     $("#breadcrumbs").innerHTML = `<span>${esc(data.project.name)}</span><span class="sep">/</span><b>${label}</b>`;
     const page = $("#page");
-    page.className = `page page-${current}`;
-    const renderers = { overview: renderOverview, okr: renderOKR, tasks: renderTasks, graph: renderGraph, mywork: renderMyWork, artifacts: renderArtifacts, reports: renderReports, settings: renderSettings };
+    page.className = `page page-${current}${isOkrManagementMode() ? " page-okr-management" : ""}`;
+    const renderers = { overview: renderOverview, tasks: renderTasks, graph: renderGraph, mywork: renderMyWork, artifacts: renderArtifacts, reports: renderReports, settings: renderSettings };
     page.innerHTML = (renderers[current] || renderers.overview)();
     hydrateIcons(page);
     if (current === "graph" && ui.graphView === "graph") bindGraphInteractions();
@@ -197,6 +198,7 @@
   }
 
   function renderOverview() {
+    if (isOkrManagementMode()) return renderOkrManagementPage();
     const activeTasks = data.tasks.filter((task) => task.status !== "已完成");
     const attentionKrs = data.krs.filter((kr) => kr.risk !== "normal");
     const highRiskKrs = data.krs.filter((kr) => kr.risk === "risk");
@@ -211,7 +213,7 @@
         ${krs.map((kr) => renderOverviewKr(kr)).join("")}
       </section>`;
     }).join("");
-    const actions = `<button class="btn" data-route="graph">${icon("graph")}查看协作全景</button>`;
+    const actions = `${canManage() ? `<button class="btn" data-action="open-okr-management">${icon("edit")}管理 O/KR</button>` : ""}<button class="btn" data-route="graph">${icon("graph")}查看协作全景</button>`;
     const projectMeta = `项目周期 ${esc(data.project.cycle)} · 主负责人 ${memberName(data.project.lead)} · 推进人 ${memberName(data.project.coordinator)}`;
     return `${head("项目总览", projectMeta, actions)}${overviewBrief}<div class="overview-list">${objectives}</div>`;
   }
@@ -225,16 +227,17 @@
       ${expanded ? `<div class="kr-tasks"><div class="kr-context"><span>负责人 ${memberName(kr.owner)}</span><span>周期 ${kr.cycle}</span><span>量化标准 ${esc(kr.metric)}</span></div><div class="mini-task mini-task-head" aria-hidden="true"><span>编号</span><span>任务</span><span>负责人</span><span>状态</span><span class="optional">进度</span><span></span></div>${tasks.map((task) => `<div class="mini-task"><span class="mono">${task.id}</span><span>${esc(task.title)}</span><span>${ownerCell(task.owner)}</span><span>${taskStatusChip(task)}</span><span class="optional">${task.progress == null ? "未填写" : `${task.progress}%`}</span><button class="icon-btn" data-action="task-detail" data-id="${task.id}" aria-label="查看任务">${icon("chevron")}</button></div>`).join("")}<div class="kr-graph-link"><button class="link-btn" data-action="focus-graph" data-id="${kr.id}">在协作全景中查看 ${kr.id} 影响链 →</button></div></div>` : ""}</div>`;
   }
 
-  function renderOKR() {
-    const editAttrs = (kind, id) => canManage() ? `data-action="edit-okr-row" data-kind="${kind}" data-id="${id}" tabindex="0" aria-label="编辑 ${id}"` : "";
+  function renderOkrManagementPage() {
+    const editAttrs = (kind, id) => `data-action="edit-okr-row" data-kind="${kind}" data-id="${id}" tabindex="0" aria-label="编辑 ${id}"`;
     const rows = data.objectives.map((objective) => {
+      const objectiveOwner = objective.owner || data.project.lead;
       const krs = data.krs.filter((kr) => kr.objectiveId === objective.id);
-      return `<tr ${editAttrs("objective", objective.id)} class="table-group ${canManage() ? "okr-editable-row" : ""}"><td colspan="7">${objective.id}　${esc(objective.title)}</td></tr>${krs.map((kr) => `<tr ${editAttrs("kr", kr.id)} class="${canManage() ? "okr-editable-row" : ""}"><td>${kr.id}</td><td>${esc(kr.title)}</td><td>${ownerCell(kr.owner)}</td><td>${esc(kr.cycle)}</td><td>${esc(kr.metric)}</td><td>${status(kr.risk === "risk" ? "高风险" : kr.risk === "warning" ? "预警" : "正常", kr.risk)}</td><td>${data.tasks.filter((x) => x.krId === kr.id).length} 项</td></tr>`).join("")}`;
+      return `<tr ${editAttrs("objective", objective.id)} class="okr-structure-o okr-editable-row"><td><span class="okr-level-tag">O</span><span class="mono">${objective.id}</span></td><td><strong>${esc(objective.title)}</strong></td><td>—</td><td>${ownerCell(objectiveOwner)}</td><td>${esc(data.project.cycle)}</td><td>—</td><td><span class="okr-row-action">编辑</span></td></tr>${krs.map((kr) => `<tr ${editAttrs("kr", kr.id)} class="okr-structure-kr okr-editable-row"><td><span class="okr-level-branch" aria-hidden="true"></span><span class="okr-level-tag kr">KR</span><span class="mono">${kr.id}</span></td><td>${esc(kr.title)}</td><td>${esc(objective.id)}</td><td>${ownerCell(kr.owner)}</td><td>${esc(kr.cycle)}</td><td>${esc(kr.metric)}</td><td><span class="okr-row-action">编辑</span></td></tr>`).join("")}`;
     }).join("");
-    const manageHint = canManage() ? "" : ` disabled title="仅项目总推进人可操作"`;
-    const actions = `<button class="btn" data-action="import-okr"${manageHint}>${icon("upload")}导入已有表格</button><button class="btn primary" data-action="add-okr"${manageHint}>${icon("plus")}新增 O / KR</button>`;
-    return `${head("OKR 管理", "O、KR 在线下确定后在此连续录入；系统不承载 OKR 讨论审批。", actions)}
-      <div class="data-table-wrap"><table class="data-table"><thead><tr><th>KR</th><th>目标描述</th><th>负责人</th><th>周期</th><th>量化指标</th><th>状态</th><th>任务</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    const actions = `<button class="btn" data-action="back-overview">${icon("back")}返回项目总览</button><button class="btn" data-action="import-okr">${icon("upload")}导入已有表格</button><button class="btn primary" data-action="add-okr">${icon("plus")}新增 O / KR</button>`;
+    return `${head("管理 O/KR", "集中维护目标结构和责任信息；项目态势、风险与任务进度仍在项目总览查看。", actions)}
+      <section class="okr-management-note"><div><b>结构维护模式</b><span>点击任一 O 或 KR 行，在右侧编辑对应结构字段。</span></div><span>${data.objectives.length} 个 O · ${data.krs.length} 个 KR</span></section>
+      <div class="data-table-wrap okr-structure-wrap"><table class="data-table okr-structure-table"><thead><tr><th>编号</th><th>名称</th><th>所属 O</th><th>负责人</th><th>周期</th><th>量化标准</th><th><span class="sr-only">操作</span></th></tr></thead><tbody>${rows}</tbody></table></div>`;
   }
 
   function renderTasks() {
@@ -963,7 +966,7 @@
     const nextO = `O${Math.max(0, ...data.objectives.map((o) => Number(o.id.replace(/\D/g, "")) || 0)) + 1}`;
     const nextKr = `KR${Math.max(0, ...data.krs.map((kr) => Number(kr.id.replace(/\D/g, "")) || 0)) + 1}`;
     const body = `<form id="add-okr-form">${memberDatalist("okr-member-options")}<div class="notice">O、KR 仍由线下确定；这里仅用于一次性连续录入结构和负责人。</div><div class="okr-sheet" style="margin-top:12px"><div class="okr-sheet-head"><span>目标 O</span><span>关键结果 KR</span><span>所属 O</span><span>负责人</span><span>周期</span><span></span></div><div id="okr-sheet-rows">${okrDraftRow("o", nextO)}${okrDraftRow("kr", nextKr, nextO)}</div></div><div class="okr-sheet-actions"><button type="button" class="btn compact" data-action="add-okr-row" data-value="o">${icon("plus")}添加 O 事项</button><button type="button" class="btn compact" data-action="add-okr-row" data-value="kr">${icon("plus")}添加 KR 事项</button></div></form>`;
-    openModal("新增 O / KR", "横向区分 O 与 KR，向下连续增加事项并指定负责人", body, `<button class="btn" data-action="close-modal">取消</button><button class="btn primary" data-action="save-okr-sheet">保存 O / KR</button>`);
+    openModal("新增 O / KR", "横向区分 O 与 KR，向下连续增加事项并指定负责人", body, `<button class="btn" data-action="close-modal">取消</button><button class="btn primary" data-action="save-okr-sheet">保存并通知负责人</button>`);
     $(".modal").classList.add("modal-wide", "okr-modal");
     refreshOkrParentOptions();
     const initialParent = $('.okr-sheet-row[data-type="kr"] select[name="objectiveId"]', $("#modal-root"));
@@ -994,14 +997,32 @@
     if (drafts.some((item) => item.type === "kr" && !validObjectives.has(item.objectiveId))) return toast("请为每个 KR 选择有效的所属 O。", "error");
     drafts.filter((item) => item.type === "o").forEach((item) => data.objectives.push({ id:item.code, title:item.title, note:"待补充目标说明", owner:item.owner }));
     drafts.filter((item) => item.type === "kr").forEach((item) => data.krs.push({ id:item.code, title:item.title, objectiveId:item.objectiveId, owner:item.owner, risk:"normal", cycle:cycleValue(item.cycleStart,item.cycleDue), metric:"待补充量化指标" }));
-    saveData(`新增 ${drafts.filter((item) => item.type === "o").length} 个 O、${drafts.filter((item) => item.type === "kr").length} 个 KR`); closeModal(); renderPage(); toast("O / KR 已保存，并已加入当前项目结构。", "success");
+    const noticesByOwner = new Map();
+    drafts.forEach((item) => {
+      if (item.owner === ui.identity) return;
+      if (!noticesByOwner.has(item.owner)) noticesByOwner.set(item.owner, []);
+      noticesByOwner.get(item.owner).push(item.code);
+    });
+    data.okrNotifications ||= [];
+    let noticeSequence = data.okrNotifications.length;
+    noticesByOwner.forEach((codes, receiver) => data.okrNotifications.unshift({
+      id:`ON${String(++noticeSequence).padStart(2,"0")}`,
+      sender:ui.identity,
+      receiver,
+      codes,
+      state:"未读",
+      createdAt:"刚刚"
+    }));
+    saveData(`新增 ${drafts.filter((item) => item.type === "o").length} 个 O、${drafts.filter((item) => item.type === "kr").length} 个 KR，并通知 ${noticesByOwner.size} 位负责人`);
+    closeModal(); renderPage();
+    toast(noticesByOwner.size ? `O / KR 已保存，并已通知 ${noticesByOwner.size} 位负责人。` : "O / KR 已保存；本次负责人均为你本人。", "success");
   }
   function openOkrEditorDrawer(kind, id) {
     if (!canManage()) return;
     const item = kind === "objective" ? getObjective(id) : getKr(id);
     if (!item) return;
     const [cycleStart, cycleDue] = cycleDateParts(item.cycle);
-    const body = kind === "objective" ? `<form id="okr-item-form" data-kind="objective" data-id="${id}" class="form-grid">${memberDatalist("okr-editor-members")}<div class="form-row full"><label>O 目标描述</label><input class="field" name="title" value="${esc(item.title)}" required></div><div class="form-row full"><label>目标说明</label><textarea class="field" name="note">${esc(item.note || "")}</textarea></div><div class="form-row full"><label>负责人</label>${memberSearchInput("owner", item.owner || "P01", "okr-editor-members")}</div></form>` : `<form id="okr-item-form" data-kind="kr" data-id="${id}" class="form-grid">${memberDatalist("okr-editor-members")}<div class="form-row full"><label>KR 目标描述</label><input class="field" name="title" value="${esc(item.title)}" required></div><div class="form-row full"><label>负责人</label>${memberSearchInput("owner", item.owner, "okr-editor-members")}</div><div class="form-row"><label>周期开始</label><input type="date" class="field" name="cycleStart" value="${cycleStart}"></div><div class="form-row"><label>周期截止</label><input type="date" class="field" name="cycleDue" value="${cycleDue}"></div><div class="form-row full"><label>量化指标</label><input class="field" name="metric" value="${esc(item.metric)}"></div><div class="form-row"><label>状态</label><select class="field" name="risk"><option value="normal" ${item.risk === "normal" ? "selected" : ""}>正常</option><option value="warning" ${item.risk === "warning" ? "selected" : ""}>预警</option><option value="risk" ${item.risk === "risk" ? "selected" : ""}>高风险</option></select></div></form>`;
+    const body = kind === "objective" ? `<form id="okr-item-form" data-kind="objective" data-id="${id}" class="form-grid">${memberDatalist("okr-editor-members")}<div class="form-row full"><label>O 名称</label><input class="field" name="title" value="${esc(item.title)}" required></div><div class="form-row full"><label>目标说明</label><textarea class="field" name="note">${esc(item.note || "")}</textarea></div><div class="form-row full"><label>负责人</label>${memberSearchInput("owner", item.owner || data.project.lead, "okr-editor-members")}</div></form>` : `<form id="okr-item-form" data-kind="kr" data-id="${id}" class="form-grid">${memberDatalist("okr-editor-members")}<div class="form-row full"><label>KR 名称</label><input class="field" name="title" value="${esc(item.title)}" required></div><div class="form-row full"><label>负责人</label>${memberSearchInput("owner", item.owner, "okr-editor-members")}</div><div class="form-row"><label>周期开始</label><input type="date" class="field" name="cycleStart" value="${cycleStart}"></div><div class="form-row"><label>周期截止</label><input type="date" class="field" name="cycleDue" value="${cycleDue}"></div><div class="form-row full"><label>量化标准</label><input class="field" name="metric" value="${esc(item.metric)}"></div></form>`;
     openDrawer(`编辑 ${id}`, kind === "objective" ? "项目目标 O" : `所属 ${item.objectiveId} · 关键结果 KR`, body, `<button class="btn" data-action="close-drawer">取消</button><button class="btn primary" data-action="save-okr-item">保存修改</button>`);
   }
   function saveOkrItem() {
@@ -1011,7 +1032,7 @@
     const owner = resolveMemberInput(fd.get("owner")); if (!owner) return toast("请从匹配结果中选择有效负责人。", "error");
     item.title = fd.get("title"); item.owner = owner;
     if (kind === "objective") item.note = fd.get("note");
-    else { item.cycle = cycleValue(fd.get("cycleStart"), fd.get("cycleDue")); item.metric = fd.get("metric"); item.risk = fd.get("risk"); }
+    else { item.cycle = cycleValue(fd.get("cycleStart"), fd.get("cycleDue")); item.metric = fd.get("metric"); }
     saveData(`编辑 ${id}`); renderPage(); toast(`${id} 已更新。`, "success");
   }
 
@@ -1042,7 +1063,8 @@
   function showNotifications() {
     const items = data.inputRequests.filter((x) => x.provider === ui.identity && ["待接收","已接收"].includes(x.state));
     const taskInvites = (data.taskInvites || []).filter((x) => x.invitee === ui.identity && x.state === "待处理");
-    $("#popover-root").innerHTML = `<div class="popover"><div class="popover-head"><span>通知</span><span class="meta">${items.length + taskInvites.length + 2} 条</span></div>${taskInvites.map((invite) => `<button class="popover-item" data-route="tasks"><span class="work-kind" style="width:28px;height:28px">任</span><span><b>${memberName(invite.inviter)} 邀请你创建任务</b><span>${invite.krId} · ${esc(invite.note)}</span></span></button>`).join("")}${items.map((r) => `<button class="popover-item" data-action="go-input-request"><span class="work-kind" style="width:28px;height:28px">输</span><span><b>${memberName(r.requester)} 请求你提供输入</b><span>${r.inputName} · ${r.state}</span></span></button>`).join("")}<button class="popover-item" data-route="mywork"><span class="work-kind" style="width:28px;height:28px">办</span><span><b>查看我的全部待办</b><span>审批、终审、接收与卡点</span></span></button></div>`;
+    const okrNotifications = (data.okrNotifications || []).filter((x) => x.receiver === ui.identity);
+    $("#popover-root").innerHTML = `<div class="popover"><div class="popover-head"><span>通知</span><span class="meta">${items.length + taskInvites.length + okrNotifications.length + 2} 条</span></div>${okrNotifications.map((notice) => `<button class="popover-item" data-route="overview"><span class="work-kind" style="width:28px;height:28px">O</span><span><b>${memberName(notice.sender)} 为你分配了 O / KR</b><span>${notice.codes.map(esc).join("、")} · 结构已保存，请查看并推进</span></span></button>`).join("")}${taskInvites.map((invite) => `<button class="popover-item" data-route="tasks"><span class="work-kind" style="width:28px;height:28px">任</span><span><b>${memberName(invite.inviter)} 邀请你创建任务</b><span>${invite.krId} · ${esc(invite.note)}</span></span></button>`).join("")}${items.map((r) => `<button class="popover-item" data-action="go-input-request"><span class="work-kind" style="width:28px;height:28px">输</span><span><b>${memberName(r.requester)} 请求你提供输入</b><span>${r.inputName} · ${r.state}</span></span></button>`).join("")}<button class="popover-item" data-route="mywork"><span class="work-kind" style="width:28px;height:28px">办</span><span><b>查看我的全部待办</b><span>审批、终审、接收与卡点</span></span></button></div>`;
   }
 
   function handleClick(event) {
@@ -1059,7 +1081,9 @@
       "import-okr": importOkrModal, "add-okr": addOkrModal, "generate-package": generatePackageModal,
     };
     if (simple[action]) { simple[action](); return; }
-    if (action === "toggle-kr") { ui.expandedKrs.has(id) ? ui.expandedKrs.delete(id) : ui.expandedKrs.add(id); renderPage(); }
+    if (action === "open-okr-management") { if (canManage()) location.hash = "overview?mode=okr"; }
+    else if (action === "back-overview") { location.hash = "overview"; }
+    else if (action === "toggle-kr") { ui.expandedKrs.has(id) ? ui.expandedKrs.delete(id) : ui.expandedKrs.add(id); renderPage(); }
     else if (action === "task-detail") { if (!$("#drawer-root .task-tabs")) ui.taskDrawerSource=route(); ui.taskDrawerContext=null; openTaskDrawer(id); }
     else if (action === "work-detail") { ui.taskDrawerSource="mywork"; const context={source:"mywork",sourceGroup:el.dataset.source,focusType:el.dataset.focusType,focusId:el.dataset.focusId}; openTaskDrawer(id,el.dataset.tab || "overview",context); }
     else if (action === "task-tab") openTaskDrawer(id,value,ui.taskDrawerContext);

@@ -1,4 +1,4 @@
-/* 视觉基线：按 collaboration-prototype-v2 生效样式（Calm Operations 2.0）还原，要点见 docs/原型设计风格基线.md。
+/* 视觉基线：按 collaboration-prototype-v4.5-overview-okr-merged 生效样式（Calm Operations 2.0）还原，要点见 docs/原型设计风格基线.md。
    契约：通用圆角 4px（圆形语义控件除外）；字号仅 12/14/16；普通卡片一级灰阴影。 */
 :root {
   --bg: #f3f5f9;

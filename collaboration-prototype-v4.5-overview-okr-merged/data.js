@@ -93,7 +93,8 @@
 
   const taskInvites = [{id:"TI01",krId:"KR2",inviter:"P04",invitee:"P06",note:"请补充一项现场联动异常回退验证任务",state:"待处理",createdAt:"09-17 10:20",waitingDays:1}];
   const reminders = [];
+  const okrNotifications = [];
 
-  window.PROTOTYPE_SEED = { project:{id:"PJT-FLX",name:"未来生活科技体验周筹备项目",phase:"联合联调阶段",cycle:"2026.08.20—2026.09.25",lead:"P01",coordinator:"P02",approvalTimeoutDays:3},members,objectives,krs,tasks,relations,deliverables,entryApprovals,changeRequests,completionApprovals,inputRequests,risks,packages,discussions,taskInvites,reminders,
+  window.PROTOTYPE_SEED = { project:{id:"PJT-FLX",name:"未来生活科技体验周筹备项目",phase:"联合联调阶段",cycle:"2026.08.20—2026.09.25",lead:"P01",coordinator:"P02",approvalTimeoutDays:3},members,objectives,krs,tasks,relations,deliverables,entryApprovals,changeRequests,completionApprovals,inputRequests,risks,packages,discussions,taskInvites,reminders,okrNotifications,
     audit:[{time:"今天 10:26",actor:"P02",action:"提醒 P03 处理 T01 待周宁审批"},{time:"今天 09:40",actor:"P10",action:"打开 T02 完成申请"},{time:"昨天 18:10",actor:"P06",action:"提交 D02、D25 候选交付物"},{time:"昨天 16:22",actor:"P03",action:"查看关系图谱中的互锁路径"}] };
 })();
