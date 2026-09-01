@@ -364,3 +364,44 @@ func (q *Queries) ListEdgesByProject(ctx context.Context, projectID int64) ([]Li
 	}
 	return items, nil
 }
+
+const listInputReadinessByProject = `-- name: ListInputReadinessByProject :many
+SELECT tt.key_result_id, tt.status AS target_status,
+    EXISTS (
+        SELECT 1 FROM deliverable_files cf
+        WHERE cf.deliverable_id = e.deliverable_id AND cf.state = 'current'
+    ) AS has_current
+FROM deliverable_edges e
+JOIN tasks tt ON tt.id = e.target_task_id
+JOIN key_results k ON k.id = tt.key_result_id
+JOIN objectives o ON o.id = k.objective_id
+WHERE o.project_id = $1
+`
+
+type ListInputReadinessByProjectRow struct {
+	KeyResultID  int64
+	TargetStatus string
+	HasCurrent   bool
+}
+
+// #150 风险队列「未就绪摘要」：项目全部输入边的就绪事实——目标任务所属 KR、
+// 目标任务状态、边上有无已生效当前内容（与 AC-48 就绪同源）；计数规则在 domain。
+func (q *Queries) ListInputReadinessByProject(ctx context.Context, projectID int64) ([]ListInputReadinessByProjectRow, error) {
+	rows, err := q.db.Query(ctx, listInputReadinessByProject, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListInputReadinessByProjectRow
+	for rows.Next() {
+		var i ListInputReadinessByProjectRow
+		if err := rows.Scan(&i.KeyResultID, &i.TargetStatus, &i.HasCurrent); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

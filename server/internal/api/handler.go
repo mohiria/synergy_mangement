@@ -813,6 +813,18 @@ func (s *Server) okrList(ctx context.Context, projectID int64, actor domain.Acto
 	if err != nil {
 		return nil, err
 	}
+	// 未就绪摘要（#150，模块 PRD §5.2）：输入边就绪事实按目标任务的 KR 归组，计数规则在 domain。
+	readinessRows, err := s.q.ListInputReadinessByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	inputFactsByKr := make(map[int64][]domain.KrInputFact)
+	for _, row := range readinessRows {
+		inputFactsByKr[row.KeyResultID] = append(inputFactsByKr[row.KeyResultID], domain.KrInputFact{
+			TargetStatus: row.TargetStatus,
+			Ready:        domain.EdgeReady(row.HasCurrent, false),
+		})
+	}
 	// KR 下任务数（含已完成与已关闭）：OKR 表「任务」列与删除守卫同源（AC-65）。
 	taskCounts, err := s.taskCountByKeyResult(ctx, projectID)
 	if err != nil {
@@ -848,6 +860,14 @@ func (s *Server) okrList(ctx context.Context, projectID int64, actor domain.Acto
 			RiskNote: optString(risk.Note),
 			OpenBlockerCount: func() *int {
 				n := len(blockersByKr[k.ID])
+				if n == 0 {
+					return nil
+				}
+				return &n
+			}(),
+			// 未就绪摘要（#150）：0 不返回（CR-22「不显示 0 未就绪」）。
+			NotReadyCount: func() *int {
+				n := domain.CountNotReadyInputs(inputFactsByKr[k.ID])
 				if n == 0 {
 					return nil
 				}

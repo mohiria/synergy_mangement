@@ -416,10 +416,26 @@ body {
 .graph-layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 12px; }
 .risk-queue { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; align-self: start; }
 .risk-queue-head { padding: 10px 14px; border-bottom: 1px solid var(--line); font-weight: 600; font-size: var(--type-body); background: #f8f9fb; }
-.risk-queue-item { width: 100%; text-align: left; border: 0; background: #fff; padding: 10px 14px; border-bottom: 1px solid #edf0f2; cursor: pointer; font: inherit; }
+.risk-queue-item {
+  width: 100%; text-align: left; border: 0; background: #fff; padding: 10px 14px;
+  border-bottom: 1px solid #edf0f2; cursor: pointer; font: inherit;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px;
+}
 .risk-queue-item:hover { background: #f8f9fc; }
-.risk-queue-item b { display: block; font-size: var(--type-aux); }
+/* #150 原型 cp-lens-list active：当前所在 KR 层对应项左缘高亮。 */
+.risk-queue-item.active { background: #f5f7ff; box-shadow: inset 3px 0 0 var(--accent); }
+.risk-queue-main { min-width: 0; }
+.risk-queue-item b { display: block; font-size: var(--type-aux); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .risk-queue-item small { display: block; color: var(--muted); font-size: 12px; }
+/* #150：右列「N 卡点／N 未就绪」双徽章（cp-lens-list i/em），0 不渲染（CR-22）。 */
+.risk-queue-counts { text-align: right; flex: none; }
+.risk-queue-counts i, .risk-queue-counts em { display: block; font-style: normal; font-size: var(--type-aux); white-space: nowrap; }
+.risk-queue-counts i { color: var(--red); font-weight: 600; }
+.risk-queue-counts em { color: var(--amber); margin-top: 3px; }
+/* #150 原型 cp-lens-foot：语义说明＋回层级树入口。 */
+.risk-queue-foot { padding: 10px 14px; background: #f8fafc; border-top: 1px solid #e5e9ef; }
+.risk-queue-foot span { display: block; color: #7b8798; font-size: var(--type-aux); }
+.risk-queue-foot button { margin-top: 6px; border: 0; background: none; color: var(--accent); font-size: var(--type-aux); padding: 0; cursor: pointer; }
 /* 画布本身不滚动：详情面板与画布操作层要常驻，滚动交给内层 graph-scroll（CR-22、CR-23）。 */
 .graph-shell {
   position: relative; min-height: 560px; height: calc(100vh - 250px);

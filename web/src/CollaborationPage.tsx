@@ -2017,29 +2017,70 @@ export default function CollaborationPage({
             {/* #144：风险队列在全局展开下同样保留（PRD §5.2 无隐藏规定，原型两种模式恒在）。 */}
             <aside className="risk-queue">
                 <div className="risk-queue-head">风险队列</div>
-                {/* #122：按 KR 聚合，每 KR 一条——编号 · 等级 · 卡点数，副行只显最高风险卡点
-                    （挑选规则在域层，前端只消费 topBlocker）；正常且无卡点的 KR 不出现。 */}
-                {krList.filter((k) => k.riskLevel !== "normal" || (k.openBlockerCount ?? 0) > 0)
-                  .length === 0 && (
-                  <div className="muted" style={{ padding: 16, fontSize: 12 }}>
-                    暂无需要关注的风险
-                  </div>
-                )}
-                {krList
-                  .filter((k) => k.riskLevel !== "normal" || (k.openBlockerCount ?? 0) > 0)
-                  .map((k) => (
-                    <button key={`rk-${k.id}`} type="button" className="risk-queue-item" onClick={() => enter({ kind: "kr", krId: k.id })}>
-                      <b>
-                        {k.code} · {k.riskLevelLabel}
-                        {(k.openBlockerCount ?? 0) > 0 && ` · ${k.openBlockerCount} 个卡点`}
-                      </b>
-                      <small>
-                        {k.topBlocker
-                          ? `${k.topBlocker.taskCode} ${k.topBlocker.kindLabel}：${k.topBlocker.summary}`
-                          : (k.riskNote ?? k.description)}
-                      </small>
+                {/* #122：按 KR 聚合，每 KR 一条，副行只显最高风险卡点（挑选规则在域层，
+                    前端只消费 topBlocker）。#150：右侧「N 卡点／N 未就绪」双徽章（0 不显示，
+                    CR-22），未就绪计入排序权重（原型 renderRiskLens：卡点×3＋未就绪），
+                    进入条件扩为风险／卡点／未就绪任一非零。 */}
+                {(() => {
+                  const weight = (k: (typeof krList)[number]) =>
+                    (k.openBlockerCount ?? 0) * 3 + (k.notReadyCount ?? 0);
+                  const queue = krList
+                    .filter(
+                      (k) =>
+                        k.riskLevel !== "normal" ||
+                        (k.openBlockerCount ?? 0) > 0 ||
+                        (k.notReadyCount ?? 0) > 0,
+                    )
+                    .sort((a, b) => weight(b) - weight(a));
+                  if (queue.length === 0) {
+                    return (
+                      <div className="muted" style={{ padding: 16, fontSize: 12 }}>
+                        暂无需要关注的风险
+                      </div>
+                    );
+                  }
+                  return queue.map((k) => (
+                    <button
+                      key={`rk-${k.id}`}
+                      type="button"
+                      className={`risk-queue-item${mode.kind === "kr" && mode.krId === k.id ? " active" : ""}`}
+                      onClick={() => enter({ kind: "kr", krId: k.id })}
+                    >
+                      <span className="risk-queue-main">
+                        <b>
+                          {k.code} · {k.riskLevelLabel}
+                        </b>
+                        <small>
+                          {k.topBlocker
+                            ? `${k.topBlocker.taskCode} ${k.topBlocker.kindLabel}：${k.topBlocker.summary}`
+                            : (k.riskNote ?? k.description)}
+                        </small>
+                      </span>
+                      <span className="risk-queue-counts">
+                        {(k.openBlockerCount ?? 0) > 0 && <i>{k.openBlockerCount} 卡点</i>}
+                        {(k.notReadyCount ?? 0) > 0 && <em>{k.notReadyCount} 未就绪</em>}
+                      </span>
                     </button>
-                  ))}
+                  ));
+                })()}
+                {/* 原型 cp-lens-foot：语义说明＋回层级树入口。 */}
+                <div className="risk-queue-foot">
+                  <span>红色仅表示真实阻塞或冲突</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode({ kind: "tree" });
+                      setViewStack([]);
+                      setExpanded(new Set());
+                      setSelectedTask(null);
+                      setSelectedEdge(null);
+                      setSelectedNode(null);
+                      resetViewport();
+                    }}
+                  >
+                    回到 O／KR 层级树
+                  </button>
+                </div>
             </aside>
             <div className="graph-shell">
               {/* #149：详情面板在全部层级可见——层级树／O 层选中 O、KR 同样打开节点详情。 */}

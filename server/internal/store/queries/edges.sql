@@ -40,6 +40,20 @@ LEFT JOIN deliverable_files cf ON cf.deliverable_id = e.deliverable_id AND cf.st
 WHERE o.project_id = $1
 ORDER BY e.id;
 
+-- name: ListInputReadinessByProject :many
+-- #150 风险队列「未就绪摘要」：项目全部输入边的就绪事实——目标任务所属 KR、
+-- 目标任务状态、边上有无已生效当前内容（与 AC-48 就绪同源）；计数规则在 domain。
+SELECT tt.key_result_id, tt.status AS target_status,
+    EXISTS (
+        SELECT 1 FROM deliverable_files cf
+        WHERE cf.deliverable_id = e.deliverable_id AND cf.state = 'current'
+    ) AS has_current
+FROM deliverable_edges e
+JOIN tasks tt ON tt.id = e.target_task_id
+JOIN key_results k ON k.id = tt.key_result_id
+JOIN objectives o ON o.id = k.objective_id
+WHERE o.project_id = $1;
+
 -- name: ListCurrentFilesByProjectTask :many
 -- 裁决 J1（#142）：关系列表「当前交付物」列——项目内各任务全部已生效当前内容，
 -- 供边未绑定具体交付物项时按来源任务归组展示。
