@@ -1819,6 +1819,11 @@ export interface components {
         };
         /** @description 关系列表「当前交付物」列的来源任务当前内容摘要（裁决 J1，#142） */
         EdgeCurrentFile: {
+            /**
+             * Format: int64
+             * @description 已生效当前内容文件（#149 边详情预览／下载入口；经 /files/{fileId}/download-url 取地址）
+             */
+            fileId: number;
             fileName: string;
             /** @description 文件类型显示文案（派生字段） */
             fileTypeLabel: string;

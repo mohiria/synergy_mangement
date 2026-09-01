@@ -280,6 +280,7 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 	currentFilesByTask := make(map[int64][]EdgeCurrentFile)
 	for _, f := range currentFileRows {
 		currentFilesByTask[f.TaskID] = append(currentFilesByTask[f.TaskID], EdgeCurrentFile{
+			FileId:        f.FileID,
 			FileName:      f.FileName,
 			FileTypeLabel: domain.FileTypeLabel(f.FileName),
 			FileSize:      f.FileSize,

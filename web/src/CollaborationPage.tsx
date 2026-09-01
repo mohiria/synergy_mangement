@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { Alert, AutoComplete, Button, Input, Select, Spin, Switch } from "antd";
+import { Alert, AutoComplete, Button, Input, Select, Spin, Switch, message } from "antd";
 import { client } from "./api/client";
 import { formatFileSize } from "./FileUploadField";
 import type { components } from "./api/schema";
@@ -37,6 +37,12 @@ const ZOOM_MAX = 2.2;
 const TASK_R = 29;
 const TASK_R_FOCUS = 35;
 const MEMBER_R = 29;
+
+// #124 同口径（ArtifactsPage）：这些类型走浏览器内联预览，其余只下载。
+const PREVIEWABLE = new Set(["pdf", "png", "jpg", "jpeg", "gif", "webp", "txt"]);
+
+// #149：图谱选中对象——任务与边沿用独立 state（联动淡化），O／KR／成员是纯详情选中。
+type NodeSelection = { kind: "o" | "kr" | "member"; id: number };
 
 // CR-19（#145）：节点拖拽在当前浏览会话内固定——模块级缓存在组件卸载后存活，
 // 刷新页面即清空、其他用户不继承；key 为「项目:视图:节点」，各层级坐标系互不串。
@@ -119,6 +125,8 @@ export default function CollaborationPage({
     }[]
   >([]);
   const [selectedTask, setSelectedTask] = useState<number | null>(null);
+  // #149：O／KR／成员节点的详情选中（§8.1）；点 O／KR 下钻的同时打开节点详情。
+  const [selectedNode, setSelectedNode] = useState<NodeSelection | null>(null);
   const [inspectorDetail, setInspectorDetail] = useState<TaskDetail | null>(null);
   const [zoom, setZoom] = useState(1);
   // #145：画布不再滚动，改为平移＋缩放的视口（PRD §6.4）。
@@ -261,8 +269,19 @@ export default function CollaborationPage({
     setViewStack((v) => [...v, { oFilter, krFilter, personFilter, zoom, pan }]);
     setMode(next);
     setSelectedTask(null);
+    setSelectedNode(null);
     setExpanded(new Set());
     resetViewport();
+  };
+
+  // #149：点 O／KR 在进入对应层级的同时选中该节点并打开详情（原型行为、§8.1）。
+  const enterO = (id: number) => {
+    enter({ kind: "o", objectiveId: id });
+    setSelectedNode({ kind: "o", id });
+  };
+  const enterKr = (id: number) => {
+    enter({ kind: "kr", krId: id });
+    setSelectedNode({ kind: "kr", id });
   };
 
   // 进入任务聚焦层：以该任务为起点，先展开它自己的一层邻居（AC-27）。
@@ -272,6 +291,7 @@ export default function CollaborationPage({
     setExpanded(new Set([taskId]));
     setSelectedTask(taskId);
     setSelectedEdge(null);
+    setSelectedNode(null);
     setImpactMode(false);
     resetViewport();
   };
@@ -292,6 +312,7 @@ export default function CollaborationPage({
       resetViewport();
     }
     setSelectedEdge(null);
+    setSelectedNode(null);
     setImpactMode(false);
     setExpanded(new Set());
     if (mode.kind === "focus") {
@@ -960,6 +981,7 @@ export default function CollaborationPage({
     if (!p.moved) {
       setSelectedTask(null);
       setSelectedEdge(null);
+      setSelectedNode(null);
       setImpactMode(false);
     }
   };
@@ -1069,6 +1091,7 @@ export default function CollaborationPage({
           style={{ pointerEvents: "stroke", cursor: "pointer" }}
           onClick={() => {
             setSelectedTask(null);
+            setSelectedNode(null);
             setImpactMode(false);
             setSelectedEdge((prev) => (prev === e.id ? null : e.id));
           }}
@@ -1092,6 +1115,7 @@ export default function CollaborationPage({
     const select = () => {
       setImpactMode(false);
       setSelectedEdge(null);
+      setSelectedNode(null);
       if (mode.kind === "focus") {
         // CR-05：点相邻节点继续展开下一层，画布节点集合随之增长。
         setExpanded((prev) => new Set(prev).add(t.id));
@@ -1132,54 +1156,193 @@ export default function CollaborationPage({
     );
   };
 
+  // #149 边详情预览／下载（§8.2）：复用交付物内容的预签名地址口径（#124）——
+  // PDF／图片／纯文本内联预览，其余走 attachment 下载；权限由服务端判定（§13）。
+  const openEdgeFile = async (fileId: number, fileName: string | undefined, wantPreview: boolean) => {
+    const ext = fileName?.split(".").pop()?.toLowerCase();
+    const preview = wantPreview && !!ext && PREVIEWABLE.has(ext);
+    const res = await client.GET("/projects/{projectId}/files/{fileId}/download-url", {
+      params: { path: { projectId, fileId }, query: preview ? { disposition: "inline" } : {} },
+    });
+    if (!res.data) {
+      message.error(res.error?.message ?? "获取下载地址失败");
+      return;
+    }
+    if (preview) window.open(res.data.url, "_blank");
+    else window.location.assign(res.data.url);
+  };
+
+  const previewable = (fileName?: string) => {
+    const ext = fileName?.split(".").pop()?.toLowerCase();
+    return !!ext && PREVIEWABLE.has(ext);
+  };
+
+  // 任务风险徽章（§8.1）：等级与文案取抬到该等级的那条卡点（levelLabel 服务端派生），
+  // 与节点圆环三态同口径（taskRiskLevel）。
+  const taskRiskBadge = (taskId: number): { level: string; label: string } | null => {
+    const level = taskRiskLevel(taskId);
+    if (!level) return null;
+    const b = openBlockers.find((x) => x.taskId === taskId && x.level === level);
+    return b?.levelLabel ? { level, label: b.levelLabel } : null;
+  };
+
+  const blockerDays = (since: string) =>
+    Math.max(0, Math.floor((Date.now() - new Date(since).getTime()) / 86400000));
+
   const selectedEdgeObj = selectedEdge != null ? edges.find((e) => e.id === selectedEdge) : null;
+  // #149 边详情（§8.2）：eyebrow＋标题＋就绪徽章、来源→目标 flow-card（两端可点跳聚焦）、
+  // 属性网格、CR-12 候选提示、当前交付物摘要＋预览／下载入口。
   const edgeInspector = selectedEdgeObj && (
     <aside className="graph-inspector">
       <div className="graph-inspector-head">
-        <h2>交付物边 · {selectedEdgeObj.name}</h2>
+        <h2>关系详情</h2>
         <button type="button" aria-label="关闭详情" onClick={() => setSelectedEdge(null)}>
           ✕
         </button>
       </div>
       <div className="graph-inspector-body">
-        <div>关系类型：{selectedEdgeObj.edgeTypeLabel}</div>
-        <div>必要性：{selectedEdgeObj.necessity === "required" ? "必要" : "参考"}</div>
-        <div>
-          提供方：
-          {selectedEdgeObj.sourceTaskName ??
-            selectedEdgeObj.inputRequest?.providerName ??
-            selectedEdgeObj.sourceOwnerName ??
-            "—"}
-        </div>
-        <div>接收方：{selectedEdgeObj.targetTaskName ?? "—"}</div>
-        <div>
-          就绪状态：
-          <span className={`status-pill ${selectedEdgeObj.ready ? "completed" : "warning"}`}>
+        <div className="gi-title">
+          <span className="gi-eyebrow">交付物边</span>
+          <h2>{selectedEdgeObj.name}</h2>
+          <span className={`gi-badge ${selectedEdgeObj.ready ? "ready" : "risk-warning"}`}>
             {selectedEdgeObj.ready ? "已就绪" : "未就绪"}
           </span>
-          {selectedEdgeObj.hasCandidate && <span className="muted">　候选更新审核中</span>}
+        </div>
+        <div className="gi-flow">
+          <button
+            type="button"
+            onClick={() => {
+              if (selectedEdgeObj.sourceTaskId != null) enterFocus(selectedEdgeObj.sourceTaskId);
+            }}
+            title={selectedEdgeObj.sourceTaskName ?? selectedEdgeObj.inputRequest?.providerName}
+          >
+            <span>{selectedEdgeObj.sourceTaskCode ?? "项目成员"}</span>
+            <b>{selectedEdgeObj.sourceTaskName ?? selectedEdgeObj.inputRequest?.providerName ?? "—"}</b>
+          </button>
+          <i>→</i>
+          <button
+            type="button"
+            onClick={() => enterFocus(selectedEdgeObj.targetTaskId)}
+            title={selectedEdgeObj.targetTaskName}
+          >
+            <span>{taskById.get(selectedEdgeObj.targetTaskId)?.code ?? ""}</span>
+            <b>{selectedEdgeObj.targetTaskName ?? "—"}</b>
+          </button>
+        </div>
+        <div className="gi-grid">
+          <div className="gi-prop">
+            <span>关系类型</span>
+            <strong>{selectedEdgeObj.edgeTypeLabel}</strong>
+          </div>
+          <div className="gi-prop">
+            <span>必要性</span>
+            <strong>{selectedEdgeObj.necessity === "required" ? "必要" : "参考"}</strong>
+          </div>
+          <div className="gi-prop">
+            <span>提供方</span>
+            <strong>
+              {selectedEdgeObj.sourceOwnerName ?? selectedEdgeObj.inputRequest?.providerName ?? "—"}
+            </strong>
+          </div>
+          <div className="gi-prop">
+            <span>接收方</span>
+            <strong>{taskById.get(selectedEdgeObj.targetTaskId)?.ownerName ?? "—"}</strong>
+          </div>
+          <div className="gi-prop">
+            <span>期望时间</span>
+            <strong>{selectedEdgeObj.expectedDate ?? "—"}</strong>
+          </div>
+          <div className="gi-prop">
+            <span>关键路径</span>
+            <strong>
+              {selectedEdgeObj.interlockRisk
+                ? "互锁，暂停计算"
+                : selectedEdgeObj.onCriticalPath
+                  ? "关键路径"
+                  : selectedEdgeObj.edgeType === "hard_prerequisite"
+                    ? "硬依赖链"
+                    : "不参与"}
+            </strong>
+          </div>
         </div>
         {/* 互锁解释与关键路径降级提示（PRD §4.4、AC-10）：等级本身不说明问题出在哪，
             这里把「为什么算互锁」和「为什么没有关键路径」讲清，否则用户只看到一条红虚线。 */}
         {selectedEdgeObj.interlockRisk && (
-          <div style={{ color: "var(--red)" }}>
-            硬前置循环：互锁风险
-            <div className="muted" style={{ fontSize: 12 }}>
+          <div className="gi-fact risk-high_risk">
+            <span>硬前置循环 · 互锁风险</span>
+            <small>
               两端任务互相把对方的交付当作硬前置，谁都无法先开始；循环内的边暂停参与关键路径计算，
               需由环内各任务所属 KR 负责人协商拆环。
-            </div>
+            </small>
           </div>
         )}
         {selectedEdgeObj.edgeType === "hard_prerequisite" &&
           !selectedEdgeObj.interlockRisk &&
           selectedEdgeObj.onCriticalPath == null && (
-            <div className="muted">
-              关键路径未计算：相关任务缺少完整的开始／截止时间，系统只确认硬依赖链，不宣称关键路径。
+            <div className="muted gi-row" title="相关任务缺少完整的开始／截止时间">
+              关键路径未计算：系统只确认硬依赖链，不宣称关键路径。
             </div>
           )}
-        <div>
-          当前交付物：
-          {selectedEdgeObj.currentFileName ?? "（暂无已生效内容）"}
+        {/* CR-12：候选更新只提示、不展示内容。 */}
+        {selectedEdgeObj.hasCandidate && (
+          <div className="gi-note">有更新审核中：候选内容不作为正式输入，当前内容继续有效。</div>
+        )}
+        <div className="gi-block">
+          <div className="gi-block-head">
+            <b>当前交付物</b>
+            <span>{selectedEdgeObj.ready ? "终审已生效" : "尚未形成"}</span>
+          </div>
+          {selectedEdgeObj.currentFileId != null ? (
+            <div className="gi-file">
+              <span title={selectedEdgeObj.currentFileName}>
+                <b>{selectedEdgeObj.currentFileName}</b>
+                <small>
+                  {selectedEdgeObj.currentFileTypeLabel ?? "文件"}
+                  {selectedEdgeObj.currentFileSize ? ` · ${formatFileSize(selectedEdgeObj.currentFileSize)}` : ""}
+                </small>
+              </span>
+              <span>
+                {previewable(selectedEdgeObj.currentFileName) && (
+                  <Button
+                    size="small"
+                    onClick={() => openEdgeFile(selectedEdgeObj.currentFileId!, selectedEdgeObj.currentFileName, true)}
+                  >
+                    预览
+                  </Button>
+                )}
+                <Button
+                  size="small"
+                  onClick={() => openEdgeFile(selectedEdgeObj.currentFileId!, selectedEdgeObj.currentFileName, false)}
+                >
+                  下载
+                </Button>
+              </span>
+            </div>
+          ) : (selectedEdgeObj.sourceCurrentFiles ?? []).length > 0 ? (
+            (selectedEdgeObj.sourceCurrentFiles ?? []).map((f) => (
+              <div key={f.fileId} className="gi-file">
+                <span title={f.fileName}>
+                  <b>{f.fileName}</b>
+                  <small>
+                    {f.fileTypeLabel}
+                    {f.fileSize > 0 ? ` · ${formatFileSize(f.fileSize)}` : ""}
+                  </small>
+                </span>
+                <span>
+                  {previewable(f.fileName) && (
+                    <Button size="small" onClick={() => openEdgeFile(f.fileId, f.fileName, true)}>
+                      预览
+                    </Button>
+                  )}
+                  <Button size="small" onClick={() => openEdgeFile(f.fileId, f.fileName, false)}>
+                    下载
+                  </Button>
+                </span>
+              </div>
+            ))
+          ) : (
+            <p className="gi-empty">当前没有已生效内容。</p>
+          )}
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {selectedEdgeObj.sourceTaskId != null && (
@@ -1196,10 +1359,13 @@ export default function CollaborationPage({
     </aside>
   );
 
-  const inspector = selectedTask != null && inspectorDetail && (
+  // #149 任务详情（§8.1）：eyebrow＋标题＋状态/风险徽章、双列属性网格（含参与人、计划时间）、
+  // 结构化卡点风险事实卡、输入就绪（点击选中对应边）、当前交付物（预览／下载）、
+  // 受影响 O／KR 影响块（CR-17 与所属分开；裁决 F1 只移出任务抽屉，图谱侧保留）。
+  const taskInspector = selectedTask != null && inspectorDetail && (
     <aside className="graph-inspector">
       <div className="graph-inspector-head">
-        <h2>{inspectorDetail.task.name}</h2>
+        <h2>节点详情</h2>
         <button
           type="button"
           aria-label="关闭详情"
@@ -1213,70 +1379,156 @@ export default function CollaborationPage({
       </div>
       {/* #128：面板完整展示任务内容；放不下的一律单行省略、悬停 title 看全文，不换行撑高。 */}
       <div className="graph-inspector-body">
-        <div
-          className="muted gi-row"
-          title={`${inspectorDetail.objectiveTitle} / ${inspectorDetail.krDescription}`}
-        >
-          所属：{inspectorDetail.objectiveTitle} / {inspectorDetail.krDescription}
+        <div className="gi-title">
+          <span className="gi-eyebrow">任务节点 · {inspectorDetail.task.code}</span>
+          <h2>{inspectorDetail.task.name}</h2>
+          <span className="gi-badge">{inspectorDetail.task.statusLabel}</span>
+          {(() => {
+            const rb = taskRiskBadge(inspectorDetail.task.id);
+            return rb ? <span className={`gi-badge risk-${rb.level}`}>{rb.label}</span> : null;
+          })()}
         </div>
-        <div className="gi-row" title={inspectorDetail.task.ownerName}>
-          负责人：{inspectorDetail.task.ownerName}
+        <div className="gi-grid">
+          <div
+            className="gi-prop"
+            title={`${inspectorDetail.objectiveTitle} / ${inspectorDetail.krDescription}`}
+          >
+            <span>所属 O / KR</span>
+            <strong>
+              {inspectorDetail.objectiveTitle} / {inspectorDetail.krDescription}
+            </strong>
+          </div>
+          <div className="gi-prop" title={inspectorDetail.task.ownerName}>
+            <span>负责人</span>
+            <strong>{inspectorDetail.task.ownerName}</strong>
+          </div>
+          <div
+            className="gi-prop"
+            title={(inspectorDetail.task.participants ?? []).map((p) => p.displayName).join("、") || undefined}
+          >
+            <span>参与人</span>
+            <strong>
+              {(inspectorDetail.task.participants ?? []).length > 0
+                ? (inspectorDetail.task.participants ?? []).map((p) => p.displayName).join("、")
+                : "—"}
+            </strong>
+          </div>
+          <div className="gi-prop">
+            <span>计划时间</span>
+            <strong>
+              {inspectorDetail.task.startDate} — {inspectorDetail.task.endDate}
+            </strong>
+          </div>
+          <div className="gi-prop">
+            <span>直接输入 / 输出</span>
+            <strong>
+              {inspectorDetail.inputs.length} / {inspectorDetail.outputs.length}
+            </strong>
+          </div>
+          <div className="gi-prop">
+            <span>进度</span>
+            <strong>
+              {inspectorDetail.task.progress != null ? `${inspectorDetail.task.progress}%` : "—"}
+            </strong>
+          </div>
         </div>
-        <div className="gi-row">
-          状态：<span className="status-pill">{inspectorDetail.task.statusLabel}</span>
-          {inspectorDetail.task.progress != null && ` · ${inspectorDetail.task.progress}%`}
+        {/* 结构化卡点事实卡：等级、原因、待行动人、已持续天数、影响（§8.1）。 */}
+        {inspectorDetail.blockers.map((b) => (
+          <div key={b.key} className={`gi-fact risk-${b.level}`}>
+            <span>
+              结构化卡点 · {b.kindLabel}
+              {b.levelLabel ? ` · ${b.levelLabel}` : ""}
+            </span>
+            <b>{b.reason}</b>
+            <small>
+              待行动人：{b.actionOwnerNames.join("、") || "—"} · 已持续 {blockerDays(b.since)} 天
+            </small>
+            {b.impactNote && <small>{b.impactNote}</small>}
+          </div>
+        ))}
+        <div className="gi-block">
+          <div className="gi-block-head">
+            <b>输入就绪</b>
+            <span>
+              {inspectorDetail.inputs.filter((e) => e.ready).length}/{inspectorDetail.inputs.length} 已就绪
+            </span>
+          </div>
+          {inspectorDetail.inputs.length === 0 && <p className="gi-empty">没有配置上游输入。</p>}
+          {inspectorDetail.inputs.map((e) => {
+            const src =
+              e.sourceTaskId != null
+                ? `${e.sourceTaskCode ?? ""} ${e.sourceTaskName ?? ""}`
+                : (e.inputRequest?.providerName ?? "");
+            return (
+              <button
+                key={e.id}
+                type="button"
+                className="gi-mini"
+                title={`${src} → ${inspectorDetail.task.code}`}
+                onClick={() => {
+                  // 点击输入行选中对应边（原型 cp-relation-mini → cp-edge）。
+                  setSelectedTask(null);
+                  setImpactMode(false);
+                  setSelectedNode(null);
+                  setSelectedEdge(e.id);
+                }}
+              >
+                <span>
+                  <b>
+                    {src} → {inspectorDetail.task.code}
+                  </b>
+                  <small>{e.edgeTypeLabel}</small>
+                </span>
+                <span className={`gi-badge ${e.ready ? "ready" : "risk-warning"}`}>
+                  {e.ready ? "已就绪" : "未就绪"}
+                </span>
+              </button>
+            );
+          })}
         </div>
-        <div className="gi-row">
-          输入 {inspectorDetail.inputs.length} 条 / 输出 {inspectorDetail.outputs.length} 条
+        <div className="gi-block">
+          <div className="gi-block-head">
+            <b>当前交付物</b>
+            <span>{inspectorDetail.deliverables.filter((d) => d.current).length} 项</span>
+          </div>
+          {inspectorDetail.deliverables.filter((d) => d.current).length === 0 && (
+            <p className="gi-empty">尚无已生效的当前交付物。</p>
+          )}
+          {inspectorDetail.deliverables
+            .filter((d) => d.current)
+            .map((d) => (
+              <div key={d.id} className="gi-file">
+                <span title={d.current!.fileName}>
+                  <b>{d.current!.fileName}</b>
+                  <small>
+                    {d.current!.fileType || "文件"}
+                    {d.current!.fileSize ? ` · ${formatFileSize(d.current!.fileSize)}` : ""}
+                  </small>
+                </span>
+                <span>
+                  {previewable(d.current!.fileName) && (
+                    <Button size="small" onClick={() => openEdgeFile(d.current!.id, d.current!.fileName, true)}>
+                      预览
+                    </Button>
+                  )}
+                  <Button size="small" onClick={() => openEdgeFile(d.current!.id, d.current!.fileName, false)}>
+                    下载
+                  </Button>
+                </span>
+              </div>
+            ))}
         </div>
-        {/* 输入／输出行按 #101 读法：编号 · 任务名 · 类型 · 就绪；来源为成员时显成员名。 */}
-        {inspectorDetail.inputs.map((e) => {
-          const src =
-            e.sourceTaskId != null
-              ? `${taskById.get(e.sourceTaskId)?.code ?? ""} · ${e.sourceTaskName ?? ""}`
-              : (e.inputRequest?.providerName ?? "");
-          const line = `← ${src} · ${e.edgeTypeLabel} · ${e.ready ? "已就绪" : "未就绪"}`;
-          return (
-            <div key={e.id} className="muted gi-row" title={line}>
-              {line}
-            </div>
-          );
-        })}
-        {inspectorDetail.outputs.map((e) => {
-          const line = `→ ${taskById.get(e.targetTaskId)?.code ?? ""} · ${e.targetTaskName ?? ""} · ${e.edgeTypeLabel} · ${e.ready ? "已就绪" : "未就绪"}`;
-          return (
-            <div key={e.id} className="muted gi-row" title={line}>
-              {line}
-            </div>
-          );
-        })}
-        {/* 卡点一行一条，按等级配色（与抽屉一致）。 */}
-        {inspectorDetail.blockers.map((b) => {
-          const line = `卡点 · ${b.kindLabel}：缺 ${b.missing}`;
-          return (
-            <div key={b.key} className={`gi-row gi-blocker risk-${b.level}`} title={line}>
-              {line}
-            </div>
-          );
-        })}
-        <div
-          className="gi-row"
-          title={
-            inspectorDetail.deliverables.filter((d) => d.current).length === 0
-              ? undefined
-              : inspectorDetail.deliverables
-                  .filter((d) => d.current)
-                  .map((d) => d.current!.fileName)
-                  .join("、")
-          }
-        >
-          当前交付物：
-          {inspectorDetail.deliverables.filter((d) => d.current).length === 0
-            ? "无"
-            : inspectorDetail.deliverables
-                .filter((d) => d.current)
-                .map((d) => d.current!.fileName)
-                .join("、")}
+        <div className="gi-impact">
+          <span>系统推导 · 仅沿下游硬前置</span>
+          <b
+            title={[...new Set(inspectorDetail.impactedTargets.map((t) => t.objectiveTitle))].join("、") || undefined}
+          >
+            受影响 O：
+            {[...new Set(inspectorDetail.impactedTargets.map((t) => t.objectiveTitle))].join("、") || "无"}
+          </b>
+          <b title={inspectorDetail.impactedTargets.map((t) => t.krDescription).join("、") || undefined}>
+            受影响 KR：{inspectorDetail.impactedTargets.map((t) => t.krDescription).join("、") || "无"}
+          </b>
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {/* AC-27：从当前节点向外逐层展开——进入聚焦层后画布节点集合随点击增长，
@@ -1296,6 +1548,181 @@ export default function CollaborationPage({
       </div>
     </aside>
   );
+
+  // #149 O 节点详情（§8.1：O 说明、下属 KR、总体风险）。
+  const selectedO = selectedNode?.kind === "o" ? objectives.find((o) => o.id === selectedNode.id) : null;
+  const oInspector = selectedO && (
+    <aside className="graph-inspector">
+      <div className="graph-inspector-head">
+        <h2>节点详情</h2>
+        <button type="button" aria-label="关闭详情" onClick={() => setSelectedNode(null)}>
+          ✕
+        </button>
+      </div>
+      <div className="graph-inspector-body">
+        <div className="gi-title">
+          <span className="gi-eyebrow">目标 O · {selectedO.code}</span>
+          <h2>{selectedO.title}</h2>
+          <span
+            className={`gi-badge ${selectedO.riskLevel !== "normal" ? `risk-${selectedO.riskLevel}` : ""}`}
+          >
+            {selectedO.riskLevelLabel}
+          </span>
+        </div>
+        <div className="gi-grid">
+          <div className="gi-prop">
+            <span>下属 KR</span>
+            <strong>{selectedO.keyResults.length} 个</strong>
+          </div>
+          <div className="gi-prop">
+            <span>预警／高风险 KR</span>
+            <strong>{selectedO.keyResults.filter((k) => k.riskLevel !== "normal").length} 个</strong>
+          </div>
+        </div>
+        {selectedO.riskNote && (
+          <div className={`gi-fact risk-${selectedO.riskLevel}`}>
+            <span>{selectedO.riskLevelLabel}原因</span>
+            <b>{selectedO.riskNote}</b>
+          </div>
+        )}
+        <div className="gi-block">
+          <div className="gi-block-head">
+            <b>目标说明</b>
+          </div>
+          {selectedO.description ? <div>{selectedO.description}</div> : <p className="gi-empty">未填写目标说明。</p>}
+        </div>
+      </div>
+    </aside>
+  );
+
+  // #149 KR 节点详情（§8.1：负责人、任务数量、卡点数量、风险原因）。
+  const selectedKr = selectedNode?.kind === "kr" ? krById.get(selectedNode.id) : null;
+  const krInspector = selectedKr && (
+    <aside className="graph-inspector">
+      <div className="graph-inspector-head">
+        <h2>节点详情</h2>
+        <button type="button" aria-label="关闭详情" onClick={() => setSelectedNode(null)}>
+          ✕
+        </button>
+      </div>
+      <div className="graph-inspector-body">
+        <div className="gi-title">
+          <span className="gi-eyebrow">KR 节点 · {selectedKr.code}</span>
+          <h2>{selectedKr.description}</h2>
+          <span
+            className={`gi-badge ${selectedKr.riskLevel !== "normal" ? `risk-${selectedKr.riskLevel}` : ""}`}
+          >
+            {selectedKr.riskLevelLabel}
+          </span>
+        </div>
+        <div className="gi-grid">
+          <div className="gi-prop" title={selectedKr.ownerName}>
+            <span>负责人</span>
+            <strong>{selectedKr.ownerName ?? "—"}</strong>
+          </div>
+          <div className="gi-prop">
+            <span>任务数量</span>
+            <strong>{selectedKr.taskCount ?? 0} 项</strong>
+          </div>
+          <div className="gi-prop">
+            <span>卡点数量</span>
+            <strong>{selectedKr.openBlockerCount ?? 0} 项</strong>
+          </div>
+          <div className="gi-prop">
+            <span>周期</span>
+            <strong>
+              {selectedKr.startDate && selectedKr.endDate
+                ? `${selectedKr.startDate} — ${selectedKr.endDate}`
+                : "—"}
+            </strong>
+          </div>
+        </div>
+        {selectedKr.riskNote && (
+          <div className={`gi-fact risk-${selectedKr.riskLevel}`}>
+            <span>{selectedKr.riskLevelLabel}原因</span>
+            <b>{selectedKr.riskNote}</b>
+            {selectedKr.topBlocker && (
+              <small>
+                {selectedKr.topBlocker.taskCode} {selectedKr.topBlocker.kindLabel}：{selectedKr.topBlocker.summary}
+              </small>
+            )}
+          </div>
+        )}
+        <div className="gi-block">
+          <div className="gi-block-head">
+            <b>量化指标</b>
+          </div>
+          {selectedKr.metric ? <div>{selectedKr.metric}</div> : <p className="gi-empty">未填写量化指标。</p>}
+        </div>
+      </div>
+    </aside>
+  );
+
+  // #149 成员节点详情（§8.1：当前关系职责、待提供内容、关联任务、计划时间）。
+  // 职责列表由该成员承担的全部输入边聚合（与画布同一份数据），每条可点选对应边。
+  const memberDuties =
+    selectedNode?.kind === "member"
+      ? edges.filter((e) => e.inputRequest?.providerId === selectedNode.id)
+      : [];
+  const memberInspector = selectedNode?.kind === "member" && memberDuties.length > 0 && (
+    <aside className="graph-inspector">
+      <div className="graph-inspector-head">
+        <h2>节点详情</h2>
+        <button type="button" aria-label="关闭详情" onClick={() => setSelectedNode(null)}>
+          ✕
+        </button>
+      </div>
+      <div className="graph-inspector-body">
+        <div className="gi-title">
+          <span className="gi-eyebrow">关系相关项目成员</span>
+          <h2>{memberDuties[0].inputRequest!.providerName}</h2>
+        </div>
+        <div className="gi-grid">
+          <div className="gi-prop">
+            <span>待提供输入</span>
+            <strong>{memberDuties.filter((e) => !e.ready).length} 项</strong>
+          </div>
+          <div className="gi-prop">
+            <span>关联任务</span>
+            <strong>{new Set(memberDuties.map((e) => e.targetTaskId)).size} 个</strong>
+          </div>
+        </div>
+        <div className="gi-block">
+          <div className="gi-block-head">
+            <b>当前关系职责</b>
+            <span>{memberDuties.length} 条</span>
+          </div>
+          {memberDuties.map((e) => (
+            <button
+              key={e.id}
+              type="button"
+              className="gi-mini"
+              title={e.name}
+              onClick={() => {
+                setSelectedTask(null);
+                setImpactMode(false);
+                setSelectedNode(null);
+                setSelectedEdge(e.id);
+              }}
+            >
+              <span>
+                <b>{e.name}</b>
+                <small>
+                  目标 {taskById.get(e.targetTaskId)?.code ?? ""} {e.targetTaskName ?? ""} · 期望{" "}
+                  {e.expectedDate ?? "—"}
+                </small>
+              </span>
+              <span className={`gi-badge ${e.ready ? "ready" : "risk-warning"}`}>
+                {e.ready ? "已就绪" : "未就绪"}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </aside>
+  );
+
+  const inspector = taskInspector || oInspector || krInspector || memberInspector;
 
   // CR-21 KR 节点三态：高风险归红态，预警归橙态，其余灰态。
   // riskLevel 本身已由后端读时派生（卡点等级、超期、临期取最大值），前端不再叠加卡点数
@@ -1615,7 +2042,8 @@ export default function CollaborationPage({
                   ))}
             </aside>
             <div className="graph-shell">
-              {(mode.kind === "full" || mode.kind === "kr" || mode.kind === "focus") && (edgeInspector || inspector)}
+              {/* #149：详情面板在全部层级可见——层级树／O 层选中 O、KR 同样打开节点详情。 */}
+              {edgeInspector || inspector}
               {/* #145：画布操作按原型三簇布置——返回左上、缩放簇顶部居中、重新布局右上，
                   全层级可用（PRD §5.1、§6.4）。 */}
               <div className="graph-ops graph-ops-left">
@@ -1636,12 +2064,7 @@ export default function CollaborationPage({
                 </Button>
               </div>
               <div
-                className={`graph-ops graph-ops-right${
-                  (mode.kind === "full" || mode.kind === "kr" || mode.kind === "focus") &&
-                  (edgeInspector || inspector)
-                    ? " with-inspector"
-                    : ""
-                }`}
+                className={`graph-ops graph-ops-right${edgeInspector || inspector ? " with-inspector" : ""}`}
               >
                 <Button size="small" onClick={relayout}>
                   重新布局
@@ -1686,8 +2109,8 @@ export default function CollaborationPage({
                         krVisualState(n.id) !== "normal" ? `risk-${krVisualState(n.id)}` : ""
                       }`}
                       style={{ left: n.pos.x, top: n.pos.y, width: n.pos.w, height: n.pos.h }}
-                      onClick={() => enter({ kind: "kr", krId: n.id })}
-                      onKeyDown={pressAsClick(() => enter({ kind: "kr", krId: n.id }))}
+                      onClick={() => enterKr(n.id)}
+                      onKeyDown={pressAsClick(() => enterKr(n.id))}
                     >
                       {krNodeContent(n.id)}
                     </div>
@@ -1708,8 +2131,8 @@ export default function CollaborationPage({
                         tabIndex={0}
                         className={`gnode gnode-o ${n.dimmed ? "dimmed" : ""}`}
                         style={{ left: n.pos.x, top: n.pos.y, width: n.pos.w, height: n.pos.h }}
-                        onClick={() => enter({ kind: "o", objectiveId: n.id })}
-                        onKeyDown={pressAsClick(() => enter({ kind: "o", objectiveId: n.id }))}
+                        onClick={() => enterO(n.id)}
+                        onKeyDown={pressAsClick(() => enterO(n.id))}
                       >
                         <b>{objectives.find((o) => o.id === n.id)?.title}</b>
                         <small>{krList.filter((k) => k.objectiveId === n.id).length} 个 KR</small>
@@ -1723,8 +2146,8 @@ export default function CollaborationPage({
                           krVisualState(n.id) !== "normal" ? `risk-${krVisualState(n.id)}` : ""
                         }`}
                         style={{ left: n.pos.x, top: n.pos.y, width: n.pos.w, height: n.pos.h }}
-                        onClick={() => enter({ kind: "kr", krId: n.id })}
-                        onKeyDown={pressAsClick(() => enter({ kind: "kr", krId: n.id }))}
+                        onClick={() => enterKr(n.id)}
+                        onKeyDown={pressAsClick(() => enterKr(n.id))}
                       >
                         {krNodeContent(n.id)}
                       </div>
@@ -1761,24 +2184,39 @@ export default function CollaborationPage({
                       return renderEdge(e, from, to);
                     })}
                   </svg>
-                  {/* 中心 KR 节点（#148；CR-21 视觉复用）：已在本层，点它不下钻；
+                  {/* 中心 KR 节点（#148；CR-21 视觉复用）：已在本层，点它不下钻、只开详情（#149）；
                       空 KR 交给空态提示，不渲染孤零零的中心节点。 */}
-                  {(krLayer.inKr.length > 0 || krLayer.neighbors.length > 0) && (
-                    <div
-                      className={`gnode gnode-kr ${
-                        krVisualState(krLayer.kr.id) !== "normal" ? `risk-${krVisualState(krLayer.kr.id)}` : ""
-                      }`}
-                      style={{
-                        left: krLayer.krPos.x,
-                        top: krLayer.krPos.y,
-                        width: krLayer.krPos.w,
-                        height: krLayer.krPos.h,
-                        cursor: "default",
-                      }}
-                    >
-                      {krNodeContent(krLayer.kr.id)}
-                    </div>
-                  )}
+                  {(krLayer.inKr.length > 0 || krLayer.neighbors.length > 0) &&
+                    (() => {
+                      const krId = krLayer.kr.id;
+                      const selectKr = () => {
+                        setSelectedTask(null);
+                        setSelectedEdge(null);
+                        setImpactMode(false);
+                        setSelectedNode((prev) =>
+                          prev?.kind === "kr" && prev.id === krId ? null : { kind: "kr", id: krId },
+                        );
+                      };
+                      return (
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          className={`gnode gnode-kr ${
+                            krVisualState(krId) !== "normal" ? `risk-${krVisualState(krId)}` : ""
+                          } ${selectedNode?.kind === "kr" && selectedNode.id === krId ? "selected" : ""}`}
+                          style={{
+                            left: krLayer.krPos.x,
+                            top: krLayer.krPos.y,
+                            width: krLayer.krPos.w,
+                            height: krLayer.krPos.h,
+                          }}
+                          onClick={selectKr}
+                          onKeyDown={pressAsClick(selectKr)}
+                        >
+                          {krNodeContent(krId)}
+                        </div>
+                      );
+                    })()}
                   {[...krLayer.inKr, ...krLayer.neighbors].map((t) => {
                     const pos = krLayer.positions.get(t.id);
                     return pos ? taskNode(t, pos) : null;
@@ -1788,19 +2226,28 @@ export default function CollaborationPage({
                     if (!posBase) return null;
                     // #146：成员节点是紫圆（原型 person），圆内姓名前两字、圆下 caption 显输入名。
                     const pos = memberCircle(posBase);
+                    // #149：点成员节点打开成员详情（该成员全部输入职责），不再借道边详情。
+                    const pid = edgeById.get(m.edgeId)?.inputRequest?.providerId;
                     const select = () => {
                       setSelectedTask(null);
                       setImpactMode(false);
-                      setSelectedEdge((prev) => (prev === m.edgeId ? null : m.edgeId));
+                      setSelectedEdge(null);
+                      setSelectedNode((prev) =>
+                        pid == null || (prev?.kind === "member" && prev.id === pid)
+                          ? null
+                          : { kind: "member", id: pid },
+                      );
                     };
                     return (
                       <div
                         key={`m-${m.edgeId}`}
                         role="button"
                         tabIndex={0}
-                        className={`gnode gnode-member ${selectedEdge === m.edgeId ? "selected" : ""} ${
-                          memberDimmed([m.edgeId]) ? "dimmed" : ""
-                        }`}
+                        className={`gnode gnode-member ${
+                          (selectedNode?.kind === "member" && selectedNode.id === pid) || selectedEdge === m.edgeId
+                            ? "selected"
+                            : ""
+                        } ${memberDimmed([m.edgeId]) ? "dimmed" : ""}`}
                         style={{ left: pos.x, top: pos.y, width: pos.w, height: pos.h }}
                         title={`${m.label} · ${m.inputName || "输入提供成员"}`}
                         onClick={select}
@@ -1836,19 +2283,27 @@ export default function CollaborationPage({
                     const posBase = focusLayer.positions.get(-m.edgeId);
                     if (!posBase) return null;
                     const pos = memberCircle(posBase);
+                    const pid = edgeById.get(m.edgeId)?.inputRequest?.providerId;
                     const select = () => {
                       setSelectedTask(null);
                       setImpactMode(false);
-                      setSelectedEdge((prev) => (prev === m.edgeId ? null : m.edgeId));
+                      setSelectedEdge(null);
+                      setSelectedNode((prev) =>
+                        pid == null || (prev?.kind === "member" && prev.id === pid)
+                          ? null
+                          : { kind: "member", id: pid },
+                      );
                     };
                     return (
                       <div
                         key={`fx-m-${m.edgeId}`}
                         role="button"
                         tabIndex={0}
-                        className={`gnode gnode-member ${selectedEdge === m.edgeId ? "selected" : ""} ${
-                          memberDimmed([m.edgeId]) ? "dimmed" : ""
-                        }`}
+                        className={`gnode gnode-member ${
+                          (selectedNode?.kind === "member" && selectedNode.id === pid) || selectedEdge === m.edgeId
+                            ? "selected"
+                            : ""
+                        } ${memberDimmed([m.edgeId]) ? "dimmed" : ""}`}
                         style={{ left: pos.x, top: pos.y, width: pos.w, height: pos.h }}
                         title={`${m.label} · ${m.inputName || "输入提供成员"}`}
                         onClick={select}
@@ -1922,8 +2377,8 @@ export default function CollaborationPage({
                           tabIndex={0}
                           className={`gnode gnode-o ${dim ? "dimmed" : ""}`}
                           style={{ left: n.pos.x, top: n.pos.y, width: n.pos.w, height: n.pos.h }}
-                          onClick={() => enter({ kind: "o", objectiveId: n.id })}
-                          onKeyDown={pressAsClick(() => enter({ kind: "o", objectiveId: n.id }))}
+                          onClick={() => enterO(n.id)}
+                          onKeyDown={pressAsClick(() => enterO(n.id))}
                         >
                           <b>{n.title}</b>
                           <small>{n.krCount} 个 KR</small>
@@ -1942,8 +2397,8 @@ export default function CollaborationPage({
                             krVisualState(n.id) !== "normal" ? `risk-${krVisualState(n.id)}` : ""
                           }`}
                           style={{ left: n.pos.x, top: n.pos.y, width: n.pos.w, height: n.pos.h }}
-                          onClick={() => enter({ kind: "kr", krId: n.id })}
-                          onKeyDown={pressAsClick(() => enter({ kind: "kr", krId: n.id }))}
+                          onClick={() => enterKr(n.id)}
+                          onKeyDown={pressAsClick(() => enterKr(n.id))}
                         >
                           {krNodeContent(n.id)}
                         </div>
@@ -1958,8 +2413,12 @@ export default function CollaborationPage({
                       const select = () => {
                         setSelectedTask(null);
                         setImpactMode(false);
-                        const first = m.edgeIds[0];
-                        setSelectedEdge((prev) => (prev != null && m.edgeIds.includes(prev) ? null : first));
+                        setSelectedEdge(null);
+                        setSelectedNode((prev) =>
+                          prev?.kind === "member" && prev.id === m.providerId
+                            ? null
+                            : { kind: "member", id: m.providerId },
+                        );
                       };
                       return (
                         <div
@@ -1967,7 +2426,10 @@ export default function CollaborationPage({
                           role="button"
                           tabIndex={0}
                           className={`gnode gnode-member ${
-                            selectedEdge != null && m.edgeIds.includes(selectedEdge) ? "selected" : ""
+                            (selectedNode?.kind === "member" && selectedNode.id === m.providerId) ||
+                            (selectedEdge != null && m.edgeIds.includes(selectedEdge))
+                              ? "selected"
+                              : ""
                           } ${memberDimmed(m.edgeIds) ? "dimmed" : ""}`}
                           style={{ left: pos.x, top: pos.y, width: pos.w, height: pos.h }}
                           title={`${m.name} · 关系相关项目成员`}

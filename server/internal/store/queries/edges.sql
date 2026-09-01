@@ -43,7 +43,7 @@ ORDER BY e.id;
 -- name: ListCurrentFilesByProjectTask :many
 -- 裁决 J1（#142）：关系列表「当前交付物」列——项目内各任务全部已生效当前内容，
 -- 供边未绑定具体交付物项时按来源任务归组展示。
-SELECT d.task_id, df.file_name, df.file_size
+SELECT d.task_id, df.id AS file_id, df.file_name, df.file_size
 FROM deliverable_files df
 JOIN deliverables d ON d.id = df.deliverable_id
 JOIN tasks t ON t.id = d.task_id

@@ -127,7 +127,7 @@ func (q *Queries) GetEdgeInProject(ctx context.Context, arg GetEdgeInProjectPara
 }
 
 const listCurrentFilesByProjectTask = `-- name: ListCurrentFilesByProjectTask :many
-SELECT d.task_id, df.file_name, df.file_size
+SELECT d.task_id, df.id AS file_id, df.file_name, df.file_size
 FROM deliverable_files df
 JOIN deliverables d ON d.id = df.deliverable_id
 JOIN tasks t ON t.id = d.task_id
@@ -139,6 +139,7 @@ ORDER BY df.id
 
 type ListCurrentFilesByProjectTaskRow struct {
 	TaskID   int64
+	FileID   int64
 	FileName string
 	FileSize int64
 }
@@ -154,7 +155,12 @@ func (q *Queries) ListCurrentFilesByProjectTask(ctx context.Context, projectID i
 	var items []ListCurrentFilesByProjectTaskRow
 	for rows.Next() {
 		var i ListCurrentFilesByProjectTaskRow
-		if err := rows.Scan(&i.TaskID, &i.FileName, &i.FileSize); err != nil {
+		if err := rows.Scan(
+			&i.TaskID,
+			&i.FileID,
+			&i.FileName,
+			&i.FileSize,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
