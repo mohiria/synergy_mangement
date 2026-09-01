@@ -2086,10 +2086,9 @@ export default function CollaborationPage({
             {/* #144：风险队列在全局展开下同样保留（PRD §5.2 无隐藏规定，原型两种模式恒在）。 */}
             <aside className="risk-queue">
                 <div className="risk-queue-head">风险队列</div>
-                {/* #122：按 KR 聚合，每 KR 一条，副行只显最高风险卡点（挑选规则在域层，
-                    前端只消费 topBlocker）。#150：右侧「N 卡点／N 未就绪」双徽章（0 不显示，
-                    CR-22），未就绪计入排序权重（原型 renderRiskLens：卡点×3＋未就绪），
-                    进入条件扩为风险／卡点／未就绪任一非零。 */}
+                {/* #158（裁决，CR-22 修订）：条目只显示「KR 编号 + N 个卡点」——
+                    不显风险等级、任务标题、卡点内容与未就绪摘要（notReadyCount 仍参与
+                    排序权重与进入条件：卡点×3＋未就绪，风险／卡点／未就绪任一非零进入）。 */}
                 {/* #154：条目列表区独立滚动，底部「回到 O／KR 层级树」不随列表滚走。 */}
                 <div className="risk-queue-list">
                 {(() => {
@@ -2118,18 +2117,10 @@ export default function CollaborationPage({
                       onClick={() => enter({ kind: "kr", krId: k.id })}
                     >
                       <span className="risk-queue-main">
-                        <b>
-                          {k.code} · {k.riskLevelLabel}
-                        </b>
-                        <small>
-                          {k.topBlocker
-                            ? `${k.topBlocker.taskCode} ${k.topBlocker.kindLabel}：${k.topBlocker.summary}`
-                            : (k.riskNote ?? k.description)}
-                        </small>
+                        <b>{k.code}</b>
                       </span>
                       <span className="risk-queue-counts">
-                        {(k.openBlockerCount ?? 0) > 0 && <i>{k.openBlockerCount} 卡点</i>}
-                        {(k.notReadyCount ?? 0) > 0 && <em>{k.notReadyCount} 未就绪</em>}
+                        {(k.openBlockerCount ?? 0) > 0 && <i>{k.openBlockerCount} 个卡点</i>}
                       </span>
                     </button>
                   ));
