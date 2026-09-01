@@ -10,7 +10,6 @@ func TestFieldEditMode(t *testing.T) {
 		outcome FieldChangeOutcome
 		want    string
 	}{
-		{"草稿直接生效", FieldChangeDirect, "direct"},
 		{"KR 负责人免审即时生效", FieldChangeExempt, "exempt"},
 		{"其余进入审批", FieldChangePending, "approval"},
 	}

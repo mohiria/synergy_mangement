@@ -21,7 +21,7 @@ TRUNCATE TABLE
     field_change_requests, input_requests, deliverable_edges,
     deliverable_files, deliverables,
     task_receipts, task_receivers, task_reviewers, task_invites,
-    pool_reviews, tasks, key_results, objectives,
+    tasks, key_results, objectives,
     project_members, projects, users
     RESTART IDENTITY CASCADE;
 

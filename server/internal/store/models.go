@@ -195,18 +195,6 @@ type PendingObjectDeletion struct {
 	LastTryAt pgtype.Timestamptz
 }
 
-type PoolReview struct {
-	ID          int64
-	TaskID      int64
-	SubmittedBy int64
-	Status      string
-	Exempt      bool
-	Opinion     string
-	SubmittedAt pgtype.Timestamptz
-	DecidedBy   pgtype.Int8
-	DecidedAt   pgtype.Timestamptz
-}
-
 type Project struct {
 	ID                  int64
 	Name                string

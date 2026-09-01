@@ -16,8 +16,6 @@ type WorkItem = components["schemas"]["WorkItem"];
 
 // 状态色（与全部任务、项目总览各页一致）；状态文案一律消费 API 的 statusLabel（AC-04）。
 const STATUS_CLASS: Record<TaskStatus, string> = {
-  draft: "",
-  pending_pool_review: "warning",
   not_started: "",
   waiting_input: "warning",
   in_progress: "in_progress",
@@ -30,17 +28,14 @@ const STATUS_CLASS: Record<TaskStatus, string> = {
 // 事项类型的单字标记（原型 work-kind 徽标）；分组语义由 Tab 表达，卡片正文不再展开原因。
 const KIND_BADGE: Record<string, string> = {
   task: "办",
-  task_rejected: "退",
   input_request: "输",
   invite: "邀",
-  pool_review: "审",
   field_change: "审",
   intermediate_review: "审",
   final_review: "审",
   receipt: "收",
   upstream: "等",
   waiting_input_request: "等",
-  waiting_pool: "等",
   waiting_field_change: "等",
   waiting_completion: "等",
   blocker: "卡",

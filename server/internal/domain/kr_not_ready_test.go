@@ -46,10 +46,10 @@ func TestCountNotReadyInputs(t *testing.T) {
 			want: 0,
 		},
 		{
-			name: "草稿与待入池的接收方照常计",
+			name: "未开始与等待输入的接收方照常计",
 			inputs: []KrInputFact{
-				{TargetStatus: TaskDraft, Ready: false},
-				{TargetStatus: TaskPendingPoolReview, Ready: false},
+				{TargetStatus: TaskNotStarted, Ready: false},
+				{TargetStatus: TaskWaitingInput, Ready: false},
 			},
 			want: 2,
 		},

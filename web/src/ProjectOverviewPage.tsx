@@ -14,8 +14,6 @@ type Task = components["schemas"]["Task"];
 type TaskStatus = components["schemas"]["TaskStatus"];
 
 const STATUS_CLASS: Record<TaskStatus, string> = {
-  draft: "",
-  pending_pool_review: "warning",
   not_started: "",
   waiting_input: "warning",
   in_progress: "in_progress",

@@ -12,8 +12,6 @@ func TestWriteActionsRequireNonViewerMembership(t *testing.T) {
 	me := int64(5)
 	facts := TaskFacts{Status: TaskInProgress, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
 	notStarted := TaskFacts{Status: TaskNotStarted, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
-	draft := TaskFacts{Status: TaskDraft, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
-	poolPending := TaskFacts{Status: TaskPendingPoolReview, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
 	finalPending := TaskFacts{Status: TaskPendingFinalReview, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
 	intermediate := TaskFacts{Status: TaskPendingIntermediateReview, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
 
@@ -34,12 +32,6 @@ func TestWriteActionsRequireNonViewerMembership(t *testing.T) {
 			}
 			if CanCancelTask(actor, me, facts, false) {
 				t.Fatal("不应可发起关闭")
-			}
-			if CanSubmitPoolReview(actor, me, draft, false) {
-				t.Fatal("不应可提交入池")
-			}
-			if CanDecidePoolReview(actor, me, poolPending) {
-				t.Fatal("不应可审批入池")
 			}
 			if CanConfigureInputs(actor, me, facts) {
 				t.Fatal("不应可配置输入")
@@ -68,9 +60,6 @@ func TestWriteActionsRequireNonViewerMembership(t *testing.T) {
 			if _, err := CancelRoute(actor, me, facts, false); !errors.Is(err, ErrCancelForbidden) {
 				t.Fatalf("不应可发起关闭申请: %v", err)
 			}
-			if _, err := DecidePoolReview(actor, poolPending, me, true, ""); !errors.Is(err, ErrNotKrOwner) {
-				t.Fatalf("不应可处理入池审批: %v", err)
-			}
 			if err := DecideFieldChangeRule(actor, FieldChangePendingState, facts, me, true, ""); !errors.Is(err, ErrNotKrOwner) {
 				t.Fatalf("不应可处理变更单: %v", err)
 			}
@@ -93,8 +82,8 @@ func TestWriteActionsRequireNonViewerMembership(t *testing.T) {
 	if !CanStartTask(member, me, notStarted) || !CanUpdateProgress(member, me, facts) {
 		t.Fatal("项目成员的任务负责人职责应照常生效")
 	}
-	if _, err := DecidePoolReview(member, poolPending, me, true, ""); err != nil {
-		t.Fatalf("项目成员任 KR 负责人应可审批入池: %v", err)
+	if err := DecideFieldChangeRule(member, FieldChangePendingState, facts, me, true, ""); err != nil {
+		t.Fatalf("项目成员任 KR 负责人应可处理变更单: %v", err)
 	}
 }
 

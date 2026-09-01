@@ -66,7 +66,7 @@ func (s *Server) SubmitFieldChange(w http.ResponseWriter, r *http.Request, proje
 	for _, m := range members {
 		roleByID[m.UserID] = m.Role
 	}
-	if err := domain.ValidateKeyFieldChanges(changes, reason, outcome != domain.FieldChangeDirect,
+	if err := domain.ValidateKeyFieldChanges(changes, reason, true,
 		func(id int64) string { return roleByID[id] }, task.StartDate.Time); err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_field_change", Message: err.Error()})
 		return
@@ -79,12 +79,6 @@ func (s *Server) SubmitFieldChange(w http.ResponseWriter, r *http.Request, proje
 	defer func() { _ = tx.Rollback(r.Context()) }()
 	qtx := s.q.WithTx(tx)
 	switch outcome {
-	case domain.FieldChangeDirect:
-		// 草稿完善：不生成变更单。
-		if _, err := qtx.ApplyTaskKeyFields(r.Context(), applyParams(taskId, changes)); err != nil {
-			writeInternalError(w, r, err)
-			return
-		}
 	case domain.FieldChangeExempt:
 		if _, err := qtx.CreateFieldChange(r.Context(), createFieldChangeParams(task, uid, reason, changes,
 			domain.FieldChangeApprovedState, true, domain.FieldChangeExemptOpinion,
@@ -112,7 +106,7 @@ func (s *Server) SubmitFieldChange(w http.ResponseWriter, r *http.Request, proje
 		writeInternalError(w, r, err)
 		return
 	}
-	// 草稿完善不生成变更单，也就没有可留痕的审批事实；免审直接记「生效」。
+	// 免审直接记「生效」。
 	switch outcome {
 	case domain.FieldChangeExempt:
 		s.actionActivity(r.Context(), taskId, domain.ActivityFieldChangeApproved, uid, domain.FieldChangeExemptOpinion)

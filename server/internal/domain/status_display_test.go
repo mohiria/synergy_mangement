@@ -35,8 +35,6 @@ func TestStatusLabel(t *testing.T) {
 		reviewers []string
 		want      string
 	}{
-		{"草稿", TaskDraft, "周宁", nil, "草稿"},
-		{"待入池审批显示 KR 负责人", TaskPendingPoolReview, "周宁", nil, "待周宁审批"},
 		{"未开始", TaskNotStarted, "周宁", nil, "未开始"},
 		{"等待输入", TaskWaitingInput, "周宁", nil, "等待输入"},
 		{"进行中", TaskInProgress, "周宁", nil, "进行中"},
@@ -56,27 +54,8 @@ func TestStatusLabel(t *testing.T) {
 	}
 }
 
-// 三道审批单状态显示文案（AC-04）：等待状态按当前审批人姓名显示。
+// 审批单状态显示文案（AC-04）：等待状态按当前审批人姓名显示。
 func TestReviewStateLabels(t *testing.T) {
-	t.Run("入池审批单", func(t *testing.T) {
-		cases := []struct {
-			name    string
-			state   string
-			exempt  bool
-			krOwner string
-			want    string
-		}{
-			{"待审批显示 KR 负责人", PoolReviewPending, false, "周宁", "待周宁审批"},
-			{"免审", PoolReviewApproved, true, "周宁", "免审通过"},
-			{"已通过", PoolReviewApproved, false, "周宁", "已通过"},
-			{"已退回", PoolReviewRejected, false, "周宁", "已退回"},
-		}
-		for _, tc := range cases {
-			if got := PoolReviewStateLabel(tc.state, tc.exempt, tc.krOwner); got != tc.want {
-				t.Fatalf("%s: PoolReviewStateLabel = %q, want %q", tc.name, got, tc.want)
-			}
-		}
-	})
 	t.Run("关键字段变更单", func(t *testing.T) {
 		cases := []struct {
 			name    string
@@ -126,12 +105,10 @@ func TestStageLabel(t *testing.T) {
 		reviewers []string
 		want      string
 	}{
-		{"入池审批显示 KR 负责人", StagePoolReview, "周宁", nil, "待周宁审批"},
 		{"中间或签显示审核组", StageIntermediateReview, "周宁", []string{"张三", "李四"}, "待张三等2人审批"},
 		{"中间或签单人显示姓名", StageIntermediateReview, "周宁", []string{"张三"}, "待张三审批"},
 		{"KR 终审显示 KR 负责人", StageFinalReview, "周宁", nil, "待周宁审批"},
 		{"KR 无负责人退化为待审批", StageFinalReview, "", nil, "待审批"},
-		{"草稿完善沿用环节名", StageDraft, "周宁", nil, "草稿完善"},
 		{"待开始执行沿用环节名", StageNotStarted, "周宁", nil, "待开始执行"},
 		{"等待输入沿用环节名", StageWaitingInput, "周宁", nil, "等待输入"},
 		{"任务执行沿用环节名", StageInProgress, "周宁", nil, "任务执行"},

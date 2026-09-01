@@ -262,51 +262,11 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** 项目任务（含派生动作标志与最近一次入池审批单）；支持服务端裁剪，避免大项目整表下发 */
+        /** 项目任务（含派生动作标志）；支持服务端裁剪，避免大项目整表下发 */
         get: operations["listTasks"];
         put?: never;
-        /** 表格式批量创建任务草稿（可选一并提交入池；KR 负责人本人创建免审直接进入未开始，AC-26） */
+        /** 表格式批量创建任务（裁决 */
         post: operations["createTaskBatch"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/projects/{projectId}/tasks/{taskId}/submit-pool-review": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-                taskId: number;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 将草稿任务提交所属 KR 负责人入池审批（AC-04；退回后可修改重新提交） */
-        post: operations["submitTaskPoolReview"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/projects/{projectId}/tasks/{taskId}/pool-review-decision": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-                taskId: number;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 所属 KR 负责人通过或退回入池审批（AC-04；管理员不能替代 KR 负责人） */
-        post: operations["decideTaskPoolReview"];
         delete?: never;
         options?: never;
         head?: never;
@@ -425,7 +385,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 编辑任务／提交关键字段修改（AC-23；草稿直接完善，KR 负责人本人免审即时生效，其余进入审批且旧值继续生效） */
+        /** 编辑任务／提交关键字段修改（AC-23；KR 负责人本人免审即时生效，其余进入审批且旧值继续生效） */
         post: operations["submitFieldChange"];
         delete?: never;
         options?: never;
@@ -671,7 +631,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** 配置接收方（AC-23；接收方属关键字段，已入池任务进所属 KR 负责人审批；模块 PRD §8.6、MW-09） */
+        /** 配置接收方（AC-23；接收方属关键字段，进所属 KR 负责人审批；模块 PRD §8.6、MW-09） */
         put: operations["setTaskReceivers"];
         post?: never;
         delete?: never;
@@ -793,7 +753,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 新增输入要求并自动建立「来源任务 → 目标任务」交付物边（AC-28；可一次多选来源任务，AC-53）；输入与输入源属关键字段，已入池任务进所属 KR 负责人审批（AC-23） */
+        /** 新增输入要求并自动建立「来源任务 → 目标任务」交付物边（AC-28；可一次多选来源任务，AC-53）；输入与输入源属关键字段，进所属 KR 负责人审批（AC-23） */
         post: operations["createTaskInput"];
         delete?: never;
         options?: never;
@@ -813,7 +773,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 指定项目成员提供输入（AC-29；可一次多选对接人，AC-53）：为每名对接人建立「成员 → 目标任务」交付物边并生成输入请求；输入源属关键字段，已入池任务进所属 KR 负责人审批（AC-23），生效后任务已入池即发站内通知 */
+        /** 指定项目成员提供输入（AC-29；可一次多选对接人，AC-53）：为每名对接人建立「成员 → 目标任务」交付物边并生成输入请求；输入源属关键字段，进所属 KR 负责人审批（AC-23），输入关系建立后即发站内通知（裁决 */
         post: operations["createMemberInput"];
         delete?: never;
         options?: never;
@@ -914,7 +874,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** 解除交付物边（AC-23；输入源属关键字段，已入池任务进所属 KR 负责人审批） */
+        /** 解除交付物边（AC-23；输入源属关键字段，进所属 KR 负责人审批） */
         delete: operations["removeEdge"];
         options?: never;
         head?: never;
@@ -1162,7 +1122,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 表格导入（AC-02）：生成 O／KR 与任务草稿（仅项目管理员／项目负责人；整批一个事务） */
+        /** 表格导入（AC-02）：生成 O／KR 与任务，任务直接入池（裁决 */
         post: operations["importTable"];
         delete?: never;
         options?: never;
@@ -1182,7 +1142,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 任务批量导入（AC-02b）：向已有 KR 下生成任务草稿（仅项目管理员／项目负责人；整批一个事务）
+         * 任务批量导入（AC-02b）：向已有 KR 下生成任务并直接入池（裁决
          * @description 与 O／KR 导入器分开的第二个导入器（裁决 B1）：只导任务，所属 KR 必须已存在。
          *     字段映射、人员匹配与结构预览在前端完成，此处接收结构化结果；规则复用创建任务的同一份校验。
          */
@@ -1411,9 +1371,9 @@ export interface components {
             objectiveId: number;
             objectiveTitle: string;
         };
-        /** @description KR 层进度汇总与数据覆盖度（词汇表「进度数据覆盖度」；AC-63）：统计已入池且未取消的任务， 已取消整体剔除；平均值任务等权、未填按 0 计入、已完成按 100 */
+        /** @description KR 层进度汇总与数据覆盖度（词汇表「进度数据覆盖度」；AC-63）：统计未取消的任务， 已取消整体剔除；平均值任务等权、未填按 0 计入、已完成按 100 */
         ProgressSummary: {
-            /** @description 参与汇总的任务数（已入池且未取消），即平均值的分母 */
+            /** @description 参与汇总的任务数（未取消），即平均值的分母 */
             totalTasks: number;
             /** @description 其中由负责人真实填写进度的任务数（已完成计入），说明平均值里有多少来自真实填写 */
             filledTasks: number;
@@ -1485,7 +1445,7 @@ export interface components {
         };
         /** @description 更换 KR 负责人前的确认信息（AC-61）：该 KR 下当前有多少未决审批单 */
         KrHandoverPreview: {
-            /** @description 待入池审批、待处理变更单与待终审完成申请的合计条数 */
+            /** @description 待处理变更单与待终审完成申请的合计条数 */
             pendingApprovals: number;
         };
         CreateKeyResultInput: {
@@ -1521,35 +1481,12 @@ export interface components {
          * @description 任务生命周期状态（词汇表「任务生命周期状态」）；页面主状态汇总，审批原始状态在审批单中
          * @enum {string}
          */
-        TaskStatus: "draft" | "pending_pool_review" | "not_started" | "waiting_input" | "in_progress" | "pending_intermediate_review" | "pending_final_review" | "completed" | "cancelled";
+        TaskStatus: "not_started" | "waiting_input" | "in_progress" | "pending_intermediate_review" | "pending_final_review" | "completed" | "cancelled";
         /**
          * @description 成果更新进程（词汇表「成果更新」；派生自任务事实，接口不接受直接写入）： none＝无；open＝已发起、候选内容尚未随完成申请提交；reviewing＝已提交，或签或 KR 终审在审。 整个过程中任务生命周期状态保持 completed
          * @enum {string}
          */
         ResultUpdateState: "none" | "open" | "reviewing";
-        /**
-         * @description 入池审批单状态（词汇表「入池审批单」）；未提交即无审批单
-         * @enum {string}
-         */
-        PoolReviewStatus: "pending" | "approved" | "rejected";
-        /** @description 任务最近一次入池审批单 */
-        PoolReview: {
-            status: components["schemas"]["PoolReviewStatus"];
-            /** @description 面向用户的显示文案（AC-04；派生字段）：待审批为“待{所属 KR 负责人姓名}审批”，免审为“免审通过”，其余为“已通过／已退回” */
-            statusLabel: string;
-            /** @description KR 负责人本人创建免审时由系统自动生成并标记（AC-26） */
-            exempt: boolean;
-            /** @description 审批意见；免审时为系统记录的免审原因 */
-            opinion?: string;
-            /** @description 提交人姓名（派生字段） */
-            submittedByName?: string;
-            /** @description 处理人姓名（派生字段） */
-            decidedByName?: string;
-            /** Format: date-time */
-            submittedAt?: string;
-            /** Format: date-time */
-            decidedAt?: string;
-        };
         Task: {
             /** Format: int64 */
             id: number;
@@ -1593,7 +1530,6 @@ export interface components {
             progress?: number;
             /** @description 取消原因（已取消任务保留，PRD §5.1） */
             cancelReason?: string;
-            poolReview?: components["schemas"]["PoolReview"];
             /** @description 当前用户能否开始执行本任务（派生字段；负责人／可编辑项目者，未开始或等待输入时） */
             canStart: boolean;
             /** @description 当前用户能否更新本任务进度（派生字段；负责人／可编辑项目者，仅进行中；完成后锁定为 100，AC-63） */
@@ -1607,11 +1543,11 @@ export interface components {
             /** @description 当前用户能否编辑任务／提交关键字段修改（派生字段） */
             canProposeFieldChange: boolean;
             /**
-             * @description 就地编辑的保存路由（#138 裁决 E1；派生自 FieldChangeRoute，前端不复算规则）： direct=草稿直接生效；exempt=KR 负责人本人免审即时生效；approval=生成变更单进入审批 （保存时须填修改原因）。不可编辑时不返回（以 canProposeFieldChange 为准）
+             * @description 就地编辑的保存路由（#138 裁决 E1；派生自 FieldChangeRoute，前端不复算规则）： exempt=KR 负责人本人免审即时生效；approval=生成变更单进入审批 （保存时须填修改原因）。不可编辑时不返回（以 canProposeFieldChange 为准）
              * @enum {string}
              */
-            fieldEditMode?: "direct" | "exempt" | "approval";
-            /** @description 本任务上未决审批单条数（派生字段；入池、关键字段变更／取消、完成申请合计，前端不再自行相加） */
+            fieldEditMode?: "exempt" | "approval";
+            /** @description 本任务上未决审批单条数（派生字段；关键字段变更／取消、完成申请合计，前端不再自行相加） */
             pendingReviewCount?: number;
             /** @description 当前用户能否提交任务讨论（派生字段；全体项目内成员含访客，公开项目的隐式访客不可，见词汇表「隐式访客」） */
             canDiscuss?: boolean;
@@ -1625,10 +1561,6 @@ export interface components {
             openBlockerCount?: number;
             /** @description 当前用户能否登记候选交付物内容（派生字段；负责人，执行类状态） */
             canUploadCandidate?: boolean;
-            /** @description 当前用户能否提交本任务入池（派生字段；草稿且为创建人／负责人／可编辑项目者） */
-            canSubmitPoolReview: boolean;
-            /** @description 当前用户能否处理本任务的入池审批（派生字段；仅所属 KR 负责人） */
-            canDecidePoolReview: boolean;
             receiverScope: components["schemas"]["ReceiverScope"];
             /** @description 指定成员为接收方时的名单（receiverScope=members；其余取值为空数组） */
             receivers?: components["schemas"]["ReviewerInfo"][];
@@ -1662,11 +1594,9 @@ export interface components {
         };
         CreateTaskBatchRequest: {
             items: components["schemas"]["CreateTaskItem"][];
-            /** @description true 时保存后立即提交各自所属 KR 的入池审批（原型「提交入池审批」按钮）；KR 负责人本人创建的任务始终免审直接进入未开始 */
-            submitForReview: boolean;
             /**
              * Format: int64
-             * @description 通过任务创建邀请响应时携带（AC-03）；须为发给当前用户的待处理邀请，且本批至少一项任务属于邀请指定的 KR 并提交入池，成功后邀请变为已完成
+             * @description 通过任务创建邀请响应时携带（AC-03）；须为发给当前用户的待处理邀请，且本批至少一项任务属于邀请指定的 KR，成功后邀请变为已完成
              */
             taskInviteId?: number;
         };
@@ -1677,8 +1607,6 @@ export interface components {
             objectiveTitle: string;
             /** @description 所属 KR 描述（派生字段） */
             krDescription: string;
-            /** @description 入池审批记录，最新在前（词汇表「审核记录」） */
-            poolReviews: components["schemas"]["PoolReview"][];
             /** @description 关键字段变更单记录，最新在前（词汇表「关键字段变更单」） */
             fieldChanges: components["schemas"]["FieldChange"][];
             /** @description 交付物项列表（含当前内容与候选审核提示，AC-32／AC-33） */
@@ -1712,7 +1640,7 @@ export interface components {
          * @description 任务动态类型（ADR 0002）；blocker_* 为系统派生，无行动人
          * @enum {string}
          */
-        TaskActivityKind: "pool_submitted" | "pool_approved" | "pool_rejected" | "field_change_submitted" | "field_change_approved" | "field_change_rejected" | "field_change_abandoned" | "completion_submitted" | "completion_approved" | "completion_rejected" | "receipt_confirmed" | "blocker_opened" | "blocker_resolved";
+        TaskActivityKind: "pool_entered" | "field_change_submitted" | "field_change_approved" | "field_change_rejected" | "field_change_abandoned" | "completion_submitted" | "completion_approved" | "completion_rejected" | "receipt_confirmed" | "blocker_opened" | "blocker_resolved";
         /** @description 任务动态的一条事实（词汇表「任务动态」）：已经发生、不可撤销，只记录不派生，不可编辑或删除 */
         TaskActivity: {
             /** Format: int64 */
@@ -1794,7 +1722,7 @@ export interface components {
             canAbandon?: boolean;
         };
         SubmitFieldChangeRequest: {
-            /** @description 拟议值；至少一项。草稿任务直接生效；KR 负责人改本人 KR 下任务免审即时生效 */
+            /** @description 拟议值；至少一项。KR 负责人改本人 KR 下任务免审即时生效 */
             changes: {
                 name?: string;
                 description?: string;
@@ -1804,7 +1732,7 @@ export interface components {
                 /** Format: date */
                 endDate?: string;
             };
-            /** @description 修改原因；进入审批（含免审留痕）时必填，草稿直接完善可不填 */
+            /** @description 修改原因；进入审批（含免审留痕）时必填 */
             reason?: string;
         };
         FieldChangeDecisionRequest: {
@@ -1899,7 +1827,7 @@ export interface components {
             contentStateAt?: string;
             /** @description 本交付物承接的来源关系边（AC-17 归档视角需在列表层可见可点） */
             edges: components["schemas"]["DeliverableEdgeRef"][];
-            /** @description 当前用户能否删除本项（派生字段，裁决 H1）：有编辑权限、任务在草稿或执行类状态、 且本项没有当前内容时为 true；已发布的项删除须走成果更新重传 */
+            /** @description 当前用户能否删除本项（派生字段，裁决 H1）：有编辑权限、任务在执行类状态、 且本项没有当前内容时为 true；已发布的项删除须走成果更新重传 */
             canDelete: boolean;
         };
         /**
@@ -2175,12 +2103,12 @@ export interface components {
             tasks: components["schemas"]["ImportTaskItem"][];
         };
         ImportTasksResult: {
-            /** @description 本次生成的任务草稿（按 KR 批量提交入池，AC-25） */
+            /** @description 本次导入生成的正式任务（裁决 */
             tasks: components["schemas"]["Task"][];
         };
         ImportResult: {
             objectives: components["schemas"]["Objective"][];
-            /** @description 导入生成的任务草稿（待按 KR 批量提交入池，AC-25） */
+            /** @description 导入生成的正式任务（裁决 */
             tasks: components["schemas"]["Task"][];
         };
         /**
@@ -2242,7 +2170,6 @@ export interface components {
             blockers: components["schemas"]["ReportBlocker"][];
             /** @description 待决策：停留在审批队列中的事项数 */
             pendingApprovals: {
-                poolReviews: number;
                 fieldChanges: number;
                 completions: number;
             };
@@ -2299,7 +2226,7 @@ export interface components {
         };
         /** @description 我的工作事项（词汇表「我的工作事项」）；卡片派生事实，动作在任务详情抽屉完成 */
         WorkItem: {
-            /** @description 事项类型（task/pool_review/field_change/intermediate_review/final_review/input_request/invite/upstream/blocker 等） */
+            /** @description 事项类型（task/field_change/intermediate_review/final_review/input_request/invite/upstream/blocker 等） */
             kind: string;
             title: string;
             /** Format: int64 */
@@ -2434,7 +2361,7 @@ export interface components {
             state: components["schemas"]["InputRequestState"];
             /**
              * Format: date-time
-             * @description 站内通知发送时间（入池审批通过后才发送）
+             * @description 站内通知发送时间（裁决
              */
             notifiedAt?: string;
             /** Format: date-time */
@@ -2604,11 +2531,6 @@ export interface components {
             inviteeIds: number[];
             /** @description 邀请说明，随站内通知一同展示 */
             note?: string;
-        };
-        PoolReviewDecisionRequest: {
-            /** @enum {string} */
-            decision: "approved" | "rejected";
-            opinion?: string;
         };
         Project: {
             /** Format: int64 */
@@ -3379,66 +3301,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    submitTaskPoolReview: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-                taskId: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 已提交，任务进入待入池审批 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Task"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    decideTaskPoolReview: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-                taskId: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PoolReviewDecisionRequest"];
-            };
-        };
-        responses: {
-            /** @description 已处理，返回任务最新状态 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Task"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
             422: components["responses"]["ValidationError"];
         };
     };

@@ -822,10 +822,9 @@ func TestOkrTableBatchCreate(t *testing.T) {
 
 func sp2int64(v int64) *int64 { return &v }
 
-// 任务创建、入池审批与免审（#4，AC-04／AC-26）：
-// 项目成员提交任务→待入池审批→KR 负责人通过→未开始；退回→草稿可重新提交；
-// KR 负责人本人创建免审直接未开始并记录免审原因；管理员不能替代 KR 负责人审批。
-func TestTaskCreateAndPoolReview(t *testing.T) {
+// 任务创建直接入池（裁决 #162）：创建即为正式任务、初始状态未开始；
+// 入池写任务动态并站内通知所属 KR 负责人（本人创建不另发；KR 无负责人不发）。
+func TestTaskCreateDirectPoolEntry(t *testing.T) {
 	q, pool := setupDB(t)
 	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
 	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
@@ -872,137 +871,89 @@ func TestTaskCreateAndPoolReview(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-12"), openapiDate(t, "2026-09-21")
 
-	// AC-04：项目成员 carol 创建并提交，任务进入待入池审批
+	// 裁决 #162：项目成员 carol 创建 → 直接入池、未开始
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: krWithOwner, Name: "验证现场联动异常回退", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
 	})
 	wantStatus(t, resp, http.StatusCreated)
 	list := decodeBody[[]api.Task](t, resp)
-	if len(list) != 1 || list[0].Status != api.TaskStatusPendingPoolReview {
-		t.Fatalf("项目成员提交后应为待入池审批: %+v", list)
+	if len(list) != 1 || list[0].Status != api.TaskStatusNotStarted {
+		t.Fatalf("创建后应直接进入未开始: %+v", list)
 	}
 	taskID := list[0].Id
-	if list[0].PoolReview == nil || list[0].PoolReview.Status != api.PoolReviewStatusPending || list[0].PoolReview.Exempt {
-		t.Fatalf("审批单异常: %+v", list[0].PoolReview)
+	if list[0].StatusLabel != "未开始" {
+		t.Fatalf("新任务显示文案 = %q, want 未开始", list[0].StatusLabel)
 	}
-	// AC-04：面向用户显示当前审批人姓名（入池审批人是 KR 负责人 bob／李四）。
-	if list[0].StatusLabel != "待李四审批" {
-		t.Fatalf("待入池审批任务显示文案 = %q, want 待李四审批", list[0].StatusLabel)
-	}
-	if list[0].PoolReview.StatusLabel != "待李四审批" {
-		t.Fatalf("入池审批单显示文案 = %q, want 待李四审批", list[0].PoolReview.StatusLabel)
-	}
-	// carol 视角不可自审；bob（KR 负责人）视角可审
-	if list[0].CanDecidePoolReview {
-		t.Fatalf("提交人不应可处理审批: %+v", list[0])
-	}
-	resp = doJSON(t, bob, http.MethodGet, tasksURL, nil)
+
+	// 补偿机制：所属 KR 负责人 bob 收到入池通知，任务动态留痕
+	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
 	wantStatus(t, resp, http.StatusOK)
-	if got := decodeBody[[]api.Task](t, resp); !got[0].CanDecidePoolReview {
-		t.Fatalf("KR 负责人应可处理审批: %+v", got[0])
+	bobNotes := dropOkrAssigned(decodeBody[[]api.Notification](t, resp))
+	if len(bobNotes) != 1 || bobNotes[0].Kind != "task_pool_entered" {
+		t.Fatalf("KR 负责人应收到入池通知: %+v", bobNotes)
 	}
-
-	// §3.3：管理员 alice 不能替代 KR 负责人 → 403
-	decisionURL := fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, taskID)
-	resp = doJSON(t, alice, http.MethodPost, decisionURL, api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
-	wantStatus(t, resp, http.StatusForbidden)
-	resp.Body.Close()
-
-	// bob 退回 → 任务回到草稿，意见保留
-	opinion := "验收口径不清，请补充完成标准"
-	resp = doJSON(t, bob, http.MethodPost, decisionURL, api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionRejected, Opinion: &opinion})
+	if !strings.Contains(bobNotes[0].Content, "验证现场联动异常回退") || !strings.Contains(bobNotes[0].Content, "王五") {
+		t.Fatalf("入池通知应带任务名与创建人: %q", bobNotes[0].Content)
+	}
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
 	wantStatus(t, resp, http.StatusOK)
-	rejected := decodeBody[api.Task](t, resp)
-	if rejected.Status != api.TaskStatusDraft || rejected.PoolReview == nil || rejected.PoolReview.Status != api.PoolReviewStatusRejected {
-		t.Fatalf("退回后状态异常: %+v", rejected)
+	detail := decodeBody[api.TaskDetail](t, resp)
+	foundEntry := false
+	for _, a := range detail.Activities {
+		if a.Kind == api.PoolEntered {
+			foundEntry = true
+		}
 	}
-	if rejected.PoolReview.Opinion == nil || *rejected.PoolReview.Opinion != opinion {
-		t.Fatalf("退回意见未保留: %+v", rejected.PoolReview)
-	}
-	if rejected.StatusLabel != "草稿" || rejected.PoolReview.StatusLabel != "已退回" {
-		t.Fatalf("退回后显示文案异常: %q / %q", rejected.StatusLabel, rejected.PoolReview.StatusLabel)
-	}
-
-	// 草稿可重新提交（生成新审批单），KR 负责人通过 → 未开始
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/submit-pool-review", tasksURL, taskID), nil)
-	wantStatus(t, resp, http.StatusOK)
-	if got := decodeBody[api.Task](t, resp); got.Status != api.TaskStatusPendingPoolReview {
-		t.Fatalf("重新提交后应为待入池审批: %+v", got)
-	}
-	resp = doJSON(t, bob, http.MethodPost, decisionURL, api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
-	wantStatus(t, resp, http.StatusOK)
-	approved := decodeBody[api.Task](t, resp)
-	if approved.Status != api.TaskStatusNotStarted || approved.PoolReview.Status != api.PoolReviewStatusApproved {
-		t.Fatalf("通过后应进入未开始: %+v", approved)
+	if !foundEntry {
+		t.Fatalf("任务动态应有入池留痕: %+v", detail.Activities)
 	}
 
-	// 已处理的审批不可重复处理 → 409
-	resp = doJSON(t, bob, http.MethodPost, decisionURL, api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
-	wantStatus(t, resp, http.StatusConflict)
-	resp.Body.Close()
-
-	// AC-26：KR 负责人 bob 在本人 KR 下创建 → 免审直接未开始并记录免审原因
+	// KR 负责人 bob 本人创建 → 不另发通知
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: krWithOwner, Name: "输出验收清单模板", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 		},
 	})
 	wantStatus(t, resp, http.StatusCreated)
 	list = decodeBody[[]api.Task](t, resp)
-	var exemptTask *api.Task
+	var ownTask *api.Task
 	for i := range list {
 		if list[i].Name == "输出验收清单模板" {
-			exemptTask = &list[i]
+			ownTask = &list[i]
 		}
 	}
-	if exemptTask == nil || exemptTask.Status != api.TaskStatusNotStarted {
-		t.Fatalf("免审任务应直接未开始: %+v", list)
+	if ownTask == nil || ownTask.Status != api.TaskStatusNotStarted {
+		t.Fatalf("KR 负责人本人创建应直接未开始: %+v", list)
 	}
-	if exemptTask.PoolReview == nil || !exemptTask.PoolReview.Exempt || exemptTask.PoolReview.Status != api.PoolReviewStatusApproved || exemptTask.PoolReview.Opinion == nil {
-		t.Fatalf("免审应生成已通过并记录原因的审批单: %+v", exemptTask.PoolReview)
-	}
-	if exemptTask.PoolReview.StatusLabel != "免审通过" {
-		t.Fatalf("免审审批单显示文案 = %q, want 免审通过", exemptTask.PoolReview.StatusLabel)
-	}
-
-	// KR 未指定负责人时提交入池 422
-	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
-		Items: []api.CreateTaskItem{
-			{KeyResultId: krNoOwner, Name: "无人可审的任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
-		},
-	})
-	wantStatus(t, resp, http.StatusUnprocessableEntity)
-	if e := decodeBody[api.Error](t, resp); e.Code != "kr_owner_missing" {
-		t.Fatalf("code = %q, want kr_owner_missing", e.Code)
+	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
+	wantStatus(t, resp, http.StatusOK)
+	bobNotes = dropOkrAssigned(decodeBody[[]api.Notification](t, resp))
+	if len(bobNotes) != 1 {
+		t.Fatalf("本人创建不应另发通知: %+v", bobNotes)
 	}
 
-	// 不提交入池时保存为草稿
+	// KR 未指定负责人：创建照常入池，无人可通知
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: false,
 		Items: []api.CreateTaskItem{
-			{KeyResultId: krNoOwner, Name: "先存草稿的任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
+			{KeyResultId: krNoOwner, Name: "无负责人 KR 下的任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
 	})
 	wantStatus(t, resp, http.StatusCreated)
 	list = decodeBody[[]api.Task](t, resp)
-	var draft *api.Task
+	var orphan *api.Task
 	for i := range list {
-		if list[i].Name == "先存草稿的任务" {
-			draft = &list[i]
+		if list[i].Name == "无负责人 KR 下的任务" {
+			orphan = &list[i]
 		}
 	}
-	if draft == nil || draft.Status != api.TaskStatusDraft || draft.PoolReview != nil {
-		t.Fatalf("草稿保存异常: %+v", draft)
+	if orphan == nil || orphan.Status != api.TaskStatusNotStarted {
+		t.Fatalf("无负责人 KR 下创建应直接未开始: %+v", list)
 	}
 
 	// 校验失败整批不落库：截止早于开始 422
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: false,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: krWithOwner, Name: "倒置周期", OwnerId: carolUser.ID, StartDate: end, EndDate: start},
 		},
@@ -1021,7 +972,6 @@ func TestTaskCreateAndPoolReview(t *testing.T) {
 	dave := newClient(t)
 	login(dave, "dave", "dave-pass")
 	resp = doJSON(t, dave, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: false,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: krWithOwner, Name: "越权任务", OwnerId: daveUser.ID, StartDate: start, EndDate: end},
 		},
@@ -1037,7 +987,7 @@ func TestTaskCreateAndPoolReview(t *testing.T) {
 	}
 }
 
-// 任务创建邀请（#5，AC-03；MW-19）：KR 负责人邀请成员→受邀人通过邀请创建并提交任务入池→邀请完成；
+// 任务创建邀请（#5，AC-03；MW-19）：KR 负责人邀请成员→受邀人通过邀请创建任务（直接入池）→邀请完成；
 // 撤回后不可再响应；无关任务不使邀请结束；项目成员不可发邀请。
 func TestTaskInviteLifecycle(t *testing.T) {
 	q, pool := setupDB(t)
@@ -1129,7 +1079,6 @@ func TestTaskInviteLifecycle(t *testing.T) {
 
 	// carol 在无关 KR 提交任务，邀请不结束（词汇表）
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr2, Name: "与邀请无关的任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
@@ -1144,7 +1093,7 @@ func TestTaskInviteLifecycle(t *testing.T) {
 
 	// 他人（bob）带 carol 的邀请 ID 提交 403
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true, TaskInviteId: &inviteID,
+		TaskInviteId: &inviteID,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "冒名响应", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 		},
@@ -1154,7 +1103,7 @@ func TestTaskInviteLifecycle(t *testing.T) {
 
 	// 批内无指定 KR 任务 422
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true, TaskInviteId: &inviteID,
+		TaskInviteId: &inviteID,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr2, Name: "跑偏的响应", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
@@ -1164,9 +1113,9 @@ func TestTaskInviteLifecycle(t *testing.T) {
 		t.Fatalf("code = %q, want invalid_invite_response", e.Code)
 	}
 
-	// AC-03：carol 通过邀请在 KR1 创建并提交 → 任务待入池审批、邀请完成
+	// AC-03：carol 通过邀请在 KR1 创建 → 任务直接入池（裁决 #162）、邀请完成
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true, TaskInviteId: &inviteID,
+		TaskInviteId: &inviteID,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "验证现场联动异常回退", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
@@ -1179,7 +1128,7 @@ func TestTaskInviteLifecycle(t *testing.T) {
 			invited = &tasks[i]
 		}
 	}
-	if invited == nil || invited.Status != api.TaskStatusPendingPoolReview {
+	if invited == nil || invited.Status != api.TaskStatusNotStarted {
 		t.Fatalf("邀请响应任务状态异常: %+v", tasks)
 	}
 	resp = doJSON(t, carol, http.MethodGet, invitesURL, nil)
@@ -1190,7 +1139,7 @@ func TestTaskInviteLifecycle(t *testing.T) {
 
 	// 已完成邀请再响应 409
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true, TaskInviteId: &inviteID,
+		TaskInviteId: &inviteID,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "重复响应", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
@@ -1224,7 +1173,7 @@ func TestTaskInviteLifecycle(t *testing.T) {
 		t.Fatalf("撤回不应补发通知，两次发出各一条: %d", inviteNotes)
 	}
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true, TaskInviteId: &second,
+		TaskInviteId: &second,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "响应已撤回邀请", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
@@ -1299,7 +1248,6 @@ func TestTaskStatusAndProgress(t *testing.T) {
 
 	// bob（KR 负责人）免审建两个任务：一个自己负责、一个 carol 负责
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "验收脚本编写", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 			{KeyResultId: kr1, Name: "联调环境准备", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
@@ -1481,9 +1429,8 @@ func TestTaskDetail(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
-	// alice 创建任务（负责人 bob）→ 待入池审批
+	// alice 创建任务（负责人 bob）→ 直接入池、未开始（裁决 #162）
 	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "验证现场联动异常回退", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 		},
@@ -1491,8 +1438,7 @@ func TestTaskDetail(t *testing.T) {
 	wantStatus(t, resp, http.StatusCreated)
 	tasks := decodeBody[[]api.Task](t, resp)
 	taskID := tasks[0].Id
-	// AC-04：当前环节文案同样显示当前审批人姓名（入池审批人是 KR 负责人 bob／李四）。
-	if tasks[0].CurrentStage != "待李四审批" || tasks[0].PendingActorName == nil || *tasks[0].PendingActorName != "李四" {
+	if tasks[0].CurrentStage != "待开始执行" || tasks[0].PendingActorName == nil || *tasks[0].PendingActorName != "李四" {
 		t.Fatalf("当前环节/待行动人派生异常: %+v", tasks[0])
 	}
 
@@ -1504,37 +1450,15 @@ func TestTaskDetail(t *testing.T) {
 	if detail.ObjectiveTitle != "提升交付质量" || detail.KrDescription != "上线自动验收" {
 		t.Fatalf("O/KR 归属派生异常: %+v", detail)
 	}
-	if len(detail.PoolReviews) != 1 || detail.PoolReviews[0].Status != api.PoolReviewStatusPending {
-		t.Fatalf("审核记录异常: %+v", detail.PoolReviews)
-	}
-	if detail.Task.CanDecidePoolReview || detail.Task.CanSubmitPoolReview || detail.Task.CanStart || detail.Task.CanCancel {
+	if detail.Task.CanStart || detail.Task.CanCancel {
 		t.Fatalf("访客不应有任何动作标志: %+v", detail.Task)
 	}
 
-	// KR 负责人 bob 视角出现审批动作（AC-34 操作按钮按权限出现）
+	// 任务负责人 bob 视角出现开始执行动作（AC-34 操作按钮按权限出现）
 	resp = doJSON(t, bob, http.MethodGet, detailURL, nil)
 	wantStatus(t, resp, http.StatusOK)
-	if d := decodeBody[api.TaskDetail](t, resp); !d.Task.CanDecidePoolReview {
-		t.Fatalf("KR 负责人应可处理审批: %+v", d.Task)
-	}
-
-	// 审核历史累积：退回→重提后详情含两条记录
-	decisionURL := fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, taskID)
-	op := "先补充完成标准"
-	resp = doJSON(t, bob, http.MethodPost, decisionURL, api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionRejected, Opinion: &op})
-	wantStatus(t, resp, http.StatusOK)
-	resp.Body.Close()
-	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/submit-pool-review", tasksURL, taskID), nil)
-	wantStatus(t, resp, http.StatusOK)
-	resp.Body.Close()
-	resp = doJSON(t, dave, http.MethodGet, detailURL, nil)
-	wantStatus(t, resp, http.StatusOK)
-	detail = decodeBody[api.TaskDetail](t, resp)
-	if len(detail.PoolReviews) != 2 || detail.PoolReviews[0].Status != api.PoolReviewStatusPending || detail.PoolReviews[1].Status != api.PoolReviewStatusRejected {
-		t.Fatalf("审核记录顺序异常: %+v", detail.PoolReviews)
-	}
-	if detail.PoolReviews[1].Opinion == nil || *detail.PoolReviews[1].Opinion != op {
-		t.Fatalf("退回意见未保留: %+v", detail.PoolReviews[1])
+	if d := decodeBody[api.TaskDetail](t, resp); !d.Task.CanStart {
+		t.Fatalf("任务负责人应可开始执行: %+v", d.Task)
 	}
 
 	// 不存在的任务 404
@@ -1544,7 +1468,7 @@ func TestTaskDetail(t *testing.T) {
 }
 
 // 关键字段修改审批（#12，AC-23）：审批期间旧值生效，通过后新值生效，退回后拟议值作废并
-// 派生退回待处理事项；KR 负责人本人免审即时生效；草稿直接完善。
+// 派生退回待处理事项；KR 负责人本人免审即时生效。
 func TestFieldChangeApproval(t *testing.T) {
 	q, pool := setupDB(t)
 	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
@@ -1588,35 +1512,16 @@ func TestFieldChangeApproval(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
-	// carol 创建草稿（不提交）→ 草稿直接完善不生成变更单
+	// carol 创建任务 → 直接入池、未开始（裁决 #162）
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: false,
 		Items: []api.CreateTaskItem{
-			{KeyResultId: kr1, Name: "初稿任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
+			{KeyResultId: kr1, Name: "验证现场联动异常回退", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
 	})
 	wantStatus(t, resp, http.StatusCreated)
 	tasks := decodeBody[[]api.Task](t, resp)
 	taskID := tasks[0].Id
 	changeURL := func(id int64) string { return fmt.Sprintf("%s/%d/field-changes", tasksURL, id) }
-	draftEdit := api.SubmitFieldChangeRequest{}
-	draftEdit.Changes.Name = sp("验证现场联动异常回退")
-	draftEdit.Changes.Description = sp("覆盖联动断链后的自动回退")
-	resp = doJSON(t, carol, http.MethodPost, changeURL(taskID), draftEdit)
-	wantStatus(t, resp, http.StatusOK)
-	edited := decodeBody[api.Task](t, resp)
-	if edited.Name != "验证现场联动异常回退" || edited.FieldChange != nil {
-		t.Fatalf("草稿完善异常: %+v", edited)
-	}
-
-	// 提交入池并通过，任务进入未开始
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/submit-pool-review", tasksURL, taskID), nil)
-	wantStatus(t, resp, http.StatusOK)
-	resp.Body.Close()
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, taskID),
-		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
-	wantStatus(t, resp, http.StatusOK)
-	resp.Body.Close()
 
 	// carol 提交关键字段修改（改截止时间）：原因必填 422
 	newEnd := openapiDate(t, "2026-10-15")
@@ -1762,7 +1667,6 @@ func TestDeliverablesAndFiles(t *testing.T) {
 
 	// 创建任务时带预期交付物 → 自动建交付物项并出现在列表列
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: bobUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("验收方案 V1")},
 		},
@@ -1921,7 +1825,6 @@ func TestDiscussionsAndNotifications(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 		},
@@ -2039,9 +1942,8 @@ func TestCompletionReviewFlow(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
-	// carol 建任务（带两个交付物项）→ bob 入池通过 → carol 开始执行
+	// carol 建任务（带两个交付物项，直接入池）→ carol 开始执行
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: carolUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("验收方案")},
 		},
@@ -2049,10 +1951,6 @@ func TestCompletionReviewFlow(t *testing.T) {
 	wantStatus(t, resp, http.StatusCreated)
 	tasks := decodeBody[[]api.Task](t, resp)
 	taskID := tasks[0].Id
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, taskID),
-		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
-	wantStatus(t, resp, http.StatusOK)
-	resp.Body.Close()
 	// 裁决 H1（#141）：已入池任务加交付物项即时生效，不走审批
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/deliverables", tasksURL, taskID),
 		api.CreateDeliverableRequest{FileName: "验收记录.docx"})
@@ -2248,7 +2146,6 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 
 	// bob 免审建上游任务 A（带交付物）与跨 KR 下游任务 B（carol 负责）
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "采集现场数据", OwnerId: bobUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("现场数据包")},
 			{KeyResultId: kr2, Name: "回归验证分析", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
@@ -2465,7 +2362,6 @@ func TestIntermediateReviewOrSign(t *testing.T) {
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: carolUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("验收方案")},
 		},
@@ -2473,10 +2369,6 @@ func TestIntermediateReviewOrSign(t *testing.T) {
 	wantStatus(t, resp, http.StatusCreated)
 	tasks := decodeBody[[]api.Task](t, resp)
 	taskID := tasks[0].Id
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, taskID),
-		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
-	wantStatus(t, resp, http.StatusOK)
-	resp.Body.Close()
 
 	// carol 配置或签组（dave、erin）；访客会被拒
 	reviewersURL := fmt.Sprintf("%s/%d/reviewers", tasksURL, taskID)
@@ -2587,7 +2479,7 @@ func TestIntermediateReviewOrSign(t *testing.T) {
 	}
 }
 
-// 指定成员输入请求（#14，AC-29/30；MW-10／MW-11）：草稿阶段不通知→入池通过后带上下文通知→同意接收（不就绪）
+// 指定成员输入请求（#14，AC-29/30；MW-10／MW-11）：输入关系建立后立即带上下文通知（裁决 #162）→同意接收（不就绪）
 // →提交内容后输入就绪；无拒绝/转派端点。
 func TestMemberInputRequests(t *testing.T) {
 	q, pool := setupDB(t)
@@ -2633,9 +2525,8 @@ func TestMemberInputRequests(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
-	// carol 建草稿（不提交）→ 配置成员输入（dave）→ 通知不发（AC-29 前半）
+	// carol 建任务（直接入池）→ 配置成员输入（dave）→ 输入关系建立后立即通知（裁决 #162）
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: false,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "回归验证分析", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
@@ -2649,8 +2540,9 @@ func TestMemberInputRequests(t *testing.T) {
 			Necessity: api.Required, ProviderIds: []int64{daveUser.ID},
 			ContentNote: "请提供最新接口字段口径说明", ExpectedDate: expected,
 		})
-	// 草稿任务的结构变更直接生效，不生成变更单（AC-23）
-	wantStructureAccepted(t, resp)
+	// 输入源属关键字段（AC-23）：负责人提交进 KR 负责人审批，通过后边才建立、通知才发出。
+	pendingInput := wantStructureAccepted(t, resp)
+	approveStructureChange(t, bob, base, created.Id, taskID, pendingInput)
 	edge := edgeOf(t, carol, base, created.Id, taskID, "接口字段口径")
 	if edge.InputRequest == nil || edge.InputRequest.State != api.InputRequestStatePending || edge.Ready {
 		t.Fatalf("成员输入边异常: %+v", edge)
@@ -2658,8 +2550,9 @@ func TestMemberInputRequests(t *testing.T) {
 	requestID := edge.InputRequest.Id
 	resp = doJSON(t, dave, http.MethodGet, base+"/notifications", nil)
 	wantStatus(t, resp, http.StatusOK)
-	if got := decodeBody[[]api.Notification](t, resp); len(got) != 0 {
-		t.Fatalf("草稿阶段不应打扰对接人: %+v", got)
+	notes := decodeBody[[]api.Notification](t, resp)
+	if len(notes) != 1 || notes[0].Kind != "input_request" || notes[0].TaskId == nil || *notes[0].TaskId != taskID {
+		t.Fatalf("输入关系建立后应立即发带上下文通知: %+v", notes)
 	}
 
 	// 期望时间必填 422
@@ -2670,27 +2563,13 @@ func TestMemberInputRequests(t *testing.T) {
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 
-	// 提交入池 → KR 负责人通过 → dave 收到带上下文通知（AC-29 后半）
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/submit-pool-review", tasksURL, taskID), nil)
+	// 必要输入未到：任务显示等待输入
+	resp = doJSON(t, carol, http.MethodGet, tasksURL, nil)
 	wantStatus(t, resp, http.StatusOK)
-	resp.Body.Close()
-	resp = doJSON(t, dave, http.MethodGet, base+"/notifications", nil)
-	wantStatus(t, resp, http.StatusOK)
-	if got := decodeBody[[]api.Notification](t, resp); len(got) != 0 {
-		t.Fatalf("待审批阶段仍不应通知: %+v", got)
-	}
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, taskID),
-		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
-	wantStatus(t, resp, http.StatusOK)
-	afterPool := decodeBody[api.Task](t, resp)
-	if afterPool.Status != api.TaskStatusWaitingInput {
-		t.Fatalf("必要输入未到应显示等待输入: %+v", afterPool.Status)
-	}
-	resp = doJSON(t, dave, http.MethodGet, base+"/notifications", nil)
-	wantStatus(t, resp, http.StatusOK)
-	notes := decodeBody[[]api.Notification](t, resp)
-	if len(notes) != 1 || notes[0].Kind != "input_request" || notes[0].TaskId == nil || *notes[0].TaskId != taskID {
-		t.Fatalf("入池通过后应发带上下文通知: %+v", notes)
+	for _, task := range decodeBody[[]api.Task](t, resp) {
+		if task.Id == taskID && task.Status != api.TaskStatusWaitingInput {
+			t.Fatalf("必要输入未到应显示等待输入: %+v", task.Status)
+		}
 	}
 
 	// AC-30：他人不能接收；dave 同意接收（接收≠就绪）；未接收不能提交
@@ -2814,7 +2693,6 @@ func TestMultiSourceInputs(t *testing.T) {
 
 	// KR 负责人 bob 免审建两条上游任务与两条下游任务（C 用于多来源任务，D 用于多对接人）
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "采集现场数据", OwnerId: bobUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("现场数据包")},
 			{KeyResultId: kr1, Name: "整理历史台账", OwnerId: bobUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("历史台账")},
@@ -3023,7 +2901,6 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 
 	// bob 免审建两个任务：下游由 carol 负责，上游由 bob 负责。
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "回归验证分析", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 			{KeyResultId: kr1, Name: "现场数据采集", OwnerId: bobUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("现场数据包")},
@@ -3219,9 +3096,8 @@ func TestMyWorkFiveGroups(t *testing.T) {
 	myWorkURL := fmt.Sprintf("%s/projects/%d/my-work", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
-	// carol 提交任务入池（待审批）→ carol 等待他人、bob（KR 负责人）待我审批
+	// carol 创建任务（直接入池）→ carol 待我处理出现任务卡；bob（KR 负责人）暂无审批件
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: carolUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("验收方案")},
 		},
@@ -3233,8 +3109,8 @@ func TestMyWorkFiveGroups(t *testing.T) {
 	resp = doJSON(t, bob, http.MethodGet, myWorkURL, nil)
 	wantStatus(t, resp, http.StatusOK)
 	bobWork := decodeBody[api.MyWork](t, resp)
-	if len(bobWork.Approvals) != 1 || bobWork.Approvals[0].Kind != "pool_review" {
-		t.Fatalf("入池审批应在待我审批: %+v", bobWork.Approvals)
+	if len(bobWork.Approvals) != 0 {
+		t.Fatalf("此时不应有待我审批: %+v", bobWork.Approvals)
 	}
 	// 身份卡（#69）：身份文案与当前职责随事实派生；bob 是 KR 负责人。
 	if id := bobWork.Identity; id.UserId != bobUser.ID || id.DisplayName != "李四" ||
@@ -3244,21 +3120,6 @@ func TestMyWorkFiveGroups(t *testing.T) {
 	resp = doJSON(t, carol, http.MethodGet, myWorkURL, nil)
 	wantStatus(t, resp, http.StatusOK)
 	carolWork := decodeBody[api.MyWork](t, resp)
-	if len(carolWork.Waiting) != 1 || carolWork.Waiting[0].Kind != "waiting_pool" {
-		t.Fatalf("入池申请应在等待他人: %+v", carolWork.Waiting)
-	}
-	if len(carolWork.Pending) != 0 {
-		t.Fatalf("待审批任务不应在待我处理: %+v", carolWork.Pending)
-	}
-
-	// 通过入池 → carol 待我处理出现任务卡；走到 KR 终审 → bob 待我审批出现 final_review（AC-16）
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, taskID),
-		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
-	wantStatus(t, resp, http.StatusOK)
-	resp.Body.Close()
-	resp = doJSON(t, carol, http.MethodGet, myWorkURL, nil)
-	wantStatus(t, resp, http.StatusOK)
-	carolWork = decodeBody[api.MyWork](t, resp)
 	if len(carolWork.Pending) != 1 || carolWork.Pending[0].Kind != "task" {
 		t.Fatalf("入池后任务应在待我处理: %+v", carolWork.Pending)
 	}
@@ -3309,7 +3170,6 @@ func TestMyWorkFiveGroups(t *testing.T) {
 	// 卡点：alice 名下一个已超期任务派生任务超期卡点 → alice 与我相关的卡点（AC-11）
 	pastStart, pastEnd := openapiDate(t, "2020-01-01"), openapiDate(t, "2020-02-01")
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "验收环境准备", OwnerId: aliceUser.ID, StartDate: pastStart, EndDate: pastEnd},
 		},
@@ -3377,7 +3237,6 @@ func TestInterlockAndCriticalPath(t *testing.T) {
 
 	// 三个任务：A→B→C 硬前置链；再加 C→B 硬前置构成循环；B→A 反馈边不影响。
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "任务A", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 			{KeyResultId: kr1, Name: "任务B", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
@@ -3492,7 +3351,6 @@ func TestArtifacts(t *testing.T) {
 
 	// 走完整链路生成一份当前内容：建任务→开始→候选→终审通过
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: bobUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("验收方案")},
 		},
@@ -3525,7 +3383,6 @@ func TestArtifacts(t *testing.T) {
 
 	// 下游任务以这份成果为必要输入，边上绑定交付物项：归档列表的「来源关系边」列由此而来。
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "按方案执行验收", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 		},
@@ -3747,7 +3604,6 @@ func TestProjectReport(t *testing.T) {
 	// 任务 C：B 的上游，始终不完成，用于让 B 的必要输入未就绪。
 	far := openapiDate(t, "2026-12-31")
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: bobUser.ID, StartDate: start, EndDate: soon, ExpectedDeliverable: sp("验收方案")},
 			{KeyResultId: kr1, Name: "临近截止任务", OwnerId: bobUser.ID, StartDate: start, EndDate: soon},
@@ -3895,7 +3751,7 @@ func TestReportExport(t *testing.T) {
 	}
 }
 
-// 表格导入与批量入池（#27，AC-02/25）：结构化导入生成 O/KR 与任务草稿（整批事务）；
+// 表格导入（#27，AC-02；裁决 #162）：结构化导入生成 O/KR 与任务并直接入池（整批事务）；
 // 按 KR 批量提交；KR 负责人批量通过或退回。
 func TestImportAndPool(t *testing.T) {
 	q, pool := setupDB(t)
@@ -3939,7 +3795,7 @@ func TestImportAndPool(t *testing.T) {
 	wantStatus(t, resp, http.StatusForbidden)
 	resp.Body.Close()
 
-	// AC-02：管理员导入 1 O × 2 KR × 3 任务草稿
+	// AC-02：管理员导入 1 O × 2 KR × 3 任务（裁决 #162：直接入池）
 	imp := api.ImportRequest{SourceFileName: sp("2026Q3 目标拆解.xlsx"), Items: []api.ImportItem{{
 		Title: sp("提升交付质量"),
 		KeyResults: &[]api.ImportKrItem{
@@ -3959,8 +3815,8 @@ func TestImportAndPool(t *testing.T) {
 		t.Fatalf("导入结构异常: O=%d tasks=%d", len(result.Objectives), len(result.Tasks))
 	}
 	for _, task := range result.Tasks {
-		if task.Status != api.TaskStatusDraft {
-			t.Fatalf("导入任务应为草稿: %+v", task)
+		if task.Status != api.TaskStatusNotStarted {
+			t.Fatalf("导入任务应直接入池为未开始: %+v", task)
 		}
 	}
 
@@ -4037,7 +3893,7 @@ func TestImportAndPool(t *testing.T) {
 	if e := decodeBody[api.Error](t, resp); e.Code != "invalid_key_result" {
 		t.Fatalf("code = %q, want invalid_key_result", e.Code)
 	}
-	// 管理员导入两条任务草稿，带预期交付物
+	// 管理员导入两条任务（直接入池），带预期交付物
 	resp = doJSON(t, alice, http.MethodPost, importTasksURL, api.ImportTasksRequest{
 		SourceFileName: sp("任务批量导入.xlsx"),
 		Items: []api.ImportTaskGroup{{KeyResultId: kr1ID, Tasks: []api.ImportTaskItem{
@@ -4055,7 +3911,7 @@ func TestImportAndPool(t *testing.T) {
 		imported[task.Name] = task
 	}
 	four, ok := imported["导入任务四"]
-	if !ok || four.Status != api.TaskStatusDraft || four.KeyResultId != kr1ID {
+	if !ok || four.Status != api.TaskStatusNotStarted || four.KeyResultId != kr1ID {
 		t.Fatalf("导入任务四异常: %+v", four)
 	}
 	if _, ok := imported["导入任务五"]; !ok {
@@ -4076,51 +3932,18 @@ func TestImportAndPool(t *testing.T) {
 		t.Fatalf("任务导入源文件名未留存: %+v", latest.SourceFileName)
 	}
 
-	// AC-25（裁决 A2）：批量端点已移除，导入的任务逐条经单条端点提交入池与审批。
-	kr1Tasks := []int64{}
-	for _, task := range result.Tasks {
-		if task.Name == "导入任务一" || task.Name == "导入任务二" {
-			kr1Tasks = append(kr1Tasks, task.Id)
-		}
-	}
-	for _, id := range kr1Tasks {
-		resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/projects/%d/tasks/%d/submit-pool-review", base, created.Id, id), nil)
-		wantStatus(t, resp, http.StatusOK)
-		if got := decodeBody[api.Task](t, resp); got.Status != api.TaskStatusPendingPoolReview {
-			t.Fatalf("逐条提交后应待入池审批: %+v", got)
-		}
-	}
-
-	// 非 KR 负责人处理 403；KR 负责人 bob 逐条通过
-	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/tasks/%d/pool-review-decision", base, created.Id, kr1Tasks[0]),
-		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
-	wantStatus(t, resp, http.StatusForbidden)
-	resp.Body.Close()
-	for _, id := range kr1Tasks {
-		resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/projects/%d/tasks/%d/pool-review-decision", base, created.Id, id),
-			api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
-		wantStatus(t, resp, http.StatusOK)
-		if got := decodeBody[api.Task](t, resp); got.Status != api.TaskStatusNotStarted {
-			t.Fatalf("逐条通过后应未开始: %+v", got)
-		}
-	}
-
-	// 退回路径：任务三提交后被逐条退回，回到草稿
-	var task3 int64
-	for _, task := range result.Tasks {
-		if task.Name == "导入任务三" {
-			task3 = task.Id
-		}
-	}
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/projects/%d/tasks/%d/submit-pool-review", base, created.Id, task3), nil)
+	// 裁决 #162：导入任务直接入池，KR 负责人 bob 应收到入池通知（本人负责的任务除外）
+	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
 	wantStatus(t, resp, http.StatusOK)
-	resp.Body.Close()
-	op := "范围与 KR 不匹配"
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/projects/%d/tasks/%d/pool-review-decision", base, created.Id, task3),
-		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionRejected, Opinion: &op})
-	wantStatus(t, resp, http.StatusOK)
-	if got := decodeBody[api.Task](t, resp); got.Status != api.TaskStatusDraft {
-		t.Fatalf("退回后应回草稿: %+v", got)
+	poolNotes := 0
+	for _, n := range dropOkrAssigned(decodeBody[[]api.Notification](t, resp)) {
+		if n.Kind == "task_pool_entered" {
+			poolNotes++
+		}
+	}
+	// alice 两次导入共 5 条任务落在 bob 负责的 KR 下，逐条通知。
+	if poolNotes != 5 {
+		t.Fatalf("KR 负责人应收到 5 条入池通知，实际 %d", poolNotes)
 	}
 }
 
@@ -4171,9 +3994,8 @@ func TestUnifiedPermissionsAcrossIdentities(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
-	// carol 提交任务（待入池审批）
+	// carol 创建任务（直接入池，裁决 #162）
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
@@ -4219,22 +4041,18 @@ func TestUnifiedPermissionsAcrossIdentities(t *testing.T) {
 		wantStatus(t, resp, http.StatusOK)
 		return decodeBody[[]api.Task](t, resp)[0]
 	}
-	if ft := flagsOf(bob); !ft.CanDecidePoolReview {
-		t.Fatalf("KR 负责人应可审批: %+v", ft)
+	if ft := flagsOf(carol); !ft.CanStart {
+		t.Fatalf("任务负责人应可开始执行: %+v", ft)
 	}
-	if ft := flagsOf(carol); ft.CanDecidePoolReview {
-		t.Fatalf("提交人不应可审批: %+v", ft)
+	if ft := flagsOf(bob); ft.CanStart {
+		t.Fatalf("非负责人（KR 负责人）不应可开始执行: %+v", ft)
 	}
-	if ft := flagsOf(alice); ft.CanDecidePoolReview {
-		t.Fatalf("管理员不能替代 KR 负责人审批: %+v", ft)
-	}
-	if ft := flagsOf(dave); ft.CanDecidePoolReview || ft.CanProposeFieldChange {
+	if ft := flagsOf(dave); ft.CanStart || ft.CanProposeFieldChange {
 		t.Fatalf("访客不应有业务动作标志: %+v", ft)
 	}
 
 	// 访客：不能建任务/建 OKR，但可讨论、可查看下载（§3.4）
 	resp = doJSON(t, dave, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: false,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "越权任务", OwnerId: daveUser.ID, StartDate: start, EndDate: end},
 		},
@@ -4259,11 +4077,11 @@ func TestUnifiedPermissionsAcrossIdentities(t *testing.T) {
 		wantStatus(t, resp, http.StatusOK)
 		return decodeBody[api.MyWork](t, resp)
 	}
-	if w := getWork(bob); len(w.Approvals) != 1 {
-		t.Fatalf("KR 负责人的待我审批异常: %+v", w.Approvals)
+	if w := getWork(carol); len(w.Pending) != 1 {
+		t.Fatalf("任务负责人的待我处理异常: %+v", w.Pending)
 	}
-	if w := getWork(carol); len(w.Approvals) != 0 || len(w.Waiting) != 1 {
-		t.Fatalf("提交人的分组异常: 审批 %d 等待 %d", len(w.Approvals), len(w.Waiting))
+	if w := getWork(bob); len(w.Pending)+len(w.Approvals)+len(w.Waiting) != 0 {
+		t.Fatalf("KR 负责人此时不应有行动事项: %+v", w)
 	}
 	if w := getWork(dave); len(w.Pending)+len(w.Approvals)+len(w.Waiting)+len(w.Blockers) != 0 {
 		t.Fatalf("访客不应有行动事项: %+v", w)
@@ -4271,10 +4089,6 @@ func TestUnifiedPermissionsAcrossIdentities(t *testing.T) {
 
 	// AC-22：外部传递不产生外部账号——对接人必须是项目内非访客；
 	// 外部材料由内部协调人（成员）代为接收与提交。
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, taskID),
-		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
-	wantStatus(t, resp, http.StatusOK)
-	resp.Body.Close()
 	expected := openapiDate(t, "2026-09-10")
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/member-inputs", tasksURL, taskID),
 		api.CreateMemberInputRequest{Necessity: api.Required, ProviderIds: []int64{daveUser.ID},
@@ -4352,8 +4166,8 @@ func TestTaskActivity(t *testing.T) {
 	kr1 := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
 
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
-	// 周期取已经过去的窗口：任务在草稿态不派生卡点，入池通过进入未开始后才成为超期卡点，
-	// 这样「卡点出现」正好由入池通过这次写操作 diff 出来。
+	// 周期取已经过去的窗口：创建即入池进入未开始（裁决 #162），立即成为超期卡点，
+	// 「卡点出现」由创建这次写操作 diff 出来。
 	start, end := openapiDate(t, "2026-01-01"), openapiDate(t, "2026-01-05")
 	activitiesOf := func(taskID int64) []api.TaskActivity {
 		t.Helper()
@@ -4377,9 +4191,8 @@ func TestTaskActivity(t *testing.T) {
 		return nil
 	}
 
-	// bob 建任务并提交入池 → 提交留痕；alice（KR 负责人）退回 → 理由进动态（MW-18）
+	// bob 建任务 → 入池留痕（裁决 #162）
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "端到端联调", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 		},
@@ -4388,44 +4201,18 @@ func TestTaskActivity(t *testing.T) {
 	taskID := decodeBody[[]api.Task](t, resp)[0].Id
 
 	acts := activitiesOf(taskID)
-	if len(acts) != 1 || acts[0].Kind != api.PoolSubmitted || acts[0].ActorName == nil || *acts[0].ActorName != "李四" {
-		t.Fatalf("提交入池应留痕并带行动人: %+v", acts)
+	entered := has(acts, api.PoolEntered)
+	if entered == nil || entered.ActorName == nil || *entered.ActorName != "李四" {
+		t.Fatalf("任务入池应留痕并带行动人: %+v", acts)
 	}
-	if acts[0].KindLabel != "提交入池审批" {
-		t.Fatalf("动态类型中文名异常: %+v", acts[0])
-	}
-
-	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, taskID),
-		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionRejected, Opinion: sp("范围写得太粗")})
-	wantStatus(t, resp, http.StatusOK)
-	resp.Body.Close()
-
-	acts = activitiesOf(taskID)
-	rejected := has(acts, api.PoolRejected)
-	if rejected == nil || rejected.Summary != "入池审批退回：范围写得太粗" {
-		t.Fatalf("退回理由应进动态: %+v", kinds(acts))
-	}
-	// 最新在前
-	if acts[0].Kind != api.PoolRejected {
-		t.Fatalf("动态应最新在前: %+v", kinds(acts))
+	if entered.KindLabel != "任务入池" {
+		t.Fatalf("动态类型中文名异常: %+v", entered)
 	}
 
-	// 重新提交并通过 → 任务进入未开始
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/submit-pool-review", tasksURL, taskID), nil)
-	wantStatus(t, resp, http.StatusOK)
-	resp.Body.Close()
-	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, taskID),
-		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
-	wantStatus(t, resp, http.StatusOK)
-	resp.Body.Close()
-	acts = activitiesOf(taskID)
-	if has(acts, api.PoolApproved) == nil {
-		t.Fatalf("入池通过应留痕: %+v", kinds(acts))
-	}
-	// 入池通过让任务从草稿进入未开始，截止时间已过 ⇒ 派生出任务超期卡点，diff 补记「卡点出现」
+	// 创建即进入未开始，截止时间已过 ⇒ 派生出任务超期卡点，diff 补记「卡点出现」
 	opened := has(acts, api.BlockerOpened)
 	if opened == nil {
-		t.Fatalf("入池通过后应补记卡点出现: %+v", kinds(acts))
+		t.Fatalf("入池后应补记卡点出现: %+v", kinds(acts))
 	}
 	if opened.ActorName != nil {
 		t.Fatalf("系统派生事件不应带行动人: %+v", opened)
@@ -4505,7 +4292,6 @@ func TestReceiversAndReceipts(t *testing.T) {
 
 	// carol 建两个任务并入池通过、开始执行
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "指定接收方的任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("移交清单")},
 			{KeyResultId: kr1, Name: "全员接收的任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("通报材料")},
@@ -4515,10 +4301,6 @@ func TestReceiversAndReceipts(t *testing.T) {
 	tasks := decodeBody[[]api.Task](t, resp)
 	taskA, taskB := tasks[0].Id, tasks[1].Id
 	for _, id := range []int64{taskA, taskB} {
-		resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, id),
-			api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
-		wantStatus(t, resp, http.StatusOK)
-		resp.Body.Close()
 		resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, id),
 			api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
 		wantStatus(t, resp, http.StatusOK)
@@ -4690,7 +4472,7 @@ func TestRemindWaitingTargets(t *testing.T) {
 	}
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("按时推进"), KeyResults: &[]api.CreateKeyResultInput{{Description: "入池及时审批", OwnerId: &bobUser.ID}}},
+			{Title: sp("按时推进"), KeyResults: &[]api.CreateKeyResultInput{{Description: "变更及时审批", OwnerId: &bobUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
@@ -4698,15 +4480,20 @@ func TestRemindWaitingTargets(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
-	// carol 提交入池申请：刚提交，未达审批超时阈值，因此没有任何派生卡点
+	// carol 建任务后提交关键字段修改：刚提交，未达审批超时阈值，因此没有任何派生卡点
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "等审批的任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
 	})
 	wantStatus(t, resp, http.StatusCreated)
 	task := decodeBody[[]api.Task](t, resp)[0]
+	newEnd := openapiDate(t, "2026-10-15")
+	fcReq := api.SubmitFieldChangeRequest{Reason: sp("联调窗口顺延")}
+	fcReq.Changes.EndDate = &newEnd
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/field-changes", tasksURL, task.Id), fcReq)
+	wantStatus(t, resp, http.StatusOK)
+	changeID := decodeBody[api.Task](t, resp).FieldChange.Id
 
 	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/projects/%d/blockers", base, created.Id), nil)
 	wantStatus(t, resp, http.StatusOK)
@@ -4721,14 +4508,14 @@ func TestRemindWaitingTargets(t *testing.T) {
 	work := decodeBody[api.MyWork](t, resp)
 	var waiting *api.WorkItem
 	for i := range work.Waiting {
-		if work.Waiting[i].Kind == "waiting_pool" {
+		if work.Waiting[i].Kind == "waiting_field_change" {
 			waiting = &work.Waiting[i]
 		}
 	}
 	if waiting == nil {
-		t.Fatalf("等待他人应有入池申请卡片: %+v", work.Waiting)
+		t.Fatalf("等待他人应有关键字段变更卡片: %+v", work.Waiting)
 	}
-	if !waiting.CanRemind || waiting.RefKey == nil || !strings.HasPrefix(*waiting.RefKey, "wait:pool_review:") {
+	if !waiting.CanRemind || waiting.RefKey == nil || !strings.HasPrefix(*waiting.RefKey, "wait:field_change:") {
 		t.Fatalf("尚未成卡点的等待事项也应可提醒并按自身键寻址: %+v", waiting)
 	}
 
@@ -4744,11 +4531,16 @@ func TestRemindWaitingTargets(t *testing.T) {
 	resp.Body.Close()
 	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
 	wantStatus(t, resp, http.StatusOK)
-	notes := dropOkrAssigned(decodeBody[[]api.Notification](t, resp))
-	if len(notes) != 1 || notes[0].Kind != "blocker_remind" || notes[0].TaskId == nil || *notes[0].TaskId != task.Id {
+	notes := []api.Notification{}
+	for _, n := range decodeBody[[]api.Notification](t, resp) {
+		if n.Kind == "blocker_remind" {
+			notes = append(notes, n)
+		}
+	}
+	if len(notes) != 1 || notes[0].TaskId == nil || *notes[0].TaskId != task.Id {
 		t.Fatalf("提醒通知异常: %+v", notes)
 	}
-	for _, want := range []string{"等审批的任务", "入池审批处理", "2026-09-30"} {
+	for _, want := range []string{"等审批的任务", "关键字段变更审批处理", "2026-09-30"} {
 		if !strings.Contains(notes[0].Content, want) {
 			t.Fatalf("提醒正文缺「%s」: %s", want, notes[0].Content)
 		}
@@ -4759,9 +4551,9 @@ func TestRemindWaitingTargets(t *testing.T) {
 	wantStatus(t, resp, http.StatusConflict)
 	resp.Body.Close()
 
-	// 目标已处理后按不存在处理
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, task.Id),
-		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
+	// 目标已处理后按不存在处理：bob 通过变更单，等待事项消失
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/field-changes/%d/decision", tasksURL, task.Id, changeID),
+		api.FieldChangeDecisionRequest{Decision: api.FieldChangeDecisionRequestDecisionApproved})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
 	resp = doJSON(t, alice, http.MethodPost, remindURL, api.RemindRequest{TargetKey: *waiting.RefKey})
@@ -4811,7 +4603,6 @@ func TestTimeBlockerActivitySweep(t *testing.T) {
 	future := time.Now().AddDate(0, 0, 30).Format("2006-01-02")
 	start, end := openapiDate(t, time.Now().Format("2006-01-02")), openapiDate(t, future)
 	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "按期交付的任务", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 		},
@@ -5030,15 +4821,23 @@ func TestOkrEditHandoverAndMemberRemoval(t *testing.T) {
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 
-	// 造一件未决审批：carol 建任务提交入池，待 KR 负责人 bob 处理
+	// 造一件未决审批：carol 建任务（直接入池）后提交关键字段修改，待 KR 负责人 bob 处理
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
-		Items:           []api.CreateTaskItem{{KeyResultId: kr1, Name: "联调验证", OwnerId: carolUser.ID, StartDate: start, EndDate: end}},
+		Items: []api.CreateTaskItem{{KeyResultId: kr1, Name: "联调验证", OwnerId: carolUser.ID, StartDate: start, EndDate: end}},
 	})
 	wantStatus(t, resp, http.StatusCreated)
 	taskID := decodeBody[[]api.Task](t, resp)[0].Id
+	newEnd := openapiDate(t, "2026-10-15")
+	fcReq := api.SubmitFieldChangeRequest{Reason: sp("联调窗口顺延")}
+	fcReq.Changes.EndDate = &newEnd
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/field-changes", tasksURL, taskID), fcReq)
+	wantStatus(t, resp, http.StatusOK)
+	pendingChange := decodeBody[api.Task](t, resp).FieldChange
+	if pendingChange == nil || pendingChange.State != api.FieldChangeStatePending {
+		t.Fatalf("变更单未进入待审批: %+v", pendingChange)
+	}
 
 	// AC-61：交接确认信息给出未决审批条数
 	resp = doJSON(t, alice, http.MethodGet, krURL, nil)
@@ -5059,8 +4858,8 @@ func TestOkrEditHandoverAndMemberRemoval(t *testing.T) {
 		api.UpdateProjectMemberRoleRequest{Role: api.Viewer})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, taskID),
-		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/field-changes/%d/decision", tasksURL, taskID, pendingChange.Id),
+		api.FieldChangeDecisionRequest{Decision: api.FieldChangeDecisionRequestDecisionApproved})
 	wantStatus(t, resp, http.StatusForbidden)
 	resp.Body.Close()
 	resp = doJSON(t, bob, http.MethodPatch, krURL, api.UpdateKeyResultRequest{Description: sp("只读也想改")})
@@ -5201,7 +5000,6 @@ func TestStructureChangeRejected(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items:           []api.CreateTaskItem{{KeyResultId: kr1, Name: "联调验证", OwnerId: carolUser.ID, StartDate: start, EndDate: end}},
 	})
 	wantStatus(t, resp, http.StatusCreated)
@@ -5289,7 +5087,6 @@ func TestDeliverableStructureFree(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items:           []api.CreateTaskItem{{KeyResultId: kr1, Name: "联调验证", OwnerId: carolUser.ID, StartDate: start, EndDate: end}},
 	})
 	wantStatus(t, resp, http.StatusCreated)
@@ -5411,15 +5208,10 @@ func TestFieldChangeOnTerminalTask(t *testing.T) {
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items:           []api.CreateTaskItem{{KeyResultId: kr1, Name: "联调验证", OwnerId: carolUser.ID, StartDate: start, EndDate: end}},
 	})
 	wantStatus(t, resp, http.StatusCreated)
 	taskID := decodeBody[[]api.Task](t, resp)[0].Id
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, taskID),
-		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
-	wantStatus(t, resp, http.StatusOK)
-	resp.Body.Close()
 
 	// carol 提交关键字段变更 → 待 KR 负责人审批
 	newEnd := openapiDate(t, "2026-10-15")
@@ -5996,16 +5788,15 @@ func TestProjectSettingsThresholds(t *testing.T) {
 		t.Fatalf("code = %q, want invalid_request", e.Code)
 	}
 
-	// 建一个停在入池审批的任务，并把提交时间往前拨 2 天
+	// 建一个停在关键字段变更审批的任务，并把提交时间往前拨 2 天
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("按时推进"), KeyResults: &[]api.CreateKeyResultInput{{Description: "入池及时审批", OwnerId: &bobUser.ID}}},
+			{Title: sp("按时推进"), KeyResults: &[]api.CreateKeyResultInput{{Description: "变更及时审批", OwnerId: &bobUser.ID}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	kr1 := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/projects/%d/tasks", base, created.Id),
 		api.CreateTaskBatchRequest{
-			SubmitForReview: true,
 			Items: []api.CreateTaskItem{{
 				KeyResultId: kr1, Name: "等审批的任务", OwnerId: carolUser.ID,
 				StartDate: openapiDate(t, "2026-09-01"), EndDate: openapiDate(t, "2026-09-30"),
@@ -6013,8 +5804,14 @@ func TestProjectSettingsThresholds(t *testing.T) {
 		})
 	wantStatus(t, resp, http.StatusCreated)
 	task := decodeBody[[]api.Task](t, resp)[0]
+	fcTimeout := api.SubmitFieldChangeRequest{Reason: sp("联调窗口顺延")}
+	newEnd := openapiDate(t, "2026-10-15")
+	fcTimeout.Changes.EndDate = &newEnd
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/projects/%d/tasks/%d/field-changes", base, created.Id, task.Id), fcTimeout)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
 	if _, err := pool.Exec(context.Background(),
-		"UPDATE pool_reviews SET submitted_at = now() - interval '2 days' WHERE task_id = $1", task.Id); err != nil {
+		"UPDATE field_change_requests SET submitted_at = now() - interval '2 days' WHERE task_id = $1", task.Id); err != nil {
 		t.Fatalf("回拨提交时间失败: %v", err)
 	}
 
@@ -6134,17 +5931,12 @@ func TestTaskParticipants(t *testing.T) {
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "编写评审材料", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
 	})
 	wantStatus(t, resp, http.StatusCreated)
 	taskID := decodeBody[[]api.Task](t, resp)[0].Id
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, taskID),
-		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
-	wantStatus(t, resp, http.StatusOK)
-	resp.Body.Close()
 
 	participantsURL := fmt.Sprintf("%s/%d/participants", tasksURL, taskID)
 	// 无关成员不可配置
@@ -6265,17 +6057,12 @@ func TestResultUpdateFlow(t *testing.T) {
 
 	// carol 建任务 → bob 入池通过 → carol 执行 → 首次定稿走完完成审批
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "输出接口说明", OwnerId: carolUser.ID, StartDate: start, EndDate: end, ExpectedDeliverable: sp("接口说明")},
 		},
 	})
 	wantStatus(t, resp, http.StatusCreated)
 	taskID := decodeBody[[]api.Task](t, resp)[0].Id
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/pool-review-decision", tasksURL, taskID),
-		api.PoolReviewDecisionRequest{Decision: api.PoolReviewDecisionRequestDecisionApproved})
-	wantStatus(t, resp, http.StatusOK)
-	resp.Body.Close()
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, taskID),
 		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
 	wantStatus(t, resp, http.StatusOK)
@@ -6476,7 +6263,6 @@ func TestResultUpdateFlow(t *testing.T) {
 
 	// 已关闭任务永不可发起成果更新
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: false,
 		Items:           []api.CreateTaskItem{{KeyResultId: kr1, Name: "待取消任务", OwnerId: bobUser.ID, StartDate: start, EndDate: end}},
 	})
 	wantStatus(t, resp, http.StatusCreated)
@@ -6542,7 +6328,6 @@ func TestPublicProjectImplicitViewer(t *testing.T) {
 	tasksURL := projectURL + "/tasks"
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		SubmitForReview: true,
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: bobUser.ID, StartDate: start, EndDate: end,
 				ExpectedDeliverable: sp("验收方案")},

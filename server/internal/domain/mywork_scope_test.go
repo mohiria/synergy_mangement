@@ -123,10 +123,10 @@ func TestMyWorkApprovalTimeoutFromProjectSettings(t *testing.T) {
 				UserID: me, Actor: Actor{Role: RoleMember}, Now: now,
 				ApprovalTimeoutDays: tc.timeoutDays,
 				Tasks: []WorkTaskFact{
-					{ID: 1, Name: "待入池任务", DisplayStatus: TaskDraft, OwnerID: submitter, CreatorID: submitter, KrOwnerID: &me},
+					{ID: 1, Name: "待改任务", DisplayStatus: TaskInProgress, OwnerID: submitter, CreatorID: submitter, KrOwnerID: &me},
 				},
-				PoolReviews: []WorkApprovalFact{{
-					ID: 60, TaskID: 1, TaskName: "待入池任务", SubmittedBy: submitter,
+				FieldChanges: []WorkApprovalFact{{
+					ID: 60, TaskID: 1, TaskName: "待改任务", SubmittedBy: submitter,
 					KrOwnerID: &me, KrOwnerName: "我", SubmittedAt: submitted,
 				}},
 			})

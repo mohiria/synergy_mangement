@@ -1,10 +1,10 @@
--- 任务、入池审批单、中间审核组、接收方与接收记录。
+-- 任务、中间审核组、接收方与接收记录（裁决 #162：无入池审批，任务创建即入池）。
 --
 -- 状态分布是刻意安排的：
 --   · 6、22 已过截止仍在执行  → 任务超期卡点
---   · 23（入池，6 天）、14（终审，5 天）、7（关键字段变更，4 天）停在审批环节 → 审批超时卡点（N=3）
+--   · 14（终审，5 天）、7（关键字段变更，4 天）停在审批环节 → 审批超时卡点（N=3）
 --   · 9、13、29、37、45 的必要输入未就绪         → 显示「等待输入」＋上游未就绪卡点
---   · 20 被退回后回到草稿，8 有一张退回未处理的变更单 → 我的工作「待我处理」
+--   · 8 有一张退回未处理的变更单 → 我的工作「待我处理」
 
 INSERT INTO tasks (id, key_result_id, name, owner_id, start_date, end_date, status, created_by,
                    progress, cancel_reason, description, completion_criteria, receiver_scope, created_at, updated_at)
@@ -75,7 +75,7 @@ OVERRIDING SYSTEM VALUE VALUES
 (19, 5, '完成迁移后关键交易性能对比', 6, current_date - 30, current_date + 8, 'in_progress', 6, 45, '',
  '目前已完成 5 个交易的对比，其中账户查询劣化 14%，待优化后复测。', '12 个关键交易 TP99 劣化不超过 10%。', 'none',
  now() - interval '32 days', now() - interval '3 days'),
-(20, 5, '输出性能优化建议清单', 4, current_date + 2, current_date + 20, 'draft', 4, NULL, '',
+(20, 5, '输出性能优化建议清单', 4, current_date + 2, current_date + 20, 'not_started', 4, NULL, '',
  '把对比中发现的劣化项按优化手段归类，给出优先级。', '', 'none',
  now() - interval '9 days', now() - interval '3 days'),
 
@@ -86,7 +86,7 @@ OVERRIDING SYSTEM VALUE VALUES
 (22, 6, '配置新库监控告警与巡检脚本', 9, current_date - 50, current_date - 1, 'in_progress', 11, 60, '',
  '监控项已接入 60%，慢查询与锁等待告警还没配。', '核心指标告警覆盖率 100%，巡检脚本每日自动执行。', 'none',
  now() - interval '52 days', now() - interval '4 days'),
-(23, 6, '梳理数据库权限与账号基线', 11, current_date - 10, current_date + 14, 'pending_pool_review', 9, NULL, '',
+(23, 6, '梳理数据库权限与账号基线', 11, current_date - 10, current_date + 14, 'not_started', 9, NULL, '',
  '清理历史遗留的共享账号，按最小权限重新分配。', '账号与权限台账完整，无共享高权限账号。', 'none',
  now() - interval '11 days', now() - interval '6 days'),
 
@@ -115,7 +115,7 @@ OVERRIDING SYSTEM VALUE VALUES
 (30, 8, '完成接口鉴权与限流策略配置', 11, current_date + 2, current_date + 16, 'not_started', 4, NULL, '',
  '统一走网关鉴权，按坐席工号维度限流。', '', 'none',
  now() - interval '15 days', now() - interval '15 days'),
-(31, 8, '完成中台服务压测与容量评估', 6, current_date + 5, current_date + 25, 'draft', 6, NULL, '',
+(31, 8, '完成中台服务压测与容量评估', 6, current_date + 5, current_date + 25, 'not_started', 6, NULL, '',
  '按上线首月 1.5 倍峰值压测，给出扩容建议。', '', 'none',
  now() - interval '6 days', now() - interval '6 days'),
 
@@ -155,7 +155,7 @@ OVERRIDING SYSTEM VALUE VALUES
 (41, 11, '组织两轮坐席集中培训', 14, current_date + 20, current_date + 40, 'not_started', 14, NULL, '',
  '分两批，每批 60 人，含实操考核。', '培训覆盖 120 名坐席，考核通过率 ≥ 95%。', 'none',
  now() - interval '16 days', now() - interval '16 days'),
-(42, 11, '建立上线后运营值班与反馈机制', 12, current_date + 25, current_date + 45, 'draft', 12, NULL, '',
+(42, 11, '建立上线后运营值班与反馈机制', 12, current_date + 25, current_date + 45, 'not_started', 12, NULL, '',
  '上线首月双人值班，问题按 30 分钟响应。', '', 'none',
  now() - interval '5 days', now() - interval '5 days'),
 
@@ -177,7 +177,7 @@ OVERRIDING SYSTEM VALUE VALUES
 (47, 13, '完成首批 500 条知识入库与审校', 14, current_date - 30, current_date + 4, 'in_progress', 12, 62, '',
  '已入库 312 条，审校返工主要集中在摘要过长。', '500 条全部通过审校，返工率 < 10%。', 'none',
  now() - interval '32 days', now() - interval '1 day'),
-(48, 13, '建立知识条目更新与下线流程', 14, current_date - 6, current_date + 18, 'pending_pool_review', 14, NULL, '',
+(48, 13, '建立知识条目更新与下线流程', 14, current_date - 6, current_date + 18, 'not_started', 14, NULL, '',
  '知识条目要有责任人和复核周期，过期自动提醒。', '', 'none',
  now() - interval '7 days', now() - interval '1 day'),
 (49, 14, '搭建检索评测集与评分口径', 8, current_date - 33, current_date - 20, 'completed', 8, 100, '',
@@ -198,7 +198,7 @@ OVERRIDING SYSTEM VALUE VALUES
 (54, 16, '输出试点效果对比分析', 8, current_date + 30, current_date + 45, 'not_started', 7, NULL, '',
  '对比试点班组与对照班组的平均通话时长和一次解决率。', '', 'none',
  now() - interval '10 days', now() - interval '10 days'),
-(55, 16, '编制试点评估报告与推广建议', 14, current_date + 38, current_date + 58, 'draft', 14, NULL, '',
+(55, 16, '编制试点评估报告与推广建议', 14, current_date + 38, current_date + 58, 'not_started', 14, NULL, '',
  '', '', 'none',
  now() - interval '4 days', now() - interval '4 days'),
 
@@ -224,75 +224,6 @@ OVERRIDING SYSTEM VALUE VALUES
 (62, 19, '完成首次季度自查与问题闭环', 11, current_date - 150, current_date - 120, 'completed', 11, 100, '',
  '首次自查发现 11 个问题，全部闭环。', '自查问题闭环率 100%。', 'none',
  now() - interval '152 days', now() - interval '119 days');
-
--- ── 入池审批单 ────────────────────────────────────────────────────────────────
--- KR 负责人本人创建的任务免审入池（exempt），其余由 KR 负责人处理。
-INSERT INTO pool_reviews (id, task_id, submitted_by, status, exempt, opinion, submitted_at, decided_by, decided_at)
-OVERRIDING SYSTEM VALUE VALUES
-(1,  1,  3,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '178 days', 3,  now() - interval '178 days'),
-(2,  2,  3,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '170 days', 3,  now() - interval '170 days'),
-(3,  3,  9,  'approved', FALSE, '',                             now() - interval '162 days', 3,  now() - interval '161 days'),
-(4,  4,  3,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '147 days', 3,  now() - interval '147 days'),
-(5,  5,  4,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '142 days', 4,  now() - interval '142 days'),
-(6,  6,  4,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '103 days', 4,  now() - interval '103 days'),
-(7,  7,  4,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '83 days',  4,  now() - interval '83 days'),
-(8,  8,  4,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '62 days',  4,  now() - interval '62 days'),
-(9,  9,  4,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '12 days',  4,  now() - interval '12 days'),
-(10, 10, 9,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '117 days', 9,  now() - interval '117 days'),
-(11, 11, 9,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '92 days',  9,  now() - interval '92 days'),
--- 12 号任务退回过一次：第一次范围与 11 号重叠，重报后通过。
-(12, 12, 6,  'rejected', FALSE, '和第一轮演练的收尾工作重叠，先把窗口压缩目标写清楚再报', now() - interval '26 days', 9, now() - interval '25 days'),
-(13, 12, 6,  'approved', FALSE, '窗口压缩目标写清楚了，按这个报',                          now() - interval '24 days',  9,  now() - interval '23 days'),
-(14, 13, 9,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '18 days',  9,  now() - interval '18 days'),
-(15, 14, 2,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '63 days',  2,  now() - interval '63 days'),
-(16, 15, 2,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '58 days',  2,  now() - interval '58 days'),
-(17, 16, 2,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '30 days',  2,  now() - interval '30 days'),
-(18, 17, 2,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '28 days',  2,  now() - interval '28 days'),
-(19, 18, 6,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '80 days',  6,  now() - interval '80 days'),
-(20, 19, 6,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '32 days',  6,  now() - interval '32 days'),
--- 20 号任务被退回，回到草稿等待补充后重报。
-(21, 20, 4,  'rejected', FALSE, '建议合并到 19 号任务的对比结论里，单独立项没有必要；如仍要单列，请写清交付物', now() - interval '5 days', 6, now() - interval '3 days'),
-(22, 21, 11, 'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '68 days',  11, now() - interval '68 days'),
-(23, 22, 11, 'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '52 days',  11, now() - interval '52 days'),
--- 23 号任务的入池审批停了 6 天（审批超时卡点）。
-(24, 23, 9,  'pending',  FALSE, '',                             now() - interval '6 days',   NULL, NULL),
-(25, 24, 3,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '97 days',  3,  now() - interval '97 days'),
-(26, 25, 3,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '82 days',  3,  now() - interval '82 days'),
-(27, 26, 3,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '72 days',  3,  now() - interval '72 days'),
-(28, 27, 4,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '67 days',  4,  now() - interval '67 days'),
-(29, 28, 4,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '52 days',  4,  now() - interval '52 days'),
-(30, 29, 4,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '27 days',  4,  now() - interval '27 days'),
-(31, 30, 4,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '15 days',  4,  now() - interval '15 days'),
-(32, 32, 5,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '57 days',  5,  now() - interval '57 days'),
-(33, 33, 5,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '37 days',  5,  now() - interval '37 days'),
-(34, 34, 5,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '20 days',  5,  now() - interval '20 days'),
-(35, 35, 5,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '24 days',  5,  now() - interval '24 days'),
-(36, 36, 12, 'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '30 days',  12, now() - interval '30 days'),
-(37, 37, 12, 'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '22 days',  12, now() - interval '22 days'),
-(38, 38, 12, 'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '22 days',  12, now() - interval '22 days'),
-(39, 39, 12, 'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '20 days',  12, now() - interval '20 days'),
-(40, 40, 14, 'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '14 days',  14, now() - interval '14 days'),
-(41, 41, 14, 'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '16 days',  14, now() - interval '16 days'),
-(42, 43, 8,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '44 days',  8,  now() - interval '44 days'),
-(43, 44, 8,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '25 days',  8,  now() - interval '25 days'),
-(44, 45, 8,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '18 days',  8,  now() - interval '18 days'),
-(45, 46, 12, 'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '48 days',  12, now() - interval '48 days'),
-(46, 47, 12, 'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '32 days',  12, now() - interval '32 days'),
--- 48 号昨天刚提交，还在阈值内。
-(47, 48, 14, 'pending',  FALSE, '',                             now() - interval '1 day',    NULL, NULL),
-(48, 49, 8,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '35 days',  8,  now() - interval '35 days'),
-(49, 50, 8,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '20 days',  8,  now() - interval '20 days'),
-(50, 51, 8,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '14 days',  8,  now() - interval '14 days'),
-(51, 52, 7,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '10 days',  7,  now() - interval '10 days'),
-(52, 53, 7,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '12 days',  7,  now() - interval '12 days'),
-(53, 54, 7,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '10 days',  7,  now() - interval '10 days'),
-(54, 56, 11, 'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '218 days', 11, now() - interval '218 days'),
-(55, 57, 11, 'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '208 days', 11, now() - interval '208 days'),
-(56, 58, 11, 'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '162 days', 11, now() - interval '162 days'),
-(57, 59, 9,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '212 days', 9,  now() - interval '212 days'),
-(58, 60, 9,  'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '198 days', 9,  now() - interval '198 days'),
-(59, 61, 11, 'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '182 days', 11, now() - interval '182 days'),
-(60, 62, 11, 'approved', TRUE,  'KR 负责人本人创建，免审入池', now() - interval '152 days', 11, now() - interval '152 days');
 
 -- ── 中间审核组 ────────────────────────────────────────────────────────────────
 INSERT INTO task_reviewers (task_id, user_id) VALUES

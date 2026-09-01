@@ -20,7 +20,7 @@ tags:
   - name: users
     description: 用户目录（人员选择用）
   - name: tasks
-    description: 任务的创建、入池审批与 KR 负责人免审（AC-04、AC-26）
+    description: 任务的创建与直接入池（裁决 #162：无入池审批）
   - name: task-invites
     description: 任务创建邀请（AC-03；词汇表「任务创建邀请」）
   - name: discussions
@@ -549,7 +549,7 @@ paths:
     get:
       operationId: listTasks
       tags: [tasks]
-      summary: 项目任务（含派生动作标志与最近一次入池审批单）；支持服务端裁剪，避免大项目整表下发
+      summary: 项目任务（含派生动作标志）；支持服务端裁剪，避免大项目整表下发
       parameters:
         - name: krId
           in: query
@@ -585,7 +585,7 @@ paths:
     post:
       operationId: createTaskBatch
       tags: [tasks]
-      summary: 表格式批量创建任务草稿（可选一并提交入池；KR 负责人本人创建免审直接进入未开始，AC-26）
+      summary: 表格式批量创建任务（裁决 #162：创建即入正式任务池，初始状态未开始；入池留痕并通知所属 KR 负责人）
       requestBody:
         required: true
         content:
@@ -607,84 +607,6 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-        "422":
-          $ref: "#/components/responses/ValidationError"
-
-  /projects/{projectId}/tasks/{taskId}/submit-pool-review:
-    parameters:
-      - name: projectId
-        in: path
-        required: true
-        schema:
-          type: integer
-          format: int64
-      - name: taskId
-        in: path
-        required: true
-        schema:
-          type: integer
-          format: int64
-    post:
-      operationId: submitTaskPoolReview
-      tags: [tasks]
-      summary: 将草稿任务提交所属 KR 负责人入池审批（AC-04；退回后可修改重新提交）
-      responses:
-        "200":
-          description: 已提交，任务进入待入池审批
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Task"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          $ref: "#/components/responses/Conflict"
-        "422":
-          $ref: "#/components/responses/ValidationError"
-
-  /projects/{projectId}/tasks/{taskId}/pool-review-decision:
-    parameters:
-      - name: projectId
-        in: path
-        required: true
-        schema:
-          type: integer
-          format: int64
-      - name: taskId
-        in: path
-        required: true
-        schema:
-          type: integer
-          format: int64
-    post:
-      operationId: decideTaskPoolReview
-      tags: [tasks]
-      summary: 所属 KR 负责人通过或退回入池审批（AC-04；管理员不能替代 KR 负责人）
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/PoolReviewDecisionRequest"
-      responses:
-        "200":
-          description: 已处理，返回任务最新状态
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Task"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/ValidationError"
 
@@ -899,7 +821,7 @@ paths:
     post:
       operationId: submitFieldChange
       tags: [tasks]
-      summary: 编辑任务／提交关键字段修改（AC-23；草稿直接完善，KR 负责人本人免审即时生效，其余进入审批且旧值继续生效）
+      summary: 编辑任务／提交关键字段修改（AC-23；KR 负责人本人免审即时生效，其余进入审批且旧值继续生效）
       requestBody:
         required: true
         content:
@@ -1405,7 +1327,7 @@ paths:
     put:
       operationId: setTaskReceivers
       tags: [tasks]
-      summary: 配置接收方（AC-23；接收方属关键字段，已入池任务进所属 KR 负责人审批；模块 PRD §8.6、MW-09）
+      summary: 配置接收方（AC-23；接收方属关键字段，进所属 KR 负责人审批；模块 PRD §8.6、MW-09）
       requestBody:
         required: true
         content:
@@ -1655,7 +1577,7 @@ paths:
     post:
       operationId: createTaskInput
       tags: [tasks]
-      summary: 新增输入要求并自动建立「来源任务 → 目标任务」交付物边（AC-28；可一次多选来源任务，AC-53）；输入与输入源属关键字段，已入池任务进所属 KR 负责人审批（AC-23）
+      summary: 新增输入要求并自动建立「来源任务 → 目标任务」交付物边（AC-28；可一次多选来源任务，AC-53）；输入与输入源属关键字段，进所属 KR 负责人审批（AC-23）
       requestBody:
         required: true
         content:
@@ -1695,7 +1617,7 @@ paths:
     post:
       operationId: createMemberInput
       tags: [tasks]
-      summary: 指定项目成员提供输入（AC-29；可一次多选对接人，AC-53）：为每名对接人建立「成员 → 目标任务」交付物边并生成输入请求；输入源属关键字段，已入池任务进所属 KR 负责人审批（AC-23），生效后任务已入池即发站内通知
+      summary: 指定项目成员提供输入（AC-29；可一次多选对接人，AC-53）：为每名对接人建立「成员 → 目标任务」交付物边并生成输入请求；输入源属关键字段，进所属 KR 负责人审批（AC-23），输入关系建立后即发站内通知（裁决 #162）
       requestBody:
         required: true
         content:
@@ -1875,7 +1797,7 @@ paths:
     delete:
       operationId: removeEdge
       tags: [tasks]
-      summary: 解除交付物边（AC-23；输入源属关键字段，已入池任务进所属 KR 负责人审批）
+      summary: 解除交付物边（AC-23；输入源属关键字段，进所属 KR 负责人审批）
       responses:
         "200":
           description: 已受理，返回目标任务最新状态（进入审批时边仍在，任务上带待审批变更单）
@@ -2292,7 +2214,7 @@ paths:
     post:
       operationId: importTable
       tags: [okr]
-      summary: 表格导入（AC-02）：生成 O／KR 与任务草稿（仅项目管理员／项目负责人；整批一个事务）
+      summary: 表格导入（AC-02）：生成 O／KR 与任务，任务直接入池（裁决 #162；仅项目管理员／项目负责人；整批一个事务）
       requestBody:
         required: true
         content:
@@ -2326,7 +2248,7 @@ paths:
     post:
       operationId: importTasks
       tags: [tasks]
-      summary: 任务批量导入（AC-02b）：向已有 KR 下生成任务草稿（仅项目管理员／项目负责人；整批一个事务）
+      summary: 任务批量导入（AC-02b）：向已有 KR 下生成任务并直接入池（裁决 #162；仅项目管理员／项目负责人；整批一个事务）
       description: |
         与 O／KR 导入器分开的第二个导入器（裁决 B1）：只导任务，所属 KR 必须已存在。
         字段映射、人员匹配与结构预览在前端完成，此处接收结构化结果；规则复用创建任务的同一份校验。
@@ -2747,13 +2669,13 @@ components:
     ProgressSummary:
       type: object
       description: >-
-        KR 层进度汇总与数据覆盖度（词汇表「进度数据覆盖度」；AC-63）：统计已入池且未取消的任务，
+        KR 层进度汇总与数据覆盖度（词汇表「进度数据覆盖度」；AC-63）：统计未取消的任务，
         已取消整体剔除；平均值任务等权、未填按 0 计入、已完成按 100
       required: [totalTasks, filledTasks]
       properties:
         totalTasks:
           type: integer
-          description: 参与汇总的任务数（已入池且未取消），即平均值的分母
+          description: 参与汇总的任务数（未取消），即平均值的分母
         filledTasks:
           type: integer
           description: 其中由负责人真实填写进度的任务数（已完成计入），说明平均值里有多少来自真实填写
@@ -2872,7 +2794,7 @@ components:
       properties:
         pendingApprovals:
           type: integer
-          description: 待入池审批、待处理变更单与待终审完成申请的合计条数
+          description: 待处理变更单与待终审完成申请的合计条数
     CreateKeyResultInput:
       type: object
       required: [description]
@@ -2936,8 +2858,6 @@ components:
       description: 任务生命周期状态（词汇表「任务生命周期状态」）；页面主状态汇总，审批原始状态在审批单中
       enum:
         [
-          draft,
-          pending_pool_review,
           not_started,
           waiting_input,
           in_progress,
@@ -2953,38 +2873,6 @@ components:
         none＝无；open＝已发起、候选内容尚未随完成申请提交；reviewing＝已提交，或签或 KR 终审在审。
         整个过程中任务生命周期状态保持 completed
       enum: [none, open, reviewing]
-    PoolReviewStatus:
-      type: string
-      description: 入池审批单状态（词汇表「入池审批单」）；未提交即无审批单
-      enum: [pending, approved, rejected]
-    PoolReview:
-      type: object
-      description: 任务最近一次入池审批单
-      required: [status, statusLabel, exempt]
-      properties:
-        status:
-          $ref: "#/components/schemas/PoolReviewStatus"
-        statusLabel:
-          type: string
-          description: 面向用户的显示文案（AC-04；派生字段）：待审批为“待{所属 KR 负责人姓名}审批”，免审为“免审通过”，其余为“已通过／已退回”
-        exempt:
-          type: boolean
-          description: KR 负责人本人创建免审时由系统自动生成并标记（AC-26）
-        opinion:
-          type: string
-          description: 审批意见；免审时为系统记录的免审原因
-        submittedByName:
-          type: string
-          description: 提交人姓名（派生字段）
-        decidedByName:
-          type: string
-          description: 处理人姓名（派生字段）
-        submittedAt:
-          type: string
-          format: date-time
-        decidedAt:
-          type: string
-          format: date-time
     Task:
       type: object
       required:
@@ -3005,8 +2893,6 @@ components:
           canStart,
           canUpdateProgress,
           canCancel,
-          canSubmitPoolReview,
-          canDecidePoolReview,
           receiverScope,
         ]
       properties:
@@ -3066,8 +2952,6 @@ components:
         cancelReason:
           type: string
           description: 取消原因（已取消任务保留，PRD §5.1）
-        poolReview:
-          $ref: "#/components/schemas/PoolReview"
         canStart:
           type: boolean
           description: 当前用户能否开始执行本任务（派生字段；负责人／可编辑项目者，未开始或等待输入时）
@@ -3090,14 +2974,14 @@ components:
           description: 当前用户能否编辑任务／提交关键字段修改（派生字段）
         fieldEditMode:
           type: string
-          enum: [direct, exempt, approval]
+          enum: [exempt, approval]
           description: >-
             就地编辑的保存路由（#138 裁决 E1；派生自 FieldChangeRoute，前端不复算规则）：
-            direct=草稿直接生效；exempt=KR 负责人本人免审即时生效；approval=生成变更单进入审批
+            exempt=KR 负责人本人免审即时生效；approval=生成变更单进入审批
             （保存时须填修改原因）。不可编辑时不返回（以 canProposeFieldChange 为准）
         pendingReviewCount:
           type: integer
-          description: 本任务上未决审批单条数（派生字段；入池、关键字段变更／取消、完成申请合计，前端不再自行相加）
+          description: 本任务上未决审批单条数（派生字段；关键字段变更／取消、完成申请合计，前端不再自行相加）
         canDiscuss:
           type: boolean
           description: 当前用户能否提交任务讨论（派生字段；全体项目内成员含访客，公开项目的隐式访客不可，见词汇表「隐式访客」）
@@ -3116,12 +3000,6 @@ components:
         canUploadCandidate:
           type: boolean
           description: 当前用户能否登记候选交付物内容（派生字段；负责人，执行类状态）
-        canSubmitPoolReview:
-          type: boolean
-          description: 当前用户能否提交本任务入池（派生字段；草稿且为创建人／负责人／可编辑项目者）
-        canDecidePoolReview:
-          type: boolean
-          description: 当前用户能否处理本任务的入池审批（派生字段；仅所属 KR 负责人）
         receiverScope:
           $ref: "#/components/schemas/ReceiverScope"
         receivers:
@@ -3180,20 +3058,17 @@ components:
           description: 预期交付物名称（选填，原型创建弹窗列）；随任务创建对应交付物项
     CreateTaskBatchRequest:
       type: object
-      required: [items, submitForReview]
+      required: [items]
       properties:
         items:
           type: array
           minItems: 1
           items:
             $ref: "#/components/schemas/CreateTaskItem"
-        submitForReview:
-          type: boolean
-          description: true 时保存后立即提交各自所属 KR 的入池审批（原型「提交入池审批」按钮）；KR 负责人本人创建的任务始终免审直接进入未开始
         taskInviteId:
           type: integer
           format: int64
-          description: 通过任务创建邀请响应时携带（AC-03）；须为发给当前用户的待处理邀请，且本批至少一项任务属于邀请指定的 KR 并提交入池，成功后邀请变为已完成
+          description: 通过任务创建邀请响应时携带（AC-03）；须为发给当前用户的待处理邀请，且本批至少一项任务属于邀请指定的 KR，成功后邀请变为已完成
     TaskDetail:
       type: object
       description: 任务详情抽屉数据（AC-31／AC-34）：任务事实、O／KR 归属与全部审核记录
@@ -3202,7 +3077,6 @@ components:
           task,
           objectiveTitle,
           krDescription,
-          poolReviews,
           fieldChanges,
           impactedTargets,
           deliverables,
@@ -3226,11 +3100,6 @@ components:
         krDescription:
           type: string
           description: 所属 KR 描述（派生字段）
-        poolReviews:
-          type: array
-          description: 入池审批记录，最新在前（词汇表「审核记录」）
-          items:
-            $ref: "#/components/schemas/PoolReview"
         fieldChanges:
           type: array
           description: 关键字段变更单记录，最新在前（词汇表「关键字段变更单」）
@@ -3310,9 +3179,7 @@ components:
       description: 任务动态类型（ADR 0002）；blocker_* 为系统派生，无行动人
       enum:
         [
-          pool_submitted,
-          pool_approved,
-          pool_rejected,
+          pool_entered,
           field_change_submitted,
           field_change_approved,
           field_change_rejected,
@@ -3454,7 +3321,7 @@ components:
       properties:
         changes:
           type: object
-          description: 拟议值；至少一项。草稿任务直接生效；KR 负责人改本人 KR 下任务免审即时生效
+          description: 拟议值；至少一项。KR 负责人改本人 KR 下任务免审即时生效
           properties:
             name:
               type: string
@@ -3475,7 +3342,7 @@ components:
         reason:
           type: string
           maxLength: 500
-          description: 修改原因；进入审批（含免审留痕）时必填，草稿直接完善可不填
+          description: 修改原因；进入审批（含免审留痕）时必填
     FieldChangeDecisionRequest:
       type: object
       required: [decision]
@@ -3605,7 +3472,7 @@ components:
         canDelete:
           type: boolean
           description: >-
-            当前用户能否删除本项（派生字段，裁决 H1）：有编辑权限、任务在草稿或执行类状态、
+            当前用户能否删除本项（派生字段，裁决 H1）：有编辑权限、任务在执行类状态、
             且本项没有当前内容时为 true；已发布的项删除须走成果更新重传
     CreateDeliverableRequest:
       type: object
@@ -4055,7 +3922,7 @@ components:
       properties:
         tasks:
           type: array
-          description: 本次生成的任务草稿（按 KR 批量提交入池，AC-25）
+          description: 本次导入生成的正式任务（裁决 #162：直接入池，初始状态未开始）
           items:
             $ref: "#/components/schemas/Task"
     ImportResult:
@@ -4068,7 +3935,7 @@ components:
             $ref: "#/components/schemas/Objective"
         tasks:
           type: array
-          description: 导入生成的任务草稿（待按 KR 批量提交入池，AC-25）
+          description: 导入生成的正式任务（裁决 #162：直接入池，初始状态未开始）
           items:
             $ref: "#/components/schemas/Task"
           maxLength: 500
@@ -4180,10 +4047,8 @@ components:
         pendingApprovals:
           type: object
           description: 待决策：停留在审批队列中的事项数
-          required: [poolReviews, fieldChanges, completions]
+          required: [fieldChanges, completions]
           properties:
-            poolReviews:
-              type: integer
             fieldChanges:
               type: integer
             completions:
@@ -4294,7 +4159,7 @@ components:
       properties:
         kind:
           type: string
-          description: 事项类型（task/pool_review/field_change/intermediate_review/final_review/input_request/invite/upstream/blocker 等）
+          description: 事项类型（task/field_change/intermediate_review/final_review/input_request/invite/upstream/blocker 等）
         title:
           type: string
         taskId:
@@ -4508,7 +4373,7 @@ components:
         notifiedAt:
           type: string
           format: date-time
-          description: 站内通知发送时间（入池审批通过后才发送）
+          description: 站内通知发送时间（裁决 #162：输入关系建立后即发送）
         acceptedAt:
           type: string
           format: date-time
@@ -4783,16 +4648,6 @@ components:
           type: string
           maxLength: 500
           description: 邀请说明，随站内通知一同展示
-    PoolReviewDecisionRequest:
-      type: object
-      required: [decision]
-      properties:
-        decision:
-          type: string
-          enum: [approved, rejected]
-        opinion:
-          type: string
-          maxLength: 500
     Project:
       type: object
       required: [id, name, ownerId, ownerName, status, createdAt, canEdit, canManageMembers, visibility, visibilityLabel, implicitViewer]

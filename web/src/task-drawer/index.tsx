@@ -6,8 +6,8 @@ import type { components } from "../api/schema";
 import FileUploadField from "../FileUploadField";
 import TaskDrawer from "./TaskDrawer";
 import ConfigureInputModal from "./ConfigureInputModal";
-import { CancelTaskModal, PoolRejectModal } from "./modals";
-import { cancelTask as apiCancelTask, decidePoolReview, saveProgress as apiSaveProgress, startTask as apiStartTask, submitPoolReview } from "./actions";
+import { CancelTaskModal } from "./modals";
+import { cancelTask as apiCancelTask, saveProgress as apiSaveProgress, startTask as apiStartTask } from "./actions";
 import { structureMessage, type KrOption } from "./shared";
 
 type Objective = components["schemas"]["Objective"];
@@ -84,8 +84,6 @@ export default function TaskDrawerHost({
     setStack([]);
   }, [taskId, initialTab]);
 
-  const [rejectTask, setRejectTask] = useState<Task | null>(null);
-  const [rejectOpinion, setRejectOpinion] = useState("");
   const [fcReject, setFcReject] = useState<{ task: Task; changeId: number } | null>(null);
   const [fcRejectOpinion, setFcRejectOpinion] = useState("");
   const [inputTask, setInputTask] = useState<Task | null>(null);
@@ -102,9 +100,6 @@ export default function TaskDrawerHost({
 
   // 列表行与抽屉共用的几个单任务动作放在 actions.ts，两边都只是包一层刷新。
   const startTask = (task: Task) => apiStartTask(projectId, task, refresh);
-  const submitPool = (task: Task) => submitPoolReview(projectId, task, refresh);
-  const decidePool = (task: Task, decision: "approved" | "rejected", opinion?: string) =>
-    decidePoolReview(projectId, task, decision, opinion, refresh);
   const doCancelTask = (task: Task, reason: string) => apiCancelTask(projectId, task, reason, refresh);
   const saveProgress = (task: Task, progress: number | null) =>
     apiSaveProgress(projectId, task, progress, refresh);
@@ -323,12 +318,6 @@ export default function TaskDrawerHost({
         }}
         actions={{
           start: startTask,
-          submitPool,
-          approvePool: (t) => decidePool(t, "approved"),
-          openReject: (t) => {
-            setRejectTask(t);
-            setRejectOpinion("");
-          },
           openCancel: (t) => {
             setCancelTask(t);
             setCancelReason("");
@@ -342,11 +331,9 @@ export default function TaskDrawerHost({
             });
             if (res.data) {
               message.success(
-                t.status === "draft"
-                  ? "草稿已更新"
-                  : res.data.fieldChange?.state === "pending"
-                    ? "已提交所属 KR 负责人审批，审批期间旧值继续生效"
-                    : "修改已生效",
+                res.data.fieldChange?.state === "pending"
+                  ? "已提交所属 KR 负责人审批，审批期间旧值继续生效"
+                  : "修改已生效",
               );
               refresh();
               return true;
@@ -547,13 +534,6 @@ export default function TaskDrawerHost({
           onChange={(e) => setFcRejectOpinion(e.target.value)}
         />
       </Modal>
-      <PoolRejectModal
-        task={rejectTask}
-        opinion={rejectOpinion}
-        onOpinionChange={setRejectOpinion}
-        onClose={() => setRejectTask(null)}
-        onSubmit={(t, opinion) => decidePool(t, "rejected", opinion)}
-      />
       <CancelTaskModal
         task={cancelTask}
         reason={cancelReason}

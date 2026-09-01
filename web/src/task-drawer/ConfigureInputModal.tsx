@@ -158,7 +158,7 @@ export default function ConfigureInputModal({
       setSaving(false);
       if (res.data) {
         message.success(
-          structureMessage(res.data, `已为 ${providerIds.length} 名对接人建立输入请求；入池后对接人会收到通知`),
+          structureMessage(res.data, `已为 ${providerIds.length} 名对接人建立输入请求；对接人会收到站内通知`),
         );
         onSaved();
       } else {

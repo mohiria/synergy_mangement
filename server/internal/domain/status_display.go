@@ -24,13 +24,9 @@ func ApprovalWaitingLabel(names []string) string {
 }
 
 // StatusLabel 派生任务主状态的面向用户显示文案：审批等待状态按当前审批人姓名显示
-// （入池与终审的审批人是所属 KR 负责人，中间或签取审核组），其余为固定中文标签。
+// （终审的审批人是所属 KR 负责人，中间或签取审核组），其余为固定中文标签。
 func StatusLabel(status, krOwnerName string, reviewerNames []string) string {
 	switch status {
-	case TaskDraft:
-		return "草稿"
-	case TaskPendingPoolReview:
-		return ApprovalWaitingLabel([]string{krOwnerName})
 	case TaskNotStarted:
 		return "未开始"
 	case TaskWaitingInput:
@@ -47,21 +43,6 @@ func StatusLabel(status, krOwnerName string, reviewerNames []string) string {
 		return "已关闭"
 	}
 	return status
-}
-
-// PoolReviewStateLabel 入池审批单显示文案：待审批显示所属 KR 负责人，免审为“免审通过”。
-func PoolReviewStateLabel(state string, exempt bool, krOwnerName string) string {
-	switch {
-	case state == PoolReviewPending:
-		return ApprovalWaitingLabel([]string{krOwnerName})
-	case exempt:
-		return "免审通过"
-	case state == PoolReviewApproved:
-		return "已通过"
-	case state == PoolReviewRejected:
-		return "已退回"
-	}
-	return state
 }
 
 // FieldChangeStateLabel 关键字段变更单显示文案：待审批显示所属 KR 负责人，免审为“免审生效”。
@@ -96,8 +77,6 @@ func CompletionStateLabel(state, krOwnerName string, reviewerNames []string) str
 
 // 当前环节名（词汇表「当前环节」；CurrentStage 的取值域）。
 const (
-	StageDraft              = "草稿完善"
-	StagePoolReview         = "创建入池审批"
 	StageNotStarted         = "待开始执行"
 	StageWaitingInput       = "等待输入"
 	StageInProgress         = "任务执行"
@@ -111,7 +90,7 @@ const (
 // 其余环节沿用环节名。
 func StageLabel(stage, krOwnerName string, reviewerNames []string) string {
 	switch stage {
-	case StagePoolReview, StageFinalReview:
+	case StageFinalReview:
 		return ApprovalWaitingLabel([]string{krOwnerName})
 	case StageIntermediateReview:
 		return ApprovalWaitingLabel(reviewerNames)

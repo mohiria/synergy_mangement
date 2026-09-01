@@ -30,12 +30,10 @@ func TestCancelRoute(t *testing.T) {
 		{"项目管理员发起进审批", Actor{Role: RoleAdmin}, 9, facts(TaskInProgress), false, FieldChangePending, nil},
 		{"KR 负责人本人免审", Actor{Role: RoleMember}, 7, facts(TaskInProgress), false, FieldChangeExempt, nil},
 		{"未开始也可发起", Actor{Role: RoleMember}, 5, facts(TaskNotStarted), false, FieldChangePending, nil},
-		{"草稿也可发起", Actor{Role: RoleMember}, 5, facts(TaskDraft), false, FieldChangePending, nil},
 		{"创建人不是发起人", Actor{Role: RoleMember}, 3, facts(TaskInProgress), false, 0, ErrCancelForbidden},
 		{"访客不可发起", Actor{Role: RoleViewer}, 9, facts(TaskInProgress), false, 0, ErrCancelForbidden},
 		{"已完成不可取消", Actor{Role: RoleMember}, 5, facts(TaskCompleted), false, 0, ErrCannotCancel},
 		{"已关闭不可再取消", Actor{Role: RoleMember}, 5, facts(TaskCancelled), false, 0, ErrCannotCancel},
-		{"入池审批中互斥", Actor{Role: RoleMember}, 5, facts(TaskPendingPoolReview), false, 0, ErrCancelPendingExists},
 		{"成果审核中互斥", Actor{Role: RoleMember}, 5, facts(TaskPendingIntermediateReview), false, 0, ErrCancelPendingExists},
 		{"终审中互斥", Actor{Role: RoleMember}, 5, facts(TaskPendingFinalReview), false, 0, ErrCancelPendingExists},
 		{"有待审批变更单互斥", Actor{Role: RoleMember}, 5, facts(TaskInProgress), true, 0, ErrCancelPendingExists},
@@ -64,13 +62,6 @@ func TestPendingCancelBlocksOtherApprovals(t *testing.T) {
 	// KR 负责人本人的免审通道同样受未决单约束（否则免审会绕过互斥）。
 	if _, err := FieldChangeRoute(Actor{Role: RoleMember}, 7, inProgress, true); !errors.Is(err, ErrChangePendingExists) {
 		t.Fatalf("有未决关闭单时 KR 负责人免审也应被拒: %v", err)
-	}
-	draft := TaskFacts{Status: TaskDraft, CreatorID: 3, OwnerID: 5, KrOwnerID: i64(7)}
-	if err := SubmitPoolReview(draft, true); !errors.Is(err, ErrCancelBlocked) {
-		t.Fatalf("有未决关闭单时提交入池应被拒: %v", err)
-	}
-	if err := SubmitPoolReview(draft, false); err != nil {
-		t.Fatalf("无未决单时提交入池应通过: %v", err)
 	}
 }
 

@@ -53,11 +53,6 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 		writeInternalError(w, r, err)
 		return
 	}
-	poolRows, err := s.q.LatestPoolReviewsByProject(ctx, projectId)
-	if err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
 	changeRows, err := s.q.LatestFieldChangesByProject(ctx, projectId)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -100,29 +95,6 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 	krOwnerNameByTask := map[int64]string{}
 	for _, t := range taskRows {
 		krOwnerNameByTask[t.ID] = t.KrOwnerName.String
-	}
-	for _, pr := range poolRows {
-		name := taskNameByID[pr.TaskID]
-		switch pr.Status {
-		case domain.PoolReviewPending:
-			fact := domain.WorkApprovalFact{
-				ID: pr.ID, TaskID: pr.TaskID, TaskName: name, SubmittedBy: pr.SubmittedBy,
-				KrOwnerID: krOwnerOf(pr.TaskID), KrOwnerName: krOwnerNameByTask[pr.TaskID],
-			}
-			if pr.SubmittedAt.Valid {
-				fact.SubmittedAt = pr.SubmittedAt.Time
-			}
-			if tf, ok := taskFactByID[pr.TaskID]; ok {
-				fact.TaskEnd = tf.EndDate
-			}
-			facts.PoolReviews = append(facts.PoolReviews, fact)
-		case domain.PoolReviewRejected:
-			// 入组只看「草稿 + 存在退回审批单」；意见是展示字段，不参与归类（MW-05）。
-			if tf, ok := taskFactByID[pr.TaskID]; ok && tf.DisplayStatus == domain.TaskDraft {
-				op := pr.Opinion
-				tf.PoolRejected = &op
-			}
-		}
 	}
 	for _, fc := range changeRows {
 		name := taskNameByID[fc.TaskID]

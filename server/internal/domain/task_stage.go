@@ -5,11 +5,6 @@ package domain
 func CurrentStage(t TaskFacts) (string, *int64) {
 	owner := t.OwnerID
 	switch t.Status {
-	case TaskDraft:
-		creator := t.CreatorID
-		return StageDraft, &creator
-	case TaskPendingPoolReview:
-		return StagePoolReview, t.KrOwnerID
 	case TaskNotStarted:
 		return StageNotStarted, &owner
 	case TaskWaitingInput:

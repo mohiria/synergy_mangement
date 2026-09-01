@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"synergy/server/internal/domain"
 	"synergy/server/internal/store"
@@ -17,7 +16,7 @@ import (
 // 指定项目成员输入请求（AC-29、AC-30）。业务规则在 domain，handler 仅编排。
 
 // CreateMemberInput 指定项目成员提供输入：为每名对接人分别建边 + 建输入请求（AC-29；AC-53 可多选对接人）；
-// 任务已入池立即逐人通知，否则入池通过后补发。
+// 裁决 #162：输入关系建立后立即逐人通知。
 func (s *Server) CreateMemberInput(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64) {
 	var req CreateMemberInputRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -53,7 +52,7 @@ func (s *Server) CreateMemberInput(w http.ResponseWriter, r *http.Request, proje
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_member_input", Message: err.Error()})
 		return
 	}
-	// 输入源是关键字段（§5.2.B、§5.5）：已入池任务指定对接人要经所属 KR 负责人审批，
+	// 输入源是关键字段（§5.2.B、§5.5）：指定对接人要经所属 KR 负责人审批，
 	// 审批通过后才建边、生成输入请求并发通知。
 	outcome, ok := s.routeStructureChange(w, r, taskId, actor, uid, facts)
 	if !ok {
@@ -243,26 +242,6 @@ func (s *Server) GetInputRequestFileUrl(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	writeJSON(w, http.StatusOK, DownloadUrlResponse{Url: url})
-}
-
-// notifyPendingInputRequests 入池审批通过后补发对接人通知（AC-29；§7.3 首次入池通过后发送）。
-func (s *Server) notifyPendingInputRequests(r *http.Request, projectID, taskID int64, taskName string) {
-	rows, err := s.q.ListUnnotifiedInputRequestsByTask(r.Context(), taskID)
-	if err != nil {
-		return
-	}
-	for _, ir := range rows {
-		_, err := s.q.CreateNotification(r.Context(), store.CreateNotificationParams{
-			UserID:    ir.ProviderID,
-			Kind:      domain.NotifyInputRequest,
-			Content:   fmt.Sprintf("请你为任务「%s」提供输入「%s」：%s", taskName, ir.EdgeName, ir.ContentNote),
-			ProjectID: pgtype.Int8{Int64: projectID, Valid: true},
-			TaskID:    pgtype.Int8{Int64: taskID, Valid: true},
-		})
-		if err == nil {
-			_ = s.q.MarkInputRequestNotified(r.Context(), ir.ID)
-		}
-	}
 }
 
 // inputRequestView 组装契约 InputRequest（派生动作标志）。

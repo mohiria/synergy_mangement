@@ -60,15 +60,14 @@ func CanUpdateProgress(a Actor, userID int64, t TaskFacts) bool {
 }
 
 // ProgressCoverage 计算 KR 层进度汇总与数据覆盖度（AC-12、AC-63、§5.6）：
-// 统计范围是已入池且未取消的任务，已关闭整体剔除（不进分子也不进分母）；
+// 统计范围是未取消的任务，已关闭整体剔除（不进分子也不进分母）；
 // 分母为该范围内全部任务、任务等权，未填按 0 计入，已完成一律按 100；
 // FilledTasks 只数真实填写，用来说明这个平均值里有多少来自负责人填的值。
 func ProgressCoverage(tasks []TaskProgressFact) ProgressSummaryFacts {
 	out := ProgressSummaryFacts{}
 	sum := 0
 	for _, t := range tasks {
-		switch t.Status {
-		case TaskDraft, TaskPendingPoolReview, TaskCancelled:
+		if t.Status == TaskCancelled {
 			continue
 		}
 		out.TotalTasks++

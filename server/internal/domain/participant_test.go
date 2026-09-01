@@ -58,9 +58,8 @@ func TestCanManageParticipants(t *testing.T) {
 		want  bool
 	}{
 		{"负责人可配置", Actor{Role: RoleMember}, 5, facts, true},
-		// 裁决 D2（#137）：创建人只在草稿期保留编辑权。
-		{"创建人草稿期可配置", Actor{Role: RoleMember}, 3, TaskFacts{Status: TaskDraft, CreatorID: 3, OwnerID: 5}, true},
-		{"创建人入池后不可配置", Actor{Role: RoleMember}, 3, facts, false},
+		// 裁决 D2（#137）＋裁决 #162：无草稿期，创建人不再有编辑权。
+		{"创建人（非负责人）不可配置", Actor{Role: RoleMember}, 3, facts, false},
 		{"可编辑项目者可配置", Actor{Role: RoleAdmin}, 9, facts, true},
 		{"无关成员不可配置", Actor{Role: RoleMember}, 9, facts, false},
 		{"访客不可配置", Actor{Role: RoleViewer}, 5, facts, false},

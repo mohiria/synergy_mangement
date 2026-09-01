@@ -14,7 +14,7 @@ import (
 	"synergy/server/internal/store"
 )
 
-// 任务与入池审批（AC-04、AC-26）。业务规则在 domain，handler 仅编排。
+// 任务创建与直接入池（裁决 #162）。业务规则在 domain，handler 仅编排。
 
 func (s *Server) ListTasks(w http.ResponseWriter, r *http.Request, projectId int64, params ListTasksParams) {
 	proj, ok := s.fetchProject(w, r, projectId)
@@ -70,13 +70,9 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 	for _, m := range members {
 		roleByID[m.UserID] = m.Role
 	}
-	// 通过任务创建邀请响应时（AC-03）：邀请必须待处理、发给本人，且本批含指定 KR 的任务并提交入池。
+	// 通过任务创建邀请响应时（AC-03）：邀请必须待处理、发给本人，且本批含指定 KR 的任务。
 	var invite store.GetTaskInviteInProjectRow
 	if req.TaskInviteId != nil {
-		if !req.SubmitForReview {
-			writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_invite_response", Message: "通过邀请创建的任务需要一并提交入池"})
-			return
-		}
 		invite, err = s.q.GetTaskInviteInProject(r.Context(), store.GetTaskInviteInProjectParams{ID: *req.TaskInviteId, ProjectID: projectId})
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -102,8 +98,8 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 			return
 		}
 	}
-	// 逐项校验：所属 KR 属于本项目、最小骨架合法；提交入池时 KR 必须有负责人（免审除外）。
-	krOwners := make([]*int64, len(req.Items))
+	// 逐项校验：所属 KR 属于本项目、最小骨架合法。
+	krs := make([]store.GetKeyResultInProjectRow, len(req.Items))
 	for i, item := range req.Items {
 		kr, err := s.q.GetKeyResultInProject(r.Context(), store.GetKeyResultInProjectParams{ID: item.KeyResultId, ProjectID: projectId})
 		if err != nil {
@@ -114,7 +110,7 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 			writeInternalError(w, r, err)
 			return
 		}
-		krOwners[i] = fromPgInt8(kr.OwnerID)
+		krs[i] = kr
 		nt := domain.NewTask{Name: strings.TrimSpace(item.Name), OwnerID: item.OwnerId, Start: item.StartDate.Time, End: item.EndDate.Time}
 		if err := domain.ValidateNewTask(nt, func(id int64) string { return roleByID[id] }); err != nil {
 			writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_task", Message: err.Error()})
@@ -126,14 +122,9 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 				return
 			}
 		}
-		if _, exempt := domain.TaskCreationOutcome(uid, krOwners[i]); !exempt && req.SubmitForReview {
-			if err := domain.SubmitPoolReview(domain.TaskFacts{Status: domain.TaskDraft, KrOwnerID: krOwners[i]}, false); err != nil {
-				writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "kr_owner_missing", Message: err.Error()})
-				return
-			}
-		}
 	}
-	// 整批一个事务：全部成功或全部失败。
+	// 整批一个事务：全部成功或全部失败。裁决 #162：创建即入正式任务池，初始状态未开始；
+	// 补偿机制——入池通知所属 KR 负责人（本人创建不另发），通知与创建同事务。
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -141,48 +132,34 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
 	qtx := s.q.WithTx(tx)
-	created := make([]createdTask, 0, len(req.Items))
+	createdIDs := make([]int64, 0, len(req.Items))
 	for i, item := range req.Items {
-		status, exempt := domain.TaskCreationOutcome(uid, krOwners[i])
-		if !exempt && req.SubmitForReview {
-			status = domain.TaskPendingPoolReview
-		}
 		task, err := qtx.CreateTask(r.Context(), store.CreateTaskParams{
 			KeyResultID: item.KeyResultId,
 			Name:        strings.TrimSpace(item.Name),
 			OwnerID:     item.OwnerId,
 			StartDate:   pgtype.Date{Time: item.StartDate.Time, Valid: true},
 			EndDate:     pgtype.Date{Time: item.EndDate.Time, Valid: true},
-			Status:      status,
+			Status:      domain.TaskNotStarted,
 			CreatedBy:   uid,
 		})
 		if err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
-		created = append(created, createdTask{id: task.ID, exempt: exempt, submitted: req.SubmitForReview})
-		switch {
-		case exempt:
-			// AC-26：免审生成一条已通过并标记免审的审批单，记录免审原因。
-			_, err = qtx.CreatePoolReview(r.Context(), store.CreatePoolReviewParams{
-				TaskID:      task.ID,
-				SubmittedBy: uid,
-				Status:      domain.PoolReviewApproved,
-				Exempt:      true,
-				Opinion:     domain.PoolExemptOpinion,
-				DecidedBy:   pgtype.Int8{Int64: uid, Valid: true},
-				DecidedAt:   pgtype.Timestamptz{Time: s.now(), Valid: true},
-			})
-		case req.SubmitForReview:
-			_, err = qtx.CreatePoolReview(r.Context(), store.CreatePoolReviewParams{
-				TaskID:      task.ID,
-				SubmittedBy: uid,
-				Status:      domain.PoolReviewPending,
-			})
-		}
-		if err != nil {
-			writeInternalError(w, r, err)
-			return
+		createdIDs = append(createdIDs, task.ID)
+		if target := domain.PoolEntryNotifyTarget(uid, fromPgInt8(krs[i].OwnerID)); target != nil {
+			krCode := domain.KeyResultCode(int(krs[i].ObjectiveCodeSeq), int(krs[i].CodeSeq))
+			if _, err := qtx.CreateNotification(r.Context(), store.CreateNotificationParams{
+				UserID:    *target,
+				Kind:      domain.NotifyTaskPoolEntered,
+				Content:   domain.PoolEntryNotification(currentUser(r).DisplayName, task.Name, krCode, krs[i].Description),
+				ProjectID: pgtype.Int8{Int64: projectId, Valid: true},
+				TaskID:    pgtype.Int8{Int64: task.ID, Valid: true},
+			}); err != nil {
+				writeInternalError(w, r, err)
+				return
+			}
 		}
 		// 预期交付物（原型创建弹窗列）：随任务建立对应交付物项。
 		if item.ExpectedDeliverable != nil {
@@ -195,7 +172,7 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 		}
 	}
 	if req.TaskInviteId != nil {
-		// 邀请随本批提交一并完成（词汇表：受邀人通过该邀请提交关联任务的入池申请后结束）。
+		// 邀请随本批创建一并完成（词汇表：受邀人通过该邀请创建关联任务后结束）。
 		if _, err := qtx.UpdateTaskInviteState(r.Context(), store.UpdateTaskInviteStateParams{ID: invite.ID, State: domain.TaskInviteCompleted}); err != nil {
 			writeInternalError(w, r, err)
 			return
@@ -205,15 +182,9 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 		writeInternalError(w, r, err)
 		return
 	}
-	// 新建任务的入池留痕：免审记「入池审批通过」并带免审原因，提交待审记「提交入池审批」。
-	// 存草稿不产生审批事实，也就没有可留痕的动态。
-	for _, c := range created {
-		switch {
-		case c.exempt:
-			s.actionActivity(r.Context(), c.id, domain.ActivityPoolApproved, uid, domain.PoolExemptOpinion)
-		case c.submitted:
-			s.actionActivity(r.Context(), c.id, domain.ActivityPoolSubmitted, uid, "")
-		}
+	// 入池留痕：每个新任务记一条「任务入池」动态（裁决 #162 补偿机制）。
+	for _, id := range createdIDs {
+		s.actionActivity(r.Context(), id, domain.ActivityPoolEntered, uid, "")
 	}
 	resp, err := s.taskList(r.Context(), projectId, uid, actor)
 	if err != nil {
@@ -221,147 +192,6 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 		return
 	}
 	writeJSON(w, http.StatusCreated, resp)
-}
-
-// createdTask 本批新建任务的入池留痕所需事实。
-type createdTask struct {
-	id        int64
-	exempt    bool
-	submitted bool
-}
-
-func (s *Server) SubmitTaskPoolReview(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64) {
-	proj, ok := s.fetchProject(w, r, projectId)
-	if !ok {
-		return
-	}
-	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
-	task, facts, ok := s.fetchTask(w, r, projectId, taskId)
-	if !ok {
-		return
-	}
-	if uid != task.CreatedBy && uid != task.OwnerID && !domain.CanEditProject(actor) {
-		writeForbidden(w)
-		return
-	}
-	hasPending, err := s.q.HasPendingFieldChange(r.Context(), taskId)
-	if err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	if err := domain.SubmitPoolReview(facts, hasPending); err != nil {
-		switch {
-		case errors.Is(err, domain.ErrTaskNotDraft), errors.Is(err, domain.ErrCancelBlocked):
-			writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: err.Error()})
-		default:
-			writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "kr_owner_missing", Message: err.Error()})
-		}
-		return
-	}
-	tx, err := s.db.Begin(r.Context())
-	if err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	defer func() { _ = tx.Rollback(r.Context()) }()
-	qtx := s.q.WithTx(tx)
-	if _, err := qtx.UpdateTaskStatus(r.Context(), store.UpdateTaskStatusParams{ID: taskId, Status: domain.TaskPendingPoolReview}); err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	if _, err := qtx.CreatePoolReview(r.Context(), store.CreatePoolReviewParams{
-		TaskID:      taskId,
-		SubmittedBy: uid,
-		Status:      domain.PoolReviewPending,
-	}); err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	if err := tx.Commit(r.Context()); err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	s.actionActivity(r.Context(), taskId, domain.ActivityPoolSubmitted, uid, "")
-	s.writeTask(w, r, projectId, taskId, uid, actor)
-}
-
-func (s *Server) DecideTaskPoolReview(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64) {
-	var req PoolReviewDecisionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || !req.Decision.Valid() {
-		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_request", Message: "请求内容无法解析"})
-		return
-	}
-	proj, ok := s.fetchProject(w, r, projectId)
-	if !ok {
-		return
-	}
-	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
-	approve := req.Decision == PoolReviewDecisionRequestDecisionApproved
-	opinion := ""
-	if req.Opinion != nil {
-		opinion = strings.TrimSpace(*req.Opinion)
-	}
-	// 规则与写入同事务：先锁任务行再重读事实，避免并发决策各自基于过期状态写库（R2）。
-	tx, err := s.db.Begin(r.Context())
-	if err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	defer func() { _ = tx.Rollback(r.Context()) }()
-	qtx := s.q.WithTx(tx)
-	task, facts, ok := lockTaskFacts(r, w, qtx, projectId, taskId)
-	if !ok {
-		return
-	}
-	newStatus, err := domain.DecidePoolReview(actor, facts, uid, approve, opinion)
-	if err != nil {
-		switch {
-		case errors.Is(err, domain.ErrPoolReviewNotPending):
-			writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: err.Error()})
-		case errors.Is(err, domain.ErrRejectOpinionRequired):
-			writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "opinion_required", Message: err.Error()})
-		default:
-			writeJSON(w, http.StatusForbidden, Error{Code: "forbidden", Message: err.Error()})
-		}
-		return
-	}
-	review, err := qtx.GetLatestPoolReview(r.Context(), taskId)
-	if err != nil || review.Status != domain.PoolReviewPending {
-		writeInternalError(w, r, err)
-		return
-	}
-	reviewStatus := domain.PoolReviewApproved
-	if !approve {
-		reviewStatus = domain.PoolReviewRejected
-	}
-	if _, err := qtx.DecidePoolReview(r.Context(), store.DecidePoolReviewParams{
-		ID:        review.ID,
-		Status:    reviewStatus,
-		Opinion:   opinion,
-		DecidedBy: pgtype.Int8{Int64: uid, Valid: true},
-	}); err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	if _, err := qtx.UpdateTaskStatus(r.Context(), store.UpdateTaskStatusParams{ID: taskId, Status: newStatus}); err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	if err := tx.Commit(r.Context()); err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	// 退回类动态带上一句话理由（MW-18）。
-	if approve {
-		s.actionActivity(r.Context(), taskId, domain.ActivityPoolApproved, uid, opinion)
-		// AC-29：首次入池通过后补发指定成员的输入请求通知。
-		s.notifyPendingInputRequests(r, projectId, task.ID, task.Name)
-	} else {
-		s.actionActivity(r.Context(), taskId, domain.ActivityPoolRejected, uid, opinion)
-	}
-	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 
 // UpdateTaskStatus 手工流转：开始执行（AC-12；完成走三道审批，取消走 RequestTaskCancellation）。
@@ -481,11 +311,6 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		writeInternalError(w, r, err)
 		return
 	}
-	reviews, err := s.q.ListPoolReviewsByTask(r.Context(), taskId)
-	if err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
 	changeRows, err := s.q.ListFieldChangesByTask(r.Context(), taskId)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -573,22 +398,6 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 	if item == nil {
 		writeInternalError(w, r, err)
 		return
-	}
-	// 审批显示文案需要所属 KR 负责人姓名（AC-04）。
-	krOwnerName := ""
-	if kr.OwnerID.Valid {
-		if ku, err := s.q.GetUserByID(r.Context(), kr.OwnerID.Int64); err == nil {
-			krOwnerName = ku.DisplayName
-		}
-	}
-	prs := make([]PoolReview, 0, len(reviews))
-	for _, pr := range reviews {
-		prs = append(prs, *toPoolReview(store.LatestPoolReviewsByProjectRow{
-			ID: pr.ID, TaskID: pr.TaskID, SubmittedBy: pr.SubmittedBy, Status: pr.Status,
-			Exempt: pr.Exempt, Opinion: pr.Opinion, SubmittedAt: pr.SubmittedAt,
-			DecidedBy: pr.DecidedBy, DecidedAt: pr.DecidedAt,
-			SubmittedByName: pr.SubmittedByName, DecidedByName: pr.DecidedByName,
-		}, krOwnerName))
 	}
 	facts := domain.TaskFacts{Status: string(item.Status), CreatorID: task.CreatedBy, OwnerID: task.OwnerID,
 		KrOwnerID: fromPgInt8(task.KrOwnerID), ResultUpdate: task.ResultUpdate}
@@ -689,13 +498,8 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		writeInternalError(w, r, err)
 		return
 	}
-	// F1：未决审批计数由后端派生，前端不再把三类审批单各自过滤后相加。
+	// F1：未决审批计数由后端派生，前端不再把审批单各自过滤后相加。
 	pendingCount := 0
-	for _, pr := range prs {
-		if pr.Status == PoolReviewStatusPending {
-			pendingCount++
-		}
-	}
 	for _, fc := range fcs {
 		if fc.State == FieldChangeStatePending {
 			pendingCount++
@@ -711,7 +515,6 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		Task:              *item,
 		ObjectiveTitle:    obj.Title,
 		KrDescription:     kr.Description,
-		PoolReviews:       prs,
 		FieldChanges:      fcs,
 		Deliverables:      deliverables,
 		Files:             &taskFiles,
@@ -772,19 +575,11 @@ func lockTaskFacts(r *http.Request, w http.ResponseWriter, qtx *store.Queries, p
 	return task, facts, true
 }
 
-// taskList 组装项目全部任务及派生字段（负责人姓名、动作标志、最近一次入池审批单）。
+// taskList 组装项目全部任务及派生字段（负责人姓名、动作标志）。
 func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor domain.Actor) ([]Task, error) {
 	rows, err := s.q.ListProjectTasks(ctx, projectID)
 	if err != nil {
 		return nil, err
-	}
-	reviews, err := s.q.LatestPoolReviewsByProject(ctx, projectID)
-	if err != nil {
-		return nil, err
-	}
-	reviewByTask := make(map[int64]store.LatestPoolReviewsByProjectRow, len(reviews))
-	for _, pr := range reviews {
-		reviewByTask[pr.TaskID] = pr
 	}
 	// 每个任务最近一张需要关注的变更单（待审批＝拟议值标示，退回未处理＝退回待处理事项）。
 	changeRows, err := s.q.LatestFieldChangesByProject(ctx, projectID)
@@ -868,29 +663,27 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 	for _, t := range rows {
 		facts := domain.TaskFacts{Status: t.Status, CreatorID: t.CreatedBy, OwnerID: t.OwnerID,
 			KrOwnerID: fromPgInt8(t.KrOwnerID), ResultUpdate: t.ResultUpdate}
-		// 待审批变更单（含关闭单）决定编辑、取消与提交入池三处入口是否可用（AC-23、AC-57 互斥）。
+		// 待审批变更单（含关闭单）决定编辑与取消入口是否可用（AC-23、AC-57 互斥）。
 		fc, hasChange := changeByTask[t.ID]
 		hasPending := hasChange && fc.State == domain.FieldChangePendingState
 		item := Task{
-			Id:                  t.ID,
-			KeyResultId:         t.KeyResultID,
-			Code:                domain.TaskCode(int(t.ObjectiveCodeSeq), int(t.KrCodeSeq), int(t.CodeSeq)),
-			Name:                t.Name,
-			OwnerId:             t.OwnerID,
-			OwnerName:           t.OwnerName,
-			StartDate:           *fromPgDate(t.StartDate),
-			EndDate:             *fromPgDate(t.EndDate),
-			UpdatedAt:           t.UpdatedAt.Time,
-			Status:              TaskStatus(t.Status),
-			Description:         optString(t.Description),
-			CompletionCriteria:  optString(t.CompletionCriteria),
-			Progress:            domain.DisplayProgress(t.Status, fromPgInt4(t.Progress)),
-			CancelReason:        optString(t.CancelReason),
-			CanStart:            domain.CanStartTask(actor, userID, facts),
-			CanUpdateProgress:   domain.CanUpdateProgress(actor, userID, facts),
-			CanCancel:           domain.CanCancelTask(actor, userID, facts, hasPending),
-			CanSubmitPoolReview: domain.CanSubmitPoolReview(actor, userID, facts, hasPending),
-			CanDecidePoolReview: domain.CanDecidePoolReview(actor, userID, facts),
+			Id:                 t.ID,
+			KeyResultId:        t.KeyResultID,
+			Code:               domain.TaskCode(int(t.ObjectiveCodeSeq), int(t.KrCodeSeq), int(t.CodeSeq)),
+			Name:               t.Name,
+			OwnerId:            t.OwnerID,
+			OwnerName:          t.OwnerName,
+			StartDate:          *fromPgDate(t.StartDate),
+			EndDate:            *fromPgDate(t.EndDate),
+			UpdatedAt:          t.UpdatedAt.Time,
+			Status:             TaskStatus(t.Status),
+			Description:        optString(t.Description),
+			CompletionCriteria: optString(t.CompletionCriteria),
+			Progress:           domain.DisplayProgress(t.Status, fromPgInt4(t.Progress)),
+			CancelReason:       optString(t.CancelReason),
+			CanStart:           domain.CanStartTask(actor, userID, facts),
+			CanUpdateProgress:  domain.CanUpdateProgress(actor, userID, facts),
+			CanCancel:          domain.CanCancelTask(actor, userID, facts, hasPending),
 		}
 		// 页面主状态汇总：必要输入未到显示「等待输入」（存储态保持真实执行状态）。
 		displayFacts := facts
@@ -912,9 +705,6 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 			case t.KrOwnerID.Valid && *actorID == t.KrOwnerID.Int64:
 				item.PendingActorName = fromPgText(t.KrOwnerName)
 			}
-		}
-		if pr, ok := reviewByTask[t.ID]; ok {
-			item.PoolReview = toPoolReview(pr, t.KrOwnerName.String)
 		}
 		// 编辑／关键字段修改动作标志与需要关注的变更单（AC-23）。
 		if hasChange {
@@ -1003,20 +793,3 @@ func (s *Server) writeTask(w http.ResponseWriter, r *http.Request, projectID, ta
 	writeInternalError(w, r, err)
 }
 
-func toPoolReview(pr store.LatestPoolReviewsByProjectRow, krOwnerName string) *PoolReview {
-	out := &PoolReview{
-		Status:          PoolReviewStatus(pr.Status),
-		StatusLabel:     domain.PoolReviewStateLabel(pr.Status, pr.Exempt, krOwnerName),
-		Exempt:          pr.Exempt,
-		Opinion:         optString(pr.Opinion),
-		SubmittedByName: optString(pr.SubmittedByName),
-		DecidedByName:   fromPgText(pr.DecidedByName),
-	}
-	if pr.SubmittedAt.Valid {
-		out.SubmittedAt = &pr.SubmittedAt.Time
-	}
-	if pr.DecidedAt.Valid {
-		out.DecidedAt = &pr.DecidedAt.Time
-	}
-	return out
-}

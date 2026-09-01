@@ -144,7 +144,7 @@ th { background: #f7f9fb; color: #657184; font-size: 12px; }
 {{if not .Report.Blockers}}<div class="empty">没有需要关注的卡点</div>{{end}}
 {{range .Report.Blockers}}<div class="item"><b>{{.TaskName}}：缺 {{.Missing}}</b> <span class="pill {{.Level}}">{{riskLabel .Level}}</span><small>{{.Reason}}{{if .ActionOwnerName}} · 待行动人 {{.ActionOwnerName}}{{end}}</small></div>{{end}}
 <h2>待决策</h2>
-<div class="item">入池审批 {{.Report.PendingApprovals.PoolReviews}} 件 · 关键字段修改 {{.Report.PendingApprovals.FieldChanges}} 件 · 完成审核 {{.Report.PendingApprovals.Completions}} 件仍停留在审批队列。</div>
+<div class="item">关键字段修改 {{.Report.PendingApprovals.FieldChanges}} 件 · 完成审核 {{.Report.PendingApprovals.Completions}} 件仍停留在审批队列。</div>
 <h2>下一步（临近截止／已超期）</h2>
 {{if not .Report.NextSteps}}<div class="empty">未来 7 天内没有临近截止的任务</div>{{end}}
 {{range .Report.NextSteps}}<div class="item"><b>{{.TaskName}}</b>{{if .Overdue}}{{if deref .Overdue}} <span class="pill high_risk">已超期</span>{{end}}{{end}}<small>{{.OwnerName}}{{if .EndDate}} · 截止 {{.EndDate}}{{end}}</small></div>{{end}}

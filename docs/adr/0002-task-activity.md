@@ -40,8 +40,7 @@
 
 | kind | 触发 | 行动人 |
 |---|---|---|
-| `pool_submitted` | 提交入池审批 | 提交人 |
-| `pool_approved` / `pool_rejected` | 入池审批处理（含免审通过） | 处理人 |
+| `pool_entered` | 任务入池（裁决 #162：创建／导入即入池，替代原 pool_submitted／pool_approved／pool_rejected） | 创建人 |
 | `field_change_submitted` | 提交关键字段修改 | 提交人 |
 | `field_change_approved` / `field_change_rejected` | 变更单处理（含免审生效） | 处理人 |
 | `field_change_abandoned` | 提交人放弃本次变更 | 提交人 |

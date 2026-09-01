@@ -29,12 +29,10 @@ func TestCanManageDeliverables(t *testing.T) {
 		want  bool
 	}{
 		{"负责人可配置", Actor{Role: RoleMember}, 5, facts, true},
-		// 裁决 D2（#137）：创建人只在草稿期保留编辑权。
-		{"创建人草稿期可配置", Actor{Role: RoleMember}, 3, TaskFacts{Status: TaskDraft, CreatorID: 3, OwnerID: 5}, true},
-		{"创建人入池后不可配置", Actor{Role: RoleMember}, 3, facts, false},
+		// 裁决 D2（#137）＋裁决 #162：无草稿期，创建人不再有编辑权。
+		{"创建人（非负责人）不可配置", Actor{Role: RoleMember}, 3, facts, false},
 		{"管理员可配置", Actor{Role: RoleAdmin}, 9, facts, true},
 		{"无关成员不可配置", Actor{Role: RoleMember}, 9, facts, false},
-		{"草稿可配置", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskDraft, OwnerID: 5}, true},
 		{"已完成不可配置", Actor{Role: RoleAdmin}, 9, TaskFacts{Status: TaskCompleted, OwnerID: 5}, false},
 		{"已关闭不可配置", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCancelled, OwnerID: 5}, false},
 	}
@@ -61,7 +59,6 @@ func TestCanUploadCandidate(t *testing.T) {
 		{"等待输入可传", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskWaitingInput, OwnerID: 5}, true},
 		{"管理员可传", Actor{Role: RoleAdmin}, 9, TaskFacts{Status: TaskInProgress, OwnerID: 5}, true},
 		{"创建人非负责人不可传", Actor{Role: RoleMember}, 3, TaskFacts{Status: TaskInProgress, OwnerID: 5, CreatorID: 3}, false},
-		{"草稿不可传", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskDraft, OwnerID: 5}, false},
 		{"完成审核中不可另传", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskPendingFinalReview, OwnerID: 5}, false},
 		{"已完成不可传", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCompleted, OwnerID: 5}, false},
 	}

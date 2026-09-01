@@ -73,7 +73,6 @@ func TestDeriveDisplayStatus(t *testing.T) {
 		{"未开始且必要输入未到", TaskNotStarted, true, TaskWaitingInput},
 		{"进行中不再叠加等待输入", TaskInProgress, true, TaskInProgress},
 		{"进行中输入已就绪", TaskInProgress, false, TaskInProgress},
-		{"草稿不改写", TaskDraft, true, TaskDraft},
 		{"待终审不改写", TaskPendingFinalReview, true, TaskPendingFinalReview},
 		{"已完成不改写", TaskCompleted, true, TaskCompleted},
 	}

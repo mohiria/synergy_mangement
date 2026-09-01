@@ -185,10 +185,6 @@ func (s *Server) projectBlockerFacts(ctx context.Context, projectID int64) (doma
 	if err != nil {
 		return domain.BlockerFacts{}, err
 	}
-	poolRows, err := s.q.LatestPoolReviewsByProject(ctx, projectID)
-	if err != nil {
-		return domain.BlockerFacts{}, err
-	}
 	changeRows, err := s.q.LatestFieldChangesByProject(ctx, projectID)
 	if err != nil {
 		return domain.BlockerFacts{}, err
@@ -253,17 +249,7 @@ func (s *Server) projectBlockerFacts(ctx context.Context, projectID int64) (doma
 		}
 	}
 
-	// 停在当前环节的审批件：入池、关键字段变更、中间或签、KR 终审。
-	for _, pr := range poolRows {
-		if pr.Status != domain.PoolReviewPending {
-			continue
-		}
-		facts.Approvals = append(facts.Approvals, domain.BlockerApprovalFact{
-			Kind: "pool_review", RefID: pr.ID, TaskID: pr.TaskID,
-			StageSince:  pr.SubmittedAt.Time,
-			ApproverIDs: approverIDs(taskRows, pr.TaskID), ApproverNames: []string{krOwnerNameByTask[pr.TaskID]},
-		})
-	}
+	// 停在当前环节的审批件：关键字段变更、中间或签、KR 终审。
 	for _, fc := range changeRows {
 		if fc.State != domain.FieldChangePendingState {
 			continue

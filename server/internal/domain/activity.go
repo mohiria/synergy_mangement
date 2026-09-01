@@ -4,9 +4,7 @@ import "time"
 
 // 任务动态类型（词汇表「任务动态」；ADR 0002）。
 const (
-	ActivityPoolSubmitted        = "pool_submitted"
-	ActivityPoolApproved         = "pool_approved"
-	ActivityPoolRejected         = "pool_rejected"
+	ActivityPoolEntered          = "pool_entered"
 	ActivityFieldChangeSubmitted = "field_change_submitted"
 	ActivityFieldChangeApproved  = "field_change_approved"
 	ActivityFieldChangeRejected  = "field_change_rejected"
@@ -24,9 +22,7 @@ const (
 )
 
 var activityKindLabels = map[string]string{
-	ActivityPoolSubmitted:        "提交入池审批",
-	ActivityPoolApproved:         "入池审批通过",
-	ActivityPoolRejected:         "入池审批退回",
+	ActivityPoolEntered:          "任务入池",
 	ActivityFieldChangeSubmitted: "提交关键字段修改",
 	ActivityFieldChangeApproved:  "关键字段修改生效",
 	ActivityFieldChangeRejected:  "关键字段修改退回",

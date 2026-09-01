@@ -39,8 +39,6 @@ func TestStartTask(t *testing.T) {
 	}{
 		{"未开始可开始", TaskNotStarted, TaskInProgress, nil},
 		{"等待输入可开始", TaskWaitingInput, TaskInProgress, nil},
-		{"草稿不可开始", TaskDraft, "", ErrCannotStart},
-		{"待入池审批不可开始", TaskPendingPoolReview, "", ErrCannotStart},
 		{"进行中不可重复开始", TaskInProgress, "", ErrCannotStart},
 		{"已完成不可开始", TaskCompleted, "", ErrCannotStart},
 		{"已关闭不可开始", TaskCancelled, "", ErrCannotStart},
@@ -114,7 +112,7 @@ func TestCanUpdateProgress(t *testing.T) {
 	}
 }
 
-// AC-12：KR 覆盖度——只统计已入池且未取消的任务；平均值任务等权、只算已填任务、四舍五入；
+// AC-12：KR 覆盖度——统计未取消的任务；平均值任务等权、只算已填任务、四舍五入；
 // 系统不为未填任务虚构百分比。
 func TestProgressCoverage(t *testing.T) {
 	cases := []struct {
@@ -125,9 +123,6 @@ func TestProgressCoverage(t *testing.T) {
 		wantAvg    *int
 	}{
 		{"无任务", nil, 0, 0, nil},
-		{"草稿与待审批不计入", []TaskProgressFact{
-			{Status: TaskDraft}, {Status: TaskPendingPoolReview, Progress: ip(50)},
-		}, 0, 0, nil},
 		// AC-63：已关闭整体剔除，既不进分子也不进分母。
 		{"已关闭不计入", []TaskProgressFact{
 			{Status: TaskCancelled, Progress: ip(80)}, {Status: TaskNotStarted},

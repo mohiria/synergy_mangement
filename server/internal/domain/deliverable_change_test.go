@@ -20,13 +20,11 @@ func TestDeliverableStructureRule(t *testing.T) {
 		facts   TaskFacts
 		wantErr error
 	}{
-		{"入池后负责人新增即时生效，不进审批", member, me, facts(TaskInProgress), nil},
+		{"负责人新增即时生效，不进审批", member, me, facts(TaskInProgress), nil},
 		{"未开始状态负责人可调整", member, me, facts(TaskNotStarted), nil},
 		{"等待输入状态负责人可调整", member, me, facts(TaskWaitingInput), nil},
-		{"草稿期创建人可调整", member, other, TaskFacts{Status: TaskDraft, CreatorID: other, OwnerID: me, KrOwnerID: i64(7)}, nil},
 		{"非负责人的普通成员无权调整", member, other, facts(TaskInProgress), ErrDeliverableChangeForbidden},
 		{"隐式访客无权调整", Actor{Role: RoleViewer, Implicit: true}, me, facts(TaskInProgress), ErrDeliverableChangeForbidden},
-		{"入池审批中不可调整", member, me, facts(TaskPendingPoolReview), ErrDeliverableStateNotAllowed},
 		{"成果审核中冻结", member, me, facts(TaskPendingIntermediateReview), ErrDeliverableFrozen},
 		{"终审中冻结", member, me, facts(TaskPendingFinalReview), ErrDeliverableFrozen},
 		{"已完成不可增删", member, me, facts(TaskCompleted), ErrDeliverableStateNotAllowed},
@@ -63,7 +61,6 @@ func TestDeleteDeliverableRule(t *testing.T) {
 		wantErr    error
 	}{
 		{"未发布的项可自由删除", member, me, facts(TaskInProgress), false, nil},
-		{"草稿期未发布的项可删除", member, me, facts(TaskDraft), false, nil},
 		{"有当前内容的项不可删，走成果更新", member, me, facts(TaskInProgress), true, ErrDeliverableHasCurrent},
 		{"已完成任务上已发布的项，提示走成果更新而非状态错误", member, me, facts(TaskCompleted), true, ErrDeliverableHasCurrent},
 		{"完成申请在审期间不可删", member, me, facts(TaskPendingFinalReview), false, ErrDeliverableFrozen},

@@ -73,10 +73,6 @@ func (s *Server) commitStructureChange(w http.ResponseWriter, r *http.Request, p
 	defer func() { _ = tx.Rollback(r.Context()) }()
 	qtx := s.q.WithTx(tx)
 	switch outcome {
-	case domain.FieldChangeDirect:
-		if !s.applyStructureOrFail(w, r, qtx, projectID, taskID, uid, p) {
-			return false
-		}
 	case domain.FieldChangeExempt:
 		if _, err := qtx.CreateFieldChange(r.Context(), structureChangeParams(taskID, uid, reason, raw,
 			domain.FieldChangeApprovedState, true, domain.FieldChangeExemptOpinion,
@@ -196,8 +192,7 @@ func (s *Server) applyAddMemberInput(ctx context.Context, qtx *store.Queries, pr
 	if err != nil {
 		return err
 	}
-	// 草稿与待入池审批阶段不提前打扰对接人（§7.3）。
-	pooled := task.Status != domain.TaskDraft && task.Status != domain.TaskPendingPoolReview
+	// 裁决 #162：对接通知时点为「输入关系建立后」，随建边立即逐人发送。
 	note := strings.TrimSpace(req.ContentNote)
 	// 同上：写入当时派生的标识，读取现算（#112）。
 	name := domain.EdgeDisplayName("", "", note)
@@ -214,26 +209,21 @@ func (s *Server) applyAddMemberInput(ctx context.Context, qtx *store.Queries, pr
 		if err != nil {
 			return err
 		}
-		notified := pgtype.Timestamptz{}
-		if pooled {
-			notified = pgtype.Timestamptz{Time: s.now(), Valid: true}
-		}
 		if _, err := qtx.CreateInputRequest(ctx, store.CreateInputRequestParams{
-			EdgeID: edge.ID, ProviderID: providerID, ContentNote: note, NotifiedAt: notified,
+			EdgeID: edge.ID, ProviderID: providerID, ContentNote: note,
+			NotifiedAt: pgtype.Timestamptz{Time: s.now(), Valid: true},
 		}); err != nil {
 			return err
 		}
-		if pooled {
-			// AC-29：带上下文的站内通知，每名对接人各发一条。
-			if _, err := qtx.CreateNotification(ctx, store.CreateNotificationParams{
-				UserID:    providerID,
-				Kind:      domain.NotifyInputRequest,
-				Content:   fmt.Sprintf("请你为任务「%s」提供输入「%s」：%s", task.Name, name, note),
-				ProjectID: pgtype.Int8{Int64: projectID, Valid: true},
-				TaskID:    pgtype.Int8{Int64: taskID, Valid: true},
-			}); err != nil {
-				return err
-			}
+		// AC-29：带上下文的站内通知，每名对接人各发一条。
+		if _, err := qtx.CreateNotification(ctx, store.CreateNotificationParams{
+			UserID:    providerID,
+			Kind:      domain.NotifyInputRequest,
+			Content:   fmt.Sprintf("请你为任务「%s」提供输入「%s」：%s", task.Name, name, note),
+			ProjectID: pgtype.Int8{Int64: projectID, Valid: true},
+			TaskID:    pgtype.Int8{Int64: taskID, Valid: true},
+		}); err != nil {
+			return err
 		}
 	}
 	return nil

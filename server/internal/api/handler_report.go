@@ -163,11 +163,6 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 	}
 
 	// 待决策：停留在审批队列中的事项数。
-	poolRows, err := s.q.LatestPoolReviewsByProject(ctx, projectId)
-	if err != nil {
-		writeInternalError(w, r, err)
-		return Report{}, false
-	}
 	changeRows, err := s.q.LatestFieldChangesByProject(ctx, projectId)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -176,13 +171,7 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 	pending := struct {
 		Completions  int `json:"completions"`
 		FieldChanges int `json:"fieldChanges"`
-		PoolReviews  int `json:"poolReviews"`
 	}{}
-	for _, pr := range poolRows {
-		if pr.Status == domain.PoolReviewPending {
-			pending.PoolReviews++
-		}
-	}
 	for _, fc := range changeRows {
 		if fc.State == domain.FieldChangePendingState {
 			pending.FieldChanges++
@@ -199,7 +188,7 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 	horizon := now.AddDate(0, 0, 7)
 	for _, t := range taskRows {
 		switch t.Status {
-		case domain.TaskCompleted, domain.TaskCancelled, domain.TaskDraft:
+		case domain.TaskCompleted, domain.TaskCancelled:
 			continue
 		}
 		if !t.EndDate.Valid || t.EndDate.Time.After(horizon) {

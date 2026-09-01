@@ -119,7 +119,7 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 		}
 	}
 
-	// 整批一个事务：O → KR → 任务草稿（含预期交付物项）。
+	// 整批一个事务：O → KR → 任务（裁决 #162：直接入池，含预期交付物项）。
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
 		failImportInternal(err)
@@ -129,10 +129,18 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 	qtx := s.q.WithTx(tx)
 	// 计数取本次真实写入量，不是请求里报的条数（AC-68）。
 	counts := domain.ImportCounts{}
+	createdTaskIDs := []int64{}
 	for _, item := range req.Items {
 		objectiveID := int64(0)
+		objectiveCodeSeq := 0
 		if item.ObjectiveId != nil {
 			objectiveID = *item.ObjectiveId
+			obj, err := qtx.GetObjective(r.Context(), store.GetObjectiveParams{ID: objectiveID, ProjectID: projectId})
+			if err != nil {
+				failImportInternal(err)
+				return
+			}
+			objectiveCodeSeq = int(obj.CodeSeq)
 		} else {
 			title := ""
 			if item.Title != nil {
@@ -148,6 +156,7 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 				return
 			}
 			objectiveID = o.ID
+			objectiveCodeSeq = int(o.CodeSeq)
 			counts.Objectives++
 		}
 		if item.KeyResults == nil {
@@ -181,7 +190,7 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 					OwnerID:     tk.OwnerId,
 					StartDate:   pgtype.Date{Time: tk.StartDate.Time, Valid: true},
 					EndDate:     pgtype.Date{Time: tk.EndDate.Time, Valid: true},
-					Status:      domain.TaskDraft,
+					Status:      domain.TaskNotStarted,
 					CreatedBy:   uid,
 				})
 				if err != nil {
@@ -189,6 +198,21 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 					return
 				}
 				counts.Tasks++
+				createdTaskIDs = append(createdTaskIDs, task.ID)
+				// 裁决 #162 补偿机制：导入入池通知所属 KR 负责人（本人导入不另发），与导入同事务。
+				if target := domain.PoolEntryNotifyTarget(uid, k.OwnerId); target != nil {
+					krCode := domain.KeyResultCode(objectiveCodeSeq, int(kr.CodeSeq))
+					if _, err := qtx.CreateNotification(r.Context(), store.CreateNotificationParams{
+						UserID:    *target,
+						Kind:      domain.NotifyTaskPoolEntered,
+						Content:   domain.PoolEntryNotification(currentUser(r).DisplayName, task.Name, krCode, kr.Description),
+						ProjectID: pgtype.Int8{Int64: projectId, Valid: true},
+						TaskID:    pgtype.Int8{Int64: task.ID, Valid: true},
+					}); err != nil {
+						failImportInternal(err)
+						return
+					}
+				}
 				if tk.ExpectedDeliverable != nil {
 					if dn := strings.TrimSpace(*tk.ExpectedDeliverable); dn != "" {
 						if _, err := qtx.CreateDeliverable(r.Context(), store.CreateDeliverableParams{TaskID: task.ID, Name: dn, CreatedBy: uid}); err != nil {
@@ -212,6 +236,10 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 	if err := tx.Commit(r.Context()); err != nil {
 		failImportInternal(err)
 		return
+	}
+	// 入池留痕（裁决 #162）：每个导入任务记一条「任务入池」动态。
+	for _, id := range createdTaskIDs {
+		s.actionActivity(r.Context(), id, domain.ActivityPoolEntered, uid, "")
 	}
 	// 到这里导入已经落库：后面只是回读展示数据，出错不改变「本次导入成功」这个事实。
 	objectives, err := s.okrList(r.Context(), projectId, actor, uid)
@@ -340,8 +368,10 @@ func (s *Server) ImportTasks(w http.ResponseWriter, r *http.Request, projectId i
 		return
 	}
 	// 所属 KR 必须在本项目内：跨项目的 KR id 不能借这条路径写进来。
+	krByID := map[int64]store.GetKeyResultInProjectRow{}
 	for _, g := range groups {
-		if _, err := s.q.GetKeyResultInProject(r.Context(), store.GetKeyResultInProjectParams{ID: g.KeyResultID, ProjectID: projectId}); err != nil {
+		kr, err := s.q.GetKeyResultInProject(r.Context(), store.GetKeyResultInProjectParams{ID: g.KeyResultID, ProjectID: projectId})
+		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				failImport(http.StatusUnprocessableEntity, "invalid_key_result", "所属 KR 不存在")
 				return
@@ -349,6 +379,7 @@ func (s *Server) ImportTasks(w http.ResponseWriter, r *http.Request, projectId i
 			failImportInternal(err)
 			return
 		}
+		krByID[g.KeyResultID] = kr
 	}
 
 	tx, err := s.db.Begin(r.Context())
@@ -359,7 +390,9 @@ func (s *Server) ImportTasks(w http.ResponseWriter, r *http.Request, projectId i
 	defer func() { _ = tx.Rollback(r.Context()) }()
 	qtx := s.q.WithTx(tx)
 	counts := domain.ImportCounts{}
+	createdTaskIDs := []int64{}
 	for _, g := range groups {
+		kr := krByID[g.KeyResultID]
 		for _, it := range g.Tasks {
 			task, err := qtx.CreateTask(r.Context(), store.CreateTaskParams{
 				KeyResultID: g.KeyResultID,
@@ -367,7 +400,7 @@ func (s *Server) ImportTasks(w http.ResponseWriter, r *http.Request, projectId i
 				OwnerID:     it.Task.OwnerID,
 				StartDate:   pgtype.Date{Time: it.Task.Start, Valid: true},
 				EndDate:     pgtype.Date{Time: it.Task.End, Valid: true},
-				Status:      domain.TaskDraft,
+				Status:      domain.TaskNotStarted,
 				CreatedBy:   uid,
 			})
 			if err != nil {
@@ -375,6 +408,21 @@ func (s *Server) ImportTasks(w http.ResponseWriter, r *http.Request, projectId i
 				return
 			}
 			counts.Tasks++
+			createdTaskIDs = append(createdTaskIDs, task.ID)
+			// 裁决 #162 补偿机制：导入入池通知所属 KR 负责人（本人导入不另发），与导入同事务。
+			if target := domain.PoolEntryNotifyTarget(uid, fromPgInt8(kr.OwnerID)); target != nil {
+				krCode := domain.KeyResultCode(int(kr.ObjectiveCodeSeq), int(kr.CodeSeq))
+				if _, err := qtx.CreateNotification(r.Context(), store.CreateNotificationParams{
+					UserID:    *target,
+					Kind:      domain.NotifyTaskPoolEntered,
+					Content:   domain.PoolEntryNotification(currentUser(r).DisplayName, task.Name, krCode, kr.Description),
+					ProjectID: pgtype.Int8{Int64: projectId, Valid: true},
+					TaskID:    pgtype.Int8{Int64: task.ID, Valid: true},
+				}); err != nil {
+					failImportInternal(err)
+					return
+				}
+			}
 			if it.ExpectedDeliverable != "" {
 				if _, err := qtx.CreateDeliverable(r.Context(), store.CreateDeliverableParams{TaskID: task.ID, Name: it.ExpectedDeliverable, CreatedBy: uid}); err != nil {
 					failImportInternal(err)
@@ -395,6 +443,10 @@ func (s *Server) ImportTasks(w http.ResponseWriter, r *http.Request, projectId i
 	if err := tx.Commit(r.Context()); err != nil {
 		failImportInternal(err)
 		return
+	}
+	// 入池留痕（裁决 #162）：每个导入任务记一条「任务入池」动态。
+	for _, id := range createdTaskIDs {
+		s.actionActivity(r.Context(), id, domain.ActivityPoolEntered, uid, "")
 	}
 	tasks, err := s.taskList(r.Context(), projectId, uid, actor)
 	if err != nil {

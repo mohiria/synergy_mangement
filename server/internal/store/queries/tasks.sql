@@ -38,15 +38,6 @@ LEFT JOIN users ku ON ku.id = k.owner_id
 WHERE o.project_id = $1
 ORDER BY t.id;
 
--- name: ListPoolReviewsByTask :many
--- 任务全部入池审批记录（词汇表「审核记录」），最新在前。
-SELECT pr.*, su.display_name AS submitted_by_name, du.display_name AS decided_by_name
-FROM pool_reviews pr
-JOIN users su ON su.id = pr.submitted_by
-LEFT JOIN users du ON du.id = pr.decided_by
-WHERE pr.task_id = $1
-ORDER BY pr.id DESC;
-
 -- name: UpdateTaskStatus :one
 UPDATE tasks
 SET status = $2, updated_at = now()
@@ -88,33 +79,3 @@ FROM key_results k
 JOIN objectives o ON o.id = k.objective_id
 WHERE k.id = $1 AND o.project_id = $2;
 
--- name: CreatePoolReview :one
-INSERT INTO pool_reviews (task_id, submitted_by, status, exempt, opinion, decided_by, decided_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING *;
-
--- name: GetLatestPoolReview :one
-SELECT * FROM pool_reviews
-WHERE task_id = $1
-ORDER BY id DESC
-LIMIT 1;
-
--- name: LatestPoolReviewsByProject :many
--- 每个任务最近一次入池审批单，连同提交人／处理人姓名（列表展示用）。
-SELECT DISTINCT ON (pr.task_id) pr.*,
-    su.display_name AS submitted_by_name,
-    du.display_name AS decided_by_name
-FROM pool_reviews pr
-JOIN tasks t ON t.id = pr.task_id
-JOIN key_results k ON k.id = t.key_result_id
-JOIN objectives o ON o.id = k.objective_id
-JOIN users su ON su.id = pr.submitted_by
-LEFT JOIN users du ON du.id = pr.decided_by
-WHERE o.project_id = $1
-ORDER BY pr.task_id, pr.id DESC;
-
--- name: DecidePoolReview :one
-UPDATE pool_reviews
-SET status = $2, opinion = $3, decided_by = $4, decided_at = now()
-WHERE id = $1
-RETURNING *;

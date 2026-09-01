@@ -13,8 +13,6 @@ func TestCurrentStage(t *testing.T) {
 		wantStage string
 		wantActor *int64
 	}{
-		{"草稿由创建人完善", facts(TaskDraft), "草稿完善", i64(3)},
-		{"待入池审批停在 KR 负责人", facts(TaskPendingPoolReview), "创建入池审批", i64(7)},
 		{"未开始等负责人开始", facts(TaskNotStarted), "待开始执行", i64(5)},
 		{"等待输入停在负责人", facts(TaskWaitingInput), "等待输入", i64(5)},
 		{"进行中为任务执行", facts(TaskInProgress), "任务执行", i64(5)},

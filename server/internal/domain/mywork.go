@@ -18,7 +18,6 @@ type WorkTaskFact struct {
 	KrOwnerID           *int64
 	EndDate             *time.Time
 	UnreadyNote         string
-	PoolRejected        *string
 	FieldChangeRejected *string
 	CompletionRejected  *string
 }
@@ -102,7 +101,6 @@ type MyWorkFacts struct {
 	RemindDailyLimit int
 	RemindSentToday  func(recipientID, taskID int64) int
 	Tasks         []WorkTaskFact
-	PoolReviews   []WorkApprovalFact
 	FieldChanges  []WorkApprovalFact
 	Completions   []WorkCompletionFact
 	InputRequests []WorkInputRequestFact
@@ -201,19 +199,6 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 	tid := func(v int64) *int64 { return &v }
 
 	// —— 待我审批（判定顺序 Q1）——
-	for _, pr := range f.PoolReviews {
-		if terminal[pr.TaskID] {
-			continue
-		}
-		if pr.KrOwnerID != nil && *pr.KrOwnerID == me {
-			days, overdue := waitingDays(pr.SubmittedAt)
-			g.Approvals = append(g.Approvals, WorkItem{
-				Kind: "pool_review", Title: "[入池审批] " + pr.TaskName,
-				TaskID: tid(pr.TaskID), TaskName: pr.TaskName, RefID: tid(pr.ID),
-				Due: pr.TaskEnd, WaitingDays: days, Overdue: overdue, DrawerTab: "audit",
-			})
-		}
-	}
 	for _, fc := range f.FieldChanges {
 		if terminal[fc.TaskID] {
 			continue
@@ -291,9 +276,8 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		}
 	}
 	for _, tk := range f.Tasks {
-		switch {
-		case tk.OwnerID == me &&
-			(tk.DisplayStatus == TaskNotStarted || tk.DisplayStatus == TaskInProgress || tk.DisplayStatus == TaskWaitingInput):
+		if tk.OwnerID == me &&
+			(tk.DisplayStatus == TaskNotStarted || tk.DisplayStatus == TaskInProgress || tk.DisplayStatus == TaskWaitingInput) {
 			item := WorkItem{
 				Kind: "task", Title: tk.Name, TaskID: tid(tk.ID), TaskName: tk.Name,
 				Due: tk.EndDate, UnreadyNote: tk.UnreadyNote, DrawerTab: "overview",
@@ -307,11 +291,6 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 				item.RejectedReason = *tk.FieldChangeRejected
 			}
 			g.Pending = append(g.Pending, item)
-		case tk.CreatorID == me && tk.DisplayStatus == TaskDraft && tk.PoolRejected != nil:
-			g.Pending = append(g.Pending, WorkItem{
-				Kind: "task_rejected", Title: tk.Name, TaskID: tid(tk.ID), TaskName: tk.Name,
-				Due: tk.EndDate, RejectedReason: *tk.PoolRejected, DrawerTab: "audit",
-			})
 		}
 	}
 
@@ -369,23 +348,6 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 				Stage: "等待对接人提供", DrawerTab: "overview",
 			}
 			setWaitRemind(&item, InputRequestWaitFact(ir.ID, ir.TaskID, ir.InputName, ir.ProviderID, ""))
-			g.Waiting = append(g.Waiting, item)
-		}
-	}
-	for _, pr := range f.PoolReviews {
-		if terminal[pr.TaskID] {
-			continue
-		}
-		if pr.SubmittedBy == me && !(pr.KrOwnerID != nil && *pr.KrOwnerID == me) {
-			days, overdue := waitingDays(pr.SubmittedAt)
-			// AC-04：等待他人卡片按当前审批人姓名显示。
-			item := WorkItem{
-				Kind: "waiting_pool", Title: "[入池申请] " + pr.TaskName,
-				TaskID: tid(pr.TaskID), TaskName: pr.TaskName, RefID: tid(pr.ID),
-				WaitingDays: days, Overdue: overdue,
-				Stage: ApprovalWaitingLabel([]string{pr.KrOwnerName}), DrawerTab: "audit",
-			}
-			setWaitRemind(&item, ApprovalWaitFact("pool_review", pr.ID, pr.TaskID, singleApprover(pr.KrOwnerID), []string{pr.KrOwnerName}, days))
 			g.Waiting = append(g.Waiting, item)
 		}
 	}

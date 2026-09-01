@@ -112,7 +112,7 @@ export default function TaskImportModal({
     <ImportSkeleton<FieldKey, Group[]>
       open={open}
       title="批量导入任务"
-      subtitle="字段映射 → 人员匹配 → 结构预览 → 生成任务草稿"
+      subtitle="字段映射 → 人员匹配 → 结构预览 → 生成任务"
       intro="选择 CSV／xlsx 文件，或从 Excel 复制后直接粘贴（首行为表头）；所属 KR 用编号（如 KR1.1）定位，留空表示沿用上一行。"
       pastePlaceholder={"所属 KR 编号\t任务名称\t任务负责人\t开始日期\t截止日期\t预期交付物"}
       templateFileName="任务导入模板.xlsx"
@@ -145,10 +145,10 @@ export default function TaskImportModal({
         </>
       )}
       previewNote={
-        <div className="notice">导入后任务为草稿；在任务抽屉逐条提交入池审批（裁决 A2）。</div>
+        <div className="notice">导入后任务直接进入正式任务池（初始状态未开始）；所属 KR 负责人会收到入池通知。</div>
       }
       successMessage={(structure) =>
-        `已导入 ${structure.reduce((n, g) => n + g.tasks.length, 0)} 项任务草稿；请在任务抽屉逐条提交入池`
+        `已导入 ${structure.reduce((n, g) => n + g.tasks.length, 0)} 项任务，已直接入池`
       }
       submit={async (structure, sourceFileName) => {
         const res = await client.POST("/projects/{projectId}/import-tasks", {

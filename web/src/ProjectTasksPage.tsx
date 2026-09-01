@@ -37,8 +37,6 @@ type TaskInvite = components["schemas"]["TaskInvite"];
 // 状态筛选下拉的选项词表（需要枚举全集，非行级显示；文案对齐原型 taskStatusOptions）。
 // 行级状态显示一律消费 API 派生的 statusLabel（AC-04），不在前端推导。
 const STATUS_FILTER_LABEL: Record<TaskStatus, string> = {
-  draft: "草稿",
-  pending_pool_review: "待负责人审批",
   not_started: "未开始",
   waiting_input: "等待输入",
   in_progress: "进行中",
@@ -54,9 +52,6 @@ const STATUS_FILTER_LABEL: Record<TaskStatus, string> = {
 function statusNote(t: Task): { text: string; alert: boolean } | null {
   const parts: string[] = [];
   let alert = false;
-  if (t.status === "draft" && t.poolReview?.status === "rejected" && t.poolReview.opinion) {
-    parts.push(`退回：${t.poolReview.opinion}`);
-  }
   if (t.status === "cancelled" && t.cancelReason) parts.push(`原因：${t.cancelReason}`);
   if (t.openBlockerCount != null && t.openBlockerCount > 0) {
     parts.push(`⚠ ${t.openBlockerCount} 个卡点`);
@@ -276,7 +271,7 @@ export default function ProjectTasksPage({
           <div className="page-head">
             <div>
               <h1>全部任务</h1>
-              <p>按 O / KR 组织三级任务；任务创建后先提交入池审批，通过后进入执行池。</p>
+              <p>按 O / KR 组织三级任务；任务创建即进入正式任务池，所属 KR 负责人会收到入池通知。</p>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               {/* 任务批量导入（AC-02b、#107）：入口只对项目负责人与项目管理员开放，
@@ -539,7 +534,7 @@ function CreateTaskModal({
     setError(null);
     const res = await client.POST("/projects/{projectId}/tasks", {
       params: { path: { projectId } },
-      body: { items, submitForReview: true, taskInviteId: invite?.id },
+      body: { items, taskInviteId: invite?.id },
     });
     setSaving(false);
     if (res.data) {
@@ -556,7 +551,7 @@ function CreateTaskModal({
           {invite ? "响应任务创建邀请" : "创建任务"}
           <span className="modal-sub">
             {invite
-              ? `${invite.inviterName} 发起 · 通过本邀请提交关联任务后邀请退出`
+              ? `${invite.inviterName} 发起 · 通过本邀请创建关联任务后邀请退出`
               : "按 KR 连续录入任务骨架并指定负责人"}
           </span>
         </div>
@@ -566,7 +561,7 @@ function CreateTaskModal({
       confirmLoading={saving}
       onOk={save}
       onCancel={onClose}
-      okText="提交入池审批"
+      okText="创建任务"
       cancelText="取消"
       destroyOnHidden
     >
@@ -576,7 +571,7 @@ function CreateTaskModal({
           <b>任务创建邀请</b>
           {invite.note ? `：${invite.note}` : ""}
           <div className="muted" style={{ fontSize: 12 }}>
-            只有通过本邀请提交关联任务，邀请才会退出。
+            只有通过本邀请创建关联任务，邀请才会退出。
           </div>
         </div>
       )}
@@ -650,12 +645,12 @@ function CreateTaskModal({
           ＋ 继续添加任务
         </Button>
         <span className="muted" style={{ fontSize: 12 }}>
-          可连续录入多项任务，保存后统一提交各自所属 KR 的入池审批。
+          可连续录入多项任务，保存后直接进入正式任务池。
         </span>
       </div>
       <div className="notice" style={{ marginTop: 12 }}>
-        任务提交后处于“待入池审批”；所属 KR 负责人通过后，才进入执行池并变为“未开始”。KR
-        负责人在本人负责的 KR 下创建的任务免审，保存后直接进入“未开始”。
+        任务创建后即为正式任务，初始状态“未开始”（必要输入未就绪时显示“等待输入”）；
+        所属 KR 负责人会收到入池通知。
       </div>
     </Modal>
   );

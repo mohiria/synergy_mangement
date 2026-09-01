@@ -40,8 +40,8 @@ func TestValidateKeyFieldChanges(t *testing.T) {
 	}
 }
 
-// AC-23 路由：草稿直接完善；KR 负责人本人免审即时生效；已入池任务进入审批；
-// 待入池审批／审核中／终态不可修改；同一任务最多一张待审批变更单。
+// AC-23 路由：KR 负责人本人免审即时生效，其余进入审批；
+// 审核中／终态不可修改；同一任务最多一张待审批变更单。
 func TestFieldChangeRoute(t *testing.T) {
 	facts := func(status string) TaskFacts {
 		return TaskFacts{Status: status, CreatorID: 3, OwnerID: 5, KrOwnerID: i64(7)}
@@ -55,16 +55,12 @@ func TestFieldChangeRoute(t *testing.T) {
 		want       FieldChangeOutcome
 		wantErr    error
 	}{
-		{"草稿创建人直接完善", Actor{Role: RoleMember}, 3, facts(TaskDraft), false, FieldChangeDirect, nil},
-		{"草稿负责人直接完善", Actor{Role: RoleMember}, 5, facts(TaskDraft), false, FieldChangeDirect, nil},
-		{"草稿无关成员禁止", Actor{Role: RoleMember}, 9, facts(TaskDraft), false, 0, ErrChangeForbidden},
 		{"KR 负责人本人免审", Actor{Role: RoleMember}, 7, facts(TaskInProgress), false, FieldChangeExempt, nil},
 		{"负责人提交进入审批", Actor{Role: RoleMember}, 5, facts(TaskInProgress), false, FieldChangePending, nil},
 		{"管理员提交进入审批", Actor{Role: RoleAdmin}, 9, facts(TaskNotStarted), false, FieldChangePending, nil},
 		{"等待输入可提交", Actor{Role: RoleMember}, 5, facts(TaskWaitingInput), false, FieldChangePending, nil},
 		{"无关成员禁止", Actor{Role: RoleMember}, 9, facts(TaskInProgress), false, 0, ErrChangeForbidden},
 		{"已有待审批变更单冲突", Actor{Role: RoleMember}, 5, facts(TaskInProgress), true, 0, ErrChangePendingExists},
-		{"待入池审批不可修改", Actor{Role: RoleMember}, 5, facts(TaskPendingPoolReview), false, 0, ErrChangeNotAllowed},
 		{"完成审核中不可修改", Actor{Role: RoleMember}, 5, facts(TaskPendingFinalReview), false, 0, ErrChangeNotAllowed},
 		{"已完成不可修改", Actor{Role: RoleMember}, 5, facts(TaskCompleted), false, 0, ErrChangeNotAllowed},
 		{"已关闭不可修改", Actor{Role: RoleAdmin}, 9, facts(TaskCancelled), false, 0, ErrChangeNotAllowed},

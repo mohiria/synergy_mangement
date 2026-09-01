@@ -76,7 +76,7 @@ JOIN objectives o ON o.id = k.objective_id
 WHERE t.owner_id <> d.author_id
   AND NOT EXISTS (SELECT 1 FROM discussion_mentions m WHERE m.discussion_id = d.id AND m.user_id = t.owner_id);
 
--- 输入请求通知：任务入池后发给对接人。
+-- 输入请求通知：输入关系建立后发给对接人（裁决 #162）。
 INSERT INTO notifications (user_id, kind, content, project_id, task_id, created_at)
 SELECT ir.provider_id,
        'input_request',
@@ -105,10 +105,6 @@ INSERT INTO notifications (user_id, kind, content, project_id, task_id, created_
      '任务「完成中台与呼叫中心系统联调」提醒：缺「工单受理服务（联调可用版本）」（上游任务「开发工单受理与流转服务」尚未交付当前内容）；截止 '
      || to_char(current_date + 15, 'YYYY-MM-DD') || '；沿硬前置影响下游 2 项任务：汇总 UAT 问题并跟踪闭环、组织售后场景 UAT',
      2, 29, now() - interval '1 day' + interval '4 hours'),
-(11, 'blocker_remind',
-     '任务「梳理数据库权限与账号基线」提醒：缺「入池审批处理」（入池审批已等待 6 天，超过阈值 3 天）；截止 '
-     || to_char(current_date + 14, 'YYYY-MM-DD'),
-     1, 23, now() - interval '3 hours'),
 (2,  'blocker_remind',
      '任务「编制割接实施方案」提醒：缺「KR 终审处理」（KR 终审已等待 3 天，超过阈值 3 天）；截止 '
      || to_char(current_date + 2, 'YYYY-MM-DD') || '；沿硬前置影响下游 1 项任务：组织割接方案公司级评审',
@@ -124,19 +120,10 @@ UPDATE notifications SET read_at = created_at + interval '2 hours'
 WHERE read_at IS NULL AND created_at < now() - interval '5 days' AND id % 3 <> 0;
 
 -- ── 任务动态 ──────────────────────────────────────────────────────────────────
--- 入池：免审只记一条「入池审批通过」，其余记提交 + 处理。
+-- 入池（裁决 #162）：创建即入池，每个任务一条「任务入池」。
 INSERT INTO task_activities (task_id, kind, actor_id, summary, occurred_at)
-SELECT task_id, 'pool_submitted', submitted_by, '提交入池审批', submitted_at
-FROM pool_reviews WHERE NOT exempt;
-
-INSERT INTO task_activities (task_id, kind, actor_id, summary, occurred_at)
-SELECT task_id, 'pool_approved', decided_by,
-       '入池审批通过' || CASE WHEN opinion <> '' THEN '：' || opinion ELSE '' END, decided_at
-FROM pool_reviews WHERE status = 'approved' AND decided_at IS NOT NULL;
-
-INSERT INTO task_activities (task_id, kind, actor_id, summary, occurred_at)
-SELECT task_id, 'pool_rejected', decided_by, '入池审批退回：' || opinion, decided_at
-FROM pool_reviews WHERE status = 'rejected' AND decided_at IS NOT NULL;
+SELECT id, 'pool_entered', created_by, '任务入池', created_at
+FROM tasks;
 
 -- 完成申请：提交、中间或签通过、终审处理。
 INSERT INTO task_activities (task_id, kind, actor_id, summary, occurred_at)

@@ -231,8 +231,7 @@ export default function ReportsPage({
           <section className="report-section">
             <h3>待决策</h3>
             <div className="notice">
-              入池审批 {report.pendingApprovals.poolReviews} 件 · 关键字段修改{" "}
-              {report.pendingApprovals.fieldChanges} 件 · 完成审核{" "}
+              关键字段修改 {report.pendingApprovals.fieldChanges} 件 · 完成审核{" "}
               {report.pendingApprovals.completions} 件仍停留在审批队列。
             </div>
           </section>

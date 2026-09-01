@@ -47,9 +47,6 @@ export default function TaskDrawer({
   onClose: () => void;
   actions: {
     start: (t: Task) => void;
-    submitPool: (t: Task) => void;
-    approvePool: (t: Task) => void;
-    openReject: (t: Task) => void;
     openCancel: (t: Task) => void;
     saveProgress: (t: Task, progress: number | null) => Promise<void>;
     submitFieldChange: (t: Task, changes: Record<string, unknown>, reason?: string) => Promise<boolean>;
@@ -109,7 +106,7 @@ export default function TaskDrawer({
     </span>
   );
   // #138 就地编辑（裁决 E1）：字段点击进入编辑态；保存按 fieldEditMode 路由——
-  // direct/exempt 直接提交，approval 先弹一行「修改原因」（必填）；
+  // exempt 直接提交，approval 先弹一行「修改原因」（必填）；
   // 已有待审变更单时全部字段锁定（后端 ErrChangePendingExists 同口径），逐字段标「审批中」。
   const [editingField, setEditingField] = useState<
     "name" | "description" | "completionCriteria" | "ownerId" | "endDate" | null
@@ -1208,8 +1205,7 @@ export default function TaskDrawer({
   const audit = (
     <div style={{ paddingTop: 4 }}>
       {/* #135：成果审核人配置移入基础信息栏，审核 Tab 只保留审核记录。 */}
-      {(detail?.poolReviews ?? []).length === 0 &&
-        (detail?.fieldChanges ?? []).length === 0 &&
+      {(detail?.fieldChanges ?? []).length === 0 &&
         (detail?.completionReviews ?? []).length === 0 && (
           <div className="empty compact-empty">暂无审核记录</div>
         )}
@@ -1374,46 +1370,6 @@ export default function TaskDrawer({
           )}
         </article>
       ))}
-      {(detail?.poolReviews ?? []).map((r, i) => (
-        <article key={i} className={`audit-card ${r.status === "pending" ? "pending" : ""}`}>
-          <div className="audit-card-head">
-            <div>
-              <b>创建入池审批</b>{" "}
-              <span
-                className={`status-pill ${
-                  r.status === "pending" ? "warning" : r.status === "approved" ? "completed" : "danger"
-                }`}
-              >
-                {r.statusLabel}
-              </span>
-            </div>
-            <span className="meta muted" style={{ fontSize: 12 }}>
-              申请人 {r.submittedByName} · {fmtTime(r.submittedAt)}
-            </span>
-          </div>
-          {(r.decidedByName || r.opinion) && (
-            <div className="handled-fact">
-              {r.decidedByName && (
-                <b>
-                  {r.decidedByName}
-                  {r.decidedAt ? ` · ${fmtTime(r.decidedAt)}` : ""}
-                </b>
-              )}
-              <div>{r.opinion || "未填写意见"}</div>
-            </div>
-          )}
-          {r.status === "pending" && task.canDecidePoolReview && (
-            <div className="audit-actions">
-              <Button size="small" danger onClick={() => actions.openReject(task)}>
-                退回
-              </Button>
-              <Button size="small" type="primary" onClick={() => actions.approvePool(task)}>
-                通过
-              </Button>
-            </div>
-          )}
-        </article>
-      ))}
     </div>
   );
 
@@ -1481,11 +1437,6 @@ export default function TaskDrawer({
           )}
           {task.canStart && <Button onClick={() => actions.start(task)}>开始执行</Button>}
           {task.canCancel && <Button onClick={() => actions.openCancel(task)}>关闭任务</Button>}
-          {task.canSubmitPoolReview && (
-            <Button type="primary" onClick={() => actions.submitPool(task)}>
-              提交入池审批
-            </Button>
-          )}
           {task.canStartResultUpdate && (
             <Button onClick={() => actions.startResultUpdate(task)}>发起成果更新</Button>
           )}

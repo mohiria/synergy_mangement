@@ -70,8 +70,6 @@ func TestImplicitViewerReadsAllButWritesNothing(t *testing.T) {
 	implicit := Actor{Role: RoleViewer, Implicit: true}
 	facts := TaskFacts{Status: TaskInProgress, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
 	notStarted := TaskFacts{Status: TaskNotStarted, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
-	draft := TaskFacts{Status: TaskDraft, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
-	poolPending := TaskFacts{Status: TaskPendingPoolReview, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
 	finalPending := TaskFacts{Status: TaskPendingFinalReview, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
 	intermediate := TaskFacts{Status: TaskPendingIntermediateReview, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
 
@@ -88,8 +86,6 @@ func TestImplicitViewerReadsAllButWritesNothing(t *testing.T) {
 		{"开始任务", CanStartTask(implicit, me, notStarted)},
 		{"更新进度", CanUpdateProgress(implicit, me, facts)},
 		{"发起关闭", CanCancelTask(implicit, me, facts, false)},
-		{"提交入池", CanSubmitPoolReview(implicit, me, draft, false)},
-		{"审批入池", CanDecidePoolReview(implicit, me, poolPending)},
 		{"配置输入", CanConfigureInputs(implicit, me, facts)},
 		{"配置接收方", CanConfigureReceivers(implicit, me, facts)},
 		{"配置交付物项", CanManageDeliverables(implicit, me, facts)},
@@ -113,9 +109,6 @@ func TestImplicitViewerReadsAllButWritesNothing(t *testing.T) {
 	}
 	if _, err := CancelRoute(implicit, me, facts, false); !errors.Is(err, ErrCancelForbidden) {
 		t.Fatalf("隐式访客不应可发起关闭申请: %v", err)
-	}
-	if _, err := DecidePoolReview(implicit, poolPending, me, true, ""); !errors.Is(err, ErrNotKrOwner) {
-		t.Fatalf("隐式访客不应可处理入池审批: %v", err)
 	}
 	if err := DecideFieldChangeRule(implicit, FieldChangePendingState, facts, me, true, ""); !errors.Is(err, ErrNotKrOwner) {
 		t.Fatalf("隐式访客不应可处理变更单: %v", err)

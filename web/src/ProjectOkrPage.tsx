@@ -565,7 +565,7 @@ function OkrBatchModal({
     ...objectives.map((o, i) => ({ value: `existing:${o.id}`, label: `O${i + 1}：${o.title}` })),
   ];
 
-  // KR 负责人承担入池、关键字段变更与完成终审，访客担任会让审批链无人可推进（#95、§3.4）；
+  // KR 负责人承担关键字段变更与完成终审，访客担任会让审批链无人可推进（#95、§3.4）；
   // 与导入、编辑抽屉、任务各处的负责人选择同一口径，规则本身由域层兜底。
   const ownerOptions = members
     .filter((m) => m.role !== "viewer")

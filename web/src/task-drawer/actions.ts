@@ -24,37 +24,6 @@ export async function startTask(projectId: number, task: Task, done: OnDone) {
   }
 }
 
-export async function submitPoolReview(projectId: number, task: Task, done: OnDone) {
-  const res = await client.POST("/projects/{projectId}/tasks/{taskId}/submit-pool-review", {
-    params: { path: { projectId, taskId: task.id } },
-  });
-  if (res.data) {
-    message.success("已提交所属 KR 负责人入池审批");
-    done();
-  } else {
-    message.error(res.error?.message ?? "提交失败");
-  }
-}
-
-export async function decidePoolReview(
-  projectId: number,
-  task: Task,
-  decision: "approved" | "rejected",
-  opinion: string | undefined,
-  done: OnDone,
-) {
-  const res = await client.POST("/projects/{projectId}/tasks/{taskId}/pool-review-decision", {
-    params: { path: { projectId, taskId: task.id } },
-    body: { decision, opinion },
-  });
-  if (res.data) {
-    message.success(decision === "approved" ? "已通过，任务进入未开始" : "已退回，任务回到草稿");
-    done();
-  } else {
-    message.error(res.error?.message ?? "处理失败");
-  }
-}
-
 export async function cancelTask(projectId: number, task: Task, reason: string, done: OnDone) {
   const res = await client.POST("/projects/{projectId}/tasks/{taskId}/cancellation", {
     params: { path: { projectId, taskId: task.id } },

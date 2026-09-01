@@ -22,8 +22,6 @@ export type KrOption = {
 
 // 状态色（与我的工作、项目总览各页一致）；状态文案一律消费 API 的 statusLabel（AC-04）。
 export const STATUS_CLASS: Record<TaskStatus, string> = {
-  draft: "",
-  pending_pool_review: "warning",
   not_started: "",
   waiting_input: "warning",
   in_progress: "in_progress",
@@ -76,7 +74,7 @@ export function memberTreeItems(members: ProjectMember[]): TreeTransferItem[] {
     }));
 }
 
-// 结构变更（输入、输入源、输出、接收方）属关键字段：已入池任务要经所属 KR 负责人审批（AC-23）。
+// 结构变更（输入、输入源、输出、接收方）属关键字段：要经所属 KR 负责人审批（AC-23）。
 // 回包里带着待审批的结构变更单，就说明这次没有立即生效。
 export function pendingStructureChange(task: Task | undefined): boolean {
   const fc = task?.fieldChange;

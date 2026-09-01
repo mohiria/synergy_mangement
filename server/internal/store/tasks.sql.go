@@ -11,47 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const createPoolReview = `-- name: CreatePoolReview :one
-INSERT INTO pool_reviews (task_id, submitted_by, status, exempt, opinion, decided_by, decided_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, task_id, submitted_by, status, exempt, opinion, submitted_at, decided_by, decided_at
-`
-
-type CreatePoolReviewParams struct {
-	TaskID      int64
-	SubmittedBy int64
-	Status      string
-	Exempt      bool
-	Opinion     string
-	DecidedBy   pgtype.Int8
-	DecidedAt   pgtype.Timestamptz
-}
-
-func (q *Queries) CreatePoolReview(ctx context.Context, arg CreatePoolReviewParams) (PoolReview, error) {
-	row := q.db.QueryRow(ctx, createPoolReview,
-		arg.TaskID,
-		arg.SubmittedBy,
-		arg.Status,
-		arg.Exempt,
-		arg.Opinion,
-		arg.DecidedBy,
-		arg.DecidedAt,
-	)
-	var i PoolReview
-	err := row.Scan(
-		&i.ID,
-		&i.TaskID,
-		&i.SubmittedBy,
-		&i.Status,
-		&i.Exempt,
-		&i.Opinion,
-		&i.SubmittedAt,
-		&i.DecidedBy,
-		&i.DecidedAt,
-	)
-	return i, err
-}
-
 const createTask = `-- name: CreateTask :one
 INSERT INTO tasks (key_result_id, name, owner_id, start_date, end_date, status, created_by, code_seq)
 VALUES ($1, $2, $3, $4, $5, $6, $7,
@@ -104,42 +63,6 @@ func (q *Queries) CreateTask(ctx context.Context, arg CreateTaskParams) (Task, e
 	return i, err
 }
 
-const decidePoolReview = `-- name: DecidePoolReview :one
-UPDATE pool_reviews
-SET status = $2, opinion = $3, decided_by = $4, decided_at = now()
-WHERE id = $1
-RETURNING id, task_id, submitted_by, status, exempt, opinion, submitted_at, decided_by, decided_at
-`
-
-type DecidePoolReviewParams struct {
-	ID        int64
-	Status    string
-	Opinion   string
-	DecidedBy pgtype.Int8
-}
-
-func (q *Queries) DecidePoolReview(ctx context.Context, arg DecidePoolReviewParams) (PoolReview, error) {
-	row := q.db.QueryRow(ctx, decidePoolReview,
-		arg.ID,
-		arg.Status,
-		arg.Opinion,
-		arg.DecidedBy,
-	)
-	var i PoolReview
-	err := row.Scan(
-		&i.ID,
-		&i.TaskID,
-		&i.SubmittedBy,
-		&i.Status,
-		&i.Exempt,
-		&i.Opinion,
-		&i.SubmittedAt,
-		&i.DecidedBy,
-		&i.DecidedAt,
-	)
-	return i, err
-}
-
 const getKeyResultInProject = `-- name: GetKeyResultInProject :one
 SELECT k.id, k.objective_id, k.description, k.metric, k.owner_id, k.start_date, k.end_date, k.sort_order, k.created_at, k.code_seq, o.project_id, o.code_seq AS objective_code_seq
 FROM key_results k
@@ -184,30 +107,6 @@ func (q *Queries) GetKeyResultInProject(ctx context.Context, arg GetKeyResultInP
 		&i.CodeSeq,
 		&i.ProjectID,
 		&i.ObjectiveCodeSeq,
-	)
-	return i, err
-}
-
-const getLatestPoolReview = `-- name: GetLatestPoolReview :one
-SELECT id, task_id, submitted_by, status, exempt, opinion, submitted_at, decided_by, decided_at FROM pool_reviews
-WHERE task_id = $1
-ORDER BY id DESC
-LIMIT 1
-`
-
-func (q *Queries) GetLatestPoolReview(ctx context.Context, taskID int64) (PoolReview, error) {
-	row := q.db.QueryRow(ctx, getLatestPoolReview, taskID)
-	var i PoolReview
-	err := row.Scan(
-		&i.ID,
-		&i.TaskID,
-		&i.SubmittedBy,
-		&i.Status,
-		&i.Exempt,
-		&i.Opinion,
-		&i.SubmittedAt,
-		&i.DecidedBy,
-		&i.DecidedAt,
 	)
 	return i, err
 }
@@ -273,123 +172,6 @@ func (q *Queries) GetTaskInProject(ctx context.Context, arg GetTaskInProjectPara
 		&i.ProjectID,
 	)
 	return i, err
-}
-
-const latestPoolReviewsByProject = `-- name: LatestPoolReviewsByProject :many
-SELECT DISTINCT ON (pr.task_id) pr.id, pr.task_id, pr.submitted_by, pr.status, pr.exempt, pr.opinion, pr.submitted_at, pr.decided_by, pr.decided_at,
-    su.display_name AS submitted_by_name,
-    du.display_name AS decided_by_name
-FROM pool_reviews pr
-JOIN tasks t ON t.id = pr.task_id
-JOIN key_results k ON k.id = t.key_result_id
-JOIN objectives o ON o.id = k.objective_id
-JOIN users su ON su.id = pr.submitted_by
-LEFT JOIN users du ON du.id = pr.decided_by
-WHERE o.project_id = $1
-ORDER BY pr.task_id, pr.id DESC
-`
-
-type LatestPoolReviewsByProjectRow struct {
-	ID              int64
-	TaskID          int64
-	SubmittedBy     int64
-	Status          string
-	Exempt          bool
-	Opinion         string
-	SubmittedAt     pgtype.Timestamptz
-	DecidedBy       pgtype.Int8
-	DecidedAt       pgtype.Timestamptz
-	SubmittedByName string
-	DecidedByName   pgtype.Text
-}
-
-// 每个任务最近一次入池审批单，连同提交人／处理人姓名（列表展示用）。
-func (q *Queries) LatestPoolReviewsByProject(ctx context.Context, projectID int64) ([]LatestPoolReviewsByProjectRow, error) {
-	rows, err := q.db.Query(ctx, latestPoolReviewsByProject, projectID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []LatestPoolReviewsByProjectRow
-	for rows.Next() {
-		var i LatestPoolReviewsByProjectRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.TaskID,
-			&i.SubmittedBy,
-			&i.Status,
-			&i.Exempt,
-			&i.Opinion,
-			&i.SubmittedAt,
-			&i.DecidedBy,
-			&i.DecidedAt,
-			&i.SubmittedByName,
-			&i.DecidedByName,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listPoolReviewsByTask = `-- name: ListPoolReviewsByTask :many
-SELECT pr.id, pr.task_id, pr.submitted_by, pr.status, pr.exempt, pr.opinion, pr.submitted_at, pr.decided_by, pr.decided_at, su.display_name AS submitted_by_name, du.display_name AS decided_by_name
-FROM pool_reviews pr
-JOIN users su ON su.id = pr.submitted_by
-LEFT JOIN users du ON du.id = pr.decided_by
-WHERE pr.task_id = $1
-ORDER BY pr.id DESC
-`
-
-type ListPoolReviewsByTaskRow struct {
-	ID              int64
-	TaskID          int64
-	SubmittedBy     int64
-	Status          string
-	Exempt          bool
-	Opinion         string
-	SubmittedAt     pgtype.Timestamptz
-	DecidedBy       pgtype.Int8
-	DecidedAt       pgtype.Timestamptz
-	SubmittedByName string
-	DecidedByName   pgtype.Text
-}
-
-// 任务全部入池审批记录（词汇表「审核记录」），最新在前。
-func (q *Queries) ListPoolReviewsByTask(ctx context.Context, taskID int64) ([]ListPoolReviewsByTaskRow, error) {
-	rows, err := q.db.Query(ctx, listPoolReviewsByTask, taskID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListPoolReviewsByTaskRow
-	for rows.Next() {
-		var i ListPoolReviewsByTaskRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.TaskID,
-			&i.SubmittedBy,
-			&i.Status,
-			&i.Exempt,
-			&i.Opinion,
-			&i.SubmittedAt,
-			&i.DecidedBy,
-			&i.DecidedAt,
-			&i.SubmittedByName,
-			&i.DecidedByName,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const listProjectTasks = `-- name: ListProjectTasks :many

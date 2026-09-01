@@ -13,11 +13,11 @@ var (
 	ErrDeliverableHasCurrent      = errors.New("已发布的交付物项不可删除，请发起成果更新重传内容")
 )
 
-// DeliverableStructureRule 判定能否增删交付物项：草稿与执行类状态放行（权限沿裁决 D 口径，
-// 即 CanEditTaskConfig 的四角色），完成申请在审冻结，入池审批中与终态一律不可。
+// DeliverableStructureRule 判定能否增删交付物项：执行类状态放行（权限沿裁决 D 口径，
+// 即 CanEditTaskConfig），完成申请在审冻结，终态一律不可。
 func DeliverableStructureRule(a Actor, userID int64, t TaskFacts) error {
 	switch t.Status {
-	case TaskDraft, TaskNotStarted, TaskWaitingInput, TaskInProgress:
+	case TaskNotStarted, TaskWaitingInput, TaskInProgress:
 	case TaskPendingIntermediateReview, TaskPendingFinalReview:
 		return ErrDeliverableFrozen
 	default:

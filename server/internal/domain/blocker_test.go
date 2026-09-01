@@ -99,21 +99,16 @@ func TestDeriveBlockersEntryAndExit(t *testing.T) {
 			f.Tasks[0].EndDate = blockerDay(-1)
 			f.Tasks[0].Status = TaskCancelled
 		}, ""},
-		{"草稿超期不入卡点", func(f *BlockerFacts) {
-			f.Tasks[0].EndDate = blockerDay(-1)
-			f.Tasks[0].Status = TaskDraft
-		}, ""},
 		{"改期生效后自动解除", func(f *BlockerFacts) { f.Tasks[0].EndDate = blockerDay(1) }, ""},
 
 		// —— 审批超时：当前环节等待达到 N×24 小时 ——
-		{"入池审批超时", func(f *BlockerFacts) {
-			f.Tasks[0].Status = TaskPendingPoolReview
+		{"变更审批超时", func(f *BlockerFacts) {
 			f.Approvals = []BlockerApprovalFact{{
-				Kind: "pool_review", RefID: 20, TaskID: 1,
+				Kind: "field_change", RefID: 20, TaskID: 1,
 				StageSince:  blockerNow.Add(-3 * 24 * time.Hour),
 				ApproverIDs: []int64{7}, ApproverNames: []string{"赵七"},
 			}}
-		}, "approval_timeout:pool_review:20"},
+		}, "approval_timeout:field_change:20"},
 		{"未达阈值不算超时", func(f *BlockerFacts) {
 			f.Approvals = []BlockerApprovalFact{{
 				Kind: "final_review", RefID: 30, TaskID: 1,

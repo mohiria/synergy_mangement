@@ -91,9 +91,7 @@ func TestBlockerActivityDiff(t *testing.T) {
 // 动态类型的中文名（ADR 0002 表格）；行级显示消费派生字段，前端不按枚举拼文案。
 func TestActivityKindLabel(t *testing.T) {
 	cases := map[string]string{
-		ActivityPoolSubmitted:          "提交入池审批",
-		ActivityPoolApproved:           "入池审批通过",
-		ActivityPoolRejected:           "入池审批退回",
+		ActivityPoolEntered:            "任务入池",
 		ActivityFieldChangeSubmitted:   "提交关键字段修改",
 		ActivityFieldChangeApproved:    "关键字段修改生效",
 		ActivityFieldChangeRejected:    "关键字段修改退回",

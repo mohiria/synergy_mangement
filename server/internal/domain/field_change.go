@@ -48,19 +48,15 @@ func (c KeyFieldChanges) Empty() bool {
 type FieldChangeOutcome int
 
 const (
-	// FieldChangeDirect 草稿直接完善，不生成变更单。
-	FieldChangeDirect FieldChangeOutcome = iota + 1
 	// FieldChangeExempt KR 负责人本人修改，免审即时生效并留痕。
-	FieldChangeExempt
+	FieldChangeExempt FieldChangeOutcome = iota + 1
 	// FieldChangePending 进入审批，旧值继续生效。
 	FieldChangePending
 )
 
-// FieldEditMode 就地编辑保存路由的对外表达（#138 裁决 E1）：direct／exempt／approval。
+// FieldEditMode 就地编辑保存路由的对外表达（#138 裁决 E1）：exempt／approval。
 func FieldEditMode(o FieldChangeOutcome) string {
 	switch o {
-	case FieldChangeDirect:
-		return "direct"
 	case FieldChangeExempt:
 		return "exempt"
 	case FieldChangePending:
@@ -69,7 +65,7 @@ func FieldEditMode(o FieldChangeOutcome) string {
 	return ""
 }
 
-// ValidateKeyFieldChanges 校验拟议值（§9.1：至少一项拟议值、修改原因；草稿直接完善不要求原因）。
+// ValidateKeyFieldChanges 校验拟议值（§9.1：至少一项拟议值、修改原因）。
 func ValidateKeyFieldChanges(c KeyFieldChanges, reason string, reasonRequired bool, roleOf func(int64) string, taskStart time.Time) error {
 	if c.Empty() {
 		return ErrChangeEmpty
@@ -96,19 +92,13 @@ func ValidateKeyFieldChanges(c KeyFieldChanges, reason string, reasonRequired bo
 }
 
 // FieldChangeRoute 路由提交结果（AC-23、§5.2.B）：
-// 草稿由创建人／负责人／可编辑项目者直接完善；已入池任务 KR 负责人本人免审即时生效，
-// 其余进入审批（同一任务最多一张待审批变更单）；审批中／审核中／终态不可修改。
+// KR 负责人本人免审即时生效，其余进入审批（同一任务最多一张待审批变更单）；
+// 审批中／审核中／终态不可修改。
 func FieldChangeRoute(a Actor, userID int64, t TaskFacts, hasPending bool) (FieldChangeOutcome, error) {
 	if !CanWriteProject(a) {
 		return 0, ErrChangeForbidden
 	}
 	switch t.Status {
-	case TaskDraft:
-		// 裁决 D2（#137）：创建人只在草稿期保留编辑权。
-		if userID != t.CreatorID && userID != t.OwnerID && !CanEditProject(a) {
-			return 0, ErrChangeForbidden
-		}
-		return FieldChangeDirect, nil
 	case TaskNotStarted, TaskWaitingInput, TaskInProgress:
 		if hasPending {
 			return 0, ErrChangePendingExists
@@ -116,7 +106,7 @@ func FieldChangeRoute(a Actor, userID int64, t TaskFacts, hasPending bool) (Fiel
 		if t.KrOwnerID != nil && *t.KrOwnerID == userID {
 			return FieldChangeExempt, nil
 		}
-		// 入池后：负责人／可编辑项目者（KR 负责人已在上方免审路径）。
+		// 负责人／可编辑项目者（KR 负责人已在上方免审路径）。
 		if userID != t.OwnerID && !CanEditProject(a) {
 			return 0, ErrChangeForbidden
 		}
@@ -138,7 +128,7 @@ func DecideFieldChangeRule(a Actor, state string, t TaskFacts, actorID int64, ap
 	if !CanWriteProject(a) || t.KrOwnerID == nil || *t.KrOwnerID != actorID {
 		return ErrNotKrOwner
 	}
-	// MW-18：退回必须写清理由，与入池审批、完成审核同口径。
+	// MW-18：退回必须写清理由，与完成审核同口径。
 	if !approve && strings.TrimSpace(opinion) == "" {
 		return ErrRejectOpinionRequired
 	}
@@ -175,10 +165,10 @@ func CancelChange() KeyFieldChanges {
 }
 
 // PendingApprovalOnTask 报告任务上是否存在任一未决审批单：
-// 入池审批与完成审批体现在任务状态上，关键字段变更／取消体现在待审批变更单上（AC-57）。
+// 完成审批体现在任务状态上，关键字段变更／取消体现在待审批变更单上（AC-57）。
 func PendingApprovalOnTask(t TaskFacts, hasPendingChange bool) bool {
 	switch t.Status {
-	case TaskPendingPoolReview, TaskPendingIntermediateReview, TaskPendingFinalReview:
+	case TaskPendingIntermediateReview, TaskPendingFinalReview:
 		return true
 	}
 	// 成果更新在审时任务状态仍是已完成，未决事实只体现在成果更新进程上（AC-66）。
