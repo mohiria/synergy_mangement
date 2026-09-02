@@ -1134,7 +1134,11 @@ export default function CollaborationPage({
         onMouseDown={(ev) => startDrag(`t:${t.id}`, ev.clientX, ev.clientY)}
         onClick={guardClick(select)}
         onKeyDown={pressAsClick(select)}
-        onDoubleClick={() => setDrawerTaskId(t.id)}
+        // #177 裁决：双击任务节点进入逐层展开（不再打开任务抽屉）；
+        // 聚焦层内单击已按 CR-05 继续展开，双击不再另起动作。
+        onDoubleClick={() => {
+          if (mode.kind !== "focus") enterFocus(t.id);
+        }}
       >
         {risk && (
           <span className={`gnode-risk-marker risk-${risk}`} aria-hidden>
@@ -1335,7 +1339,9 @@ export default function CollaborationPage({
           ✕
         </button>
       </div>
-      {/* #128：面板完整展示任务内容；放不下的一律单行省略、悬停 title 看全文，不换行撑高。 */}
+      {/* #177 裁决：面板按任务抽屉「任务概况」重做为只读版——基础信息、输入源、
+          交付物、过程文件与外部材料、交付物接收方、当前卡点；空区块不占位、无底部按钮。
+          放不下的一律单行省略、悬停 title 看全文，不换行撑高（#128 口径保留）。 */}
       <div className="graph-inspector-body">
         <div className="gi-title">
           <span className="gi-eyebrow">任务节点 · {inspectorDetail.task.code}</span>
@@ -1360,41 +1366,159 @@ export default function CollaborationPage({
             <span>负责人</span>
             <strong>{inspectorDetail.task.ownerName}</strong>
           </div>
-          <div
-            className="gi-prop"
-            title={(inspectorDetail.task.participants ?? []).map((p) => p.displayName).join("、") || undefined}
-          >
-            <span>参与人</span>
-            <strong>
-              {(inspectorDetail.task.participants ?? []).length > 0
-                ? (inspectorDetail.task.participants ?? []).map((p) => p.displayName).join("、")
-                : "—"}
-            </strong>
-          </div>
+          {(inspectorDetail.task.participants ?? []).length > 0 && (
+            <div
+              className="gi-prop"
+              title={(inspectorDetail.task.participants ?? []).map((p) => p.displayName).join("、")}
+            >
+              <span>参与人</span>
+              <strong>
+                {(inspectorDetail.task.participants ?? []).map((p) => p.displayName).join("、")}
+              </strong>
+            </div>
+          )}
           <div className="gi-prop">
-            <span>计划时间</span>
+            <span>周期</span>
             <strong>
               {inspectorDetail.task.startDate} — {inspectorDetail.task.endDate}
             </strong>
           </div>
-          <div className="gi-prop">
-            <span>直接输入 / 输出</span>
-            <strong>
-              {inspectorDetail.inputs.length} / {inspectorDetail.outputs.length}
-            </strong>
-          </div>
-          <div className="gi-prop">
-            <span>进度</span>
-            <strong>
-              {inspectorDetail.task.progress != null ? `${inspectorDetail.task.progress}%` : "—"}
-            </strong>
-          </div>
+          {inspectorDetail.task.progress != null && (
+            <div className="gi-prop">
+              <span>进度</span>
+              <strong>{inspectorDetail.task.progress}%</strong>
+            </div>
+          )}
+          {inspectorDetail.task.completionCriteria && (
+            <div className="gi-prop" title={inspectorDetail.task.completionCriteria}>
+              <span>量化标准</span>
+              <strong>{inspectorDetail.task.completionCriteria}</strong>
+            </div>
+          )}
+          {inspectorDetail.task.description && (
+            <div className="gi-prop" title={inspectorDetail.task.description}>
+              <span>任务说明</span>
+              <strong>{inspectorDetail.task.description}</strong>
+            </div>
+          )}
         </div>
-        {/* 结构化卡点事实卡：等级、原因、待行动人、已持续天数、影响（§8.1）。 */}
+        {inspectorDetail.inputs.length > 0 && (
+          <div className="gi-block">
+            <div className="gi-block-head">
+              <b>输入源</b>
+              <span>
+                {inspectorDetail.inputs.filter((e) => e.ready).length}/{inspectorDetail.inputs.length} 已就绪
+              </span>
+            </div>
+            {inspectorDetail.inputs.map((e) => {
+              const src =
+                e.sourceTaskId != null
+                  ? `${e.sourceTaskCode ?? ""} ${e.sourceTaskName ?? ""}`
+                  : (e.inputRequest?.providerName ?? "");
+              return (
+                <button
+                  key={e.id}
+                  type="button"
+                  className="gi-mini"
+                  title={`${src} → ${inspectorDetail.task.code}`}
+                  onClick={() => {
+                    // 点击输入行选中对应边（原型 cp-relation-mini → cp-edge）。
+                    setSelectedTask(null);
+                    setImpactMode(false);
+                    setSelectedNode(null);
+                    setSelectedEdge(e.id);
+                  }}
+                >
+                  <span>
+                    <b>
+                      {src} → {inspectorDetail.task.code}
+                    </b>
+                    <small>{e.necessityLabel}</small>
+                  </span>
+                  <span className={`gi-badge ${e.ready ? "ready" : "risk-warning"}`}>
+                    {e.ready ? "已就绪" : "未就绪"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {inspectorDetail.deliverables.length > 0 && (
+          <div className="gi-block">
+            <div className="gi-block-head">
+              <b>交付物</b>
+              <span>{inspectorDetail.deliverables.length} 项</span>
+            </div>
+            {inspectorDetail.deliverables.map((d) => (
+              <div key={d.id} className="gi-file">
+                <span title={`${d.name} · ${d.contentStateLabel}`}>
+                  <b>{d.name}</b>
+                  <small>
+                    {d.contentStateLabel}
+                    {d.current?.fileSize ? ` · ${formatFileSize(d.current.fileSize)}` : ""}
+                  </small>
+                </span>
+                {d.current && (
+                  <span>
+                    {previewable(d.current.fileName) && (
+                      <Button size="small" onClick={() => openEdgeFile(d.current!.id, d.current!.fileName, true)}>
+                        预览
+                      </Button>
+                    )}
+                    <Button size="small" onClick={() => openEdgeFile(d.current!.id, d.current!.fileName, false)}>
+                      下载
+                    </Button>
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {(inspectorDetail.files ?? []).length > 0 && (
+          <div className="gi-block">
+            <div className="gi-block-head">
+              <b>过程文件与外部材料</b>
+              <span>{(inspectorDetail.files ?? []).length} 项</span>
+            </div>
+            {(inspectorDetail.files ?? []).map((f) => (
+              <div key={f.id} className="gi-file">
+                <span title={f.fileName}>
+                  <b>{f.fileName}</b>
+                  <small>
+                    {f.kindLabel}
+                    {f.fileSize ? ` · ${formatFileSize(f.fileSize)}` : ""}
+                  </small>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        {inspectorDetail.receipts.length > 0 && (
+          <div className="gi-block">
+            <div className="gi-block-head">
+              <b>交付物接收方</b>
+              <span>
+                {inspectorDetail.receipts.filter((r) => r.confirmedAt).length}/
+                {inspectorDetail.receipts.length} 已接收
+              </span>
+            </div>
+            {inspectorDetail.receipts.map((r) => (
+              <div key={r.id} className="gi-file">
+                <span title={r.displayName}>
+                  <b>{r.displayName}</b>
+                </span>
+                <span className={`gi-badge ${r.confirmedAt ? "ready" : "risk-warning"}`}>
+                  {r.confirmedAt ? "已接收" : "待接收"}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        {/* 当前卡点（§8.1）：等级、原因、待行动人、已持续天数、影响。 */}
         {inspectorDetail.blockers.map((b) => (
           <div key={b.key} className={`gi-fact risk-${b.level}`}>
             <span>
-              结构化卡点 · {b.kindLabel}
+              当前卡点 · {b.kindLabel}
               {b.levelLabel ? ` · ${b.levelLabel}` : ""}
             </span>
             <b>{b.reason}</b>
@@ -1404,105 +1528,6 @@ export default function CollaborationPage({
             {b.impactNote && <small>{b.impactNote}</small>}
           </div>
         ))}
-        <div className="gi-block">
-          <div className="gi-block-head">
-            <b>输入就绪</b>
-            <span>
-              {inspectorDetail.inputs.filter((e) => e.ready).length}/{inspectorDetail.inputs.length} 已就绪
-            </span>
-          </div>
-          {inspectorDetail.inputs.length === 0 && <p className="gi-empty">没有配置上游输入。</p>}
-          {inspectorDetail.inputs.map((e) => {
-            const src =
-              e.sourceTaskId != null
-                ? `${e.sourceTaskCode ?? ""} ${e.sourceTaskName ?? ""}`
-                : (e.inputRequest?.providerName ?? "");
-            return (
-              <button
-                key={e.id}
-                type="button"
-                className="gi-mini"
-                title={`${src} → ${inspectorDetail.task.code}`}
-                onClick={() => {
-                  // 点击输入行选中对应边（原型 cp-relation-mini → cp-edge）。
-                  setSelectedTask(null);
-                  setImpactMode(false);
-                  setSelectedNode(null);
-                  setSelectedEdge(e.id);
-                }}
-              >
-                <span>
-                  <b>
-                    {src} → {inspectorDetail.task.code}
-                  </b>
-                  <small>{e.necessityLabel}</small>
-                </span>
-                <span className={`gi-badge ${e.ready ? "ready" : "risk-warning"}`}>
-                  {e.ready ? "已就绪" : "未就绪"}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-        <div className="gi-block">
-          <div className="gi-block-head">
-            <b>当前交付物</b>
-            <span>{inspectorDetail.deliverables.filter((d) => d.current).length} 项</span>
-          </div>
-          {inspectorDetail.deliverables.filter((d) => d.current).length === 0 && (
-            <p className="gi-empty">尚无已生效的当前交付物。</p>
-          )}
-          {inspectorDetail.deliverables
-            .filter((d) => d.current)
-            .map((d) => (
-              <div key={d.id} className="gi-file">
-                <span title={d.current!.fileName}>
-                  <b>{d.current!.fileName}</b>
-                  <small>
-                    {d.current!.fileType || "文件"}
-                    {d.current!.fileSize ? ` · ${formatFileSize(d.current!.fileSize)}` : ""}
-                  </small>
-                </span>
-                <span>
-                  {previewable(d.current!.fileName) && (
-                    <Button size="small" onClick={() => openEdgeFile(d.current!.id, d.current!.fileName, true)}>
-                      预览
-                    </Button>
-                  )}
-                  <Button size="small" onClick={() => openEdgeFile(d.current!.id, d.current!.fileName, false)}>
-                    下载
-                  </Button>
-                </span>
-              </div>
-            ))}
-        </div>
-        <div className="gi-impact">
-          <span>系统推导 · 仅沿下游硬前置</span>
-          <b
-            title={[...new Set(inspectorDetail.impactedTargets.map((t) => t.objectiveTitle))].join("、") || undefined}
-          >
-            受影响 O：
-            {[...new Set(inspectorDetail.impactedTargets.map((t) => t.objectiveTitle))].join("、") || "无"}
-          </b>
-          <b title={inspectorDetail.impactedTargets.map((t) => t.krDescription).join("、") || undefined}>
-            受影响 KR：{inspectorDetail.impactedTargets.map((t) => t.krDescription).join("、") || "无"}
-          </b>
-        </div>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {/* AC-27：从当前节点向外逐层展开——进入聚焦层后画布节点集合随点击增长，
-              而不是像层级模式那样整层替换。 */}
-          {mode.kind !== "focus" && (
-            <Button size="small" type="primary" onClick={() => enterFocus(selectedTask)}>
-              逐层展开
-            </Button>
-          )}
-          <Button size="small" type={impactMode ? "primary" : "default"} onClick={() => setImpactMode((v) => !v)}>
-            {impactMode ? "退出影响路径" : "查看影响路径"}
-          </Button>
-          <Button size="small" onClick={() => setDrawerTaskId(selectedTask)}>
-            打开任务详情
-          </Button>
-        </div>
       </div>
     </aside>
   );
@@ -2000,6 +2025,16 @@ export default function CollaborationPage({
               <div
                 className={`graph-ops graph-ops-right${edgeInspector || inspector ? " with-inspector" : ""}`}
               >
+                {/* #177 裁决：影响路径入口移到画布操作区（选中任务时可用）。 */}
+                {selectedTask != null && (
+                  <Button
+                    size="small"
+                    type={impactMode ? "primary" : "default"}
+                    onClick={() => setImpactMode((v) => !v)}
+                  >
+                    {impactMode ? "退出影响路径" : "查看影响路径"}
+                  </Button>
+                )}
                 <Button size="small" onClick={relayout}>
                   重新布局
                 </Button>
@@ -2381,6 +2416,8 @@ export default function CollaborationPage({
           setDrawerTaskId(null);
           const t = taskById.get(id);
           if (t) {
+            // 从关系列表进入时也要切回图谱视图，否则选中态没有画布可落。
+            setViewMode("graph");
             setMode({ kind: "kr", krId: t.keyResultId });
             setViewStack([]);
             setSelectedTask(id);

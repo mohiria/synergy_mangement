@@ -48,8 +48,8 @@ test.describe("显示已完成开关", () => {
   test("任务聚焦层：开关口径与 KR 层一致", async ({ page }) => {
     await openGraph(page, `?task=${ACTIVE.taskId}`);
     await setShowCompleted(page, true);
-    // 落位后任务已选中，从检视面板进入聚焦层（AC-27 逐层展开）。
-    await page.getByRole("button", { name: "逐层展开" }).click();
+    // #177 裁决：双击任务节点进入聚焦层（AC-27 逐层展开），面板不再有按钮。
+    await graphNode(page, ACTIVE.name).dblclick();
     await expect(graphNode(page, ACTIVE.name)).toBeVisible();
     await expect(graphNode(page, COMPLETED_UPSTREAM)).toBeVisible();
     await setShowCompleted(page, false);
