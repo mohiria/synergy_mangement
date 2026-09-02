@@ -2616,14 +2616,17 @@ components:
           type: integer
     TaskStatus:
       type: string
-      description: 任务生命周期状态（词汇表「任务生命周期状态」）；页面主状态汇总，审批原始状态在审批单中
+      description: >-
+        任务生命周期状态（词汇表「任务生命周期状态」；裁决 13，#182）：存储五态
+        未开始／进行中／审核中／已完成／已关闭；当前审批环节从完成申请单读取，
+        不再落在任务状态上。waiting_input 是纯显示派生态（必要输入未就绪且任务
+        未开始时叠加，AC-58），只出现在接口下发、不落库
       enum:
         [
           not_started,
           waiting_input,
           in_progress,
-          pending_intermediate_review,
-          pending_final_review,
+          in_review,
           completed,
           cancelled,
         ]

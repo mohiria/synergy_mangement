@@ -215,6 +215,11 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 	if err != nil {
 		return nil, err
 	}
+	// 审核中任务的当前环节从完成申请单读取（裁决 13，#182）。
+	reviewStageByTask, err := s.pendingReviewStageByTask(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
 	// 来源任务编号（#101）：编号是持久字段，由 O／KR／任务三级序号拼出，前端不再自己拼。
 	codeByTask := make(map[int64]string, len(taskRows))
 	for _, t := range taskRows {
@@ -289,7 +294,7 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 		if e.SourceTaskStatus.Valid {
 			st := TaskStatus(e.SourceTaskStatus.String)
 			item.SourceTaskStatus = &st
-			label := domain.StatusLabel(e.SourceTaskStatus.String, finalNames, reviewerNamesByTask[sourceID])
+			label := domain.StatusLabel(e.SourceTaskStatus.String, reviewStageByTask[sourceID], finalNames, reviewerNamesByTask[sourceID])
 			item.SourceTaskStatusLabel = &label
 		}
 		if e.SourceOwnerName.Valid {

@@ -41,8 +41,7 @@ const STATUS_FILTER_LABEL: Record<TaskStatus, string> = {
   not_started: "未开始",
   waiting_input: "等待输入",
   in_progress: "进行中",
-  pending_intermediate_review: "待成果审核",
-  pending_final_review: "待终审",
+  in_review: "审核中",
   completed: "已完成",
   cancelled: "已关闭",
 };

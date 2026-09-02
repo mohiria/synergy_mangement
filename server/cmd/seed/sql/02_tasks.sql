@@ -54,10 +54,10 @@ OVERRIDING SYSTEM VALUE VALUES
  now() - interval '18 days', now() - interval '18 days'),
 
 -- KR4 割接与回退（两张审批停在路上）
-(14, 4, '编制割接实施方案', 9, current_date - 60, current_date + 2, 'pending_final_review', 2, 90, '',
+(14, 4, '编制割接实施方案', 9, current_date - 60, current_date + 2, 'in_review', 2, 90, '',
  '含割接时序、人员分工、通信机制与观察指标，需公司级评审前定稿。', '方案覆盖割接全过程，关键节点有明确责任人和时间点。', 'members',
  now() - interval '63 days', now() - interval '5 days'),
-(15, 4, '编制回退预案与判定标准', 3, current_date - 55, current_date + 8, 'pending_intermediate_review', 2, 80, '',
+(15, 4, '编制回退预案与判定标准', 3, current_date - 55, current_date + 8, 'in_review', 2, 80, '',
  '回退判定要能在 15 分钟内做出决定，避免现场扯皮。', '回退触发条件、决策人和操作步骤明确到分钟级。', 'none',
  now() - interval '58 days', now() - interval '2 days'),
 (16, 4, '组织割接方案公司级评审', 2, current_date + 8, current_date + 15, 'not_started', 2, NULL, '',

@@ -23,9 +23,9 @@ func ApprovalWaitingLabel(names []string) string {
 	return fmt.Sprintf("待%s等%d人审批", valid[0], len(valid))
 }
 
-// StatusLabel 派生任务主状态的面向用户显示文案：审批等待状态按当前审批人姓名显示
-// （裁决 11：终审的审批人是项目管理员集合，中间或签取审核组），其余为固定中文标签。
-func StatusLabel(status string, finalReviewerNames, reviewerNames []string) string {
+// StatusLabel 派生任务主状态的面向用户显示文案：审核中按申请单环节取当前审批人姓名
+// （裁决 13，#182：中间或签取审核组，待终审取项目管理员集合），其余为固定中文标签。
+func StatusLabel(status, reviewStage string, finalReviewerNames, reviewerNames []string) string {
 	switch status {
 	case TaskNotStarted:
 		return "未开始"
@@ -33,9 +33,10 @@ func StatusLabel(status string, finalReviewerNames, reviewerNames []string) stri
 		return "等待输入"
 	case TaskInProgress:
 		return "进行中"
-	case TaskPendingIntermediateReview:
-		return ApprovalWaitingLabel(reviewerNames)
-	case TaskPendingFinalReview:
+	case TaskInReview:
+		if reviewStage == CompletionIntermediate {
+			return ApprovalWaitingLabel(reviewerNames)
+		}
 		return ApprovalWaitingLabel(finalReviewerNames)
 	case TaskCompleted:
 		return "已完成"

@@ -139,7 +139,7 @@ func TestProgressCoverage(t *testing.T) {
 		// AC-63：已完成即 100，不看库里存了什么。
 		{"已完成一律按 100", []TaskProgressFact{
 			{Status: TaskCompleted, Progress: ip(60)},
-			{Status: TaskPendingFinalReview, Progress: ip(90)},
+			{Status: TaskInReview, Progress: ip(90)},
 		}, 2, 2, ip(95)},
 		{"四种任务混合", []TaskProgressFact{
 			{Status: TaskCompleted, Progress: ip(60)},
@@ -188,7 +188,7 @@ func TestCanStartAndCloseFlags(t *testing.T) {
 	if CanCloseTask(Actor{Role: RoleAdmin}, TaskFacts{Status: TaskCompleted, OwnerID: 5, KrOwnerID: i64(7)}) {
 		t.Fatal("已完成不应可关闭")
 	}
-	if CanCloseTask(Actor{Role: RoleAdmin}, TaskFacts{Status: TaskPendingFinalReview, OwnerID: 5}) {
+	if CanCloseTask(Actor{Role: RoleAdmin}, TaskFacts{Status: TaskInReview, OwnerID: 5}) {
 		t.Fatal("终审中不应可关闭（未决审批互斥）")
 	}
 }

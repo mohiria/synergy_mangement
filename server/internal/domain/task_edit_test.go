@@ -26,7 +26,7 @@ func TestTaskEditRule(t *testing.T) {
 		{"KR 负责人禁止", Actor{Role: RoleMember}, 7, facts(TaskInProgress), ErrChangeForbidden},
 		{"无关成员禁止", Actor{Role: RoleMember}, 9, facts(TaskInProgress), ErrChangeForbidden},
 		{"访客禁止", Actor{Role: RoleViewer}, 5, facts(TaskInProgress), ErrChangeForbidden},
-		{"完成审核中不可修改", Actor{Role: RoleAdmin}, 9, facts(TaskPendingFinalReview), ErrChangeNotAllowed},
+		{"完成审核中不可修改", Actor{Role: RoleAdmin}, 9, facts(TaskInReview), ErrChangeNotAllowed},
 		{"已完成不可修改", Actor{Role: RoleAdmin}, 9, facts(TaskCompleted), ErrChangeNotAllowed},
 		{"已关闭不可修改", Actor{Role: RoleAdmin}, 9, facts(TaskCancelled), ErrChangeNotAllowed},
 	}

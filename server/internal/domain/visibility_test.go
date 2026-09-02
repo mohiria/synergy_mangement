@@ -70,8 +70,8 @@ func TestImplicitViewerReadsAllButWritesNothing(t *testing.T) {
 	implicit := Actor{Role: RoleViewer, Implicit: true}
 	facts := TaskFacts{Status: TaskInProgress, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
 	notStarted := TaskFacts{Status: TaskNotStarted, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
-	finalPending := TaskFacts{Status: TaskPendingFinalReview, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
-	intermediate := TaskFacts{Status: TaskPendingIntermediateReview, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
+	finalPending := TaskFacts{Status: TaskInReview, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
+	intermediate := TaskFacts{Status: TaskInReview, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
 
 	// 读：与显式访客同等，页面与下载都放开。
 	if !CanReadProject(implicit) {

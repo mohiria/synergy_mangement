@@ -25,7 +25,7 @@ func ValidateReviewers(userIDs []int64, roleOf func(int64) string) error {
 // 审核期间与终态不可调整（配置随提交已快照进申请）。
 func CanManageReviewers(a Actor, userID int64, t TaskFacts) bool {
 	switch t.Status {
-	case TaskPendingIntermediateReview, TaskPendingFinalReview, TaskCompleted, TaskCancelled:
+	case TaskInReview, TaskCompleted, TaskCancelled:
 		return false
 	}
 	return OwnerOrProjectAdmin(a, userID, t)
@@ -36,11 +36,11 @@ func CanManageReviewers(a Actor, userID int64, t TaskFacts) bool {
 // 成果更新走同一道审批链，但任务状态保持已完成不回退（AC-66、§5.1）。
 func SubmitCompletionOutcome(reviewerCount int, resultUpdate bool) (string, string) {
 	reviewState := CompletionPendingFinal
-	taskStatus := TaskPendingFinalReview
 	if reviewerCount > 0 {
 		reviewState = CompletionIntermediate
-		taskStatus = TaskPendingIntermediateReview
 	}
+	// 裁决 13（#182）：任务状态统一为「审核中」，具体环节只落在申请单状态上。
+	taskStatus := TaskInReview
 	if resultUpdate {
 		taskStatus = TaskCompleted
 	}
@@ -51,8 +51,9 @@ func SubmitCompletionOutcome(reviewerCount int, resultUpdate bool) (string, stri
 // 不能替代）；任一人通过→待 KR 终审并关闭其余待办，任一人退回→整体退回（意见必填）。
 func DecideIntermediateRule(a Actor, t TaskFacts, actorID int64, isReviewer func(int64) bool, approve bool, opinion string) (string, string, error) {
 	// 成果更新的或签同样在任务已完成的前提下进行，处理结果不改变生命周期状态（AC-66）。
+	// 裁决 13（#182）：任务状态只剩「审核中」，环节由申请单状态把关（handler 按 review.State 分流）。
 	inResultUpdate := ResultUpdateReviewInFlight(t)
-	if t.Status != TaskPendingIntermediateReview && !inResultUpdate {
+	if t.Status != TaskInReview && !inResultUpdate {
 		return "", "", ErrCompletionNotIntermediate
 	}
 	if !CanWriteProject(a) || !isReviewer(actorID) {
@@ -67,7 +68,8 @@ func DecideIntermediateRule(a Actor, t TaskFacts, actorID int64, isReviewer func
 		if inResultUpdate {
 			return TaskCompleted, CompletionPendingFinal, nil
 		}
-		return TaskPendingFinalReview, CompletionPendingFinal, nil
+		// 或签通过：任务保持审核中，环节推进只体现在申请单状态（裁决 13）。
+		return TaskInReview, CompletionPendingFinal, nil
 	}
 	if strings.TrimSpace(opinion) == "" {
 		return "", "", ErrRejectOpinionRequired

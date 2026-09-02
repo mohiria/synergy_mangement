@@ -56,7 +56,7 @@ func TestEdgeReady(t *testing.T) {
 		{"来源已完成即就绪", TaskCompleted, true},
 		{"进行中未就绪", TaskInProgress, false},
 		{"未开始未就绪", TaskNotStarted, false},
-		{"终审中未就绪", TaskPendingFinalReview, false},
+		{"终审中未就绪", TaskInReview, false},
 		{"已关闭未就绪", TaskCancelled, false},
 	}
 	for _, tc := range cases {
@@ -80,7 +80,7 @@ func TestDeriveDisplayStatus(t *testing.T) {
 		{"未开始且必要输入未到", TaskNotStarted, true, TaskWaitingInput},
 		{"进行中不再叠加等待输入", TaskInProgress, true, TaskInProgress},
 		{"进行中输入已就绪", TaskInProgress, false, TaskInProgress},
-		{"待终审不改写", TaskPendingFinalReview, true, TaskPendingFinalReview},
+		{"待终审不改写", TaskInReview, true, TaskInReview},
 		{"已完成不改写", TaskCompleted, true, TaskCompleted},
 	}
 	for _, tc := range cases {

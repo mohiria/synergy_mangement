@@ -25,30 +25,31 @@ func TestApprovalWaitingLabel(t *testing.T) {
 	}
 }
 
-// 任务主状态显示文案（AC-04）：审批等待状态按当前审批人姓名显示，其余为固定中文标签；
-// 裁决 11（#181）：终审人为项目管理员集合，多人为“待{首位姓名}等N人审批”。
+// 任务主状态显示文案（AC-04）：审核中按申请单环节取当前审批人姓名（裁决 13，#182），
+// 其余为固定中文标签；裁决 11：终审人为项目管理员集合，多人为“待{首位姓名}等N人审批”。
 func TestStatusLabel(t *testing.T) {
 	cases := []struct {
 		name           string
 		status         string
+		reviewStage    string
 		finalReviewers []string
 		reviewers      []string
 		want           string
 	}{
-		{"未开始", TaskNotStarted, []string{"周宁"}, nil, "未开始"},
-		{"等待输入", TaskWaitingInput, []string{"周宁"}, nil, "等待输入"},
-		{"进行中", TaskInProgress, []string{"周宁"}, nil, "进行中"},
-		{"中间或签单人", TaskPendingIntermediateReview, []string{"周宁"}, []string{"张三"}, "待张三审批"},
-		{"中间或签多人", TaskPendingIntermediateReview, []string{"周宁"}, []string{"张三", "李四"}, "待张三等2人审批"},
-		{"终审单管理员显示姓名", TaskPendingFinalReview, []string{"周宁"}, nil, "待周宁审批"},
-		{"终审多管理员显示首位加人数", TaskPendingFinalReview, []string{"周宁", "张三"}, nil, "待周宁等2人审批"},
-		{"无管理员名单退化", TaskPendingFinalReview, nil, nil, "待审批"},
-		{"已完成", TaskCompleted, []string{"周宁"}, nil, "已完成"},
-		{"已关闭", TaskCancelled, []string{"周宁"}, nil, "已关闭"},
+		{"未开始", TaskNotStarted, "", []string{"周宁"}, nil, "未开始"},
+		{"等待输入", TaskWaitingInput, "", []string{"周宁"}, nil, "等待输入"},
+		{"进行中", TaskInProgress, "", []string{"周宁"}, nil, "进行中"},
+		{"审核中·或签环节单人", TaskInReview, CompletionIntermediate, []string{"周宁"}, []string{"张三"}, "待张三审批"},
+		{"审核中·或签环节多人", TaskInReview, CompletionIntermediate, []string{"周宁"}, []string{"张三", "李四"}, "待张三等2人审批"},
+		{"审核中·终审环节单管理员", TaskInReview, CompletionPendingFinal, []string{"周宁"}, nil, "待周宁审批"},
+		{"审核中·终审环节多管理员", TaskInReview, CompletionPendingFinal, []string{"周宁", "张三"}, nil, "待周宁等2人审批"},
+		{"无管理员名单退化", TaskInReview, CompletionPendingFinal, nil, nil, "待审批"},
+		{"已完成", TaskCompleted, "", []string{"周宁"}, nil, "已完成"},
+		{"已关闭", TaskCancelled, "", []string{"周宁"}, nil, "已关闭"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := StatusLabel(tc.status, tc.finalReviewers, tc.reviewers); got != tc.want {
+			if got := StatusLabel(tc.status, tc.reviewStage, tc.finalReviewers, tc.reviewers); got != tc.want {
 				t.Fatalf("StatusLabel(%q) = %q, want %q", tc.status, got, tc.want)
 			}
 		})

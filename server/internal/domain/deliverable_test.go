@@ -59,7 +59,7 @@ func TestCanUploadCandidate(t *testing.T) {
 		{"等待输入可传", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskWaitingInput, OwnerID: 5}, true},
 		{"管理员可传", Actor{Role: RoleAdmin}, 9, TaskFacts{Status: TaskInProgress, OwnerID: 5}, true},
 		{"创建人非负责人不可传", Actor{Role: RoleMember}, 3, TaskFacts{Status: TaskInProgress, OwnerID: 5, CreatorID: 3}, false},
-		{"完成审核中不可另传", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskPendingFinalReview, OwnerID: 5}, false},
+		{"完成审核中不可另传", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskInReview, OwnerID: 5}, false},
 		{"已完成不可传", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCompleted, OwnerID: 5}, false},
 	}
 	for _, tc := range cases {

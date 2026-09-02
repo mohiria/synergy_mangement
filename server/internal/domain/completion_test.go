@@ -22,7 +22,7 @@ func TestSubmitCompletionRule(t *testing.T) {
 		{"无候选不可提交", facts(TaskInProgress), 0, "x", ErrNoCandidates},
 		{"提交说明必填", facts(TaskInProgress), 1, "  ", ErrCompletionNoteRequired},
 		{"未开始不可提交", facts(TaskNotStarted), 1, "x", ErrCompletionNotInProgress},
-		{"已在终审不可重复提交", facts(TaskPendingFinalReview), 1, "x", ErrCompletionNotInProgress},
+		{"已在终审不可重复提交", facts(TaskInReview), 1, "x", ErrCompletionNotInProgress},
 		{"KR 无负责人也可提交（裁决 11）", TaskFacts{Status: TaskInProgress, OwnerID: 5}, 1, "x", nil},
 	}
 	for _, tc := range cases {
@@ -54,7 +54,7 @@ func TestCanSubmitCompletion(t *testing.T) {
 // AC-15／38（裁决 11 #181 修订）：终审人为项目管理员集合（含项目负责人）或签，
 // 任一人通过→已完成，退回→进行中且退回意见必填；KR 负责人与任务负责人不再可终审。
 func TestDecideCompletionRule(t *testing.T) {
-	pending := TaskFacts{Status: TaskPendingFinalReview, CreatorID: 3, OwnerID: 5, KrOwnerID: i64(7)}
+	pending := TaskFacts{Status: TaskInReview, CreatorID: 3, OwnerID: 5, KrOwnerID: i64(7)}
 	admin := Actor{Role: RoleAdmin}
 	owner := Actor{IsOwner: true}
 	member := Actor{Role: RoleMember}

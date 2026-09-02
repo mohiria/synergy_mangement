@@ -2021,7 +2021,7 @@ func TestCompletionReviewFlow(t *testing.T) {
 	wantStatus(t, resp, http.StatusOK)
 	pending := decodeBody[api.Task](t, resp)
 	// 裁决 11：终审人为项目管理员集合——本项目只有项目负责人张三。
-	if pending.Status != api.TaskStatusPendingFinalReview || pending.CurrentStage != "待张三审批" {
+	if pending.Status != api.TaskStatusInReview || pending.CurrentStage != "待张三审批" {
 		t.Fatalf("提交后应待终审: %+v", pending)
 	}
 
@@ -2433,7 +2433,7 @@ func TestIntermediateReviewOrSign(t *testing.T) {
 	wantStatus(t, resp, http.StatusOK)
 	submitted := decodeBody[api.Task](t, resp)
 	// 或签组为 dave（赵六）、erin（钱七）：多人取首位加人数。
-	if submitted.Status != api.TaskStatusPendingIntermediateReview || submitted.CurrentStage != "待赵六等2人审批" {
+	if submitted.Status != api.TaskStatusInReview || submitted.CurrentStage != "待赵六等2人审批" {
 		t.Fatalf("提交后应进入成果审核: %+v", submitted)
 	}
 
@@ -2496,7 +2496,7 @@ func TestIntermediateReviewOrSign(t *testing.T) {
 	resp = doJSON(t, dave, http.MethodPost, newDecisionURL, api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved, Opinion: &okOp})
 	wantStatus(t, resp, http.StatusOK)
 	afterOr := decodeBody[api.Task](t, resp)
-	if afterOr.Status != api.TaskStatusPendingFinalReview {
+	if afterOr.Status != api.TaskStatusInReview {
 		t.Fatalf("或签通过后应待 KR 终审: %+v", afterOr)
 	}
 	// AC-14：其余待办自动关闭——erin 再处理返回状态冲突

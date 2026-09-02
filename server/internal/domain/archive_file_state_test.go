@@ -13,7 +13,7 @@ func TestArchiveFileState(t *testing.T) {
 		{"已完成任务已发布", TaskCompleted, ArchivePublished, "已发布"},
 		{"进行中未发布", TaskInProgress, ArchiveUnpublished, "未发布"},
 		{"未开始未发布", TaskNotStarted, ArchiveUnpublished, "未发布"},
-		{"待 KR 终审未发布", TaskPendingFinalReview, ArchiveUnpublished, "未发布"},
+		{"待 KR 终审未发布", TaskInReview, ArchiveUnpublished, "未发布"},
 		{"已关闭未发布", TaskCancelled, ArchiveUnpublished, "未发布"},
 	}
 	for _, c := range cases {

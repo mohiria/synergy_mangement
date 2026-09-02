@@ -18,7 +18,7 @@ var (
 func DeliverableStructureRule(a Actor, userID int64, t TaskFacts) error {
 	switch t.Status {
 	case TaskNotStarted, TaskWaitingInput, TaskInProgress:
-	case TaskPendingIntermediateReview, TaskPendingFinalReview:
+	case TaskInReview:
 		return ErrDeliverableFrozen
 	default:
 		return ErrDeliverableStateNotAllowed

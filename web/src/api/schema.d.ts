@@ -1346,10 +1346,10 @@ export interface components {
             notifiedCount: number;
         };
         /**
-         * @description 任务生命周期状态（词汇表「任务生命周期状态」）；页面主状态汇总，审批原始状态在审批单中
+         * @description 任务生命周期状态（词汇表「任务生命周期状态」；裁决 13，#182）：存储五态 未开始／进行中／审核中／已完成／已关闭；当前审批环节从完成申请单读取， 不再落在任务状态上。waiting_input 是纯显示派生态（必要输入未就绪且任务 未开始时叠加，AC-58），只出现在接口下发、不落库
          * @enum {string}
          */
-        TaskStatus: "not_started" | "waiting_input" | "in_progress" | "pending_intermediate_review" | "pending_final_review" | "completed" | "cancelled";
+        TaskStatus: "not_started" | "waiting_input" | "in_progress" | "in_review" | "completed" | "cancelled";
         /**
          * @description 成果更新进程（词汇表「成果更新」；派生自任务事实，接口不接受直接写入）： none＝无；open＝已发起、候选内容尚未随完成申请提交；reviewing＝已提交，或签或终审在审。 整个过程中任务生命周期状态保持 completed
          * @enum {string}

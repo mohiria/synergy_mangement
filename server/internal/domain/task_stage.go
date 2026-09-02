@@ -11,10 +11,12 @@ func CurrentStage(t TaskFacts) (string, *int64) {
 		return StageWaitingInput, &owner
 	case TaskInProgress:
 		return StageInProgress, &owner
-	case TaskPendingIntermediateReview:
-		return StageIntermediateReview, nil
-	case TaskPendingFinalReview:
-		// 裁决 11（#181）：终审人为项目管理员集合，无单一待行动人（与或签同口径）。
+	case TaskInReview:
+		// 裁决 13（#182）：当前环节从完成申请单读取（中间或签／待终审）；
+		// 裁决 11：终审人为项目管理员集合，两个审批环节都无单一待行动人。
+		if t.ReviewStage == CompletionIntermediate {
+			return StageIntermediateReview, nil
+		}
 		return StageFinalReview, nil
 	case TaskCompleted:
 		return StageCompleted, nil

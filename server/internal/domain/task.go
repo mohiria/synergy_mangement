@@ -7,15 +7,19 @@ import (
 	"unicode/utf8"
 )
 
-// 任务生命周期状态（词汇表「任务生命周期状态」；PRD §5.1；裁决 #162 删除草稿与待入池审批）。
+// 任务生命周期状态（词汇表「任务生命周期状态」；PRD §5.1；裁决 #162 删除草稿与待入池审批；
+// 裁决 13（#182）：存储缩减为五态，当前审批环节从完成申请单读取）。
 const (
-	TaskNotStarted                = "not_started"
-	TaskWaitingInput              = "waiting_input"
-	TaskInProgress                = "in_progress"
-	TaskPendingIntermediateReview = "pending_intermediate_review"
-	TaskPendingFinalReview        = "pending_final_review"
-	TaskCompleted                 = "completed"
-	TaskCancelled                 = "cancelled"
+	TaskNotStarted = "not_started"
+	// TaskWaitingInput 纯显示派生态（裁决 13）：必要输入未就绪且任务未开始时叠加显示，
+	// 不落库——存储枚举只有下面五态。
+	TaskWaitingInput = "waiting_input"
+	TaskInProgress   = "in_progress"
+	// TaskInReview 审核中（裁决 13）：原「待成果审核（或签）」「待终审」合并；
+	// 当前环节（中间或签／待终审）从完成申请单的状态读取，不再冗余落在任务状态上。
+	TaskInReview  = "in_review"
+	TaskCompleted = "completed"
+	TaskCancelled = "cancelled"
 )
 
 var (
@@ -41,6 +45,9 @@ type TaskFacts struct {
 	KrOwnerID *int64
 	// ResultUpdate 成果更新的进程（词汇表「成果更新」）：空＝无，open＝已发起未提交，reviewing＝已提交在审。
 	ResultUpdate string
+	// ReviewStage 审核中任务的当前审批环节（裁决 13，#182）：取未决完成申请单的状态
+	// （CompletionIntermediate／CompletionPendingFinal），非审核中为空。只作显示派生输入。
+	ReviewStage string
 }
 
 // CanEditTaskConfig 任务编辑权限的统一口径（裁决 10，#180：任务配置收归项目管理员，

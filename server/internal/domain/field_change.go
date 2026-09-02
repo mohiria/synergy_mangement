@@ -98,8 +98,7 @@ var ErrCancelPendingExists = errors.New("任务上存在未决审批单，暂不
 // 完成审批体现在任务状态上，成果更新在审时任务状态仍是已完成、
 // 未决事实只体现在成果更新进程上（AC-66）。
 func PendingApprovalOnTask(t TaskFacts) bool {
-	switch t.Status {
-	case TaskPendingIntermediateReview, TaskPendingFinalReview:
+	if t.Status == TaskInReview {
 		return true
 	}
 	return ResultUpdateReviewInFlight(t)

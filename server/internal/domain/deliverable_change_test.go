@@ -25,8 +25,8 @@ func TestDeliverableStructureRule(t *testing.T) {
 		{"等待输入状态负责人可调整", member, me, facts(TaskWaitingInput), nil},
 		{"非负责人的普通成员无权调整", member, other, facts(TaskInProgress), ErrDeliverableChangeForbidden},
 		{"隐式访客无权调整", Actor{Role: RoleViewer, Implicit: true}, me, facts(TaskInProgress), ErrDeliverableChangeForbidden},
-		{"成果审核中冻结", member, me, facts(TaskPendingIntermediateReview), ErrDeliverableFrozen},
-		{"终审中冻结", member, me, facts(TaskPendingFinalReview), ErrDeliverableFrozen},
+		{"成果审核中冻结", member, me, facts(TaskInReview), ErrDeliverableFrozen},
+		{"终审中冻结", member, me, facts(TaskInReview), ErrDeliverableFrozen},
 		{"已完成不可增删", member, me, facts(TaskCompleted), ErrDeliverableStateNotAllowed},
 		{"已关闭不可增删", member, me, facts(TaskCancelled), ErrDeliverableStateNotAllowed},
 	}
@@ -63,7 +63,7 @@ func TestDeleteDeliverableRule(t *testing.T) {
 		{"未发布的项可自由删除", member, me, facts(TaskInProgress), false, nil},
 		{"有当前内容的项不可删，走成果更新", member, me, facts(TaskInProgress), true, ErrDeliverableHasCurrent},
 		{"已完成任务上已发布的项，提示走成果更新而非状态错误", member, me, facts(TaskCompleted), true, ErrDeliverableHasCurrent},
-		{"完成申请在审期间不可删", member, me, facts(TaskPendingFinalReview), false, ErrDeliverableFrozen},
+		{"完成申请在审期间不可删", member, me, facts(TaskInReview), false, ErrDeliverableFrozen},
 		{"非负责人的普通成员无权删除", member, int64(9), facts(TaskInProgress), false, ErrDeliverableChangeForbidden},
 	}
 	for _, c := range cases {

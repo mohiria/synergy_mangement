@@ -28,8 +28,8 @@ func TestCloseTaskRule(t *testing.T) {
 		{"访客不可关闭", Actor{Role: RoleViewer}, 9, facts(TaskInProgress), ErrCancelForbidden},
 		{"已完成不可关闭", Actor{Role: RoleAdmin}, 9, facts(TaskCompleted), ErrCannotCancel},
 		{"已关闭不可再关闭", Actor{Role: RoleAdmin}, 9, facts(TaskCancelled), ErrCannotCancel},
-		{"成果审核中互斥", Actor{Role: RoleAdmin}, 9, facts(TaskPendingIntermediateReview), ErrCancelPendingExists},
-		{"终审中互斥", Actor{Role: RoleAdmin}, 9, facts(TaskPendingFinalReview), ErrCancelPendingExists},
+		{"成果审核中互斥", Actor{Role: RoleAdmin}, 9, facts(TaskInReview), ErrCancelPendingExists},
+		{"终审中互斥", Actor{Role: RoleAdmin}, 9, facts(TaskInReview), ErrCancelPendingExists},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -51,7 +51,7 @@ func TestPendingApprovalOnTaskNoCancel(t *testing.T) {
 	if PendingApprovalOnTask(TaskFacts{Status: TaskInProgress}) {
 		t.Fatal("进行中且无在途审批不应判定为有未决审批单")
 	}
-	if !PendingApprovalOnTask(TaskFacts{Status: TaskPendingIntermediateReview}) {
+	if !PendingApprovalOnTask(TaskFacts{Status: TaskInReview}) {
 		t.Fatal("成果审核中应判定为有未决审批单")
 	}
 	if !PendingApprovalOnTask(TaskFacts{Status: TaskCompleted, ResultUpdate: ResultUpdateReviewing}) {

@@ -2,10 +2,16 @@ package domain
 
 import "testing"
 
-// 当前环节与待行动人派生（词汇表「当前环节」「待行动人」；AC-31 基础信息）。
+// 当前环节与待行动人派生（词汇表「当前环节」「待行动人」；AC-31 基础信息；
+// 裁决 13，#182：审核中的当前环节从完成申请单读取）。
 func TestCurrentStage(t *testing.T) {
 	facts := func(status string) TaskFacts {
 		return TaskFacts{Status: status, CreatorID: 3, OwnerID: 5, KrOwnerID: i64(7)}
+	}
+	inReview := func(stage string) TaskFacts {
+		f := facts(TaskInReview)
+		f.ReviewStage = stage
+		return f
 	}
 	cases := []struct {
 		name      string
@@ -16,9 +22,9 @@ func TestCurrentStage(t *testing.T) {
 		{"未开始等负责人开始", facts(TaskNotStarted), "待开始执行", i64(5)},
 		{"等待输入停在负责人", facts(TaskWaitingInput), "等待输入", i64(5)},
 		{"进行中为任务执行", facts(TaskInProgress), "任务执行", i64(5)},
-		{"待成果审核", facts(TaskPendingIntermediateReview), "成果审核（或签）", nil},
+		{"审核中·或签环节", inReview(CompletionIntermediate), "成果审核（或签）", nil},
 		// 裁决 11（#181）：终审人为项目管理员集合，无单一待行动人（与或签同口径）。
-		{"待终审无单一待行动人", facts(TaskPendingFinalReview), "终审", nil},
+		{"审核中·终审环节", inReview(CompletionPendingFinal), "终审", nil},
 		{"已完成即已闭环", facts(TaskCompleted), "已闭环", nil},
 		{"已关闭无待行动人", facts(TaskCancelled), "已关闭", nil},
 	}

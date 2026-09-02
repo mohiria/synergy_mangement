@@ -618,6 +618,11 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 	if err != nil {
 		return nil, err
 	}
+	// 审核中任务的当前环节从完成申请单读取（裁决 13，#182）。
+	reviewStageByTask, err := s.pendingReviewStageByTask(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
 	// 必要输入未就绪的任务显示「等待输入」（AC-48、§5.1）；成员来源按输入请求状态判定就绪。
 	unreadyNoteByTask, err := s.unreadyRequiredInputsByProject(ctx, projectID)
 	if err != nil {
@@ -690,7 +695,8 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 	resp := make([]Task, 0, len(rows))
 	for _, t := range rows {
 		facts := domain.TaskFacts{Status: t.Status, CreatorID: t.CreatedBy, OwnerID: t.OwnerID,
-			KrOwnerID: fromPgInt8(t.KrOwnerID), ResultUpdate: t.ResultUpdate}
+			KrOwnerID: fromPgInt8(t.KrOwnerID), ResultUpdate: t.ResultUpdate,
+			ReviewStage: reviewStageByTask[t.ID]}
 		item := Task{
 			Id:                 t.ID,
 			KeyResultId:        t.KeyResultID,
@@ -714,8 +720,8 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 		displayFacts := facts
 		displayFacts.Status = domain.DeriveDisplayStatus(t.Status, unreadyNoteByTask[t.ID] != "")
 		item.Status = TaskStatus(displayFacts.Status)
-		// AC-04：审批等待状态面向用户显示「待{审批人姓名}审批」（裁决 11：终审取管理员集合）。
-		item.StatusLabel = domain.StatusLabel(displayFacts.Status, finalNames, reviewerNamesByTask[t.ID])
+		// AC-04：审批等待状态面向用户显示「待{审批人姓名}审批」（裁决 11／13：按申请单环节取审批人）。
+		item.StatusLabel = domain.StatusLabel(displayFacts.Status, facts.ReviewStage, finalNames, reviewerNamesByTask[t.ID])
 		// 当前环节与待行动人（AC-31 基础信息；名字按身份就近解析）。
 		// 环节文案同样按 AC-04 收口：审批等待环节显示当前审批人姓名。
 		stage, actorID := domain.CurrentStage(displayFacts)

@@ -30,7 +30,7 @@ func TestMyWorkGrouping(t *testing.T) {
 			// 本人负责未开始 → 待我处理（裁决 10：关闭申请机制退场，无退回注记）
 			{ID: 3, Name: "未开始任务", DisplayStatus: TaskNotStarted, OwnerID: me, CreatorID: me, KrOwnerID: krOwnerOther},
 			// 本人负责、完成申请审批中 → 只在等待他人（状态排除出待我处理）
-			{ID: 4, Name: "终审中任务", DisplayStatus: TaskPendingFinalReview, OwnerID: me, CreatorID: me, KrOwnerID: krOwnerOther},
+			{ID: 4, Name: "终审中任务", DisplayStatus: TaskInReview, OwnerID: me, CreatorID: me, KrOwnerID: krOwnerOther},
 			// 他人的任务 → 不出现
 			{ID: 6, Name: "别人的任务", DisplayStatus: TaskInProgress, OwnerID: 9, CreatorID: 9, KrOwnerID: krOwnerOther},
 		},

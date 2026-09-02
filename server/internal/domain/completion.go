@@ -55,8 +55,9 @@ func CanSubmitCompletion(a Actor, userID int64, t TaskFacts, candidateCount int)
 // 任一人通过→任务完成（意见选填），退回→意见必填、任务回到进行中。
 func DecideCompletionRule(a Actor, t TaskFacts, approve bool, opinion string) (string, error) {
 	// 成果更新的终审在任务已完成的前提下进行，处理结果不改变生命周期状态（AC-66）。
+	// 裁决 13（#182）：任务状态只剩「审核中」，具体环节由申请单状态把关（handler 按 review.State 分流）。
 	inResultUpdate := ResultUpdateReviewInFlight(t)
-	if t.Status != TaskPendingFinalReview && !inResultUpdate {
+	if t.Status != TaskInReview && !inResultUpdate {
 		return "", ErrCompletionNotPending
 	}
 	if !CanEditProject(a) {

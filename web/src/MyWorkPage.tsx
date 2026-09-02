@@ -19,8 +19,7 @@ const STATUS_CLASS: Record<TaskStatus, string> = {
   not_started: "",
   waiting_input: "warning",
   in_progress: "in_progress",
-  pending_intermediate_review: "review",
-  pending_final_review: "review",
+  in_review: "review",
   completed: "completed",
   cancelled: "",
 };

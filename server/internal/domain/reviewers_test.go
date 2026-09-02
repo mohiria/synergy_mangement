@@ -34,7 +34,7 @@ func TestCanManageReviewers(t *testing.T) {
 	if CanManageReviewers(Actor{Role: RoleMember}, 9, facts) {
 		t.Fatal("无关成员不应可配置")
 	}
-	if CanManageReviewers(Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskPendingIntermediateReview, OwnerID: 5}) {
+	if CanManageReviewers(Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskInReview, OwnerID: 5}) {
 		t.Fatal("审核中不应可调整")
 	}
 	if CanManageReviewers(Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCompleted, OwnerID: 5}) {
@@ -45,11 +45,11 @@ func TestCanManageReviewers(t *testing.T) {
 // AC-13／AC-14 路由：无成果审核人直接待 KR 终审，有则进入中间或签。
 func TestSubmitCompletionOutcome(t *testing.T) {
 	state, status := SubmitCompletionOutcome(0, false)
-	if state != CompletionPendingFinal || status != TaskPendingFinalReview {
+	if state != CompletionPendingFinal || status != TaskInReview {
 		t.Fatalf("无审核人应直接待终审: %q %q", state, status)
 	}
 	state, status = SubmitCompletionOutcome(2, false)
-	if state != CompletionIntermediate || status != TaskPendingIntermediateReview {
+	if state != CompletionIntermediate || status != TaskInReview {
 		t.Fatalf("有审核人应进入中间或签: %q %q", state, status)
 	}
 }
@@ -59,7 +59,7 @@ func TestSubmitCompletionOutcome(t *testing.T) {
 // 裁决 C2（#136，裁决 11 #181 改写）：或签组**包含项目管理员**时，管理员通过即视同终审通过
 // 一次闭环；其他审核人通过仍进待终审；退回路径不变。
 func TestDecideIntermediateRule(t *testing.T) {
-	facts := TaskFacts{Status: TaskPendingIntermediateReview, CreatorID: 3, OwnerID: 5, KrOwnerID: i64(7)}
+	facts := TaskFacts{Status: TaskInReview, CreatorID: 3, OwnerID: 5, KrOwnerID: i64(7)}
 	member := Actor{Role: RoleMember}
 	admin := Actor{Role: RoleAdmin}
 	defaultGroup := map[int64]bool{11: true, 12: true}
@@ -77,16 +77,17 @@ func TestDecideIntermediateRule(t *testing.T) {
 		wantReview string
 		wantErr    error
 	}{
-		{"任一审核人通过进入待终审", member, facts, nil, 11, true, "", TaskPendingFinalReview, CompletionPendingFinal, nil},
+		{"任一审核人通过进入待终审", member, facts, nil, 11, true, "", TaskInReview, CompletionPendingFinal, nil},
 		{"任一审核人退回整体退回", member, facts, nil, 12, false, "口径不一致", TaskInProgress, CompletionRejected, nil},
 		{"退回意见必填", member, facts, nil, 11, false, " ", "", "", ErrRejectOpinionRequired},
 		{"KR 负责人非组员不可处理", member, facts, nil, 7, true, "", "", "", ErrNotReviewer},
 		{"任务负责人非组员不可处理", member, facts, nil, 5, true, "", "", "", ErrNotReviewer},
 		{"管理员非组员不可处理", admin, facts, nil, 9, true, "", "", "", ErrNotReviewer},
-		{"非成果审核状态冲突", member, TaskFacts{Status: TaskPendingFinalReview, KrOwnerID: i64(7)}, nil, 11, true, "", "", "", ErrCompletionNotIntermediate},
-		{"KR 负责人在组内通过仅进待终审（C2 改写）", member, facts, map[int64]bool{7: true, 11: true}, 7, true, "", TaskPendingFinalReview, CompletionPendingFinal, nil},
+		// 裁决 13：环节由申请单把关，状态冲突用非审核中状态验证。
+		{"非审核中状态冲突", member, TaskFacts{Status: TaskInProgress, KrOwnerID: i64(7)}, nil, 11, true, "", "", "", ErrCompletionNotIntermediate},
+		{"KR 负责人在组内通过仅进待终审（C2 改写）", member, facts, map[int64]bool{7: true, 11: true}, 7, true, "", TaskInReview, CompletionPendingFinal, nil},
 		{"组含管理员：其通过即视同终审通过", admin, facts, withAdmin, 9, true, "", TaskCompleted, CompletionApproved, nil},
-		{"组含管理员：其他审核人通过仍待终审", member, facts, withAdmin, 11, true, "", TaskPendingFinalReview, CompletionPendingFinal, nil},
+		{"组含管理员：其他审核人通过仍待终审", member, facts, withAdmin, 11, true, "", TaskInReview, CompletionPendingFinal, nil},
 		{"组含管理员：其退回仍整体退回", admin, facts, withAdmin, 9, false, "口径不一致", TaskInProgress, CompletionRejected, nil},
 		{"组只有管理员：一次通过即闭环", admin, facts, onlyAdmin, 9, true, "", TaskCompleted, CompletionApproved, nil},
 	}

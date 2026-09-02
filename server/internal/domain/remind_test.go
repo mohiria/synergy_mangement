@@ -130,7 +130,7 @@ func TestMyWorkWaitingRemindWithoutBlocker(t *testing.T) {
 		Actor:  Actor{Role: RoleMember},
 		Now:    now,
 		Tasks: []WorkTaskFact{
-			{ID: 1, Name: "我的任务", DisplayStatus: TaskPendingFinalReview, OwnerID: me, CreatorID: me, KrOwnerID: krOther},
+			{ID: 1, Name: "我的任务", DisplayStatus: TaskInReview, OwnerID: me, CreatorID: me, KrOwnerID: krOther},
 			{ID: 2, Name: "等输入的任务", DisplayStatus: TaskWaitingInput, OwnerID: me, CreatorID: me, KrOwnerID: krOther},
 			{ID: 3, Name: "上游任务", DisplayStatus: TaskInProgress, OwnerID: 9, CreatorID: 9, KrOwnerID: krOther},
 		},
@@ -174,7 +174,7 @@ func TestMyWorkWaitingRemindNotSelf(t *testing.T) {
 		Actor:  Actor{Role: RoleMember},
 		Now:    now,
 		Tasks: []WorkTaskFact{
-			{ID: 1, Name: "我的任务", DisplayStatus: TaskPendingFinalReview, OwnerID: me, CreatorID: me, KrOwnerID: krMe},
+			{ID: 1, Name: "我的任务", DisplayStatus: TaskInReview, OwnerID: me, CreatorID: me, KrOwnerID: krMe},
 		},
 		FinalReviewerIDs:   []int64{me},
 		FinalReviewerNames: []string{"张三"},

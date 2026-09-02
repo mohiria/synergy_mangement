@@ -12,8 +12,8 @@ func TestWriteActionsRequireNonViewerMembership(t *testing.T) {
 	me := int64(5)
 	facts := TaskFacts{Status: TaskInProgress, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
 	notStarted := TaskFacts{Status: TaskNotStarted, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
-	finalPending := TaskFacts{Status: TaskPendingFinalReview, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
-	intermediate := TaskFacts{Status: TaskPendingIntermediateReview, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
+	finalPending := TaskFacts{Status: TaskInReview, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
+	intermediate := TaskFacts{Status: TaskInReview, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
 
 	for _, actor := range []Actor{{Role: RoleViewer}, {Role: ""}} {
 		name := "访客"

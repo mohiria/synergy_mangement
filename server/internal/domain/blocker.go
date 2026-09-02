@@ -266,8 +266,7 @@ func CanRemindBlocker(a Actor, userID int64, b Blocker) bool {
 // blockerTaskInExecution 判定任务是否处于会产生卡点的执行区间：已入池且未终态。
 func blockerTaskInExecution(status string) bool {
 	switch status {
-	case TaskNotStarted, TaskWaitingInput, TaskInProgress,
-		TaskPendingIntermediateReview, TaskPendingFinalReview:
+	case TaskNotStarted, TaskWaitingInput, TaskInProgress, TaskInReview:
 		return true
 	}
 	return false

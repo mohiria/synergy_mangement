@@ -89,8 +89,8 @@ func TestSubmitCompletionUnderResultUpdate(t *testing.T) {
 		wantReview   string
 		wantStatus   string
 	}{
-		{"首次定稿无成果审核", 0, false, CompletionPendingFinal, TaskPendingFinalReview},
-		{"首次定稿有成果审核", 2, false, CompletionIntermediate, TaskPendingIntermediateReview},
+		{"首次定稿无成果审核", 0, false, CompletionPendingFinal, TaskInReview},
+		{"首次定稿有成果审核", 2, false, CompletionIntermediate, TaskInReview},
 		{"成果更新无成果审核仍为已完成", 0, true, CompletionPendingFinal, TaskCompleted},
 		{"成果更新有成果审核仍为已完成", 2, true, CompletionIntermediate, TaskCompleted},
 	}

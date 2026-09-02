@@ -73,6 +73,12 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 		writeInternalError(w, r, err)
 		return Report{}, false
 	}
+	// 审核中任务的当前环节从完成申请单读取（裁决 13，#182）。
+	reviewStageByTask, err := s.pendingReviewStageByTask(ctx, projectId)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return Report{}, false
+	}
 	// 必要输入未就绪的任务在报告里同样显示「等待输入」（§5.1；与任务列表、我的工作同口径）。
 	unreadyNoteByTask, err := s.unreadyRequiredInputsByProject(ctx, projectId)
 	if err != nil {
@@ -192,7 +198,7 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 			TaskName:    t.Name,
 			OwnerName:   t.OwnerName,
 			Status:      TaskStatus(display),
-			StatusLabel: domain.StatusLabel(display, finalNames, reviewerNamesByTask[t.ID]),
+			StatusLabel: domain.StatusLabel(display, reviewStageByTask[t.ID], finalNames, reviewerNamesByTask[t.ID]),
 		}
 		d := openapi_types.Date{Time: t.EndDate.Time}
 		item.EndDate = &d

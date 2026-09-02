@@ -17,6 +17,22 @@ import (
 // 完成申请与终审（AC-13、AC-15、AC-38～40；裁决 11 #181：终审人为项目管理员集合或签）。
 // 业务规则在 domain，handler 仅编排。
 
+// pendingReviewStageByTask 每个任务未决完成申请的当前环节（裁决 13，#182：当前环节从
+// 申请单读取）：intermediate_review／pending_final，无未决申请的任务不在表内。
+func (s *Server) pendingReviewStageByTask(ctx context.Context, projectID int64) (map[int64]string, error) {
+	rows, err := s.q.LatestCompletionReviewsByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	out := map[int64]string{}
+	for _, cr := range rows {
+		if cr.State == domain.CompletionIntermediate || cr.State == domain.CompletionPendingFinal {
+			out[cr.TaskID] = cr.State
+		}
+	}
+	return out, nil
+}
+
 // projectFinalReviewers 终审人集合（裁决 11，#181）：项目负责人 + 管理员成员，
 // 按处理时点动态解析角色、不快照；项目负责人排首位（显示文案「待{首位姓名}等N人审批」）。
 func (s *Server) projectFinalReviewers(ctx context.Context, projectID int64) ([]int64, []string, error) {
@@ -396,7 +412,7 @@ func (s *Server) SetTaskReviewers(w http.ResponseWriter, r *http.Request, projec
 	}
 	if !domain.CanManageReviewers(actor, uid, facts) {
 		switch facts.Status {
-		case domain.TaskPendingIntermediateReview, domain.TaskPendingFinalReview, domain.TaskCompleted, domain.TaskCancelled:
+		case domain.TaskInReview, domain.TaskCompleted, domain.TaskCancelled:
 			writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: "审核期间或终态不能调整成果审核人"})
 		default:
 			writeForbidden(w)
