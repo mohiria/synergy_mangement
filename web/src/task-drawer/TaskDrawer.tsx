@@ -1421,7 +1421,7 @@ export default function TaskDrawer({
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           {/* #138：字段就地编辑，页脚不再有「编辑任务」，只保留动作类按钮。 */}
           {task.canManageDeliverables && (
-            <Button onClick={() => actions.openConfigureInput(task)}>配置输入</Button>
+            <Button onClick={() => actions.openConfigureInput(task)}>选择输入源</Button>
           )}
           {task.canStart && <Button onClick={() => actions.start(task)}>开始执行</Button>}
           {task.canCancel && <Button onClick={() => actions.openCancel(task)}>关闭任务</Button>}

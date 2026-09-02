@@ -807,41 +807,8 @@ body {
 .identity-popover-head b { display: block; font-size: var(--type-body); }
 .identity-popover-head small { display: block; color: var(--muted); font-size: var(--type-aux); }
 
-/* 多选树形穿梭框（AC-53）：左树 O／KR／任务或成员分组，右侧已选列表批量移除。
-   各层复选框统一 16×16；面板等宽等高，向原型 .member-transfer 对齐。 */
-.tree-transfer { width: 100%; display: flex; }
-.tree-transfer .ant-transfer-list { flex: 1; min-width: 0; }
-.tree-transfer .ant-transfer-list-header { background: var(--surface-2); }
-/* 面板头按原型排布：左标题、右计数（antd 默认相反）。 */
-.tree-transfer .ant-transfer-list-header-title { order: 1; flex: none; font-weight: 600; }
-.tree-transfer .ant-transfer-list-header-selected { order: 2; margin-left: auto; color: var(--muted); font-size: var(--type-aux); }
-.tree-transfer .ant-transfer-list-body-customize-wrapper { padding: 6px; overflow: auto; }
-.tree-transfer .ant-checkbox .ant-checkbox-inner,
-.tree-transfer .ant-tree-checkbox .ant-tree-checkbox-inner { width: 16px; height: 16px; }
-/* antd Tree 的列表容器按内容 shrink-to-fit：子项写了 width: 100% 也只解析成内容宽度，
-   截断规则因此永远不触发，长 O／KR 标题反而把树横向撑宽、顶破面板（#100）。
-   给容器与节点一条明确的宽度约束，省略号才真正生效。 */
-.tree-transfer .ant-tree-list-holder-inner { width: 100%; align-items: stretch; }
-.tree-transfer .ant-tree-treenode { width: 100%; align-items: center; padding-bottom: 2px; }
-.tree-transfer .ant-tree-node-content-wrapper { flex: 1 1 0; min-width: 0; }
-.tree-transfer .ant-tree-node-content-wrapper .ant-tree-title { display: block; min-width: 0; }
-/* 右侧已选列表同口径。 */
-.tree-transfer .ant-transfer-list-content-item { min-width: 0; }
-.tree-transfer .ant-transfer-list-content-item-text { min-width: 0; overflow: hidden; }
-.tree-transfer-group { width: 100%; display: flex; align-items: center; gap: 8px; padding: 0 6px; border-radius: var(--radius); }
-.tree-transfer-group-0 { background: var(--surface-3); }
-.tree-transfer-group b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.tree-transfer-group span { margin-left: auto; flex: none; color: var(--muted); font-size: var(--type-aux); font-weight: 400; }
-.tree-transfer-row { min-width: 0; display: flex; align-items: center; gap: 8px; }
-.tree-transfer-text { min-width: 0; }
-.tree-transfer-row b { display: block; font-size: var(--type-body); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tree-transfer-row small { display: block; color: var(--muted); font-size: var(--type-aux); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tree-transfer-code {
-  flex: none; height: 20px; padding: 0 6px; display: inline-grid; place-items: center;
-  background: var(--surface-3); color: #48556b; border-radius: var(--radius);
-  font-size: var(--type-aux); font-weight: 600; font-variant-numeric: tabular-nums;
-}
-.tree-transfer-empty { padding: 36px 12px; text-align: center; color: var(--muted); }
+/* 选择输入源表格（#176）：弹窗内直接多选，长字段截断交给列的 ellipsis。 */
+.input-source-table .mono { font-variant-numeric: tabular-nums; }
 
 /* 统一上传组件（AC-52）：虚线拖拽区 + 待上传文件行，向原型 .upload-zone / .upload-file-row 对齐。 */
 .upload-zone {

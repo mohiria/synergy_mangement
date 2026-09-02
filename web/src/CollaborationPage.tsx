@@ -1312,7 +1312,7 @@ export default function CollaborationPage({
             打开目标任务
           </Button>
         </div>
-        <div className="muted">关系详情为只读；关系维护从任务详情的「配置输入」进入。</div>
+        <div className="muted">关系详情为只读；关系维护从任务详情的「选择输入源」进入。</div>
       </div>
     </aside>
   );

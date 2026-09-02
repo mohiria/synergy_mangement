@@ -1,18 +1,19 @@
-import { useEffect, useState } from "react";
-import { Alert, DatePicker, Input, Modal, Select, message } from "antd";
+import { useEffect, useMemo, useState } from "react";
+import { Alert, DatePicker, Input, Modal, Select, Table, message } from "antd";
 import type { Dayjs } from "dayjs";
 import { client } from "../api/client";
-import TreeTransfer from "../TreeTransfer";
-import type { TreeTransferItem } from "../TreeTransfer";
 import type { components } from "../api/schema";
 import PersonPicker from "../PersonPicker";
-import { structureMessage, type KrOption } from "./shared";
+import Icon from "../icons";
+import { STATUS_CLASS, structureMessage, type KrOption } from "./shared";
 
 type Objective = components["schemas"]["Objective"];
 type Task = components["schemas"]["Task"];
 type ProjectMember = components["schemas"]["ProjectMember"];
 
-// 配置输入（AC-28）：默认搜索系统内已有任务，选择来源任务及其交付物建立交付物边。
+// 选择输入源（AC-28；#176 重做）：已有任务在弹窗表格中直接多选
+// （列含编号、名称、负责人、所属 KR、状态），支持搜索与按 O/KR 定位；
+// 字段集为裁决精简后的「来源任务（多选）＋必要性」（#173/#174）。
 export default function ConfigureInputModal({
   projectId,
   task,
@@ -40,6 +41,8 @@ export default function ConfigureInputModal({
   const [sourceTaskIds, setSourceTaskIds] = useState<number[]>([]);
   const [necessity, setNecessity] = useState<"required" | "reference">("required");
   const [expectedDate, setExpectedDate] = useState<Dayjs | null>(null);
+  const [searchText, setSearchText] = useState("");
+  const [krFilter, setKrFilter] = useState<number | "all">("all");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -51,59 +54,40 @@ export default function ConfigureInputModal({
       setSourceTaskIds([]);
       setNecessity("required");
       setExpectedDate(null);
+      setSearchText("");
+      setKrFilter("all");
       setError(null);
     }
   }, [task]);
 
-  if (!task) return null;
-  const candidates = tasks.filter((t) => t.id !== task.id && t.status !== "cancelled");
+  const objectiveTitle = useMemo(() => new Map(objectives.map((o) => [o.id, o.title])), [objectives]);
+  const krById = useMemo(() => new Map(krList.map((k) => [k.id, k])), [krList]);
+  const krOrder = useMemo(() => new Map(krList.map((k, i) => [k.id, i])), [krList]);
 
-  // 已有任务来源：O → KR → 任务三级树（AC-53）；分组顺序沿用 OKR 页派生的 O／KR 顺序。
-  const objectiveTitle = new Map(objectives.map((o) => [o.id, o.title]));
-  const krById = new Map(krList.map((k) => [k.id, k]));
-  const krOrder = new Map(krList.map((k, i) => [k.id, i]));
-  const taskItems: TreeTransferItem[] = [...candidates]
-    .sort(
-      (a, b) =>
-        (krOrder.get(a.keyResultId) ?? Number.MAX_SAFE_INTEGER) -
-          (krOrder.get(b.keyResultId) ?? Number.MAX_SAFE_INTEGER) || a.id - b.id,
-    )
-    .map((t) => {
-      const kr = krById.get(t.keyResultId);
-      const oTitle = kr ? objectiveTitle.get(kr.objectiveId) ?? "" : "";
-      const code = taskCode.get(t.id) ?? "";
-      const deliverables = t.deliverableNames ?? [];
-      return {
-        key: String(t.id),
-        groups: kr
-          ? [
-              { key: `o${kr.objectiveId}`, label: oTitle },
-              { key: `k${kr.id}`, label: `${kr.code} · ${kr.description}` },
-            ]
-          : [
-              { key: "o0", label: "未归属 O" },
-              { key: "k0", label: "未归属 KR" },
-            ],
-        label: (
-          <span className="tree-transfer-row">
-            <span className="tree-transfer-code">{code}</span>
-            <span className="tree-transfer-text">
-              <b title={t.name}>{t.name}</b>
-              <small
-                title={
-                  t.ownerName + (deliverables.length > 0 ? ` · ${deliverables.join("、")}` : "")
-                }
-              >
-                {t.ownerName}
-                {deliverables.length > 0 && ` · ${deliverables.join("、")}`}
-              </small>
-            </span>
-          </span>
-        ),
-        // 支持按任务名称、O、KR、负责人和交付物名称搜索（PRD §7.3）。
-        search: `${code} ${t.name} ${t.ownerName} ${oTitle} ${kr?.code ?? ""} ${kr?.description ?? ""} ${deliverables.join(" ")}`.toLowerCase(),
-      };
-    });
+  // #176：已有任务直接在表格里多选；按 O/KR 定位与搜索在表格上方（PRD §7.3 搜索口径不变）。
+  const candidateRows = useMemo(() => {
+    if (!task) return [];
+    const kw = searchText.trim().toLowerCase();
+    return tasks
+      .filter((t) => t.id !== task.id && t.status !== "cancelled")
+      .filter((t) => krFilter === "all" || t.keyResultId === krFilter)
+      .filter((t) => {
+        if (!kw) return true;
+        const kr = krById.get(t.keyResultId);
+        const oTitle = kr ? objectiveTitle.get(kr.objectiveId) ?? "" : "";
+        const hay = `${taskCode.get(t.id) ?? ""} ${t.name} ${t.ownerName} ${oTitle} ${
+          kr?.code ?? ""
+        } ${kr?.description ?? ""} ${(t.deliverableNames ?? []).join(" ")}`.toLowerCase();
+        return hay.includes(kw);
+      })
+      .sort(
+        (a, b) =>
+          (krOrder.get(a.keyResultId) ?? Number.MAX_SAFE_INTEGER) -
+            (krOrder.get(b.keyResultId) ?? Number.MAX_SAFE_INTEGER) || a.id - b.id,
+      );
+  }, [tasks, task, searchText, krFilter, krById, krOrder, objectiveTitle, taskCode]);
+  if (!task) return null;
+
   // #166：对接人选择统一为人员选择组件（搜索框 + 头像行）。
   const providerPeople = members
     .filter((m) => m.role !== "viewer")
@@ -174,7 +158,7 @@ export default function ConfigureInputModal({
     <Modal
       title={
         <div>
-          配置输入
+          选择输入源
           <span className="modal-sub">来源为系统内已有任务；来源任务完成后输入自动就绪（裁决 #163）</span>
         </div>
       }
@@ -228,18 +212,87 @@ export default function ConfigureInputModal({
           </>
         )}
         {mode === "task" && (
-        <div>
+        <div style={{ minWidth: 0 }}>
           <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
-            来源任务（按 O／KR 整组选择或多选）
+            来源任务（表格中直接勾选，可多选）
           </div>
-          <TreeTransfer
-            items={taskItems}
-            targetKeys={sourceTaskIds.map(String)}
-            onChange={(keys) => setSourceTaskIds(keys.map(Number))}
-            titles={["可选任务", "已选任务"]}
-            unit="项"
-            searchPlaceholder="搜索 O、KR、任务、负责人或交付物"
+          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <Input
+              allowClear
+              prefix={<Icon name="search" size={15} />}
+              style={{ flex: 1 }}
+              placeholder="搜索 O、KR、任务、负责人或交付物"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+            />
+            <Select
+              style={{ width: 220 }}
+              value={krFilter}
+              onChange={setKrFilter}
+              options={[
+                { value: "all" as const, label: "全部 O / KR" },
+                ...krList.map((k) => ({ value: k.id, label: `${k.code} · ${k.description}` })),
+              ]}
+              optionLabelProp="label"
+              popupMatchSelectWidth={360}
+            />
+          </div>
+          <Table
+            className="input-source-table"
+            size="small"
+            rowKey="id"
+            dataSource={candidateRows}
+            pagination={false}
+            scroll={{ y: 320 }}
+            rowSelection={{
+              selectedRowKeys: sourceTaskIds,
+              onChange: (keys) => setSourceTaskIds(keys.map(Number)),
+            }}
+            onRow={(t) => ({
+              // 点行即勾选；勾选框本身的点击交给 rowSelection，避免二次切换。
+              onClick: (e) => {
+                if ((e.target as HTMLElement).closest(".ant-table-selection-column")) return;
+                setSourceTaskIds((prev) =>
+                  prev.includes(t.id) ? prev.filter((id) => id !== t.id) : [...prev, t.id],
+                );
+              },
+              style: { cursor: "pointer" },
+            })}
+            locale={{ emptyText: "没有匹配的任务" }}
+            columns={[
+              {
+                title: "编号",
+                width: 84,
+                render: (_, t) => <span className="mono">{taskCode.get(t.id) ?? ""}</span>,
+              },
+              {
+                title: "任务",
+                ellipsis: { showTitle: false },
+                render: (_, t) => <span title={t.name}>{t.name}</span>,
+              },
+              { title: "负责人", width: 96, dataIndex: "ownerName", ellipsis: true },
+              {
+                title: "所属 KR",
+                width: 200,
+                ellipsis: { showTitle: false },
+                render: (_, t) => {
+                  const kr = krById.get(t.keyResultId);
+                  const label = kr ? `${kr.code} · ${kr.description}` : "—";
+                  return <span title={label}>{label}</span>;
+                },
+              },
+              {
+                title: "状态",
+                width: 104,
+                render: (_, t) => (
+                  <span className={`status-pill ${STATUS_CLASS[t.status]}`}>{t.statusLabel}</span>
+                ),
+              },
+            ]}
           />
+          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+            已选 {sourceTaskIds.length} 项
+          </div>
         </div>
         )}
         {/* #173 裁决：关系类型删除，只填必要性。
