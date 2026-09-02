@@ -189,16 +189,25 @@ body {
 }
 
 /* 人员选择组件（#166，参考 references/人员选择组件参考.png）：
-   触发区仿输入框；面板 = 顶部搜索框 + 成员列表（头像 + 姓名 + 账号）。 */
+   面板 = 顶部搜索框 + 成员列表（头像 + 姓名 + 账号）。
+   #175：抽屉内（默认小尺寸）查看态不显边框与下拉箭头——纯文本＋悬停虚线下划线，
+   点击弹出面板即编辑态；弹窗表单（.middle）保持仿输入框样式。 */
 .pp-trigger {
   display: inline-flex; align-items: center; gap: 6px;
-  min-height: 24px; max-width: 420px; min-width: 160px; flex: 1;
-  padding: 1px 8px; border: 1px solid #d6dce5; border-radius: var(--radius);
-  background: #fff; cursor: pointer; font-size: inherit; text-align: left; color: var(--text);
+  min-height: 24px; max-width: 420px; min-width: 0; flex: 1;
+  padding: 1px 0; border: 0; border-bottom: 1px dashed transparent;
+  background: transparent; cursor: pointer; font-size: inherit; text-align: left; color: var(--text);
 }
-.pp-trigger.middle { min-height: 32px; width: 100%; max-width: none; }
-.pp-trigger:hover { border-color: var(--accent); }
-.pp-trigger.disabled { cursor: not-allowed; background: #f5f6f8; }
+.pp-trigger:hover { border-bottom-color: var(--primary); }
+.pp-trigger .pp-caret { display: none; }
+.pp-trigger.middle {
+  min-height: 32px; width: 100%; max-width: none; min-width: 160px;
+  padding: 1px 8px; border: 1px solid #d6dce5; border-radius: var(--radius); background: #fff;
+}
+.pp-trigger.middle:hover { border-color: var(--accent); }
+.pp-trigger.middle .pp-caret { display: inline; }
+.pp-trigger.disabled { cursor: not-allowed; border-bottom-color: transparent; }
+.pp-trigger.middle.disabled { background: #f5f6f8; }
 .pp-trigger-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pp-trigger-text.muted { color: var(--muted); }
 .pp-caret { color: var(--muted); font-size: var(--type-aux); flex: none; }

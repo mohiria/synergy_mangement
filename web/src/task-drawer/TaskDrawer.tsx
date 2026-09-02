@@ -94,6 +94,8 @@ export default function TaskDrawer({
     "name" | "description" | "completionCriteria" | "ownerId" | "endDate" | null
   >(null);
   const [editDraft, setEditDraft] = useState("");
+  // #175：进度同口径——默认查看态，点击才出现进度条。
+  const [editingProgress, setEditingProgress] = useState(false);
   const canInlineEdit = !!task?.canEditFields;
   const submitField = async (field: string, value: string) => {
     if (!task) return;
@@ -123,7 +125,16 @@ export default function TaskDrawer({
       setEditDraft(current[f]);
     }
   };
-  // 文本类字段（说明／量化标准）的就地编辑行体。
+  // 文本类字段（量化标准／说明）的就地编辑行体。
+  // #175：无保存/取消按钮，光标移出（失焦）自动保存；值未变时只退出编辑态。
+  const blurSaveText = (field: "description" | "completionCriteria", current: string) => {
+    const next = editDraft.trim();
+    if (next === current.trim()) {
+      setEditingField(null);
+      return;
+    }
+    saveField(field, next);
+  };
   const editableTextRow = (field: "description" | "completionCriteria", label: string, value: string) => (
     <div className="task-info-row">
       <span>{label}</span>
@@ -132,16 +143,12 @@ export default function TaskDrawer({
           <Input.TextArea
             autoSize={{ minRows: 1, maxRows: 4 }}
             maxLength={2000}
+            autoFocus
             value={editDraft}
             onChange={(e) => setEditDraft(e.target.value)}
+            onBlur={() => blurSaveText(field, value)}
             style={{ flex: 1 }}
           />
-          <Button size="small" type="primary" onClick={() => saveField(field, editDraft.trim())}>
-            保存
-          </Button>
-          <Button size="small" onClick={() => setEditingField(null)}>
-            取消
-          </Button>
         </div>
       ) : (
         <strong
@@ -699,38 +706,50 @@ export default function TaskDrawer({
               )}
             </div>
           </div>
-          {/* #119：进度改为行内可拖进度条（刻度 1%），canUpdateProgress 为假时只读；
-              拖动结束（onChangeComplete）才落库，保存失败时清掉草稿回滚显示。
+          {/* #119 进度刻度 1%；#175：默认查看态只显数值，点击才出现进度条，
+              拖动结束（onChangeComplete）落库并收起；无权限时纯只读文本。
               进度未填且无权限时该行按 AC-50 隐藏；终态 100 由后端派生（#76），前端只消费。 */}
           {(task.progress != null || task.canUpdateProgress) && (
             <div className="task-info-row">
               <span>进度</span>
-              <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, maxWidth: 340 }}>
-                <Slider
-                  style={{ flex: 1, margin: "0 4px" }}
-                  min={0}
-                  max={100}
-                  step={1}
-                  disabled={!task.canUpdateProgress}
-                  value={progressDraft ?? task.progress ?? 0}
-                  tooltip={{ formatter: (v) => `${v}%` }}
-                  onChange={(v) => setProgressDraft(v)}
-                  onChangeComplete={async (v) => {
-                    await actions.saveProgress(task, v);
-                    setProgressDraft(null);
-                  }}
-                />
-                <strong style={{ minWidth: 40, textAlign: "right" }}>
-                  {progressDraft ?? task.progress ?? 0}%
+              {editingProgress && task.canUpdateProgress ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, maxWidth: 340 }}>
+                  <Slider
+                    style={{ flex: 1, margin: "0 4px" }}
+                    min={0}
+                    max={100}
+                    step={1}
+                    autoFocus
+                    value={progressDraft ?? task.progress ?? 0}
+                    tooltip={{ formatter: (v) => `${v}%` }}
+                    onChange={(v) => setProgressDraft(v)}
+                    onChangeComplete={async (v) => {
+                      await actions.saveProgress(task, v);
+                      setProgressDraft(null);
+                      setEditingProgress(false);
+                    }}
+                  />
+                  <strong style={{ minWidth: 40, textAlign: "right" }}>
+                    {progressDraft ?? task.progress ?? 0}%
+                  </strong>
+                </div>
+              ) : (
+                <strong
+                  className={task.canUpdateProgress ? "inline-editable" : ""}
+                  onClick={() => task.canUpdateProgress && setEditingProgress(true)}
+                  title={task.canUpdateProgress ? "点击调整进度" : undefined}
+                >
+                  {task.progress == null ? "未填进度" : `${task.progress}%`}
                 </strong>
-              </div>
+              )}
             </div>
           )}
-          {/* #138：说明与量化标准可就地编辑；可编辑时空值也保留行，否则首次填写没有入口。 */}
-          {(task.description || canInlineEdit) &&
-            editableTextRow("description", "任务说明", task.description ?? "")}
+          {/* #138 说明与量化标准可就地编辑；#175：量化标准在前、说明在后；
+              可编辑时空值也保留行，否则首次填写没有入口。 */}
           {(task.completionCriteria || canInlineEdit) &&
             editableTextRow("completionCriteria", "量化标准", task.completionCriteria ?? "")}
+          {(task.description || canInlineEdit) &&
+            editableTextRow("description", "任务说明", task.description ?? "")}
         </div>
       </section>
       {/* 输入源（§7.5、#101）：必要与参考同区块展示，合并只合展示不合语义——
@@ -1365,21 +1384,24 @@ export default function TaskDrawer({
           {editingField === "name" ? (
             <span style={{ display: "inline-flex", gap: 6, width: "90%" }}>
               <span>{code} ·</span>
+              {/* #175：失焦自动保存（空值或未变只退出编辑态），无保存/取消按钮。 */}
               <Input
                 size="small"
                 autoFocus
                 maxLength={200}
                 value={editDraft}
                 onChange={(e) => setEditDraft(e.target.value)}
-                onPressEnter={() => editDraft.trim() && saveField("name", editDraft.trim())}
+                onPressEnter={(e) => (e.target as HTMLInputElement).blur()}
+                onBlur={() => {
+                  const next = editDraft.trim();
+                  if (!next || next === task.name) {
+                    setEditingField(null);
+                    return;
+                  }
+                  saveField("name", next);
+                }}
                 style={{ flex: 1 }}
               />
-              <Button size="small" type="primary" onClick={() => editDraft.trim() && saveField("name", editDraft.trim())}>
-                保存
-              </Button>
-              <Button size="small" onClick={() => setEditingField(null)}>
-                取消
-              </Button>
             </span>
           ) : (
             <span
