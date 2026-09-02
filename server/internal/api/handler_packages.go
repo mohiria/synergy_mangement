@@ -274,7 +274,6 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 				KeyResultId: k.ID,
 				Code:        domain.KeyResultCode(int(k.ObjectiveCodeSeq), int(k.CodeSeq)),
 				Description: k.Description,
-				OwnerName:   k.OwnerName.String,
 				Tasks:       []ArtifactTask{},
 			}
 			for _, taskID := range order {

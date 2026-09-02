@@ -45,7 +45,7 @@ func (q *Queries) CreateTaskInvite(ctx context.Context, arg CreateTaskInvitePara
 }
 
 const getTaskInviteInProject = `-- name: GetTaskInviteInProject :one
-SELECT ti.id, ti.key_result_id, ti.inviter_id, ti.invitee_id, ti.note, ti.state, ti.created_at, k.owner_id AS kr_owner_id, o.project_id
+SELECT ti.id, ti.key_result_id, ti.inviter_id, ti.invitee_id, ti.note, ti.state, ti.created_at, o.project_id
 FROM task_invites ti
 JOIN key_results k ON k.id = ti.key_result_id
 JOIN objectives o ON o.id = k.objective_id
@@ -65,11 +65,10 @@ type GetTaskInviteInProjectRow struct {
 	Note        string
 	State       string
 	CreatedAt   pgtype.Timestamptz
-	KrOwnerID   pgtype.Int8
 	ProjectID   int64
 }
 
-// 邀请连同所属 KR 负责人与项目归属（权限判定与项目内寻址）。
+// 邀请连同项目归属（权限判定与项目内寻址；裁决 12 后 KR 无负责人）。
 func (q *Queries) GetTaskInviteInProject(ctx context.Context, arg GetTaskInviteInProjectParams) (GetTaskInviteInProjectRow, error) {
 	row := q.db.QueryRow(ctx, getTaskInviteInProject, arg.ID, arg.ProjectID)
 	var i GetTaskInviteInProjectRow
@@ -81,7 +80,6 @@ func (q *Queries) GetTaskInviteInProject(ctx context.Context, arg GetTaskInviteI
 		&i.Note,
 		&i.State,
 		&i.CreatedAt,
-		&i.KrOwnerID,
 		&i.ProjectID,
 	)
 	return i, err

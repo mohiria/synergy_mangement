@@ -14,14 +14,13 @@ func blockerDay(offset int) *time.Time {
 
 // baseBlockerFacts 一个不产生任何卡点的干净项目：任务在期内、输入已就绪、审批刚提交、无硬前置环。
 func baseBlockerFacts() BlockerFacts {
-	kr7 := int64(7)
 	return BlockerFacts{
 		Now:                 blockerNow,
 		ApprovalTimeoutDays: DefaultApprovalTimeoutDays,
 		Tasks: []BlockerTaskFact{{
 			ID: 1, Name: "现场调研", Status: TaskInProgress,
 			OwnerID: 5, OwnerName: "王五",
-			KrID: 10, KrOwnerID: &kr7, KrOwnerName: "赵七",
+			KrID:      10,
 			StartDate: blockerDay(-3), EndDate: blockerDay(5),
 		}},
 		Inputs: []BlockerInputFact{{
@@ -70,8 +69,6 @@ func TestUpstreamBlockerCarriesSourceFacts(t *testing.T) {
 
 // AC-11：四类结构化事实的进入与退出（我的工作 PRD §8.7）。
 func TestDeriveBlockersEntryAndExit(t *testing.T) {
-	kr7 := int64(7)
-	kr8 := int64(8)
 	cases := []struct {
 		name    string
 		mut     func(*BlockerFacts)
@@ -156,14 +153,14 @@ func TestDeriveBlockersEntryAndExit(t *testing.T) {
 		{"硬前置成环", func(f *BlockerFacts) {
 			f.Tasks = append(f.Tasks, BlockerTaskFact{
 				ID: 2, Name: "地质勘察", Status: TaskInProgress, OwnerID: 6, OwnerName: "孙六",
-				KrID: 11, KrOwnerID: &kr8, KrOwnerName: "周八", StartDate: blockerDay(-3), EndDate: blockerDay(5),
+				KrID: 11, StartDate: blockerDay(-3), EndDate: blockerDay(5),
 			})
 			f.RequiredEdges = []RequiredEdge{{ID: 200, Source: 1, Target: 2}, {ID: 201, Source: 2, Target: 1}}
 		}, "interlock:1"},
 		{"无环不算互锁", func(f *BlockerFacts) {
 			f.Tasks = append(f.Tasks, BlockerTaskFact{
 				ID: 2, Name: "地质勘察", Status: TaskInProgress, OwnerID: 6,
-				KrID: 11, KrOwnerID: &kr7, StartDate: blockerDay(-3), EndDate: blockerDay(5),
+				KrID: 11, StartDate: blockerDay(-3), EndDate: blockerDay(5),
 			})
 			f.RequiredEdges = []RequiredEdge{{ID: 200, Source: 1, Target: 2}}
 		}, ""},
@@ -185,12 +182,10 @@ func TestDeriveBlockersEntryAndExit(t *testing.T) {
 			}
 		})
 	}
-	_ = kr7
 }
 
 // 四类卡点的待行动人判定（我的工作 PRD §8.7 待行动人列）。
 func TestDeriveBlockersActionOwners(t *testing.T) {
-	kr8 := int64(8)
 	cases := []struct {
 		name  string
 		mut   func(*BlockerFacts)
@@ -215,13 +210,14 @@ func TestDeriveBlockersActionOwners(t *testing.T) {
 				ApproverIDs: []int64{6, 9}, ApproverNames: []string{"孙六", "吴九"},
 			}}
 		}, "approval_timeout:intermediate_review:40", []string{"孙六", "吴九"}},
-		{"互锁指向环内各任务所属 KR 负责人", func(f *BlockerFacts) {
+		// 裁决 12（#183）：KR 无负责人，互锁待行动人改为环内各任务负责人。
+		{"互锁指向环内各任务负责人", func(f *BlockerFacts) {
 			f.Tasks = append(f.Tasks, BlockerTaskFact{
 				ID: 2, Name: "地质勘察", Status: TaskInProgress, OwnerID: 6, OwnerName: "孙六",
-				KrID: 11, KrOwnerID: &kr8, KrOwnerName: "周八", StartDate: blockerDay(-3), EndDate: blockerDay(5),
+				KrID: 11, StartDate: blockerDay(-3), EndDate: blockerDay(5),
 			})
 			f.RequiredEdges = []RequiredEdge{{ID: 200, Source: 1, Target: 2}, {ID: 201, Source: 2, Target: 1}}
-		}, "interlock:1", []string{"赵七", "周八"}},
+		}, "interlock:1", []string{"王五", "孙六"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -298,11 +294,10 @@ func TestDeriveBlockersLevel(t *testing.T) {
 
 // 互锁卡点为环内每个任务各派生一条，并给出影响范围。
 func TestDeriveBlockersInterlockAndImpact(t *testing.T) {
-	kr8 := int64(8)
 	f := baseBlockerFacts()
 	f.Tasks = append(f.Tasks, BlockerTaskFact{
 		ID: 2, Name: "地质勘察", Status: TaskInProgress, OwnerID: 6, OwnerName: "孙六",
-		KrID: 11, KrOwnerID: &kr8, KrOwnerName: "周八", StartDate: blockerDay(-3), EndDate: blockerDay(5),
+		KrID: 11, StartDate: blockerDay(-3), EndDate: blockerDay(5),
 	})
 	f.RequiredEdges = []RequiredEdge{{ID: 200, Source: 1, Target: 2}, {ID: 201, Source: 2, Target: 1}}
 	got := DeriveBlockers(f)
@@ -315,7 +310,7 @@ func TestDeriveBlockersInterlockAndImpact(t *testing.T) {
 	f2.Tasks[0].EndDate = blockerDay(-1)
 	f2.Tasks = append(f2.Tasks, BlockerTaskFact{
 		ID: 2, Name: "地质勘察", Status: TaskInProgress, OwnerID: 6,
-		KrID: 11, KrOwnerID: &kr8, StartDate: blockerDay(-3), EndDate: blockerDay(5),
+		KrID: 11, StartDate: blockerDay(-3), EndDate: blockerDay(5),
 	})
 	f2.RequiredEdges = []RequiredEdge{{ID: 200, Source: 1, Target: 2}}
 	b := findBlocker(DeriveBlockers(f2), "task_overdue:1")
@@ -324,18 +319,18 @@ func TestDeriveBlockersInterlockAndImpact(t *testing.T) {
 	}
 }
 
-// 一键提醒：待行动人本人不提醒自己；任务负责人、KR 负责人、可编辑项目者可提醒；访客不可。
+// 一键提醒：待行动人本人不提醒自己；任务负责人、可编辑项目者可提醒；访客不可
+// （裁决 12，#183：KR 无负责人，原 KR 负责人可提醒分支删除）。
 func TestCanRemindBlocker(t *testing.T) {
-	kr7 := int64(7)
 	b := Blocker{
-		Key: "task_overdue:1", TaskID: 1, TaskOwnerID: 5, KrOwnerID: &kr7,
-		ActionOwnerIDs: []int64{5},
+		Key: "task_overdue:1", TaskID: 1, TaskOwnerID: 5,
+		ActionOwnerIDs: []int64{6},
 	}
-	if CanRemindBlocker(Actor{Role: RoleMember}, 5, b) {
+	if CanRemindBlocker(Actor{Role: RoleMember}, 6, b) {
 		t.Fatal("待行动人本人不应提醒自己")
 	}
-	if !CanRemindBlocker(Actor{Role: RoleMember}, 7, b) {
-		t.Fatal("KR 负责人应可提醒")
+	if !CanRemindBlocker(Actor{Role: RoleMember}, 5, b) {
+		t.Fatal("任务负责人应可提醒")
 	}
 	if !CanRemindBlocker(Actor{Role: RoleAdmin}, 9, b) {
 		t.Fatal("项目管理员应可提醒")
@@ -343,7 +338,7 @@ func TestCanRemindBlocker(t *testing.T) {
 	if CanRemindBlocker(Actor{Role: RoleMember}, 9, b) {
 		t.Fatal("无关成员不应可提醒")
 	}
-	if CanRemindBlocker(Actor{Role: RoleViewer}, 7, b) {
+	if CanRemindBlocker(Actor{Role: RoleViewer}, 5, b) {
 		t.Fatal("访客不应可提醒")
 	}
 }

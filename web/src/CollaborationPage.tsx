@@ -1245,7 +1245,7 @@ export default function CollaborationPage({
             <span>必要输入循环 · 互锁风险</span>
             <small>
               两端任务互相把对方的交付当作必要输入，谁都无法先开始；循环内的边暂停参与关键路径计算，
-              需由环内各任务所属 KR 负责人协商拆环。
+              需由环内各任务负责人协商拆环。
             </small>
           </div>
         )}
@@ -1576,10 +1576,11 @@ export default function CollaborationPage({
             {selectedKr.riskLevelLabel}
           </span>
         </div>
+        {/* 裁决 12（#183）：KR 无负责人与周期，改示创建人与创建时间。 */}
         <div className="gi-grid">
-          <div className="gi-prop" title={selectedKr.ownerName}>
-            <span>负责人</span>
-            <strong>{selectedKr.ownerName ?? "—"}</strong>
+          <div className="gi-prop" title={selectedKr.createdByName}>
+            <span>创建人</span>
+            <strong>{selectedKr.createdByName ?? "—"}</strong>
           </div>
           <div className="gi-prop">
             <span>任务数量</span>
@@ -1590,12 +1591,8 @@ export default function CollaborationPage({
             <strong>{selectedKr.openBlockerCount ?? 0} 项</strong>
           </div>
           <div className="gi-prop">
-            <span>周期</span>
-            <strong>
-              {selectedKr.startDate && selectedKr.endDate
-                ? `${selectedKr.startDate} — ${selectedKr.endDate}`
-                : "—"}
-            </strong>
+            <span>创建时间</span>
+            <strong>{selectedKr.createdAt ? selectedKr.createdAt.slice(0, 10) : "—"}</strong>
           </div>
         </div>
         {selectedKr.riskNote && (

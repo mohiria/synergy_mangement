@@ -8,8 +8,7 @@ import (
 // 成果更新的发起规则（AC-66、§5.1、§5.3）：已完成任务唯一接受的审批单，
 // 发起人限任务负责人与可编辑项目者，与其他未决审批单互斥，已关闭任务永不可发起。
 func TestStartResultUpdateRule(t *testing.T) {
-	krOwner := int64(7)
-	completed := TaskFacts{Status: TaskCompleted, CreatorID: 3, OwnerID: 5, KrOwnerID: &krOwner}
+	completed := TaskFacts{Status: TaskCompleted, CreatorID: 3, OwnerID: 5}
 	cases := []struct {
 		name  string
 		actor Actor
@@ -23,8 +22,8 @@ func TestStartResultUpdateRule(t *testing.T) {
 		{"无关成员不可发起", Actor{Role: RoleMember}, 9, completed, ErrResultUpdateForbidden},
 		{"访客不可发起", Actor{Role: RoleViewer}, 5, completed, ErrResultUpdateForbidden},
 		{"创建人不是负责人也不可发起", Actor{Role: RoleMember}, 3, completed, ErrResultUpdateForbidden},
-		{"进行中任务不可发起", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskInProgress, OwnerID: 5, KrOwnerID: &krOwner}, ErrResultUpdateNotCompleted},
-		{"已关闭任务不可发起", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCancelled, OwnerID: 5, KrOwnerID: &krOwner}, ErrResultUpdateNotCompleted},
+		{"进行中任务不可发起", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskInProgress, OwnerID: 5}, ErrResultUpdateNotCompleted},
+		{"已关闭任务不可发起", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCancelled, OwnerID: 5}, ErrResultUpdateNotCompleted},
 		{"已有未提交的成果更新不可再发起", Actor{Role: RoleMember}, 5, withResultUpdate(completed, ResultUpdateOpen), ErrResultUpdateExists},
 		{"审批中的成果更新不可再发起", Actor{Role: RoleMember}, 5, withResultUpdate(completed, ResultUpdateReviewing), ErrResultUpdateExists},
 		{"KR 无负责人也可发起（裁决 11：终审人为管理员集合）", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCompleted, OwnerID: 5}, nil},
@@ -68,8 +67,7 @@ func TestCanUploadCandidateUnderResultUpdate(t *testing.T) {
 
 // 成果更新走同一道完成审批：提交时任务状态保持已完成，不回退生命周期（§5.1、AC-66）。
 func TestSubmitCompletionUnderResultUpdate(t *testing.T) {
-	krOwner := int64(7)
-	completed := TaskFacts{Status: TaskCompleted, OwnerID: 5, KrOwnerID: &krOwner}
+	completed := TaskFacts{Status: TaskCompleted, OwnerID: 5}
 	if err := SubmitCompletionRule(withResultUpdate(completed, ResultUpdateOpen), 1, "更新说明"); err != nil {
 		t.Fatalf("已发起成果更新应可提交完成申请: %v", err)
 	}
@@ -106,8 +104,7 @@ func TestSubmitCompletionUnderResultUpdate(t *testing.T) {
 
 // 成果更新的终审与或签：处理人口径不变，处理结果不改变任务生命周期状态（AC-66）。
 func TestDecideCompletionUnderResultUpdate(t *testing.T) {
-	krOwner := int64(7)
-	reviewing := withResultUpdate(TaskFacts{Status: TaskCompleted, OwnerID: 5, KrOwnerID: &krOwner}, ResultUpdateReviewing)
+	reviewing := withResultUpdate(TaskFacts{Status: TaskCompleted, OwnerID: 5}, ResultUpdateReviewing)
 	admin := Actor{Role: RoleAdmin}
 	member := Actor{Role: RoleMember}
 
@@ -122,7 +119,7 @@ func TestDecideCompletionUnderResultUpdate(t *testing.T) {
 	if _, err := DecideCompletionRule(member, reviewing, true, ""); !errors.Is(err, ErrNotFinalReviewer) {
 		t.Fatalf("非项目管理员不应可终审（裁决 11）: %v", err)
 	}
-	if _, err := DecideCompletionRule(admin, TaskFacts{Status: TaskCompleted, OwnerID: 5, KrOwnerID: &krOwner}, true, ""); !errors.Is(err, ErrCompletionNotPending) {
+	if _, err := DecideCompletionRule(admin, TaskFacts{Status: TaskCompleted, OwnerID: 5}, true, ""); !errors.Is(err, ErrCompletionNotPending) {
 		t.Fatalf("没有在审的成果更新时不应可终审: %v", err)
 	}
 

@@ -17,12 +17,10 @@ func day(s string) *time.Time {
 	return &t
 }
 
+// AC-01（裁决 12，#183 修订）：KR 只剩结构字段（描述、量化指标），无负责人与周期校验。
 func TestValidateOkrBatch(t *testing.T) {
-	roles := map[int64]string{1: RoleMember, 2: RoleAdmin, 8: RoleViewer}
-	roleOf := func(id int64) string { return roles[id] }
-
 	kr := func(mut func(*NewKeyResult)) NewKeyResult {
-		k := NewKeyResult{Description: "上线转化率提升到 5%", OwnerID: i64(1)}
+		k := NewKeyResult{Description: "上线转化率提升到 5%"}
 		if mut != nil {
 			mut(&k)
 		}
@@ -71,41 +69,11 @@ func TestValidateOkrBatch(t *testing.T) {
 			Title:      "提升产品体验",
 			KeyResults: []NewKeyResult{kr(func(k *NewKeyResult) { k.Metric = strings.Repeat("标", 101) })},
 		}}, ErrKrMetricTooLong},
-		{"KR 负责人非项目成员", []OkrBatchItem{{
-			Title:      "提升产品体验",
-			KeyResults: []NewKeyResult{kr(func(k *NewKeyResult) { k.OwnerID = i64(99) })},
-		}}, ErrKrOwnerNotEligible},
-		// #95：访客担任 KR 负责人会让入池、关键字段变更与完成终审无人可推进。
-		{"KR 负责人是访客", []OkrBatchItem{{
-			Title:      "提升产品体验",
-			KeyResults: []NewKeyResult{kr(func(k *NewKeyResult) { k.OwnerID = i64(8) })},
-		}}, ErrKrOwnerNotEligible},
-		{"KR 负责人是项目管理员", []OkrBatchItem{{
-			Title:      "提升产品体验",
-			KeyResults: []NewKeyResult{kr(func(k *NewKeyResult) { k.OwnerID = i64(2) })},
-		}}, nil},
-		{"KR 负责人可不指定", []OkrBatchItem{{
-			Title:      "提升产品体验",
-			KeyResults: []NewKeyResult{kr(func(k *NewKeyResult) { k.OwnerID = nil })},
-		}}, nil},
-		{"KR 周期截止早于开始", []OkrBatchItem{{
-			Title: "提升产品体验",
-			KeyResults: []NewKeyResult{kr(func(k *NewKeyResult) {
-				k.Start = day("2026-09-01")
-				k.End = day("2026-08-01")
-			})},
-		}}, ErrKrPeriodInverted},
-		{"KR 周期只填开始", []OkrBatchItem{{
-			Title: "提升产品体验",
-			KeyResults: []NewKeyResult{kr(func(k *NewKeyResult) {
-				k.Start = day("2026-09-01")
-			})},
-		}}, nil},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := ValidateOkrBatch(tc.items, roleOf)
+			got := ValidateOkrBatch(tc.items)
 			if !errors.Is(got, tc.want) {
 				t.Fatalf("ValidateOkrBatch() = %v, want %v", got, tc.want)
 			}

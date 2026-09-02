@@ -8,9 +8,8 @@ import "testing"
 
 func TestCanDeleteCandidate(t *testing.T) {
 	owner := int64(5)
-	kr := int64(7)
 	facts := func(status, resultUpdate string) TaskFacts {
-		return TaskFacts{Status: status, OwnerID: owner, KrOwnerID: &kr, ResultUpdate: resultUpdate}
+		return TaskFacts{Status: status, OwnerID: owner, ResultUpdate: resultUpdate}
 	}
 	cases := []struct {
 		name  string

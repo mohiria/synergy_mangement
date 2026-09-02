@@ -3,7 +3,6 @@ package domain
 import (
 	"errors"
 	"strings"
-	"time"
 	"unicode/utf8"
 )
 
@@ -17,17 +16,12 @@ var (
 	ErrKrDescriptionEmpty    = errors.New("KR 描述不能为空")
 	ErrKrDescriptionTooLong  = errors.New("KR 描述不能超过 200 字")
 	ErrKrMetricTooLong       = errors.New("量化指标不能超过 100 字")
-	ErrKrOwnerNotEligible    = errors.New("KR 负责人必须是项目管理员或项目成员，访客不可")
-	ErrKrPeriodInverted      = errors.New("KR 截止日期不能早于开始日期")
 )
 
-// NewKeyResult 待创建的 KR 输入（词汇表：KR）。
+// NewKeyResult 待创建的 KR 输入（词汇表：KR；裁决 12，#183：KR 无负责人与周期属性）。
 type NewKeyResult struct {
 	Description string
 	Metric      string
-	OwnerID     *int64
-	Start       *time.Time
-	End         *time.Time
 }
 
 // OkrBatchItem 表格式批量创建中的一项：
@@ -45,9 +39,8 @@ func eligibleOwner(role string) bool {
 	return role == RoleAdmin || role == RoleMember
 }
 
-// ValidateOkrBatch 校验整批 O／KR 创建输入（AC-01）。
-// roleOf 返回某用户在本项目的角色，用于 KR 负责人校验（§7.2 匹配现有项目成员；§3.4 排除访客）。
-func ValidateOkrBatch(items []OkrBatchItem, roleOf func(int64) string) error {
+// ValidateOkrBatch 校验整批 O／KR 创建输入（AC-01；裁决 12：KR 无负责人与周期，无人员校验）。
+func ValidateOkrBatch(items []OkrBatchItem) error {
 	if len(items) == 0 {
 		return ErrOkrBatchEmpty
 	}
@@ -74,7 +67,7 @@ func ValidateOkrBatch(items []OkrBatchItem, roleOf func(int64) string) error {
 			}
 		}
 		for _, k := range item.KeyResults {
-			if err := validateNewKeyResult(k, roleOf); err != nil {
+			if err := validateNewKeyResult(k); err != nil {
 				return err
 			}
 		}
@@ -82,7 +75,7 @@ func ValidateOkrBatch(items []OkrBatchItem, roleOf func(int64) string) error {
 	return nil
 }
 
-func validateNewKeyResult(k NewKeyResult, roleOf func(int64) string) error {
+func validateNewKeyResult(k NewKeyResult) error {
 	desc := strings.TrimSpace(k.Description)
 	if desc == "" {
 		return ErrKrDescriptionEmpty
@@ -92,12 +85,6 @@ func validateNewKeyResult(k NewKeyResult, roleOf func(int64) string) error {
 	}
 	if utf8.RuneCountInString(strings.TrimSpace(k.Metric)) > 100 {
 		return ErrKrMetricTooLong
-	}
-	if k.OwnerID != nil && !eligibleOwner(roleOf(*k.OwnerID)) {
-		return ErrKrOwnerNotEligible
-	}
-	if k.Start != nil && k.End != nil && k.End.Before(*k.Start) {
-		return ErrKrPeriodInverted
 	}
 	return nil
 }

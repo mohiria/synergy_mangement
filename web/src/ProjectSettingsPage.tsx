@@ -81,7 +81,6 @@ const roleOptions = ROLE_ORDER.map((r) => ({ value: r, label: ROLE_LABEL[r] }));
 const RESPONSIBILITY_NOTES: [string, string][] = [
   ["项目总负责人", "查看完整项目并处理决策"],
   ["总推进人", "项目录入、维护、协调与报告"],
-  ["KR 负责人", "关键字段变更和完成终审"],
   ["任务负责人／参与人", "执行、提交成果和处理输入"],
   ["访客", "查看完整上下文，不可修改"],
 ];

@@ -5,8 +5,7 @@ VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: GetEdgeInProject :one
-SELECT e.*, tt.owner_id AS target_owner_id, tt.created_by AS target_created_by, tt.status AS target_status,
-    k.owner_id AS target_kr_owner_id
+SELECT e.*, tt.owner_id AS target_owner_id, tt.created_by AS target_created_by, tt.status AS target_status
 FROM deliverable_edges e
 JOIN tasks tt ON tt.id = e.target_task_id
 JOIN key_results k ON k.id = tt.key_result_id

@@ -29,7 +29,6 @@ type RemindTarget struct {
 	ImpactNote       string     // 下游影响
 	// 以下为权限判定用的任务事实。
 	TaskOwnerID int64
-	KrOwnerID   *int64
 }
 
 // RemindWaitFact 一条「等待他人」事项作为提醒目标的事实。
@@ -44,14 +43,12 @@ type RemindWaitFact struct {
 	ActionOwnerNames []string
 	Due              *time.Time
 	TaskOwnerID      int64
-	KrOwnerID        *int64
 }
 
 // RemindTaskFact 提醒目标所在任务的事实（补齐权限判定、截止时间与下游影响）。
 type RemindTaskFact struct {
 	Name       string
 	OwnerID    int64
-	KrOwnerID  *int64
 	End        *time.Time
 	ImpactNote string
 }
@@ -68,7 +65,7 @@ func RemindWaitKey(kind string, refID int64) string {
 	return fmt.Sprintf("wait:%s:%d", kind, refID)
 }
 
-// ApprovalWaitFact 审批环节（关闭申请、中间或签、KR 终审）的提醒目标事实。
+// ApprovalWaitFact 审批环节（中间或签、终审）的提醒目标事实。
 func ApprovalWaitFact(kind string, refID, taskID int64, approverIDs []int64, approverNames []string, days *int) RemindWaitFact {
 	missing := approvalStageLabels[kind]
 	if missing == "" {
@@ -107,7 +104,7 @@ func BlockerRemindTarget(b Blocker, due *time.Time) RemindTarget {
 		Missing: b.Missing, Reason: b.Reason,
 		ActionOwnerIDs: b.ActionOwnerIDs, ActionOwnerNames: b.ActionOwnerNames,
 		Due: due, ImpactNote: b.ImpactNote,
-		TaskOwnerID: b.TaskOwnerID, KrOwnerID: b.KrOwnerID,
+		TaskOwnerID: b.TaskOwnerID,
 	}
 }
 
@@ -117,7 +114,7 @@ func WaitRemindTarget(w RemindWaitFact) RemindTarget {
 		Key: RemindWaitKey(w.Kind, w.RefID), TaskID: w.TaskID, TaskName: w.TaskName,
 		Missing: w.Missing, Reason: w.Reason,
 		ActionOwnerIDs: dropZeroIDs(w.ActionOwnerIDs), ActionOwnerNames: w.ActionOwnerNames,
-		Due: w.Due, TaskOwnerID: w.TaskOwnerID, KrOwnerID: w.KrOwnerID,
+		Due: w.Due, TaskOwnerID: w.TaskOwnerID,
 	}
 }
 
@@ -141,7 +138,7 @@ func RemindTargets(f RemindFacts) []RemindTarget {
 	return out
 }
 
-// fillWaitTask 用所在任务的事实补齐等待事项：任务名、负责人、KR 负责人与截止时间。
+// fillWaitTask 用所在任务的事实补齐等待事项：任务名、负责人与截止时间。
 func fillWaitTask(w RemindWaitFact, tasks map[int64]RemindTaskFact) RemindWaitFact {
 	t, ok := tasks[w.TaskID]
 	if !ok {
@@ -149,7 +146,6 @@ func fillWaitTask(w RemindWaitFact, tasks map[int64]RemindTaskFact) RemindWaitFa
 	}
 	w.TaskName = t.Name
 	w.TaskOwnerID = t.OwnerID
-	w.KrOwnerID = t.KrOwnerID
 	w.Due = t.End
 	return w
 }
@@ -164,8 +160,8 @@ func dropZeroIDs(ids []int64) []int64 {
 	return out
 }
 
-// CanRemind 一键提醒权限（模块 PRD §5.3、§10）：访客不可；待行动人不提醒自己；
-// 任务负责人、所属 KR 负责人与可编辑项目者可提醒；没有可寻址的待行动人时不提醒。
+// CanRemind 一键提醒权限（模块 PRD §5.3、§10；裁决 12，#183：KR 无负责人，KR 负责人分支删除）：
+// 访客不可；待行动人不提醒自己；任务负责人与可编辑项目者可提醒；没有可寻址的待行动人时不提醒。
 func CanRemind(a Actor, userID int64, t RemindTarget) bool {
 	if !CanEditProject(a) && a.Role != RoleMember {
 		return false
@@ -179,9 +175,6 @@ func CanRemind(a Actor, userID int64, t RemindTarget) bool {
 		}
 	}
 	if t.TaskOwnerID == userID {
-		return true
-	}
-	if t.KrOwnerID != nil && *t.KrOwnerID == userID {
 		return true
 	}
 	return CanEditProject(a)

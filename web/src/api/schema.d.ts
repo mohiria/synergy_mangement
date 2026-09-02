@@ -183,7 +183,7 @@ export interface paths {
         /** 调整成员角色（仅项目管理员／项目负责人） */
         put: operations["updateProjectMemberRole"];
         post?: never;
-        /** 将成员移出项目（仅项目管理员／项目负责人；此人仍在担任 KR 负责人、任务负责人、成果审核人或接收方时返回 409 并列出待交接项，AC-61；#178 后无输入对接人职责） */
+        /** 将成员移出项目（仅项目管理员／项目负责人；此人仍在担任任务负责人、成果审核人或接收方时返回 409 并列出待交接项，AC-61；裁决 12 */
         delete: operations["removeProjectMember"];
         options?: never;
         head?: never;
@@ -248,7 +248,7 @@ export interface paths {
         delete: operations["deleteKeyResult"];
         options?: never;
         head?: never;
-        /** 编辑 KR（AC-61、AC-65；项目管理员或本 KR 负责人；负责人不可置空。裁决 11（#181）：无审批转交——审批人按处理时点动态解析角色） */
+        /** 编辑 KR（AC-65；裁决 12 */
         patch: operations["updateKeyResult"];
         trace?: never;
     };
@@ -384,7 +384,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 直接修改任务关键字段（AC-23、#172 裁决：有编辑权限者立即生效、无修改原因；动态留痕并站内通知所属 KR 负责人） */
+        /** 直接修改任务关键字段（AC-23、#172 裁决：立即生效、无修改原因；动态留痕。裁决 12 */
         post: operations["editTaskFields"];
         delete?: never;
         options?: never;
@@ -1043,7 +1043,7 @@ export interface paths {
         /** 项目内全部任务创建邀请（含派生动作标志） */
         get: operations["listTaskInvites"];
         put?: never;
-        /** 邀请成员为某个 KR 创建任务（KR 负责人／项目管理员／项目负责人；可多选受邀成员） */
+        /** 邀请成员为某个 KR 创建任务（项目管理员／项目负责人，裁决 12 */
         post: operations["createTaskInvites"];
         delete?: never;
         options?: never;
@@ -1193,23 +1193,13 @@ export interface components {
             description: string;
             /** @description 量化指标，选填 */
             metric?: string;
+            /** @description 创建人姓名（裁决 12，#183；存量数据无创建人时不返回，前端显示「—」） */
+            createdByName?: string;
             /**
-             * Format: int64
-             * @description KR 负责人（项目成员，选填；工作职责而非权限级别）
+             * Format: date-time
+             * @description 创建时间（裁决 12：详情处展示，O／KR 不新建动态流）
              */
-            ownerId?: number;
-            /** @description KR 负责人姓名（派生字段） */
-            ownerName?: string;
-            /**
-             * Format: date
-             * @description 周期开始日期
-             */
-            startDate?: string;
-            /**
-             * Format: date
-             * @description 周期截止日期
-             */
-            endDate?: string;
+            createdAt?: string;
             riskLevel: components["schemas"]["RiskLevel"];
             sortOrder: number;
             progressSummary?: components["schemas"]["ProgressSummary"];
@@ -1221,7 +1211,7 @@ export interface components {
             notReadyCount?: number;
             /** @description KR 下任务数量（派生字段；OKR 表「任务」列，含已完成与已取消，AC-65） */
             taskCount?: number;
-            /** @description 当前用户能否编辑本 KR（派生字段；项目管理员或本 KR 负责人，AC-65） */
+            /** @description 当前用户能否编辑本 KR（派生字段；裁决 12，#183：仅项目管理员，AC-65） */
             canEdit?: boolean;
             /** @description 当前用户能否删除本 KR（派生字段；仅项目管理员且 KR 下无任务，AC-65） */
             canDelete?: boolean;
@@ -1284,6 +1274,13 @@ export interface components {
             title: string;
             /** @description O 说明，选填 */
             description?: string;
+            /** @description 创建人姓名（裁决 12，#183；存量数据无创建人时不返回，前端显示「—」） */
+            createdByName?: string;
+            /**
+             * Format: date-time
+             * @description 创建时间（裁决 12：详情处展示，O／KR 不新建动态流）
+             */
+            createdAt?: string;
             sortOrder: number;
             keyResults: components["schemas"]["KeyResult"][];
             /** @description O 的风险等级（**只读派生字段，接口不接受写入**；AC-59、§5.7）：只取下级 KR 风险的 最大值，不叠加 O 自身的临期与超期 */
@@ -1302,32 +1299,15 @@ export interface components {
             title?: string;
             description?: string;
         };
-        /** @description 编辑 KR（AC-61、AC-65）：只传要改的字段；ownerId 不可置空 */
+        /** @description 编辑 KR（AC-65；裁决 12，#183：仅结构字段，KR 无负责人与周期属性）：只传要改的字段 */
         UpdateKeyResultRequest: {
             description?: string;
             metric?: string;
-            /**
-             * Format: int64
-             * @description 新的 KR 负责人（非只读项目成员）；不可置空
-             */
-            ownerId?: number;
-            /** Format: date */
-            startDate?: string;
-            /** Format: date */
-            endDate?: string;
         };
+        /** @description 新建 KR（裁决 12，#183：无负责人与周期属性） */
         CreateKeyResultInput: {
             description: string;
             metric?: string;
-            /**
-             * Format: int64
-             * @description KR 负责人，必须是项目成员
-             */
-            ownerId?: number;
-            /** Format: date */
-            startDate?: string;
-            /** Format: date */
-            endDate?: string;
         };
         /** @description 二选一：填 title（可带 description）新建 O，或填 objectiveId 向已有 O 追加 KR（此时 keyResults 至少一条） */
         CreateOkrBatchItem: {
@@ -1340,10 +1320,9 @@ export interface components {
         CreateOkrBatchRequest: {
             items: components["schemas"]["CreateOkrBatchItem"][];
         };
-        /** @description 批量创建结果（#125）：最新 O/KR 列表 + 本次站内通知的负责人数（去重、不含操作者本人） */
+        /** @description 批量创建结果：项目最新 O/KR 列表（裁决 12，#183：KR 无负责人，原 */
         CreateOkrBatchResponse: {
             objectives: components["schemas"]["Objective"][];
-            notifiedCount: number;
         };
         /**
          * @description 任务生命周期状态（词汇表「任务生命周期状态」；裁决 13，#182）：存储五态 未开始／进行中／审核中／已完成／已关闭；当前审批环节从完成申请单读取， 不再落在任务状态上。waiting_input 是纯显示派生态（必要输入未就绪且任务 未开始时叠加，AC-58），只出现在接口下发、不落库
@@ -1816,15 +1795,10 @@ export interface components {
             /** Format: date */
             endDate: string;
         };
+        /** @description 导入 KR（裁决 12，#183：无负责人与周期列） */
         ImportKrItem: {
             description: string;
             metric?: string;
-            /** Format: int64 */
-            ownerId?: number;
-            /** Format: date */
-            startDate?: string;
-            /** Format: date */
-            endDate?: string;
             tasks?: components["schemas"]["ImportTaskItem"][];
         };
         /** @description 二选一：title 新建 O，或 objectiveId 挂到已有 O */
@@ -1980,15 +1954,13 @@ export interface components {
             /** @description 本任务下的过程文件与重要外部材料（§7.7；归档按「文件类型」维筛选用） */
             files?: components["schemas"]["TaskFile"][];
         };
-        /** @description 归档视角的 KR 分组（AC-17）：成果按 KR 归集，组头给出 KR 负责人与交付物数量 */
+        /** @description 归档视角的 KR 分组（AC-17）：成果按 KR 归集，组头给出交付物数量（裁决 12，#183：KR 无负责人） */
         ArtifactKr: {
             /** Format: int64 */
             keyResultId: number;
             /** @description KR 展示编号，形如 KR1.1（AC-64；派生字段） */
             code: string;
             description: string;
-            /** @description KR 负责人姓名（派生字段） */
-            ownerName: string;
             /** @description 本 KR 下交付物项总数（派生字段） */
             deliverableCount: number;
             tasks: components["schemas"]["ArtifactTask"][];
@@ -2098,7 +2070,7 @@ export interface components {
             missing: string;
             /** @description 阻塞原因 */
             reason: string;
-            /** @description 当前待行动人（成果审核（或签）、互锁环内 KR 负责人可为多人） */
+            /** @description 当前待行动人（成果审核（或签）、终审管理员集合、互锁环内任务负责人可为多人） */
             actionOwnerIds: number[];
             actionOwnerNames: string[];
             /** @description 按事实严重度派生的预警或高风险（结构化卡点不使用 normal） */
@@ -2840,7 +2812,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 创建成功，返回项目最新的完整 O／KR 列表与本次已通知的负责人数（#125） */
+            /** @description 创建成功，返回项目最新的完整 O／KR 列表（裁决 12，#183：KR 无负责人，#125 指派通知随之退场） */
             201: {
                 headers: {
                     [name: string]: unknown;

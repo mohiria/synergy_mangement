@@ -88,16 +88,10 @@ func (s *Server) DeleteObjective(w http.ResponseWriter, r *http.Request, project
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// UpdateKeyResult 编辑 KR：项目管理员或本 KR 负责人；负责人不可置空。
-// 裁决 11（#181）：审批人按处理时点动态解析角色，无未决审批转交机制。
+// UpdateKeyResult 编辑 KR（裁决 12，#183）：仅项目管理员；只剩结构字段（描述、量化指标）。
 func (s *Server) UpdateKeyResult(w http.ResponseWriter, r *http.Request, projectId int64, keyResultId int64) {
 	var req UpdateKeyResultRequest
-	raw, err := readAllBody(r)
-	if err != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_request", Message: "请求内容无法解析"})
-		return
-	}
-	if err := json.Unmarshal(raw, &req); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_request", Message: "请求内容无法解析"})
 		return
 	}
@@ -107,57 +101,25 @@ func (s *Server) UpdateKeyResult(w http.ResponseWriter, r *http.Request, project
 	}
 	uid := currentUser(r).ID
 	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
-	kr, ok := s.fetchKeyResult(w, r, projectId, keyResultId)
-	if !ok {
+	if _, ok := s.fetchKeyResult(w, r, projectId, keyResultId); !ok {
 		return
 	}
-	if !domain.CanEditKeyResult(actor, uid, fromPgInt8(kr.OwnerID)) {
+	if !domain.CanEditKeyResult(actor) {
 		writeForbidden(w)
 		return
-	}
-	members, err := s.q.ListProjectMembers(r.Context(), projectId)
-	if err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	roleByID := make(map[int64]string, len(members))
-	for _, m := range members {
-		roleByID[m.UserID] = m.Role
 	}
 	update := domain.KeyResultUpdate{
 		Description: trimmedPtr(req.Description),
 		Metric:      trimmedPtr(req.Metric),
-		OwnerID:     req.OwnerId,
-		// 契约里 ownerId 缺省＝不改；显式传 null 才是「置空」，须被拒（AC-61）。
-		ClearOwner: jsonFieldIsNull(raw, "ownerId"),
-		Start:      toTimePtr(req.StartDate),
-		End:        toTimePtr(req.EndDate),
 	}
-	// 周期只改一端时，另一端取库里现值参与倒挂校验。
-	start, end := update.Start, update.End
-	if start == nil {
-		start = pgDateAsTime(kr.StartDate)
-	}
-	if end == nil {
-		end = pgDateAsTime(kr.EndDate)
-	}
-	check := update
-	check.Start, check.End = start, end
-	if err := domain.ValidateKeyResultUpdate(check, func(id int64) string { return roleByID[id] }); err != nil {
-		code := "invalid_okr"
-		if errors.Is(err, domain.ErrKrOwnerRequired) {
-			code = "kr_owner_required"
-		}
-		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: code, Message: err.Error()})
+	if err := domain.ValidateKeyResultUpdate(update); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_okr", Message: err.Error()})
 		return
 	}
 	if _, err := s.q.UpdateKeyResult(r.Context(), store.UpdateKeyResultParams{
 		ID:          keyResultId,
 		Description: toPgTextPtr(update.Description),
 		Metric:      toPgTextPtr(update.Metric),
-		OwnerID:     toPgInt8(update.OwnerID),
-		StartDate:   toPgDateFromTime(update.Start),
-		EndDate:     toPgDateFromTime(update.End),
 	}); err != nil {
 		writeInternalError(w, r, err)
 		return

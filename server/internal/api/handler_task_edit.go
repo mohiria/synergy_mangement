@@ -12,11 +12,11 @@ import (
 	"synergy/server/internal/store"
 )
 
-// #172 裁决（第二刀）：关键字段修改直接生效（无变更单、无修改原因），
-// 动作写入任务动态并站内通知所属 KR 负责人；裁决 10（#180）：修改权限收归项目管理员，
-// 关闭申请机制退场（关闭见 handler_task_cancel.go）。业务规则在 domain，handler 仅编排。
+// #172 裁决（第二刀）：关键字段修改直接生效（无变更单、无修改原因），动作写入任务动态；
+// 裁决 10（#180）：修改权限收归项目管理员，关闭申请机制退场（关闭见 handler_task_cancel.go）；
+// 裁决 12（#183）：KR 无负责人，原字段修改站内通知退场。业务规则在 domain，handler 仅编排。
 
-// EditTaskFields 直接修改任务关键字段：立即生效、动态留痕、通知 KR 负责人（本人修改不另发）。
+// EditTaskFields 直接修改任务关键字段：立即生效、动态留痕。
 func (s *Server) EditTaskFields(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64) {
 	var req EditTaskFieldsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -71,20 +71,7 @@ func (s *Server) EditTaskFields(w http.ResponseWriter, r *http.Request, projectI
 		writeInternalError(w, r, err)
 		return
 	}
-	// 站内通知所属 KR 负责人（#172 裁决；本人是 KR 负责人时不另发），与写入同事务。
-	if target := domain.FieldEditNotifyTarget(uid, facts.KrOwnerID); target != nil {
-		if _, err := qtx.CreateNotification(r.Context(), store.CreateNotificationParams{
-			UserID: *target,
-			Kind:   domain.NotifyTaskFieldEdited,
-			Content: domain.FieldEditNotification(
-				currentUser(r).DisplayName, task.Name, labels),
-			ProjectID: pgtype.Int8{Int64: projectId, Valid: true},
-			TaskID:    pgtype.Int8{Int64: taskId, Valid: true},
-		}); err != nil {
-			writeInternalError(w, r, err)
-			return
-		}
-	}
+	// 裁决 12（#183）：KR 无负责人，原 #172 字段修改站内通知随之无对象、退场；修改事实留任务动态。
 	if err := tx.Commit(r.Context()); err != nil {
 		writeInternalError(w, r, err)
 		return

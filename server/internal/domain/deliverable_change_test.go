@@ -11,7 +11,7 @@ func TestDeliverableStructureRule(t *testing.T) {
 	const me, other = int64(5), int64(9)
 	member := Actor{Role: RoleMember}
 	facts := func(status string) TaskFacts {
-		return TaskFacts{Status: status, CreatorID: other, OwnerID: me, KrOwnerID: i64(7)}
+		return TaskFacts{Status: status, CreatorID: other, OwnerID: me}
 	}
 	cases := []struct {
 		name    string
@@ -50,7 +50,7 @@ func TestDeleteDeliverableRule(t *testing.T) {
 	const me = int64(5)
 	member := Actor{Role: RoleMember}
 	facts := func(status string) TaskFacts {
-		return TaskFacts{Status: status, CreatorID: me, OwnerID: me, KrOwnerID: i64(7)}
+		return TaskFacts{Status: status, CreatorID: me, OwnerID: me}
 	}
 	cases := []struct {
 		name       string

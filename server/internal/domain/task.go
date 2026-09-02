@@ -37,12 +37,11 @@ type NewTask struct {
 	End     time.Time
 }
 
-// TaskFacts 判定任务流转所需的任务事实。
+// TaskFacts 判定任务流转所需的任务事实（裁决 12，#183：KR 无负责人，无 KrOwnerID）。
 type TaskFacts struct {
 	Status    string
 	CreatorID int64
 	OwnerID   int64
-	KrOwnerID *int64
 	// ResultUpdate 成果更新的进程（词汇表「成果更新」）：空＝无，open＝已发起未提交，reviewing＝已提交在审。
 	ResultUpdate string
 	// ReviewStage 审核中任务的当前审批环节（裁决 13，#182）：取未决完成申请单的状态

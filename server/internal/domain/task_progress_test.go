@@ -55,7 +55,7 @@ func TestStartTask(t *testing.T) {
 
 // AC-63：完成终审通过时进度置 100 并锁定编辑；已完成任务不再接受进度写入。
 func TestProgressLockedAfterCompletion(t *testing.T) {
-	completed := TaskFacts{Status: TaskCompleted, OwnerID: 5, CreatorID: 5, KrOwnerID: i64(7)}
+	completed := TaskFacts{Status: TaskCompleted, OwnerID: 5, CreatorID: 5}
 	if CanUpdateProgress(Actor{Role: RoleMember}, 5, completed) {
 		t.Fatal("已完成任务的进度不应可编辑")
 	}
@@ -166,7 +166,7 @@ func TestProgressCoverage(t *testing.T) {
 
 // 派生动作标志：开始（负责人/可编辑项目者）、关闭（裁决 10：仅项目管理员）。
 func TestCanStartAndCloseFlags(t *testing.T) {
-	facts := TaskFacts{Status: TaskNotStarted, OwnerID: 5, CreatorID: 3, KrOwnerID: i64(7)}
+	facts := TaskFacts{Status: TaskNotStarted, OwnerID: 5, CreatorID: 3}
 	if !CanStartTask(Actor{Role: RoleMember}, 5, facts) {
 		t.Fatal("负责人应可开始")
 	}
@@ -185,7 +185,7 @@ func TestCanStartAndCloseFlags(t *testing.T) {
 	if !CanCloseTask(Actor{Role: RoleAdmin}, facts) {
 		t.Fatal("项目管理员应可直接关闭")
 	}
-	if CanCloseTask(Actor{Role: RoleAdmin}, TaskFacts{Status: TaskCompleted, OwnerID: 5, KrOwnerID: i64(7)}) {
+	if CanCloseTask(Actor{Role: RoleAdmin}, TaskFacts{Status: TaskCompleted, OwnerID: 5}) {
 		t.Fatal("已完成不应可关闭")
 	}
 	if CanCloseTask(Actor{Role: RoleAdmin}, TaskFacts{Status: TaskInReview, OwnerID: 5}) {

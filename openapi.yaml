@@ -347,7 +347,7 @@ paths:
     delete:
       operationId: removeProjectMember
       tags: [projects]
-      summary: 将成员移出项目（仅项目管理员／项目负责人；此人仍在担任 KR 负责人、任务负责人、成果审核人或接收方时返回 409 并列出待交接项，AC-61；#178 后无输入对接人职责）
+      summary: 将成员移出项目（仅项目管理员／项目负责人；此人仍在担任任务负责人、成果审核人或接收方时返回 409 并列出待交接项，AC-61；裁决 12 #183 后无 KR 负责人职责）
       responses:
         "204":
           description: 已移出
@@ -397,7 +397,7 @@ paths:
               $ref: "#/components/schemas/CreateOkrBatchRequest"
       responses:
         "201":
-          description: 创建成功，返回项目最新的完整 O／KR 列表与本次已通知的负责人数（#125）
+          description: 创建成功，返回项目最新的完整 O／KR 列表（裁决 12，#183：KR 无负责人，#125 指派通知随之退场）
           content:
             application/json:
               schema:
@@ -483,7 +483,7 @@ paths:
     patch:
       operationId: updateKeyResult
       tags: [okr]
-      summary: 编辑 KR（AC-61、AC-65；项目管理员或本 KR 负责人；负责人不可置空。裁决 11（#181）：无审批转交——审批人按处理时点动态解析角色）
+      summary: 编辑 KR（AC-65；裁决 12 #183：仅项目管理员、仅结构字段——KR 无负责人与周期属性）
       requestBody:
         required: true
         content:
@@ -804,7 +804,7 @@ paths:
     post:
       operationId: editTaskFields
       tags: [tasks]
-      summary: 直接修改任务关键字段（AC-23、#172 裁决：有编辑权限者立即生效、无修改原因；动态留痕并站内通知所属 KR 负责人）
+      summary: 直接修改任务关键字段（AC-23、#172 裁决：立即生效、无修改原因；动态留痕。裁决 12 #183：KR 负责人退场，无站内通知对象）
       requestBody:
         required: true
         content:
@@ -2077,7 +2077,7 @@ paths:
     post:
       operationId: createTaskInvites
       tags: [task-invites]
-      summary: 邀请成员为某个 KR 创建任务（KR 负责人／项目管理员／项目负责人；可多选受邀成员）
+      summary: 邀请成员为某个 KR 创建任务（项目管理员／项目负责人，裁决 12 #183 后无 KR 负责人；可多选受邀成员）
       requestBody:
         required: true
         content:
@@ -2362,21 +2362,13 @@ components:
         metric:
           type: string
           description: 量化指标，选填
-        ownerId:
-          type: integer
-          format: int64
-          description: KR 负责人（项目成员，选填；工作职责而非权限级别）
-        ownerName:
+        createdByName:
           type: string
-          description: KR 负责人姓名（派生字段）
-        startDate:
+          description: 创建人姓名（裁决 12，#183；存量数据无创建人时不返回，前端显示「—」）
+        createdAt:
           type: string
-          format: date
-          description: 周期开始日期
-        endDate:
-          type: string
-          format: date
-          description: 周期截止日期
+          format: date-time
+          description: 创建时间（裁决 12：详情处展示，O／KR 不新建动态流）
         riskLevel:
           $ref: "#/components/schemas/RiskLevel"
         sortOrder:
@@ -2397,7 +2389,7 @@ components:
           description: KR 下任务数量（派生字段；OKR 表「任务」列，含已完成与已取消，AC-65）
         canEdit:
           type: boolean
-          description: 当前用户能否编辑本 KR（派生字段；项目管理员或本 KR 负责人，AC-65）
+          description: 当前用户能否编辑本 KR（派生字段；裁决 12，#183：仅项目管理员，AC-65）
         canDelete:
           type: boolean
           description: 当前用户能否删除本 KR（派生字段；仅项目管理员且 KR 下无任务，AC-65）
@@ -2501,6 +2493,13 @@ components:
         description:
           type: string
           description: O 说明，选填
+        createdByName:
+          type: string
+          description: 创建人姓名（裁决 12，#183；存量数据无创建人时不返回，前端显示「—」）
+        createdAt:
+          type: string
+          format: date-time
+          description: 创建时间（裁决 12：详情处展示，O／KR 不新建动态流）
         sortOrder:
           type: integer
         keyResults:
@@ -2537,7 +2536,7 @@ components:
           maxLength: 500
     UpdateKeyResultRequest:
       type: object
-      description: 编辑 KR（AC-61、AC-65）：只传要改的字段；ownerId 不可置空
+      description: 编辑 KR（AC-65；裁决 12，#183：仅结构字段，KR 无负责人与周期属性）：只传要改的字段
       properties:
         description:
           type: string
@@ -2546,19 +2545,10 @@ components:
         metric:
           type: string
           maxLength: 100
-        ownerId:
-          type: integer
-          format: int64
-          description: 新的 KR 负责人（非只读项目成员）；不可置空
-        startDate:
-          type: string
-          format: date
-        endDate:
-          type: string
-          format: date
     CreateKeyResultInput:
       type: object
       required: [description]
+      description: 新建 KR（裁决 12，#183：无负责人与周期属性）
       properties:
         description:
           type: string
@@ -2567,16 +2557,6 @@ components:
         metric:
           type: string
           maxLength: 100
-        ownerId:
-          type: integer
-          format: int64
-          description: KR 负责人，必须是项目成员
-        startDate:
-          type: string
-          format: date
-        endDate:
-          type: string
-          format: date
     CreateOkrBatchItem:
       type: object
       description: 二选一：填 title（可带 description）新建 O，或填 objectiveId 向已有 O 追加 KR（此时 keyResults 至少一条）
@@ -2605,15 +2585,13 @@ components:
             $ref: "#/components/schemas/CreateOkrBatchItem"
     CreateOkrBatchResponse:
       type: object
-      description: 批量创建结果（#125）：最新 O/KR 列表 + 本次站内通知的负责人数（去重、不含操作者本人）
-      required: [objectives, notifiedCount]
+      description: 批量创建结果：项目最新 O/KR 列表（裁决 12，#183：KR 无负责人，原 #125 通知计数删除）
+      required: [objectives]
       properties:
         objectives:
           type: array
           items:
             $ref: "#/components/schemas/Objective"
-        notifiedCount:
-          type: integer
     TaskStatus:
       type: string
       description: >-
@@ -3445,6 +3423,7 @@ components:
     ImportKrItem:
       type: object
       required: [description]
+      description: 导入 KR（裁决 12，#183：无负责人与周期列）
       properties:
         description:
           type: string
@@ -3453,15 +3432,6 @@ components:
         metric:
           type: string
           maxLength: 100
-        ownerId:
-          type: integer
-          format: int64
-        startDate:
-          type: string
-          format: date
-        endDate:
-          type: string
-          format: date
         tasks:
           type: array
           items:
@@ -3757,9 +3727,9 @@ components:
             $ref: "#/components/schemas/TaskFile"
     ArtifactKr:
       type: object
-      description: 归档视角的 KR 分组（AC-17）：成果按 KR 归集，组头给出 KR 负责人与交付物数量
+      description: 归档视角的 KR 分组（AC-17）：成果按 KR 归集，组头给出交付物数量（裁决 12，#183：KR 无负责人）
       required:
-        [keyResultId, code, description, ownerName, deliverableCount, tasks]
+        [keyResultId, code, description, deliverableCount, tasks]
       properties:
         keyResultId:
           type: integer
@@ -3769,9 +3739,6 @@ components:
           description: KR 展示编号，形如 KR1.1（AC-64；派生字段）
         description:
           type: string
-        ownerName:
-          type: string
-          description: KR 负责人姓名（派生字段）
         deliverableCount:
           type: integer
           description: 本 KR 下交付物项总数（派生字段）
@@ -3956,7 +3923,7 @@ components:
           description: 阻塞原因
         actionOwnerIds:
           type: array
-          description: 当前待行动人（成果审核（或签）、互锁环内 KR 负责人可为多人）
+          description: 当前待行动人（成果审核（或签）、终审管理员集合、互锁环内任务负责人可为多人）
           items:
             type: integer
             format: int64

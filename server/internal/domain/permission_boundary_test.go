@@ -10,10 +10,10 @@ import (
 // 成果审核人的身份，也不得再编辑或审批；确认接收是访客唯一的写操作（AC-62）。
 func TestWriteActionsRequireNonViewerMembership(t *testing.T) {
 	me := int64(5)
-	facts := TaskFacts{Status: TaskInProgress, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
-	notStarted := TaskFacts{Status: TaskNotStarted, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
-	finalPending := TaskFacts{Status: TaskInReview, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
-	intermediate := TaskFacts{Status: TaskInReview, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
+	facts := TaskFacts{Status: TaskInProgress, CreatorID: me, OwnerID: me}
+	notStarted := TaskFacts{Status: TaskNotStarted, CreatorID: me, OwnerID: me}
+	finalPending := TaskFacts{Status: TaskInReview, CreatorID: me, OwnerID: me}
+	intermediate := TaskFacts{Status: TaskInReview, CreatorID: me, OwnerID: me}
 
 	for _, actor := range []Actor{{Role: RoleViewer}, {Role: ""}} {
 		name := "访客"
@@ -104,12 +104,9 @@ func TestViewerCannotBeAppointedOwner(t *testing.T) {
 		t.Fatalf("非成员不应可任任务负责人: %v", err)
 	}
 
-	items := []OkrBatchItem{{Title: "提升交付质量", KeyResults: []NewKeyResult{{Description: "上线自动验收", OwnerID: i64(9)}}}}
-	if err := ValidateOkrBatch(items, roleOf); !errors.Is(err, ErrKrOwnerNotEligible) {
-		t.Fatalf("访客不应可任 KR 负责人: %v", err)
-	}
-	items[0].KeyResults[0].OwnerID = i64(5)
-	if err := ValidateOkrBatch(items, roleOf); err != nil {
-		t.Fatalf("项目成员应可任 KR 负责人: %v", err)
+	// 裁决 12（#183）：KR 无负责人，批量创建不再有人员资格校验。
+	items := []OkrBatchItem{{Title: "提升交付质量", KeyResults: []NewKeyResult{{Description: "上线自动验收"}}}}
+	if err := ValidateOkrBatch(items); err != nil {
+		t.Fatalf("结构合法的批量创建应通过: %v", err)
 	}
 }

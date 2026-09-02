@@ -164,7 +164,7 @@ func (s *Server) SubmitCompletion(w http.ResponseWriter, r *http.Request, projec
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 
-// DecideCompletion KR 负责人终审：通过则候选整体覆盖对应当前内容并永久删除旧文件（AC-15/39），
+// DecideCompletion 终审（项目管理员或签，裁决 11）：通过则候选整体覆盖对应当前内容并永久删除旧文件（AC-15/39），
 // 退回则删除本次候选文件、任务回到进行中（AC-40）。
 func (s *Server) DecideCompletion(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64, reviewId int64) {
 	var req CompletionDecisionRequest
@@ -206,7 +206,7 @@ func (s *Server) DecideCompletion(w http.ResponseWriter, r *http.Request, projec
 		return
 	}
 	// 中间或签阶段（AC-14/24/37）：仅或签组成员可处理。
-	// 裁决 C2（#136）：或签组含 KR 负责人时其通过＝终审通过——decideIntermediate 落或签留痕后
+	// 裁决 C2（#136，裁决 11 改写）：或签组含项目管理员时其通过＝终审通过——decideIntermediate 落或签留痕后
 	// 返回 merged，继续走下方同一条终审通过路径（覆盖当前、删旧文件、接收、进度、审计不复制第二份）。
 	merged := false
 	if review.State == domain.CompletionIntermediate {
@@ -322,8 +322,8 @@ func (s *Server) DecideCompletion(w http.ResponseWriter, r *http.Request, projec
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 
-// decideIntermediate 或签处理：任一人通过→待 KR 终审（留痕）；任一人退回→整体退回（裁决 #165：候选保留）。
-// 裁决 C2（#136）：KR 负责人在组内且通过时规则返回终审通过——本函数只落或签留痕后返回
+// decideIntermediate 或签处理：任一人通过→待终审（留痕）；任一人退回→整体退回（裁决 #165：候选保留）。
+// 裁决 C2（#136，裁决 11 改写）：项目管理员在组内且通过时规则返回终审通过——本函数只落或签留痕后返回
 // merged=true，由调用方继续同一条终审通过路径；其余情形在本函数内完成响应并返回 false。
 func (s *Server) decideIntermediate(w http.ResponseWriter, r *http.Request, tx pgx.Tx, qtx *store.Queries,
 	projectId, taskId int64, review store.CompletionReview, facts domain.TaskFacts, uid int64, actor domain.Actor,

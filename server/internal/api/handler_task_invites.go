@@ -51,7 +51,7 @@ func (s *Server) CreateTaskInvites(w http.ResponseWriter, r *http.Request, proje
 		writeInternalError(w, r, err)
 		return
 	}
-	if !domain.CanInviteForKr(actor, uid, fromPgInt8(kr.OwnerID)) {
+	if !domain.CanInviteForKr(actor) {
 		writeForbidden(w)
 		return
 	}

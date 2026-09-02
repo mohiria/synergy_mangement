@@ -123,7 +123,7 @@ func (q *Queries) CreateTask(ctx context.Context, arg CreateTaskParams) (Task, e
 }
 
 const getKeyResultInProject = `-- name: GetKeyResultInProject :one
-SELECT k.id, k.objective_id, k.description, k.metric, k.owner_id, k.start_date, k.end_date, k.sort_order, k.created_at, k.code_seq, o.project_id, o.code_seq AS objective_code_seq
+SELECT k.id, k.objective_id, k.description, k.metric, k.sort_order, k.created_at, k.code_seq, k.created_by, o.project_id, o.code_seq AS objective_code_seq
 FROM key_results k
 JOIN objectives o ON o.id = k.objective_id
 WHERE k.id = $1 AND o.project_id = $2
@@ -139,12 +139,10 @@ type GetKeyResultInProjectRow struct {
 	ObjectiveID      int64
 	Description      string
 	Metric           string
-	OwnerID          pgtype.Int8
-	StartDate        pgtype.Date
-	EndDate          pgtype.Date
 	SortOrder        int32
 	CreatedAt        pgtype.Timestamptz
 	CodeSeq          int32
+	CreatedBy        pgtype.Int8
 	ProjectID        int64
 	ObjectiveCodeSeq int32
 }
@@ -158,12 +156,10 @@ func (q *Queries) GetKeyResultInProject(ctx context.Context, arg GetKeyResultInP
 		&i.ObjectiveID,
 		&i.Description,
 		&i.Metric,
-		&i.OwnerID,
-		&i.StartDate,
-		&i.EndDate,
 		&i.SortOrder,
 		&i.CreatedAt,
 		&i.CodeSeq,
+		&i.CreatedBy,
 		&i.ProjectID,
 		&i.ObjectiveCodeSeq,
 	)
@@ -171,7 +167,7 @@ func (q *Queries) GetKeyResultInProject(ctx context.Context, arg GetKeyResultInP
 }
 
 const getTaskInProject = `-- name: GetTaskInProject :one
-SELECT t.id, t.key_result_id, t.name, t.owner_id, t.start_date, t.end_date, t.status, t.created_by, t.created_at, t.progress, t.cancel_reason, t.description, t.completion_criteria, t.updated_at, t.receiver_scope, t.code_seq, t.result_update, k.owner_id AS kr_owner_id, o.project_id
+SELECT t.id, t.key_result_id, t.name, t.owner_id, t.start_date, t.end_date, t.status, t.created_by, t.created_at, t.progress, t.cancel_reason, t.description, t.completion_criteria, t.updated_at, t.receiver_scope, t.code_seq, t.result_update, o.project_id
 FROM tasks t
 JOIN key_results k ON k.id = t.key_result_id
 JOIN objectives o ON o.id = k.objective_id
@@ -201,11 +197,10 @@ type GetTaskInProjectRow struct {
 	ReceiverScope      string
 	CodeSeq            int32
 	ResultUpdate       string
-	KrOwnerID          pgtype.Int8
 	ProjectID          int64
 }
 
-// 任务连同所属 KR 负责人与项目归属（用于权限判定与项目内寻址）。
+// 任务连同项目归属（用于权限判定与项目内寻址；裁决 12 #183 后 KR 无负责人）。
 func (q *Queries) GetTaskInProject(ctx context.Context, arg GetTaskInProjectParams) (GetTaskInProjectRow, error) {
 	row := q.db.QueryRow(ctx, getTaskInProject, arg.ID, arg.ProjectID)
 	var i GetTaskInProjectRow
@@ -227,7 +222,6 @@ func (q *Queries) GetTaskInProject(ctx context.Context, arg GetTaskInProjectPara
 		&i.ReceiverScope,
 		&i.CodeSeq,
 		&i.ResultUpdate,
-		&i.KrOwnerID,
 		&i.ProjectID,
 	)
 	return i, err
@@ -235,14 +229,12 @@ func (q *Queries) GetTaskInProject(ctx context.Context, arg GetTaskInProjectPara
 
 const listProjectTasks = `-- name: ListProjectTasks :many
 SELECT t.id, t.key_result_id, t.name, t.owner_id, t.start_date, t.end_date, t.status, t.created_by, t.created_at, t.progress, t.cancel_reason, t.description, t.completion_criteria, t.updated_at, t.receiver_scope, t.code_seq, t.result_update, u.display_name AS owner_name, cu.display_name AS creator_name,
-    k.owner_id AS kr_owner_id, ku.display_name AS kr_owner_name,
     k.code_seq AS kr_code_seq, o.code_seq AS objective_code_seq
 FROM tasks t
 JOIN key_results k ON k.id = t.key_result_id
 JOIN objectives o ON o.id = k.objective_id
 JOIN users u ON u.id = t.owner_id
 JOIN users cu ON cu.id = t.created_by
-LEFT JOIN users ku ON ku.id = k.owner_id
 WHERE o.project_id = $1
 ORDER BY t.id
 `
@@ -267,13 +259,11 @@ type ListProjectTasksRow struct {
 	ResultUpdate       string
 	OwnerName          string
 	CreatorName        string
-	KrOwnerID          pgtype.Int8
-	KrOwnerName        pgtype.Text
 	KrCodeSeq          int32
 	ObjectiveCodeSeq   int32
 }
 
-// 项目全部任务，含负责人／创建人／KR 负责人姓名（派生动作标志与待行动人在 domain 判定）。
+// 项目全部任务，含负责人／创建人姓名（派生动作标志与待行动人在 domain 判定；裁决 12 后 KR 无负责人）。
 func (q *Queries) ListProjectTasks(ctx context.Context, projectID int64) ([]ListProjectTasksRow, error) {
 	rows, err := q.db.Query(ctx, listProjectTasks, projectID)
 	if err != nil {
@@ -303,8 +293,6 @@ func (q *Queries) ListProjectTasks(ctx context.Context, projectID int64) ([]List
 			&i.ResultUpdate,
 			&i.OwnerName,
 			&i.CreatorName,
-			&i.KrOwnerID,
-			&i.KrOwnerName,
 			&i.KrCodeSeq,
 			&i.ObjectiveCodeSeq,
 		); err != nil {
@@ -354,7 +342,7 @@ func (q *Queries) ListTaskProgressByProject(ctx context.Context, projectID int64
 }
 
 const lockTaskInProject = `-- name: LockTaskInProject :one
-SELECT t.id, t.key_result_id, t.name, t.owner_id, t.start_date, t.end_date, t.status, t.created_by, t.created_at, t.progress, t.cancel_reason, t.description, t.completion_criteria, t.updated_at, t.receiver_scope, t.code_seq, t.result_update, k.owner_id AS kr_owner_id, o.project_id
+SELECT t.id, t.key_result_id, t.name, t.owner_id, t.start_date, t.end_date, t.status, t.created_by, t.created_at, t.progress, t.cancel_reason, t.description, t.completion_criteria, t.updated_at, t.receiver_scope, t.code_seq, t.result_update, o.project_id
 FROM tasks t
 JOIN key_results k ON k.id = t.key_result_id
 JOIN objectives o ON o.id = k.objective_id
@@ -385,7 +373,6 @@ type LockTaskInProjectRow struct {
 	ReceiverScope      string
 	CodeSeq            int32
 	ResultUpdate       string
-	KrOwnerID          pgtype.Int8
 	ProjectID          int64
 }
 
@@ -412,7 +399,6 @@ func (q *Queries) LockTaskInProject(ctx context.Context, arg LockTaskInProjectPa
 		&i.ReceiverScope,
 		&i.CodeSeq,
 		&i.ResultUpdate,
-		&i.KrOwnerID,
 		&i.ProjectID,
 	)
 	return i, err

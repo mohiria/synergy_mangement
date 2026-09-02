@@ -96,7 +96,6 @@ func TestParticipantsAreNotDerivationInput(t *testing.T) {
 // 只是某个任务的参与人，不会因此在「我的工作」里收到任何事项。
 func TestParticipantGetsNoWorkItems(t *testing.T) {
 	const participantID = int64(7)
-	krOwner := int64(3)
 	groups := MyWork(MyWorkFacts{
 		UserID: participantID,
 		Actor:  Actor{Role: RoleMember},
@@ -107,7 +106,6 @@ func TestParticipantGetsNoWorkItems(t *testing.T) {
 			DisplayStatus: TaskInProgress,
 			OwnerID:       9,
 			CreatorID:     9,
-			KrOwnerID:     &krOwner,
 		}},
 	})
 	n := len(groups.Pending) + len(groups.Approvals) + len(groups.Receipts) + len(groups.Waiting) + len(groups.Blockers)

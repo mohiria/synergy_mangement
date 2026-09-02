@@ -15,7 +15,7 @@ import (
 //	上游未就绪 | 必要输入未就绪、已到开始时间且任务尚未开始 | 上游任务负责人 | 输入就绪或任务开始
 //	任务超期   | 截止已过且未完成                 | 任务负责人                 | 完成或改期生效
 //	审批超时   | 当前环节等待达到 N×24 小时       | 该审批人（或签为各审核人） | 审批处理或审批单关闭
-//	硬依赖互锁 | 硬前置交付物边成环               | 环内各任务所属 KR 负责人   | 任一边被改掉
+//	硬依赖互锁 | 硬前置交付物边成环               | 环内各任务负责人           | 任一边被改掉
 const (
 	BlockerUpstreamUnready = "upstream_unready"
 	BlockerTaskOverdue     = "task_overdue"
@@ -28,16 +28,14 @@ const NotifyBlockerRemind = "blocker_remind"
 
 // BlockerTaskFact 派生卡点所需的任务事实。
 type BlockerTaskFact struct {
-	ID          int64
-	Name        string
-	Status      string // 存储的生命周期状态，不是显示状态
-	OwnerID     int64
-	OwnerName   string
-	KrID        int64
-	KrOwnerID   *int64
-	KrOwnerName string
-	StartDate   *time.Time
-	EndDate     *time.Time
+	ID        int64
+	Name      string
+	Status    string // 存储的生命周期状态，不是显示状态
+	OwnerID   int64
+	OwnerName string
+	KrID      int64
+	StartDate *time.Time
+	EndDate   *time.Time
 }
 
 // BlockerInputFact 指向某任务的一条输入事实（交付物边 + 就绪判定结果）。
@@ -90,7 +88,6 @@ type Blocker struct {
 	ImpactNote       string
 	// 以下为分组与权限判定用的任务事实，不出现在 API 契约里。
 	TaskOwnerID int64
-	KrOwnerID   *int64
 	// 上游任务事实（#167）：仅「上游未就绪」且来源为任务时有值——
 	// 卡点条目按「编号＋标题＋负责人」展示，前端只消费不拼算。
 	SourceTaskCode  string
@@ -125,7 +122,6 @@ func DeriveBlockers(f BlockerFacts) []Blocker {
 		b.TaskID = t.ID
 		b.TaskName = t.Name
 		b.TaskOwnerID = t.OwnerID
-		b.KrOwnerID = t.KrOwnerID
 		b.ImpactNote = downstream[t.ID]
 		out = append(out, b)
 	}
@@ -320,19 +316,20 @@ func interlockComponents(edges []RequiredEdge, interlocked map[int64]bool) [][]i
 	return out
 }
 
-// interlockActionOwners 环内各任务所属 KR 负责人去重后作为待行动人。
+// interlockActionOwners 环内各任务负责人去重后作为待行动人
+// （裁决 12，#183：KR 无负责人，硬依赖互锁的待行动人改为环内各任务负责人）。
 func interlockActionOwners(comp []int64, taskByID map[int64]BlockerTaskFact) ([]int64, []string) {
 	ids := []int64{}
 	names := []string{}
 	seen := map[int64]bool{}
 	for _, id := range comp {
 		t, ok := taskByID[id]
-		if !ok || t.KrOwnerID == nil || seen[*t.KrOwnerID] {
+		if !ok || seen[t.OwnerID] {
 			continue
 		}
-		seen[*t.KrOwnerID] = true
-		ids = append(ids, *t.KrOwnerID)
-		names = append(names, t.KrOwnerName)
+		seen[t.OwnerID] = true
+		ids = append(ids, t.OwnerID)
+		names = append(names, t.OwnerName)
 	}
 	return ids, names
 }

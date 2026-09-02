@@ -68,10 +68,10 @@ func TestProjectIdentity(t *testing.T) {
 func TestImplicitViewerReadsAllButWritesNothing(t *testing.T) {
 	me := int64(5)
 	implicit := Actor{Role: RoleViewer, Implicit: true}
-	facts := TaskFacts{Status: TaskInProgress, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
-	notStarted := TaskFacts{Status: TaskNotStarted, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
-	finalPending := TaskFacts{Status: TaskInReview, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
-	intermediate := TaskFacts{Status: TaskInReview, CreatorID: me, OwnerID: me, KrOwnerID: i64(5)}
+	facts := TaskFacts{Status: TaskInProgress, CreatorID: me, OwnerID: me}
+	notStarted := TaskFacts{Status: TaskNotStarted, CreatorID: me, OwnerID: me}
+	finalPending := TaskFacts{Status: TaskInReview, CreatorID: me, OwnerID: me}
+	intermediate := TaskFacts{Status: TaskInReview, CreatorID: me, OwnerID: me}
 
 	// 读：与显式访客同等，页面与下载都放开。
 	if !CanReadProject(implicit) {

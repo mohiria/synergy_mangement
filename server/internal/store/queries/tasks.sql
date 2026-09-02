@@ -20,8 +20,8 @@ WHERE id = sqlc.arg('id')
 RETURNING *;
 
 -- name: GetTaskInProject :one
--- 任务连同所属 KR 负责人与项目归属（用于权限判定与项目内寻址）。
-SELECT t.*, k.owner_id AS kr_owner_id, o.project_id
+-- 任务连同项目归属（用于权限判定与项目内寻址；裁决 12 #183 后 KR 无负责人）。
+SELECT t.*, o.project_id
 FROM tasks t
 JOIN key_results k ON k.id = t.key_result_id
 JOIN objectives o ON o.id = k.objective_id
@@ -30,7 +30,7 @@ WHERE t.id = $1 AND o.project_id = $2;
 -- name: LockTaskInProject :one
 -- 与 GetTaskInProject 同形，但对任务行加写锁：三道审批的决策必须在锁内重读状态、重跑规则，
 -- 否则并发决策（如或签一人通过、一人退回）会各自基于过期事实写库。
-SELECT t.*, k.owner_id AS kr_owner_id, o.project_id
+SELECT t.*, o.project_id
 FROM tasks t
 JOIN key_results k ON k.id = t.key_result_id
 JOIN objectives o ON o.id = k.objective_id
@@ -38,16 +38,14 @@ WHERE t.id = $1 AND o.project_id = $2
 FOR UPDATE OF t;
 
 -- name: ListProjectTasks :many
--- 项目全部任务，含负责人／创建人／KR 负责人姓名（派生动作标志与待行动人在 domain 判定）。
+-- 项目全部任务，含负责人／创建人姓名（派生动作标志与待行动人在 domain 判定；裁决 12 后 KR 无负责人）。
 SELECT t.*, u.display_name AS owner_name, cu.display_name AS creator_name,
-    k.owner_id AS kr_owner_id, ku.display_name AS kr_owner_name,
     k.code_seq AS kr_code_seq, o.code_seq AS objective_code_seq
 FROM tasks t
 JOIN key_results k ON k.id = t.key_result_id
 JOIN objectives o ON o.id = k.objective_id
 JOIN users u ON u.id = t.owner_id
 JOIN users cu ON cu.id = t.created_by
-LEFT JOIN users ku ON ku.id = k.owner_id
 WHERE o.project_id = $1
 ORDER BY t.id;
 

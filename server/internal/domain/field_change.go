@@ -2,16 +2,15 @@ package domain
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
 )
 
-// #172 裁决（第二刀）：关键字段修改不再走变更单审批——直接修改生效，
-// 动作写入任务动态并站内通知所属 KR 负责人。
+// #172 裁决（第二刀）：关键字段修改不再走变更单审批——直接修改生效，动作写入任务动态。
 // 裁决 10（#180）：关闭申请审批机制整体退场，关闭改为项目管理员直接操作
 // （原因必填、即时生效、写任务动态）；修改权限收归项目管理员。
+// 裁决 12（#183）：KR 无负责人，原字段修改站内通知退场（见文件下方注记）。
 
 var (
 	ErrChangeEmpty      = errors.New("至少要修改一项字段")
@@ -71,23 +70,8 @@ func TaskEditRule(a Actor, userID int64, t TaskFacts) error {
 	return nil
 }
 
-// NotifyTaskFieldEdited 站内通知类型：任务字段直接修改生效（#172 裁决）。
-const NotifyTaskFieldEdited = "task_field_edited"
-
-// FieldEditNotifyTarget 字段修改生效后的站内通知对象：所属 KR 负责人；
-// 修改人本人是 KR 负责人或 KR 无负责人时不发（与入池通知同模式，#162）。
-func FieldEditNotifyTarget(editorID int64, krOwnerID *int64) *int64 {
-	if krOwnerID == nil || *krOwnerID == editorID {
-		return nil
-	}
-	id := *krOwnerID
-	return &id
-}
-
-// FieldEditNotification 字段修改站内通知内容（派生文案，前端不拼算）。
-func FieldEditNotification(editorName, taskName string, fieldLabels []string) string {
-	return fmt.Sprintf("%s 修改了任务「%s」的%s", editorName, taskName, strings.Join(fieldLabels, "、"))
-}
+// 裁决 12（#183）：KR 负责人属性退场，原「字段修改站内通知所属 KR 负责人」（#172）
+// 随之无通知对象，通知机制删除；修改事实只体现在任务动态（ActivityFieldEdited）。
 
 var ErrCancelForbidden = errors.New("只有项目管理员可以关闭任务")
 

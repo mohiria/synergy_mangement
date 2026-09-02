@@ -15,7 +15,7 @@ import (
 
 // #178 裁决（裁决 8）：替指定成员创建上游任务——上游任务不存在时由其完成，
 // 输入请求机制退场，关系回归任务与任务之间。业务规则在 domain，handler 仅编排：
-// 新任务走 #162 口径直接入池（入池动态 + 通知所属 KR 负责人），另通知新任务负责人；
+// 新任务走 #162 口径直接入池（入池动态留痕；裁决 12 #183 后无 KR 负责人、无入池通知），另通知新任务负责人；
 // 自动建立「新上游任务 → 当前任务」的必要输入边（配置输入源权限口径同 #172 直改）。
 func (s *Server) CreateUpstreamTask(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64) {
 	var req CreateUpstreamTaskRequest
@@ -37,8 +37,7 @@ func (s *Server) CreateUpstreamTask(w http.ResponseWriter, r *http.Request, proj
 	if !s.routeStructureChange(w, r, taskId, actor, uid, facts) {
 		return
 	}
-	kr, err := s.q.GetKeyResultInProject(r.Context(), store.GetKeyResultInProjectParams{ID: req.KeyResultId, ProjectID: projectId})
-	if err != nil {
+	if _, err := s.q.GetKeyResultInProject(r.Context(), store.GetKeyResultInProjectParams{ID: req.KeyResultId, ProjectID: projectId}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_key_result", Message: "所属 KR 不存在"})
 			return
@@ -89,20 +88,6 @@ func (s *Server) CreateUpstreamTask(w http.ResponseWriter, r *http.Request, proj
 		writeInternalError(w, r, err)
 		return
 	}
-	// 入池通知所属 KR 负责人（#162 口径，本人创建不另发）。
-	if target := domain.PoolEntryNotifyTarget(uid, fromPgInt8(kr.OwnerID)); target != nil {
-		krCode := domain.KeyResultCode(int(kr.ObjectiveCodeSeq), int(kr.CodeSeq))
-		if _, err := qtx.CreateNotification(r.Context(), store.CreateNotificationParams{
-			UserID:    *target,
-			Kind:      domain.NotifyTaskPoolEntered,
-			Content:   domain.PoolEntryNotification(currentUser(r).DisplayName, upstream.Name, krCode, kr.Description),
-			ProjectID: pgtype.Int8{Int64: projectId, Valid: true},
-			TaskID:    pgtype.Int8{Int64: upstream.ID, Valid: true},
-		}); err != nil {
-			writeInternalError(w, r, err)
-			return
-		}
-	}
 	// 通知新任务负责人（无认领确认环节；本人替自己创建不另发）。
 	if target := domain.UpstreamTaskNotifyTarget(uid, req.OwnerId); target != nil {
 		if _, err := qtx.CreateNotification(r.Context(), store.CreateNotificationParams{
@@ -126,20 +111,6 @@ func (s *Server) CreateUpstreamTask(w http.ResponseWriter, r *http.Request, proj
 	}); err != nil {
 		writeInternalError(w, r, err)
 		return
-	}
-	// 站内通知当前任务所属 KR 负责人（输入源修改，#172 口径）。
-	if target := domain.FieldEditNotifyTarget(uid, facts.KrOwnerID); target != nil {
-		if _, err := qtx.CreateNotification(r.Context(), store.CreateNotificationParams{
-			UserID: *target,
-			Kind:   domain.NotifyTaskFieldEdited,
-			Content: domain.FieldEditNotification(
-				currentUser(r).DisplayName, task.Name, []string{"输入源"}),
-			ProjectID: pgtype.Int8{Int64: projectId, Valid: true},
-			TaskID:    pgtype.Int8{Int64: taskId, Valid: true},
-		}); err != nil {
-			writeInternalError(w, r, err)
-			return
-		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
 		writeInternalError(w, r, err)

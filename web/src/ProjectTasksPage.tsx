@@ -240,8 +240,8 @@ export default function ProjectTasksPage({
   ]);
 
   const canCreate = members.some((m) => m.userId === user.id && m.role !== "viewer") || !!project?.canEdit;
-  // 邀请入口：项目管理员/负责人，或本人负责任一 KR（domain CanInviteForKr 的前端投影，仅控制入口显隐）。
-  const canInvite = !!project?.canEdit || krList.some((k) => k.ownerId === user.id);
+  // 邀请入口（裁决 12，#183）：收归项目管理员／项目负责人（domain CanInviteForKr 的前端投影）。
+  const canInvite = !!project?.canEdit;
   const myPendingInvites = invites.filter((iv) => iv.canHandle);
 
   return (
@@ -261,7 +261,7 @@ export default function ProjectTasksPage({
           <div className="page-head">
             <div>
               <h1>全部任务</h1>
-              <p>按 O / KR 组织三级任务；任务创建即进入正式任务池，所属 KR 负责人会收到入池通知。</p>
+              <p>按 O / KR 组织三级任务；任务创建即进入正式任务池，入池记录在任务动态。</p>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               {/* 任务批量导入（AC-02b、#107）：入口只对项目负责人与项目管理员开放，
@@ -397,7 +397,7 @@ export default function ProjectTasksPage({
       <InviteOwnersModal
         open={inviteModalOpen}
         projectId={projectId}
-        krList={krList.filter((k) => !!project?.canEdit || k.ownerId === user.id)}
+        krList={project?.canEdit ? krList : []}
         members={members}
         currentUserId={user.id}
         onClose={() => setInviteModalOpen(false)}
@@ -735,7 +735,7 @@ function CreateTaskModal({
       </div>
       <div className="notice" style={{ marginTop: 12 }}>
         任务创建后即为正式任务，初始状态“未开始”（必要输入未就绪时显示“等待输入”）；
-        所属 KR 负责人会收到入池通知。
+        入池记录在任务动态。
       </div>
     </Modal>
   );
@@ -808,7 +808,7 @@ function InviteOwnersModal({
       title={
         <div>
           邀请成员创建任务
-          <span className="modal-sub">KR 负责人可以在任务尚未建立时先发出邀请</span>
+          <span className="modal-sub">项目管理员可以在任务尚未建立时先发出邀请</span>
         </div>
       }
       open={open}

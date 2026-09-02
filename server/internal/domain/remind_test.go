@@ -9,23 +9,22 @@ import (
 // MW-13：等待他人与卡点两组都能提醒当前待行动人；提醒目标不只是卡点。
 func TestRemindTargets(t *testing.T) {
 	due := time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC)
-	kr := i64(7)
 	f := RemindFacts{
 		Blockers: []Blocker{{
 			Key: "approval_timeout:final_review:31", Kind: BlockerApprovalTimeout,
-			TaskID: 1, TaskName: "验收方案", Missing: "KR 终审处理", Reason: "已等待 5 天",
+			TaskID: 1, TaskName: "验收方案", Missing: "终审处理", Reason: "已等待 5 天",
 			ActionOwnerIDs: []int64{7}, ActionOwnerNames: []string{"李四"},
-			TaskOwnerID: 5, KrOwnerID: kr,
+			TaskOwnerID: 5,
 		}},
 		Waits: []RemindWaitFact{{
 			Kind: "final_review", RefID: 32, TaskID: 2, TaskName: "接口口径",
-			Missing: "KR 终审处理", Reason: "完成申请等待 KR 终审",
+			Missing: "终审处理", Reason: "完成申请等待终审",
 			ActionOwnerIDs: []int64{7}, ActionOwnerNames: []string{"李四"},
-			TaskOwnerID: 5, KrOwnerID: kr,
+			TaskOwnerID: 5,
 		}},
 		Tasks: map[int64]RemindTaskFact{
-			1: {Name: "验收方案", OwnerID: 5, KrOwnerID: kr, End: &due, ImpactNote: "沿硬前置影响下游 2 项任务：A、B"},
-			2: {Name: "接口口径", OwnerID: 5, KrOwnerID: kr, End: &due},
+			1: {Name: "验收方案", OwnerID: 5, End: &due, ImpactNote: "沿硬前置影响下游 2 项任务：A、B"},
+			2: {Name: "接口口径", OwnerID: 5, End: &due},
 		},
 	}
 	targets := RemindTargets(f)
@@ -52,18 +51,15 @@ func TestRemindTargets(t *testing.T) {
 	}
 }
 
-// 提醒权限：访客不可；待行动人不提醒自己；任务负责人／KR 负责人／可编辑项目者可提醒。
+// 提醒权限：访客不可；待行动人不提醒自己；任务负责人／可编辑项目者可提醒
+// （裁决 12，#183：KR 无负责人，原 KR 负责人分支删除）。
 func TestCanRemind(t *testing.T) {
-	kr := i64(7)
-	target := RemindTarget{TaskID: 1, ActionOwnerIDs: []int64{9}, TaskOwnerID: 5, KrOwnerID: kr}
+	target := RemindTarget{TaskID: 1, ActionOwnerIDs: []int64{9}, TaskOwnerID: 5}
 	if CanRemind(Actor{Role: RoleMember}, 9, target) {
 		t.Fatal("待行动人不应提醒自己")
 	}
 	if !CanRemind(Actor{Role: RoleMember}, 5, target) {
 		t.Fatal("任务负责人应可提醒")
-	}
-	if !CanRemind(Actor{Role: RoleMember}, 7, target) {
-		t.Fatal("所属 KR 负责人应可提醒")
 	}
 	if !CanRemind(Actor{Role: RoleAdmin}, 3, target) {
 		t.Fatal("项目管理员应可提醒")
@@ -123,16 +119,15 @@ func TestRemindAllowed(t *testing.T) {
 func TestMyWorkWaitingRemindWithoutBlocker(t *testing.T) {
 	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
 	me := int64(5)
-	krOther := i64(7)
 	recent := now.AddDate(0, 0, -1) // 未达审批超时阈值，不会派生卡点
 	g := MyWork(MyWorkFacts{
 		UserID: me,
 		Actor:  Actor{Role: RoleMember},
 		Now:    now,
 		Tasks: []WorkTaskFact{
-			{ID: 1, Name: "我的任务", DisplayStatus: TaskInReview, OwnerID: me, CreatorID: me, KrOwnerID: krOther},
-			{ID: 2, Name: "等输入的任务", DisplayStatus: TaskWaitingInput, OwnerID: me, CreatorID: me, KrOwnerID: krOther},
-			{ID: 3, Name: "上游任务", DisplayStatus: TaskInProgress, OwnerID: 9, CreatorID: 9, KrOwnerID: krOther},
+			{ID: 1, Name: "我的任务", DisplayStatus: TaskInReview, OwnerID: me, CreatorID: me},
+			{ID: 2, Name: "等输入的任务", DisplayStatus: TaskWaitingInput, OwnerID: me, CreatorID: me},
+			{ID: 3, Name: "上游任务", DisplayStatus: TaskInProgress, OwnerID: 9, CreatorID: 9},
 		},
 		FinalReviewerIDs:   []int64{7},
 		FinalReviewerNames: []string{"李四"},
@@ -167,14 +162,13 @@ func TestMyWorkWaitingRemindWithoutBlocker(t *testing.T) {
 func TestMyWorkWaitingRemindNotSelf(t *testing.T) {
 	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
 	me := int64(5)
-	krMe := i64(5)
 	recent := now.AddDate(0, 0, -1)
 	g := MyWork(MyWorkFacts{
 		UserID: me,
 		Actor:  Actor{Role: RoleMember},
 		Now:    now,
 		Tasks: []WorkTaskFact{
-			{ID: 1, Name: "我的任务", DisplayStatus: TaskInReview, OwnerID: me, CreatorID: me, KrOwnerID: krMe},
+			{ID: 1, Name: "我的任务", DisplayStatus: TaskInReview, OwnerID: me, CreatorID: me},
 		},
 		FinalReviewerIDs:   []int64{me},
 		FinalReviewerNames: []string{"张三"},

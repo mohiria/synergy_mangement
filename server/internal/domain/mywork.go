@@ -10,12 +10,11 @@ import (
 // 本文件只做纯派生：输入为项目事实切片，输出为五组卡片事实。
 
 type WorkTaskFact struct {
-	ID                  int64
-	Name                string
+	ID            int64
+	Name          string
 	DisplayStatus string
 	OwnerID       int64
 	CreatorID     int64
-	KrOwnerID     *int64
 	EndDate       *time.Time
 	UnreadyNote   string
 	// CompletionRejected 完成申请退回注记（裁决 10 后关闭申请退场，退回注记只剩这一类）。
@@ -147,12 +146,11 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		taskByID[t.ID] = t
 	}
 	// 等待他人事项的提醒目标（MW-13）：目标是事项本身，不必先成卡点；
-	// 任务负责人／KR 负责人与截止时间由所在任务补齐，没有可寻址待行动人时不给提醒入口。
+	// 任务负责人与截止时间由所在任务补齐，没有可寻址待行动人时不给提醒入口。
 	setWaitRemind := func(item *WorkItem, w RemindWaitFact) {
 		if t, ok := taskByID[w.TaskID]; ok {
 			w.TaskName = t.Name
 			w.TaskOwnerID = t.OwnerID
-			w.KrOwnerID = t.KrOwnerID
 			w.Due = t.EndDate
 		}
 		target := WaitRemindTarget(w)
@@ -319,7 +317,7 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 				break
 			}
 		}
-		if !isActionOwner && b.TaskOwnerID != me && !(b.KrOwnerID != nil && *b.KrOwnerID == me) {
+		if !isActionOwner && b.TaskOwnerID != me {
 			continue
 		}
 		days, _ := waitingDays(b.Since)
@@ -451,20 +449,20 @@ func ReportRangeFrom(name string, now time.Time) (*time.Time, error) {
 // 会挡住移出的职责，正是会给人派活的职责。
 
 // workResponsibilityOrder 职责显示顺序：从项目级到事项级，横排一行读得下来。
-// #178 裁决：输入请求机制退场，「输入对接人」职责随之删除。
+// #178 裁决：输入请求机制退场，「输入对接人」职责随之删除；
+// 裁决 12（#183）：KR 无负责人，「KR 负责人」职责随之删除。
 var workResponsibilityOrder = []string{
-	"项目负责人", "KR 负责人", "任务负责人", "成果审核人", "接收方", "被邀请人",
+	"项目负责人", "任务负责人", "成果审核人", "接收方", "被邀请人",
 }
 
 // WorkResponsibilities 派生当前用户在本项目承担的职责标签（读时派生，不落库）。
 func WorkResponsibilities(d MemberDuties, isProjectOwner, hasPendingInvite bool) []string {
 	held := map[string]bool{
-		"项目负责人":  isProjectOwner,
-		"KR 负责人": len(d.KeyResults) > 0,
-		"任务负责人":  len(d.Tasks) > 0,
-		"成果审核人":  len(d.Reviewers) > 0,
-		"接收方":    len(d.Receivers) > 0,
-		"被邀请人":   hasPendingInvite,
+		"项目负责人": isProjectOwner,
+		"任务负责人": len(d.Tasks) > 0,
+		"成果审核人": len(d.Reviewers) > 0,
+		"接收方":   len(d.Receivers) > 0,
+		"被邀请人":  hasPendingInvite,
 	}
 	out := []string{}
 	for _, label := range workResponsibilityOrder {

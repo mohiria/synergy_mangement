@@ -8,7 +8,7 @@ import (
 // AC-58：必要输入未就绪不阻断任何动作——开始、上传候选、提交完成申请都放行。
 func TestUnreadyInputDoesNotBlockActions(t *testing.T) {
 	owner := int64(5)
-	notStarted := TaskFacts{Status: TaskNotStarted, CreatorID: owner, OwnerID: owner, KrOwnerID: i64(7)}
+	notStarted := TaskFacts{Status: TaskNotStarted, CreatorID: owner, OwnerID: owner}
 	// 未开始且必要输入未就绪，页面汇总显示「等待输入」，但开始动作照常可用。
 	if got := DeriveDisplayStatus(notStarted.Status, true); got != TaskWaitingInput {
 		t.Fatalf("未开始且输入未就绪应显示等待输入，got %q", got)
@@ -51,8 +51,8 @@ func TestUpstreamWaitingSurvivesTaskStart(t *testing.T) {
 			Actor:  Actor{Role: RoleMember},
 			Now:    now,
 			Tasks: []WorkTaskFact{
-				{ID: 1, Name: "下游任务", DisplayStatus: status, OwnerID: me, CreatorID: me, KrOwnerID: i64(7)},
-				{ID: 2, Name: "上游任务", DisplayStatus: TaskInProgress, OwnerID: 9, CreatorID: 9, KrOwnerID: i64(7)},
+				{ID: 1, Name: "下游任务", DisplayStatus: status, OwnerID: me, CreatorID: me},
+				{ID: 2, Name: "上游任务", DisplayStatus: TaskInProgress, OwnerID: 9, CreatorID: 9},
 			},
 			Upstreams: []WorkUpstreamFact{upstream},
 		})

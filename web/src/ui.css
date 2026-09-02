@@ -308,13 +308,13 @@ body {
   border-left: 3px solid #7c89df;
 }
 
-/* 原型 okr-sheet：新增 O / KR 表格式弹窗（列宽按 antd Modal 内容宽 1112px 适配）。
-   量化指标是 §9.1 的新建 KR 字段（#94），补列后弹窗加宽到 1160，负责人列保持约 4 个汉字。 */
+/* 原型 okr-sheet：新增 O / KR 表格式弹窗。
+   量化指标是 §9.1 的新建 KR 字段（#94）；裁决 12（#183）：KR 无负责人与周期，列缩为四列。 */
 .okr-sheet { border: 1px solid var(--line); border-radius: var(--radius); overflow: auto; background: #fff; margin-top: 12px; }
 .okr-sheet-head, .okr-sheet-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(210px, 1.2fr) minmax(170px, 1fr) 110px 132px 240px 36px;
-  min-width: 1078px;
+  grid-template-columns: minmax(200px, 1fr) minmax(240px, 1.3fr) minmax(200px, 1fr) 150px 36px;
+  min-width: 860px;
   align-items: center;
 }
 .okr-sheet-head {

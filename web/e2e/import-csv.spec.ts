@@ -79,9 +79,9 @@ test("导入流程不发任何外部请求，模板由代码现生成", async ({
   expect(external).toEqual([]);
 });
 
-// O／KR 导入器只导 O 与 KR（#106，裁决 B1）：字段里没有任务列，
-// 模板表头能被表头猜测原样认出，未填负责人的行走统一指派。
-test("字段只有 O/KR 六项，模板表头被原样认出", async ({ page }) => {
+// O／KR 导入器只导 O 与 KR（#106，裁决 B1；裁决 12 #183：KR 无负责人与周期，字段缩为三项）：
+// 模板表头能被表头猜测原样认出，旧模板的负责人／周期列自动落为「忽略此列」。
+test("字段只有 O/KR 三项，旧模板多余列被忽略", async ({ page }) => {
   await login(page);
   await openPreview(page, "e2e/fixtures/import.xlsx");
   const options = await page
@@ -90,34 +90,30 @@ test("字段只有 O/KR 六项，模板表头被原样认出", async ({ page }) 
   expect(options).toEqual([
     "O 标题",
     "KR 描述",
-    "KR 负责人",
+    "忽略此列",
     "量化指标",
-    "周期开始",
-    "周期截止",
+    "忽略此列",
+    "忽略此列",
   ]);
 
-  // 候选里没有任务列
+  // 候选里没有任务列，也没有负责人／周期列
   await page.locator(".ant-modal .data-table thead .ant-select-selector").first().click();
   const all = await page
     .locator(".ant-select-dropdown:visible .ant-select-item-option-content")
     .allInnerTexts();
-  expect(all).toEqual(["忽略此列", "O 标题", "KR 负责人", "KR 描述", "量化指标", "周期开始", "周期截止"]);
+  expect(all).toEqual(["忽略此列", "O 标题", "KR 描述", "量化指标"]);
 });
 
-test("未填负责人的 KR 走统一指派，指派前不能进结构预览", async ({ page }) => {
+// 裁决 12：KR 无负责人，导入器不再有人员匹配事项——该步骤为空态直通。
+test("无负责人字段时人员匹配为空态，可直接进结构预览", async ({ page }) => {
   await login(page);
   await openPreview(page, "e2e/fixtures/import-noowner.csv");
   await page.getByRole("button", { name: /下一步：人员匹配/ }).click();
-
-  const slot = page.getByText("有 2 条 KR 没填负责人");
-  await expect(slot).toBeVisible();
+  await expect(page.getByText("表格中没有需要匹配的人员")).toBeVisible();
   const next = page.getByRole("button", { name: /下一步：结构预览/ });
-  await expect(next).toBeDisabled();
-
-  await page.locator(".ant-modal .fact-card .ant-select-selector").first().click();
-  await page.locator(".ant-select-dropdown:visible .ant-select-item-option").first().click();
-  await expect(slot).toHaveCount(0);
   await expect(next).toBeEnabled();
+  await next.click();
+  await expect(page.getByRole("button", { name: "确认导入" })).toBeEnabled();
 });
 
 // 粘贴路径（剪贴板）保持制表符优先。

@@ -135,7 +135,6 @@ func (s *Server) RemoveEdge(w http.ResponseWriter, r *http.Request, projectId in
 	}
 	facts := domain.TaskFacts{
 		Status: edge.TargetStatus, CreatorID: edge.TargetCreatedBy, OwnerID: edge.TargetOwnerID,
-		KrOwnerID: fromPgInt8(edge.TargetKrOwnerID),
 	}
 	// 解除输入源同样是关键字段变更（§5.5；#172 裁决改直接生效）。
 	if !s.routeStructureChange(w, r, edge.TargetTaskID, actor, uid, facts) {

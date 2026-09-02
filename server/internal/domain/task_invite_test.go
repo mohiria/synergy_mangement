@@ -7,23 +7,20 @@ import (
 
 // AC-03：只有该 KR 负责人、项目管理员或项目负责人可以发出任务创建邀请。
 func TestCanInviteForKr(t *testing.T) {
+	// 裁决 12（#183）：KR 无负责人，邀请权收归项目管理员与项目负责人。
 	cases := []struct {
-		name    string
-		actor   Actor
-		user    int64
-		krOwner *int64
-		want    bool
+		name  string
+		actor Actor
+		want  bool
 	}{
-		{"KR 负责人可邀请", Actor{Role: RoleMember}, 7, i64(7), true},
-		{"项目管理员可邀请", Actor{Role: RoleAdmin}, 9, i64(7), true},
-		{"项目负责人可邀请", Actor{IsOwner: true}, 9, i64(7), true},
-		{"项目成员不可邀请", Actor{Role: RoleMember}, 9, i64(7), false},
-		{"访客不可邀请", Actor{Role: RoleViewer}, 9, i64(7), false},
-		{"KR 无负责人时管理员仍可邀请", Actor{Role: RoleAdmin}, 9, nil, true},
+		{"项目管理员可邀请", Actor{Role: RoleAdmin}, true},
+		{"项目负责人可邀请", Actor{IsOwner: true}, true},
+		{"项目成员不可邀请", Actor{Role: RoleMember}, false},
+		{"访客不可邀请", Actor{Role: RoleViewer}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := CanInviteForKr(tc.actor, tc.user, tc.krOwner); got != tc.want {
+			if got := CanInviteForKr(tc.actor); got != tc.want {
 				t.Fatalf("CanInviteForKr() = %v, want %v", got, tc.want)
 			}
 		})

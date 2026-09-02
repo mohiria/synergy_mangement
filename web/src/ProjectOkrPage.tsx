@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, Drawer, Input, Modal, Select, Spin, message } from "antd";
-import type { Dayjs } from "dayjs";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import ProjectShell from "./ProjectShell";
 import ImportModal from "./ImportModal";
-import DateRangeField from "./DateRangeField";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
@@ -16,8 +14,8 @@ type ProjectMember = components["schemas"]["ProjectMember"];
 type CreateOkrBatchItem = components["schemas"]["CreateOkrBatchItem"];
 
 
-// 周期展示沿用原型的紧凑格式（08.20—09.18）。
-const fmtDate = (d?: string | null) => (d ? d.slice(5).replace("-", ".") : "…");
+// 裁决 12（#183）：KR 无负责人与周期属性，列表与抽屉改示创建人／创建时间（存量数据缺省显示「—」）。
+const fmtDay = (d?: string | null) => (d ? d.slice(0, 10) : "—");
 
 export default function ProjectOkrPage({
   user,
@@ -66,7 +64,7 @@ export default function ProjectOkrPage({
     load();
   }, [load]);
 
-  // #125：管理模式只维护结构字段（编号／名称／所属 O／负责人／周期／量化标准），
+  // #125：管理模式只维护结构字段（编号／名称／所属 O／量化标准，裁决 12 后无负责人与周期），
   // 风险、卡点、任务数与进度一律留在项目总览；点行开右侧编辑抽屉（§7.2）。
   const rows = objectives.flatMap((o) => [
     <tr
@@ -102,24 +100,18 @@ export default function ProjectOkrPage({
           </td>
           <td title={k.description}>{k.description}</td>
           <td className="mono">{o.code}</td>
-          <td title={k.ownerName ?? "未指定"}>
-            {k.ownerName ? (
+          <td title={k.createdByName ?? "—"}>
+            {k.createdByName ? (
               <span className="owner-cell">
-                <span className="avatar">{k.ownerName.slice(0, 1)}</span>
-                <span className="cell-text">{k.ownerName}</span>
-              </span>
-            ) : (
-              <span className="muted">未指定</span>
-            )}
-          </td>
-          <td>
-            {k.startDate || k.endDate ? (
-              <span>
-                {fmtDate(k.startDate)}—{fmtDate(k.endDate)}
+                <span className="avatar">{k.createdByName.slice(0, 1)}</span>
+                <span className="cell-text">{k.createdByName}</span>
               </span>
             ) : (
               <span className="muted">—</span>
             )}
+          </td>
+          <td>
+            {k.createdAt ? <span>{fmtDay(k.createdAt)}</span> : <span className="muted">—</span>}
           </td>
           <td title={k.metric ?? "待补充量化指标"}>
             {k.metric ?? <span className="muted">待补充量化指标</span>}
@@ -157,7 +149,7 @@ export default function ProjectOkrPage({
               <div className="page-head">
                 <div>
                   <h1>管理 O/KR</h1>
-                  <p>集中维护目标结构和责任信息；项目态势、风险与任务进度仍在项目总览查看。</p>
+                  <p>集中维护目标结构；项目态势、风险与任务进度仍在项目总览查看。</p>
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
                   <Button onClick={() => navigate(`/projects/${projectId}`)}>返回项目总览</Button>
@@ -183,8 +175,8 @@ export default function ProjectOkrPage({
                       <th style={{ width: 130 }}>编号</th>
                       <th>名称</th>
                       <th style={{ width: 80 }}>所属 O</th>
-                      <th style={{ width: 150 }}>负责人</th>
-                      <th style={{ width: 180 }}>周期</th>
+                      <th style={{ width: 150 }}>创建人</th>
+                      <th style={{ width: 140 }}>创建时间</th>
                       <th style={{ width: 240 }}>量化标准</th>
                       <th style={{ width: 64 }} />
                     </tr>
@@ -241,9 +233,9 @@ export default function ProjectOkrPage({
   );
 }
 
-// OkrEditDrawer 编辑 O／KR 的右侧抽屉（§7.2、AC-61、AC-65）：
-// O 只有项目管理员能打开；KR 由管理员或本人负责的 KR 打开。
-// 更换 KR 负责人且该 KR 下有未决审批时先弹确认框，默认转交继任者。
+// OkrEditDrawer 编辑 O／KR 的右侧抽屉（§7.2、AC-65；裁决 12 #183）：
+// O 与 KR 均只有项目管理员能打开；KR 只剩描述与量化指标两个结构字段，
+// 创建人与创建时间只读展示（存量数据缺省显示「—」）。
 function OkrEditDrawer({
   target,
   projectId,
@@ -260,10 +252,9 @@ function OkrEditDrawer({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [metric, setMetric] = useState("");
-  const [ownerId, setOwnerId] = useState<number | undefined>(undefined);
-  const [period, setPeriod] = useState<[Dayjs | null, Dayjs | null] | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  void members;
 
   useEffect(() => {
     if (!target) return;
@@ -275,13 +266,9 @@ function OkrEditDrawer({
     }
     setDescription(target.k.description);
     setMetric(target.k.metric ?? "");
-    setOwnerId(target.k.ownerId ?? undefined);
-    setPeriod(null);
   }, [target]);
 
   if (!target) return null;
-
-  const eligible = members.filter((m) => m.role !== "viewer");
 
   const saveObjective = async () => {
     if (target.kind !== "O") return;
@@ -300,13 +287,9 @@ function OkrEditDrawer({
     }
   };
 
-  // 裁决 11（#181）：审批人按处理时点动态解析角色，更换 KR 负责人无审批转交与确认框。
+  // 裁决 12（#183）：KR 只剩描述与量化指标。
   const saveKeyResult = async () => {
     if (target.kind !== "KR") return;
-    if (!ownerId) {
-      setError("KR 负责人不可为空，请直接指定继任者");
-      return;
-    }
     setSaving(true);
     setError(null);
     const res = await client.PATCH("/projects/{projectId}/key-results/{keyResultId}", {
@@ -314,9 +297,6 @@ function OkrEditDrawer({
       body: {
         description: description.trim(),
         metric: metric.trim(),
-        ownerId,
-        startDate: period?.[0] ? period[0]!.format("YYYY-MM-DD") : undefined,
-        endDate: period?.[1] ? period[1]!.format("YYYY-MM-DD") : undefined,
       },
     });
     setSaving(false);
@@ -386,6 +366,10 @@ function OkrEditDrawer({
             value={description}
             onChange={(e) => setDescription(e.target.value)}
           />
+          <div className="muted" style={{ fontSize: 12, margin: "12px 0 4px" }}>创建人</div>
+          <div>{target.o.createdByName ?? "—"}</div>
+          <div className="muted" style={{ fontSize: 12, margin: "12px 0 4px" }}>创建时间</div>
+          <div>{fmtDay(target.o.createdAt)}</div>
         </>
       ) : (
         <>
@@ -393,18 +377,10 @@ function OkrEditDrawer({
           <Input value={description} maxLength={200} onChange={(e) => setDescription(e.target.value)} />
           <div className="muted" style={{ fontSize: 12, margin: "12px 0 4px" }}>量化指标（选填）</div>
           <Input value={metric} maxLength={100} onChange={(e) => setMetric(e.target.value)} />
-          <div className="muted" style={{ fontSize: 12, margin: "12px 0 4px" }}>负责人（不可为空）</div>
-          <Select
-            style={{ width: "100%" }}
-            value={ownerId}
-            placeholder="选择负责人"
-            showSearch
-            optionFilterProp="label"
-            onChange={setOwnerId}
-            options={eligible.map((m) => ({ value: m.userId, label: m.displayName }))}
-          />
-          <div className="muted" style={{ fontSize: 12, margin: "12px 0 4px" }}>周期（不改可留空）</div>
-          <DateRangeField value={period} onChange={setPeriod} />
+          <div className="muted" style={{ fontSize: 12, margin: "12px 0 4px" }}>创建人</div>
+          <div>{target.k.createdByName ?? "—"}</div>
+          <div className="muted" style={{ fontSize: 12, margin: "12px 0 4px" }}>创建时间</div>
+          <div>{fmtDay(target.k.createdAt)}</div>
         </>
       )}
     </Drawer>
@@ -418,8 +394,6 @@ type OkrRow = {
   objRef?: string; // KR 所属 O："new:<rowKey>" 或 "existing:<objectiveId>"
   description: string;
   metric: string; // 量化指标（选填，#94）；O 行不用
-  ownerId?: number;
-  period?: [Dayjs | null, Dayjs | null] | null;
 };
 
 let rowSeq = 0;
@@ -523,14 +497,8 @@ function OkrBatchModal({
     ...objectives.map((o, i) => ({ value: `existing:${o.id}`, label: `O${i + 1}：${o.title}` })),
   ];
 
-  // KR 负责人承担关键字段变更与完成终审，访客担任会让审批链无人可推进（#95、§3.4）；
-  // 与导入、编辑抽屉、任务各处的负责人选择同一口径，规则本身由域层兜底。
-  const ownerOptions = members
-    .filter((m) => m.role !== "viewer")
-    .map((m) => ({
-      value: m.userId,
-      label: `${m.displayName}（${m.username}）`,
-    }));
+  // 裁决 12（#183）：KR 无负责人与周期字段，成员名单在此弹窗不再使用。
+  void members;
 
   const renderObjectiveRow = (r: OkrRow) => (
     <div key={r.key} className="okr-sheet-row">
@@ -553,12 +521,6 @@ function OkrBatchModal({
       </div>
       <div className="okr-sheet-cell">
         <span className="sheet-placeholder">项目目标</span>
-      </div>
-      <div className="okr-sheet-cell">
-        <span className="sheet-placeholder">—</span>
-      </div>
-      <div className="okr-sheet-cell">
-        <span className="sheet-placeholder">沿用项目周期</span>
       </div>
       <Button type="text" size="small" onClick={() => removeRow(r.key)} aria-label="删除该行">
         ✕
@@ -600,25 +562,6 @@ function OkrBatchModal({
           placeholder="所属 O"
         />
       </div>
-      <div className="okr-sheet-cell">
-        <Select
-          style={{ width: "100%" }}
-          options={ownerOptions}
-          value={r.ownerId}
-          onChange={(v) => patch(r.key, { ownerId: v })}
-          allowClear
-          showSearch
-          optionFilterProp="label"
-          placeholder="负责人"
-        />
-      </div>
-      <div className="okr-sheet-cell">
-        <DateRangeField
-          allowEmpty
-          value={r.period}
-          onChange={(v) => patch(r.key, { period: v })}
-        />
-      </div>
       <Button type="text" size="small" onClick={() => removeRow(r.key)} aria-label="删除该行">
         ✕
       </Button>
@@ -655,9 +598,6 @@ function OkrBatchModal({
       const kr = {
         description: r.description.trim(),
         metric: r.metric.trim() || undefined,
-        ownerId: r.ownerId,
-        startDate: r.period?.[0]?.format("YYYY-MM-DD"),
-        endDate: r.period?.[1]?.format("YYYY-MM-DD"),
       };
       if (r.objRef.startsWith("new:")) {
         const idx = newIndexByKey.get(Number(r.objRef.slice(4)));
@@ -685,12 +625,8 @@ function OkrBatchModal({
     });
     setSaving(false);
     if (res.data) {
-      // #125：保存后按本次涉及的 KR 负责人发站内通知（本人不收），提示含人数。
-      message.success(
-        res.data.notifiedCount > 0
-          ? `O / KR 已保存，已通知 ${res.data.notifiedCount} 名负责人`
-          : "O / KR 已保存；本次负责人均为你本人",
-      );
+      // 裁决 12（#183）：KR 无负责人，#125 指派通知与人数提示随之退场。
+      message.success("O / KR 已保存");
       onSaved(res.data.objectives);
     } else {
       setError(res.error?.message ?? "保存失败");
@@ -702,28 +638,26 @@ function OkrBatchModal({
       title={
         <div>
           新增 O / KR
-          <span className="modal-sub">横向区分 O 与 KR，向下连续增加事项并指定负责人</span>
+          <span className="modal-sub">横向区分 O 与 KR，向下连续增加事项</span>
         </div>
       }
       open={open}
-      width={1160}
+      width={960}
       confirmLoading={saving}
       onOk={save}
       onCancel={onClose}
-      okText="保存并通知负责人"
+      okText="保存"
       cancelText="取消"
       destroyOnHidden
     >
       {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
-      <div className="notice">O、KR 仍由线下确定；这里仅用于一次性连续录入结构和负责人。</div>
+      <div className="notice">O、KR 仍由线下确定；这里仅用于一次性连续录入结构。</div>
       <div className="okr-sheet">
         <div className="okr-sheet-head">
           <span>目标 O</span>
           <span>关键结果 KR</span>
           <span>量化指标</span>
           <span>所属 O</span>
-          <span>负责人</span>
-          <span>周期</span>
           <span />
         </div>
         {/* 一个 O 一组（#104）：组头是 O 行（新建的可编辑、已有的只读），

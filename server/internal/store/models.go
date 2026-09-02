@@ -111,12 +111,10 @@ type KeyResult struct {
 	ObjectiveID int64
 	Description string
 	Metric      string
-	OwnerID     pgtype.Int8
-	StartDate   pgtype.Date
-	EndDate     pgtype.Date
 	SortOrder   int32
 	CreatedAt   pgtype.Timestamptz
 	CodeSeq     int32
+	CreatedBy   pgtype.Int8
 }
 
 type Notification struct {
@@ -138,6 +136,7 @@ type Objective struct {
 	SortOrder   int32
 	CreatedAt   pgtype.Timestamptz
 	CodeSeq     int32
+	CreatedBy   pgtype.Int8
 }
 
 type PendingObjectDeletion struct {

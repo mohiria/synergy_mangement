@@ -72,12 +72,7 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 		}
 		if item.KeyResults != nil {
 			for _, k := range *item.KeyResults {
-				kr := domain.NewKeyResult{
-					Description: strings.TrimSpace(k.Description),
-					OwnerID:     k.OwnerId,
-					Start:       toTimePtr(k.StartDate),
-					End:         toTimePtr(k.EndDate),
-				}
+				kr := domain.NewKeyResult{Description: strings.TrimSpace(k.Description)}
 				if k.Metric != nil {
 					kr.Metric = strings.TrimSpace(*k.Metric)
 				}
@@ -95,7 +90,7 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 		}
 		okrItems = append(okrItems, oi)
 	}
-	if err := domain.ValidateOkrBatch(okrItems, roleOf); err != nil {
+	if err := domain.ValidateOkrBatch(okrItems); err != nil {
 		failImport(http.StatusUnprocessableEntity, "invalid_okr", err.Error())
 		return
 	}
@@ -126,15 +121,8 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 	createdTaskIDs := []int64{}
 	for _, item := range req.Items {
 		objectiveID := int64(0)
-		objectiveCodeSeq := 0
 		if item.ObjectiveId != nil {
 			objectiveID = *item.ObjectiveId
-			obj, err := qtx.GetObjective(r.Context(), store.GetObjectiveParams{ID: objectiveID, ProjectID: projectId})
-			if err != nil {
-				failImportInternal(err)
-				return
-			}
-			objectiveCodeSeq = int(obj.CodeSeq)
 		} else {
 			title := ""
 			if item.Title != nil {
@@ -144,13 +132,13 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 			if item.Description != nil {
 				desc = strings.TrimSpace(*item.Description)
 			}
-			o, err := qtx.CreateObjective(r.Context(), store.CreateObjectiveParams{ProjectID: projectId, Title: title, Description: desc})
+			o, err := qtx.CreateObjective(r.Context(), store.CreateObjectiveParams{ProjectID: projectId, Title: title, Description: desc,
+				CreatedBy: pgtype.Int8{Int64: uid, Valid: true}})
 			if err != nil {
 				failImportInternal(err)
 				return
 			}
 			objectiveID = o.ID
-			objectiveCodeSeq = int(o.CodeSeq)
 			counts.Objectives++
 		}
 		if item.KeyResults == nil {
@@ -165,9 +153,7 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 				ObjectiveID: objectiveID,
 				Description: strings.TrimSpace(k.Description),
 				Metric:      metric,
-				OwnerID:     toPgInt8(k.OwnerId),
-				StartDate:   toPgDate(k.StartDate),
-				EndDate:     toPgDate(k.EndDate),
+				CreatedBy:   pgtype.Int8{Int64: uid, Valid: true},
 			})
 			if err != nil {
 				failImportInternal(err)
@@ -193,20 +179,7 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 				}
 				counts.Tasks++
 				createdTaskIDs = append(createdTaskIDs, task.ID)
-				// 裁决 #162 补偿机制：导入入池通知所属 KR 负责人（本人导入不另发），与导入同事务。
-				if target := domain.PoolEntryNotifyTarget(uid, k.OwnerId); target != nil {
-					krCode := domain.KeyResultCode(objectiveCodeSeq, int(kr.CodeSeq))
-					if _, err := qtx.CreateNotification(r.Context(), store.CreateNotificationParams{
-						UserID:    *target,
-						Kind:      domain.NotifyTaskPoolEntered,
-						Content:   domain.PoolEntryNotification(currentUser(r).DisplayName, task.Name, krCode, kr.Description),
-						ProjectID: pgtype.Int8{Int64: projectId, Valid: true},
-						TaskID:    pgtype.Int8{Int64: task.ID, Valid: true},
-					}); err != nil {
-						failImportInternal(err)
-						return
-					}
-				}
+				// 裁决 12（#183）：KR 无负责人，原导入入池通知随之无对象、退场；入池留痕见事务提交后。
 			}
 		}
 	}
@@ -350,10 +323,8 @@ func (s *Server) ImportTasks(w http.ResponseWriter, r *http.Request, projectId i
 		return
 	}
 	// 所属 KR 必须在本项目内：跨项目的 KR id 不能借这条路径写进来。
-	krByID := map[int64]store.GetKeyResultInProjectRow{}
 	for _, g := range groups {
-		kr, err := s.q.GetKeyResultInProject(r.Context(), store.GetKeyResultInProjectParams{ID: g.KeyResultID, ProjectID: projectId})
-		if err != nil {
+		if _, err := s.q.GetKeyResultInProject(r.Context(), store.GetKeyResultInProjectParams{ID: g.KeyResultID, ProjectID: projectId}); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				failImport(http.StatusUnprocessableEntity, "invalid_key_result", "所属 KR 不存在")
 				return
@@ -361,7 +332,6 @@ func (s *Server) ImportTasks(w http.ResponseWriter, r *http.Request, projectId i
 			failImportInternal(err)
 			return
 		}
-		krByID[g.KeyResultID] = kr
 	}
 
 	tx, err := s.db.Begin(r.Context())
@@ -374,7 +344,6 @@ func (s *Server) ImportTasks(w http.ResponseWriter, r *http.Request, projectId i
 	counts := domain.ImportCounts{}
 	createdTaskIDs := []int64{}
 	for _, g := range groups {
-		kr := krByID[g.KeyResultID]
 		for _, it := range g.Tasks {
 			task, err := qtx.CreateTask(r.Context(), store.CreateTaskParams{
 				KeyResultID: g.KeyResultID,
@@ -391,20 +360,7 @@ func (s *Server) ImportTasks(w http.ResponseWriter, r *http.Request, projectId i
 			}
 			counts.Tasks++
 			createdTaskIDs = append(createdTaskIDs, task.ID)
-			// 裁决 #162 补偿机制：导入入池通知所属 KR 负责人（本人导入不另发），与导入同事务。
-			if target := domain.PoolEntryNotifyTarget(uid, fromPgInt8(kr.OwnerID)); target != nil {
-				krCode := domain.KeyResultCode(int(kr.ObjectiveCodeSeq), int(kr.CodeSeq))
-				if _, err := qtx.CreateNotification(r.Context(), store.CreateNotificationParams{
-					UserID:    *target,
-					Kind:      domain.NotifyTaskPoolEntered,
-					Content:   domain.PoolEntryNotification(currentUser(r).DisplayName, task.Name, krCode, kr.Description),
-					ProjectID: pgtype.Int8{Int64: projectId, Valid: true},
-					TaskID:    pgtype.Int8{Int64: task.ID, Valid: true},
-				}); err != nil {
-					failImportInternal(err)
-					return
-				}
-			}
+			// 裁决 12（#183）：KR 无负责人，原导入入池通知随之无对象、退场；入池留痕见事务提交后。
 		}
 	}
 	// AC-68：与导入同事务，回滚则记录不留。

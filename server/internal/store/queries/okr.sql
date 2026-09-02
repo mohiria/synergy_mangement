@@ -1,14 +1,16 @@
 -- name: ListObjectives :many
-SELECT * FROM objectives
-WHERE project_id = $1
-ORDER BY sort_order, id;
+SELECT o.*, cu.display_name AS created_by_name
+FROM objectives o
+LEFT JOIN users cu ON cu.id = o.created_by
+WHERE o.project_id = $1
+ORDER BY o.sort_order, o.id;
 
 -- name: ListKeyResultsByProject :many
--- owner_name：KR 负责人姓名（派生字段，前端直接展示；未指定负责人时为 NULL）。
-SELECT kr.*, u.display_name AS owner_name, o.code_seq AS objective_code_seq
+-- created_by_name：创建人姓名（裁决 12，#183；存量无创建人时为 NULL，前端显示「—」）。
+SELECT kr.*, cu.display_name AS created_by_name, o.code_seq AS objective_code_seq
 FROM key_results kr
 JOIN objectives o ON o.id = kr.objective_id
-LEFT JOIN users u ON u.id = kr.owner_id
+LEFT JOIN users cu ON cu.id = kr.created_by
 WHERE o.project_id = $1
 ORDER BY kr.sort_order, kr.id;
 
@@ -19,15 +21,15 @@ WHERE id = $1 AND project_id = $2;
 -- name: CreateObjective :one
 -- 排序与编号序号都追加到项目末尾；批量创建在同一事务内串行执行，MAX+1 不会互相踩踏。
 -- code_seq 取历史最大值加一，不复用被删 O 的序号（AC-64）。
-INSERT INTO objectives (project_id, title, description, sort_order, code_seq)
-VALUES ($1, $2, $3,
+INSERT INTO objectives (project_id, title, description, created_by, sort_order, code_seq)
+VALUES ($1, $2, $3, $4,
     (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM objectives WHERE project_id = $1),
     (SELECT COALESCE(MAX(code_seq), 0) + 1 FROM objectives WHERE project_id = $1))
 RETURNING *;
 
 -- name: CreateKeyResult :one
-INSERT INTO key_results (objective_id, description, metric, owner_id, start_date, end_date, sort_order, code_seq)
-VALUES ($1, $2, $3, $4, $5, $6,
+INSERT INTO key_results (objective_id, description, metric, created_by, sort_order, code_seq)
+VALUES ($1, $2, $3, $4,
     (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM key_results WHERE objective_id = $1),
     (SELECT COALESCE(MAX(code_seq), 0) + 1 FROM key_results WHERE objective_id = $1))
 RETURNING *;
@@ -41,12 +43,10 @@ WHERE id = sqlc.arg('id') AND project_id = sqlc.arg('project_id')
 RETURNING *;
 
 -- name: UpdateKeyResult :one
+-- 裁决 12（#183）：KR 只剩结构字段（描述、量化指标）。
 UPDATE key_results
 SET description = COALESCE(sqlc.narg('description'), description),
-    metric = COALESCE(sqlc.narg('metric'), metric),
-    owner_id = COALESCE(sqlc.narg('owner_id'), owner_id),
-    start_date = COALESCE(sqlc.narg('start_date'), start_date),
-    end_date = COALESCE(sqlc.narg('end_date'), end_date)
+    metric = COALESCE(sqlc.narg('metric'), metric)
 WHERE id = sqlc.arg('id')
 RETURNING *;
 
@@ -67,12 +67,6 @@ JOIN objectives o ON o.id = kr.objective_id
 LEFT JOIN tasks t ON t.key_result_id = kr.id
 WHERE o.project_id = $1
 GROUP BY kr.id;
-
--- name: ListKeyResultsOwnedBy :many
-SELECT kr.id, kr.description
-FROM key_results kr
-JOIN objectives o ON o.id = kr.objective_id
-WHERE o.project_id = $1 AND kr.owner_id = $2;
 
 -- name: ListTasksOwnedBy :many
 SELECT t.id, t.name

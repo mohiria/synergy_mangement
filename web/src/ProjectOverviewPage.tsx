@@ -183,13 +183,12 @@ export default function ProjectOverviewPage({
                     <button type="button" className="kr-main" onClick={() => toggle(k.id)}>
                       <span className={`risk-stripe ${k.riskLevel}`} />
                       <span className="kr-code">{code}</span>
-                      {/* #160 裁决：标题下一行始终显示负责人／周期／量化指标（普通元信息样式），
-                          卡点／风险原因文字不再出现，风险表达只保留状态颜色。 */}
+                      {/* #160 裁决：标题下一行显示元信息（普通元信息样式）；
+                          裁决 12（#183）：KR 无负责人与周期，改示创建人与量化指标。 */}
                       <span className="kr-title-cell">
                         <span>{k.description}</span>
                         <small>
-                          负责人 {k.ownerName ?? "未指定"} · 周期 {fmtDate(k.startDate)}—
-                          {fmtDate(k.endDate)} · 量化指标：{k.metric ?? "待补充"}
+                          创建人 {k.createdByName ?? "—"} · 量化指标：{k.metric ?? "待补充"}
                         </small>
                       </span>
                       <span className={`status-pill risk-${k.riskLevel}`}>

@@ -286,8 +286,7 @@ func (q *Queries) IntermediateReviewerNamesByProject(ctx context.Context, projec
 
 const latestCompletionReviewsByProject = `-- name: LatestCompletionReviewsByProject :many
 SELECT DISTINCT ON (cr.task_id) cr.id, cr.task_id, cr.submitted_by, cr.note, cr.state, cr.opinion, cr.submitted_at, cr.decided_by, cr.decided_at, cr.intermediate_by, cr.intermediate_at, cr.intermediate_opinion,
-    t.name AS task_name, t.owner_id AS task_owner_id, t.end_date AS task_end_date,
-    k.owner_id AS kr_owner_id
+    t.name AS task_name, t.owner_id AS task_owner_id, t.end_date AS task_end_date
 FROM completion_reviews cr
 JOIN tasks t ON t.id = cr.task_id
 JOIN key_results k ON k.id = t.key_result_id
@@ -312,7 +311,6 @@ type LatestCompletionReviewsByProjectRow struct {
 	TaskName            string
 	TaskOwnerID         int64
 	TaskEndDate         pgtype.Date
-	KrOwnerID           pgtype.Int8
 }
 
 // 每个任务最近一次完成申请（我的工作分组用），含任务事实。
@@ -341,7 +339,6 @@ func (q *Queries) LatestCompletionReviewsByProject(ctx context.Context, projectI
 			&i.TaskName,
 			&i.TaskOwnerID,
 			&i.TaskEndDate,
-			&i.KrOwnerID,
 		); err != nil {
 			return nil, err
 		}

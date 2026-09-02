@@ -293,17 +293,7 @@ func doRaw(t *testing.T, c *http.Client, method, urlStr, body string) *http.Resp
 	return resp
 }
 
-// dropOkrAssigned 过滤新增 O/KR 的指派通知（#125）：多数用例只断言自己触发的那一条通知，
-// 而创建 OKR 的准备步骤会给 KR 负责人发 okr_assigned，先滤掉再断言。
-func dropOkrAssigned(notes []api.Notification) []api.Notification {
-	out := []api.Notification{}
-	for _, n := range notes {
-		if n.Kind != "okr_assigned" {
-			out = append(out, n)
-		}
-	}
-	return out
-}
+// 裁决 12（#183）：KR 无负责人，okr_assigned 指派通知随之退场，原 dropOkrAssigned 过滤助手删除。
 
 func decodeBody[T any](t *testing.T, resp *http.Response) T {
 	t.Helper()
@@ -674,13 +664,12 @@ func TestProjectMembersAndPermissions(t *testing.T) {
 	resp.Body.Close()
 }
 
-// O／KR 表格式创建（#3，AC-01；AC-06 展开层所需的量化指标与 KR 负责人由此供给）：一批建多个 O 与 KR、指定 KR 负责人；
+// O／KR 表格式创建（#3，AC-01；裁决 12 #183：KR 只剩描述与量化指标，创建人落 created_by）：
 // 仅项目管理员／项目负责人可创建；整批一个事务；已有 O 可继续追加 KR。
 func TestOkrTableBatchCreate(t *testing.T) {
 	q, pool := setupDB(t)
 	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
 	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
-	carolUser := seedUser(t, q, "carol", "王五", "carol-pass")
 
 	ts := httptest.NewServer(newTestHandler(t, pool))
 	defer ts.Close()
@@ -715,13 +704,11 @@ func TestOkrTableBatchCreate(t *testing.T) {
 	}
 
 	okrURL := fmt.Sprintf("%s/projects/%d/objectives", base, created.Id)
-	start := openapiDate(t, "2026-09-01")
-	end := openapiDate(t, "2026-12-31")
 
-	// 表格式批量创建：两个 O，第一个带两条 KR（一条指定负责人、量化指标和周期）
+	// 表格式批量创建：两个 O，第一个带两条 KR（描述与量化指标；裁决 12：无负责人与周期字段）
 	resp = doJSON(t, alice, http.MethodPost, okrURL, api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
 		{Title: sp("提升产品体验"), KeyResults: &[]api.CreateKeyResultInput{
-			{Description: "上线新版工作台", Metric: sp("转化率 5%"), OwnerId: &bobUser.ID, StartDate: &start, EndDate: &end},
+			{Description: "上线新版工作台", Metric: sp("转化率 5%")},
 			{Description: "NPS 提升到 40"},
 		}},
 		{Title: sp("扩大市场份额")},
@@ -729,10 +716,6 @@ func TestOkrTableBatchCreate(t *testing.T) {
 	wantStatus(t, resp, http.StatusCreated)
 	batchResp := decodeBody[api.CreateOkrBatchResponse](t, resp)
 	list := batchResp.Objectives
-	// #125「保存并通知负责人」：本次指派 bob 一名负责人，人数按人去重；操作者本人不计。
-	if batchResp.NotifiedCount != 1 {
-		t.Fatalf("已通知负责人数异常: %d", batchResp.NotifiedCount)
-	}
 	if len(list) != 2 || list[0].Title != "提升产品体验" || list[1].Title != "扩大市场份额" {
 		t.Fatalf("批量创建返回异常: %+v", list)
 	}
@@ -740,8 +723,15 @@ func TestOkrTableBatchCreate(t *testing.T) {
 		t.Fatalf("KR 归属异常: %+v", list)
 	}
 	kr := list[0].KeyResults[0]
-	if kr.OwnerName == nil || *kr.OwnerName != "李四" || kr.RiskLevel != api.Normal || kr.SortOrder != 1 {
+	if kr.RiskLevel != api.Normal || kr.SortOrder != 1 {
 		t.Fatalf("KR 派生字段异常: %+v", kr)
+	}
+	// 裁决 12：O／KR 补创建人与创建时间（详情处展示；存量数据可缺省）。
+	if kr.CreatedByName == nil || *kr.CreatedByName != "张三" || kr.CreatedAt == nil {
+		t.Fatalf("KR 应带创建人与创建时间: %+v", kr)
+	}
+	if list[0].CreatedByName == nil || *list[0].CreatedByName != "张三" || list[0].CreatedAt == nil {
+		t.Fatalf("O 应带创建人与创建时间: %+v", list[0])
 	}
 	// AC-59：O 的风险取下级最大值——下面没有 KR 或 KR 全正常时都是正常（#82）。
 	if list[0].RiskLevel != api.Normal || list[0].RiskLevelLabel != "正常" || list[0].RiskNote != nil {
@@ -750,24 +740,15 @@ func TestOkrTableBatchCreate(t *testing.T) {
 	if list[1].RiskLevel != api.Normal {
 		t.Fatalf("没有 KR 的 O 应为正常: %+v", list[1].RiskLevel)
 	}
-	if kr.StartDate == nil || kr.EndDate == nil {
-		t.Fatalf("KR 周期未保存: %+v", kr)
-	}
-	if second := list[0].KeyResults[1]; second.OwnerId != nil || second.SortOrder != 2 {
-		t.Fatalf("未指定负责人的 KR 异常: %+v", second)
+	if second := list[0].KeyResults[1]; second.SortOrder != 2 {
+		t.Fatalf("第二条 KR 异常: %+v", second)
 	}
 
-	// #125：被指派的 KR 负责人收到 okr_assigned 站内通知，文案含 KR 描述；操作者本人不收。
+	// 裁决 12：KR 无负责人，#125 指派通知退场——创建后无人收到任何通知。
 	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
 	wantStatus(t, resp, http.StatusOK)
-	bobNotes := decodeBody[[]api.Notification](t, resp)
-	if len(bobNotes) != 1 || bobNotes[0].Kind != "okr_assigned" || !strings.Contains(bobNotes[0].Content, "上线新版工作台") {
-		t.Fatalf("KR 负责人应收到指派通知: %+v", bobNotes)
-	}
-	resp = doJSON(t, alice, http.MethodGet, base+"/notifications", nil)
-	wantStatus(t, resp, http.StatusOK)
-	if aliceNotes := decodeBody[[]api.Notification](t, resp); len(aliceNotes) != 0 {
-		t.Fatalf("操作者本人不应收指派通知: %+v", aliceNotes)
+	if bobNotes := decodeBody[[]api.Notification](t, resp); len(bobNotes) != 0 {
+		t.Fatalf("裁决 12 后创建 O/KR 不应发通知: %+v", bobNotes)
 	}
 
 	// 向已有 O 追加 KR
@@ -792,9 +773,9 @@ func TestOkrTableBatchCreate(t *testing.T) {
 	wantStatus(t, resp, http.StatusForbidden)
 	resp.Body.Close()
 
-	// KR 负责人不是项目成员 422
+	// KR 描述为空 422（裁决 12 后仅剩结构校验）
 	resp = doJSON(t, alice, http.MethodPost, okrURL, api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-		{Title: sp("负责人越界"), KeyResults: &[]api.CreateKeyResultInput{{Description: "x", OwnerId: &carolUser.ID}}},
+		{Title: sp("空描述"), KeyResults: &[]api.CreateKeyResultInput{{Description: "  "}}},
 	}})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	if e := decodeBody[api.Error](t, resp); e.Code != "invalid_okr" {
@@ -851,11 +832,11 @@ func TestTaskCreateDirectPoolEntry(t *testing.T) {
 
 	sp := func(s string) *string { return &s }
 
-	// alice（管理员/负责人）建项目，bob、carol 为项目成员；bob 任 KR 负责人
+	// alice（管理员/负责人）建项目，bob、carol 为项目成员
 	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "任务试点", OwnerId: aliceUser.ID})
 	wantStatus(t, resp, http.StatusCreated)
 	created := decodeBody[api.Project](t, resp)
-	// 裁决 10：创建任务收归项目管理员——bob 任管理员（兼 KR 负责人），carol 普通成员。
+	// 裁决 10：创建任务收归项目管理员——bob 任管理员，carol 普通成员。
 	for _, m := range []struct {
 		id   int64
 		role api.MemberRole
@@ -868,21 +849,21 @@ func TestTaskCreateDirectPoolEntry(t *testing.T) {
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
 			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{
-				{Description: "上线自动验收", OwnerId: &bobUser.ID},
-				{Description: "未指负责人的 KR"},
+				{Description: "上线自动验收"},
+				{Description: "另一条 KR"},
 			}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
-	krWithOwner := okr[0].KeyResults[0].Id
-	krNoOwner := okr[0].KeyResults[1].Id
+	kr1 := okr[0].KeyResults[0].Id
+	kr2 := okr[0].KeyResults[1].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-12"), openapiDate(t, "2026-09-21")
 
 	// 裁决 #162＋裁决 10：项目负责人 alice 创建 → 直接入池、未开始
 	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
-			{KeyResultId: krWithOwner, Name: "验证现场联动异常回退", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
+			{KeyResultId: kr1, Name: "验证现场联动异常回退", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
 	})
 	wantStatus(t, resp, http.StatusCreated)
@@ -895,15 +876,11 @@ func TestTaskCreateDirectPoolEntry(t *testing.T) {
 		t.Fatalf("新任务显示文案 = %q, want 未开始", list[0].StatusLabel)
 	}
 
-	// 补偿机制：所属 KR 负责人 bob 收到入池通知，任务动态留痕
+	// 裁决 12（#183）：KR 无负责人，原入池站内通知退场——任务动态留痕即全部事实
 	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
 	wantStatus(t, resp, http.StatusOK)
-	bobNotes := dropOkrAssigned(decodeBody[[]api.Notification](t, resp))
-	if len(bobNotes) != 1 || bobNotes[0].Kind != "task_pool_entered" {
-		t.Fatalf("KR 负责人应收到入池通知: %+v", bobNotes)
-	}
-	if !strings.Contains(bobNotes[0].Content, "验证现场联动异常回退") || !strings.Contains(bobNotes[0].Content, "张三") {
-		t.Fatalf("入池通知应带任务名与创建人: %q", bobNotes[0].Content)
+	if bobNotes := decodeBody[[]api.Notification](t, resp); len(bobNotes) != 0 {
+		t.Fatalf("裁决 12 后创建任务不应发入池通知: %+v", bobNotes)
 	}
 	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
 	wantStatus(t, resp, http.StatusOK)
@@ -918,10 +895,10 @@ func TestTaskCreateDirectPoolEntry(t *testing.T) {
 		t.Fatalf("任务动态应有入池留痕: %+v", detail.Activities)
 	}
 
-	// KR 负责人 bob 本人创建 → 不另发通知
+	// 管理员 bob 创建 → 同样直接入池
 	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
-			{KeyResultId: krWithOwner, Name: "输出验收清单模板", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
+			{KeyResultId: kr1, Name: "输出验收清单模板", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 		},
 	})
 	wantStatus(t, resp, http.StatusCreated)
@@ -933,38 +910,32 @@ func TestTaskCreateDirectPoolEntry(t *testing.T) {
 		}
 	}
 	if ownTask == nil || ownTask.Status != api.TaskStatusNotStarted {
-		t.Fatalf("KR 负责人本人创建应直接未开始: %+v", list)
-	}
-	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
-	wantStatus(t, resp, http.StatusOK)
-	bobNotes = dropOkrAssigned(decodeBody[[]api.Notification](t, resp))
-	if len(bobNotes) != 1 {
-		t.Fatalf("本人创建不应另发通知: %+v", bobNotes)
+		t.Fatalf("管理员本人创建应直接未开始: %+v", list)
 	}
 
-	// KR 未指定负责人：创建照常入池，无人可通知
+	// 另一条 KR 下创建照常入池
 	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
-			{KeyResultId: krNoOwner, Name: "无负责人 KR 下的任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
+			{KeyResultId: kr2, Name: "另一条 KR 下的任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
 	})
 	wantStatus(t, resp, http.StatusCreated)
 	list = decodeBody[[]api.Task](t, resp)
 	var orphan *api.Task
 	for i := range list {
-		if list[i].Name == "无负责人 KR 下的任务" {
+		if list[i].Name == "另一条 KR 下的任务" {
 			orphan = &list[i]
 		}
 	}
 	if orphan == nil || orphan.Status != api.TaskStatusNotStarted {
-		t.Fatalf("无负责人 KR 下创建应直接未开始: %+v", list)
+		t.Fatalf("另一条 KR 下创建应直接未开始: %+v", list)
 	}
 
 	// 裁决 #164：五个选填字段随创建落库，任务概况可见。
 	scope := api.ReceiverScopeMembers
 	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{{
-			KeyResultId: krWithOwner, Name: "带选填字段的任务", OwnerId: carolUser.ID,
+			KeyResultId: kr1, Name: "带选填字段的任务", OwnerId: carolUser.ID,
 			StartDate: start, EndDate: end,
 			CompletionCriteria: sp("回归通过率 ≥ 99%"), Description: sp("覆盖联动断链后的自动回退"),
 			ParticipantIds: &[]int64{bobUser.ID}, ReviewerIds: &[]int64{bobUser.ID},
@@ -1003,7 +974,7 @@ func TestTaskCreateDirectPoolEntry(t *testing.T) {
 	// 参与人不能选负责人本人 422
 	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{{
-			KeyResultId: krWithOwner, Name: "非法参与人", OwnerId: carolUser.ID,
+			KeyResultId: kr1, Name: "非法参与人", OwnerId: carolUser.ID,
 			StartDate: start, EndDate: end, ParticipantIds: &[]int64{carolUser.ID},
 		}},
 	})
@@ -1013,7 +984,7 @@ func TestTaskCreateDirectPoolEntry(t *testing.T) {
 	// 校验失败整批不落库：截止早于开始 422
 	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
-			{KeyResultId: krWithOwner, Name: "倒置周期", OwnerId: carolUser.ID, StartDate: end, EndDate: start},
+			{KeyResultId: kr1, Name: "倒置周期", OwnerId: carolUser.ID, StartDate: end, EndDate: start},
 		},
 	})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
@@ -1031,7 +1002,7 @@ func TestTaskCreateDirectPoolEntry(t *testing.T) {
 	login(dave, "dave", "dave-pass")
 	resp = doJSON(t, dave, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
-			{KeyResultId: krWithOwner, Name: "越权任务", OwnerId: daveUser.ID, StartDate: start, EndDate: end},
+			{KeyResultId: kr1, Name: "越权任务", OwnerId: daveUser.ID, StartDate: start, EndDate: end},
 		},
 	})
 	wantStatus(t, resp, http.StatusForbidden)
@@ -1040,7 +1011,7 @@ func TestTaskCreateDirectPoolEntry(t *testing.T) {
 	// 裁决 10：普通项目成员也不能直接创建任务 → 403
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
-			{KeyResultId: krWithOwner, Name: "成员越权任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
+			{KeyResultId: kr1, Name: "成员越权任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
 	})
 	wantStatus(t, resp, http.StatusForbidden)
@@ -1054,7 +1025,8 @@ func TestTaskCreateDirectPoolEntry(t *testing.T) {
 	}
 }
 
-// 任务创建邀请（#5，AC-03；MW-19）：KR 负责人邀请成员→受邀人通过邀请创建任务（直接入池）→邀请完成；
+// 任务创建邀请（#5，AC-03；MW-19；裁决 12 #183：邀请权收归项目管理员）：
+// 管理员邀请成员→受邀人通过邀请创建任务（直接入池）→邀请完成；
 // 撤回后不可再响应；无关任务不使邀请结束；项目成员不可发邀请。
 func TestTaskInviteLifecycle(t *testing.T) {
 	q, pool := setupDB(t)
@@ -1079,21 +1051,24 @@ func TestTaskInviteLifecycle(t *testing.T) {
 
 	sp := func(s string) *string { return &s }
 
-	// alice 建项目；bob、carol 项目成员；bob 任 KR1 负责人，另建无负责人的 KR2
+	// alice 建项目；bob 任项目管理员（裁决 12：邀请权收归管理员）、carol 项目成员
 	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "邀请试点", OwnerId: aliceUser.ID})
 	wantStatus(t, resp, http.StatusCreated)
 	created := decodeBody[api.Project](t, resp)
-	for _, uid := range []int64{bobUser.ID, carolUser.ID} {
+	for _, m := range []struct {
+		id   int64
+		role api.MemberRole
+	}{{bobUser.ID, api.Admin}, {carolUser.ID, api.Member}} {
 		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-			api.AddProjectMembersRequest{UserIds: []int64{uid}, Role: api.Member})
+			api.AddProjectMembersRequest{UserIds: []int64{m.id}, Role: m.role})
 		wantStatus(t, resp, http.StatusCreated)
 		resp.Body.Close()
 	}
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
 			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{
-				{Description: "上线自动验收", OwnerId: &bobUser.ID},
-				{Description: "回归通过率达标", OwnerId: &bobUser.ID},
+				{Description: "上线自动验收"},
+				{Description: "回归通过率达标"},
 			}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
@@ -1103,12 +1078,12 @@ func TestTaskInviteLifecycle(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-12"), openapiDate(t, "2026-09-21")
 
-	// 项目成员 carol（非 KR 负责人）发邀请 403
+	// 项目成员 carol 发邀请 403（裁决 12：仅项目管理员）
 	resp = doJSON(t, carol, http.MethodPost, invitesURL, api.CreateTaskInvitesRequest{KeyResultId: kr1, InviteeIds: []int64{bobUser.ID}})
 	wantStatus(t, resp, http.StatusForbidden)
 	resp.Body.Close()
 
-	// KR 负责人 bob 邀请 carol（KR 尚无任务也可邀请）
+	// 管理员 bob 邀请 carol（KR 尚无任务也可邀请）
 	note := "请结合你负责的工作，在该 KR 下补充需要推进的任务。"
 	resp = doJSON(t, bob, http.MethodPost, invitesURL, api.CreateTaskInvitesRequest{KeyResultId: kr1, InviteeIds: []int64{carolUser.ID}, Note: &note})
 	wantStatus(t, resp, http.StatusCreated)
@@ -1305,7 +1280,7 @@ func TestTaskStatusAndProgress(t *testing.T) {
 	}
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
@@ -1463,7 +1438,7 @@ func TestTaskDetail(t *testing.T) {
 	resp.Body.Close()
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
@@ -1510,7 +1485,7 @@ func TestTaskDetail(t *testing.T) {
 }
 
 // 关键字段直接修改（AC-23、#172 裁决）：有编辑权限者修改立即生效、无修改原因，
-// 动作写入任务动态并站内通知所属 KR 负责人（本人修改不另发）。
+// 动作写入任务动态（裁决 12，#183：KR 无负责人，原站内通知退场）。
 func TestTaskFieldEditDirect(t *testing.T) {
 	q, pool := setupDB(t)
 	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
@@ -1534,7 +1509,7 @@ func TestTaskFieldEditDirect(t *testing.T) {
 
 	sp := func(s string) *string { return &s }
 
-	// alice 建项目；bob、carol 成员；bob 任 KR 负责人
+	// alice 建项目；bob、carol 成员
 	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "变更试点", OwnerId: aliceUser.ID})
 	wantStatus(t, resp, http.StatusCreated)
 	created := decodeBody[api.Project](t, resp)
@@ -1546,7 +1521,7 @@ func TestTaskFieldEditDirect(t *testing.T) {
 	}
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
@@ -1587,7 +1562,7 @@ func TestTaskFieldEditDirect(t *testing.T) {
 		t.Fatalf("项目负责人应保有编辑权限: %+v", edited)
 	}
 
-	// 动作写入任务动态，站内通知所属 KR 负责人 bob
+	// 动作写入任务动态；裁决 12（#183）：KR 无负责人，不再发字段修改站内通知
 	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
 	wantStatus(t, resp, http.StatusOK)
 	detail := decodeBody[api.TaskDetail](t, resp)
@@ -1602,20 +1577,13 @@ func TestTaskFieldEditDirect(t *testing.T) {
 	}
 	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
 	wantStatus(t, resp, http.StatusOK)
-	notes := decodeBody[[]api.Notification](t, resp)
-	foundNote := false
-	for _, n := range notes {
-		if n.Kind == "task_field_edited" && n.TaskId != nil && *n.TaskId == taskID &&
-			strings.Contains(n.Content, "截止时间") && strings.Contains(n.Content, "张三") {
-			foundNote = true
+	for _, n := range decodeBody[[]api.Notification](t, resp) {
+		if n.Kind == "task_field_edited" {
+			t.Fatalf("裁决 12 后不应再发字段修改通知: %+v", n)
 		}
 	}
-	if !foundNote {
-		t.Fatalf("字段修改应站内通知所属 KR 负责人: %+v", notes)
-	}
-	noteCount := len(notes)
 
-	// KR 负责人本人（升为管理员后）修改：立即生效且不另发通知
+	// 管理员（bob 升为管理员后）修改：立即生效
 	resp = doJSON(t, alice, http.MethodPut, fmt.Sprintf("%s/projects/%d/members/%d", base, created.Id, bobUser.ID),
 		api.UpdateProjectMemberRoleRequest{Role: api.Admin})
 	wantStatus(t, resp, http.StatusOK)
@@ -1623,12 +1591,7 @@ func TestTaskFieldEditDirect(t *testing.T) {
 	resp = doJSON(t, bob, http.MethodPost, editURL(taskID), api.EditTaskFieldsRequest{OwnerId: &bobUser.ID})
 	wantStatus(t, resp, http.StatusOK)
 	if got := decodeBody[api.Task](t, resp); got.OwnerId != bobUser.ID {
-		t.Fatalf("KR 负责人修改应即时生效: %+v", got)
-	}
-	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
-	wantStatus(t, resp, http.StatusOK)
-	if after := decodeBody[[]api.Notification](t, resp); len(after) != noteCount {
-		t.Fatalf("KR 负责人本人修改不应另发通知: %d → %d", noteCount, len(after))
+		t.Fatalf("管理员修改应即时生效: %+v", got)
 	}
 
 	// 校验仍然生效：负责人须为项目成员（非成员被拒）；
@@ -1676,7 +1639,7 @@ func TestDeliverablesAndFiles(t *testing.T) {
 	resp.Body.Close()
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
@@ -1844,7 +1807,7 @@ func TestDiscussionsAndNotifications(t *testing.T) {
 	resp.Body.Close()
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
@@ -1885,11 +1848,10 @@ func TestDiscussionsAndNotifications(t *testing.T) {
 	resp.Body.Close()
 
 	// AC-36：讨论通知只发任务负责人 bob 与被 @ 的 alice，携带 taskId 可直达讨论 Tab
-	// （bob 另有 alice 建任务的入池通知，这里只看讨论类）
 	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
 	wantStatus(t, resp, http.StatusOK)
 	bobNotes := []api.Notification{}
-	for _, n := range dropOkrAssigned(decodeBody[[]api.Notification](t, resp)) {
+	for _, n := range decodeBody[[]api.Notification](t, resp) {
 		if strings.HasPrefix(n.Kind, "discussion") {
 			bobNotes = append(bobNotes, n)
 		}
@@ -1967,7 +1929,7 @@ func TestCompletionReviewFlow(t *testing.T) {
 	}
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
@@ -2185,8 +2147,8 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
 			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{
-				{Description: "上线自动验收", OwnerId: &bobUser.ID},
-				{Description: "现场回归通过", OwnerId: &bobUser.ID},
+				{Description: "上线自动验收"},
+				{Description: "现场回归通过"},
 			}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
@@ -2396,7 +2358,7 @@ func TestIntermediateReviewOrSign(t *testing.T) {
 	}
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
@@ -2560,7 +2522,7 @@ func TestCreateUpstreamTask(t *testing.T) {
 	}
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
@@ -2643,17 +2605,13 @@ func TestCreateUpstreamTask(t *testing.T) {
 		t.Fatalf("新任务负责人应收到通知")
 	}
 
-	// KR 负责人 bob 收到新任务入池通知（#162 口径）
+	// 裁决 12（#183）：KR 无负责人，替他人创建上游任务不再发入池通知（负责人通知保留）。
 	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
 	wantStatus(t, resp, http.StatusOK)
-	foundPool := false
 	for _, n := range decodeBody[[]api.Notification](t, resp) {
-		if n.Kind == "task_pool_entered" && n.TaskId != nil && *n.TaskId == upstream.Id {
-			foundPool = true
+		if n.Kind == "task_pool_entered" {
+			t.Fatalf("裁决 12 后不应再发入池通知: %+v", n)
 		}
-	}
-	if !foundPool {
-		t.Fatalf("KR 负责人应收到新任务入池通知")
 	}
 }
 
@@ -2697,7 +2655,7 @@ func TestMultiSourceInputs(t *testing.T) {
 	}
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	kr1 := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
@@ -2705,7 +2663,7 @@ func TestMultiSourceInputs(t *testing.T) {
 	edgesURL := fmt.Sprintf("%s/projects/%d/edges", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
-	// KR 负责人 bob 免审建两条上游任务与两条下游任务（C 用于多来源任务，D 用于多对接人）
+	// 管理员 alice 建两条上游任务与两条下游任务（C 用于多来源任务，D 用于多对接人）
 	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "采集现场数据", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
@@ -2851,7 +2809,7 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 	}
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
@@ -2979,9 +2937,9 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 	resp.Body.Close()
 	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
 	wantStatus(t, resp, http.StatusOK)
-	// #172 后 bob 还会收到 task_field_edited（carol 配置输入），只看提醒类。
+	// 只看提醒类通知。
 	notes := []api.Notification{}
-	for _, n := range dropOkrAssigned(decodeBody[[]api.Notification](t, resp)) {
+	for _, n := range decodeBody[[]api.Notification](t, resp) {
 		if n.Kind == "blocker_remind" {
 			notes = append(notes, n)
 		}
@@ -3059,7 +3017,7 @@ func TestMyWorkFiveGroups(t *testing.T) {
 	}
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
@@ -3068,7 +3026,7 @@ func TestMyWorkFiveGroups(t *testing.T) {
 	myWorkURL := fmt.Sprintf("%s/projects/%d/my-work", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
-	// carol 创建任务（直接入池）→ carol 待我处理出现任务卡；bob（KR 负责人）暂无审批件
+	// alice 创建任务（直接入池）→ carol 待我处理出现任务卡；bob 暂无审批件
 	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
@@ -3084,9 +3042,9 @@ func TestMyWorkFiveGroups(t *testing.T) {
 	if len(bobWork.Approvals) != 0 {
 		t.Fatalf("此时不应有待我审批: %+v", bobWork.Approvals)
 	}
-	// 身份卡（#69）：身份文案与当前职责随事实派生；bob 是 KR 负责人。
+	// 身份卡（#69；裁决 12：无 KR 负责人职责）：bob 当前不承担任何行动职责。
 	if id := bobWork.Identity; id.UserId != bobUser.ID || id.DisplayName != "李四" ||
-		id.RoleLabel != "项目成员" || id.ResponsibilitiesLabel != "KR 负责人" {
+		id.RoleLabel != "项目成员" || id.ResponsibilitiesLabel != "当前未承担行动职责" {
 		t.Fatalf("身份卡异常: %+v", bobWork.Identity)
 	}
 	resp = doJSON(t, carol, http.MethodGet, myWorkURL, nil)
@@ -3107,7 +3065,7 @@ func TestMyWorkFiveGroups(t *testing.T) {
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
 
-	// 裁决 11：终审归入项目管理员（alice）的待我审批；KR 负责人 bob 不再持有终审件。
+	// 裁决 11：终审归入项目管理员（alice）的待我审批；普通成员 bob 不持有终审件。
 	resp = doJSON(t, alice, http.MethodGet, myWorkURL, nil)
 	wantStatus(t, resp, http.StatusOK)
 	aliceWork := decodeBody[api.MyWork](t, resp)
@@ -3125,7 +3083,7 @@ func TestMyWorkFiveGroups(t *testing.T) {
 	bobWork = decodeBody[api.MyWork](t, resp)
 	for _, it := range bobWork.Approvals {
 		if it.Kind == "final_review" {
-			t.Fatalf("KR 负责人不应再持有终审件（裁决 11）: %+v", it)
+			t.Fatalf("普通成员不应持有终审件（裁决 11）: %+v", it)
 		}
 	}
 	resp = doJSON(t, carol, http.MethodGet, myWorkURL, nil)
@@ -3205,7 +3163,7 @@ func TestInterlockAndCriticalPath(t *testing.T) {
 	resp.Body.Close()
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
@@ -3320,7 +3278,7 @@ func TestArtifacts(t *testing.T) {
 	resp.Body.Close()
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
@@ -3399,8 +3357,9 @@ func TestArtifacts(t *testing.T) {
 	if ao.Code != "O1" || akr.Code != "KR1.1" || at.Code != "T1.1.1" {
 		t.Fatalf("归档编号异常: O=%q KR=%q 任务=%q", ao.Code, akr.Code, at.Code)
 	}
-	if akr.OwnerName != "李四" || akr.DeliverableCount != 1 {
-		t.Fatalf("KR 分组头异常: 负责人=%q 交付物数=%d", akr.OwnerName, akr.DeliverableCount)
+	// 裁决 12（#183）：KR 无负责人，组头只剩交付物数量。
+	if akr.DeliverableCount != 1 {
+		t.Fatalf("KR 分组头异常: 交付物数=%d", akr.DeliverableCount)
 	}
 	// #171：未配置接收方不显示口径文字（空串），不再回「未配置」。
 	if at.OwnerName != "李四" || at.ReceiverLabel != "" {
@@ -3568,7 +3527,7 @@ func TestProjectReport(t *testing.T) {
 	resp.Body.Close()
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
@@ -3773,11 +3732,11 @@ func TestImportAndPool(t *testing.T) {
 	imp := api.ImportRequest{SourceFileName: sp("2026Q3 目标拆解.xlsx"), Items: []api.ImportItem{{
 		Title: sp("提升交付质量"),
 		KeyResults: &[]api.ImportKrItem{
-			{Description: "上线自动验收", OwnerId: &bobUser.ID, Tasks: &[]api.ImportTaskItem{
+			{Description: "上线自动验收", Tasks: &[]api.ImportTaskItem{
 				{Name: "导入任务一", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 				{Name: "导入任务二", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 			}},
-			{Description: "现场回归通过", OwnerId: &bobUser.ID, Tasks: &[]api.ImportTaskItem{
+			{Description: "现场回归通过", Tasks: &[]api.ImportTaskItem{
 				{Name: "导入任务三", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 			}},
 		},
@@ -3906,18 +3865,13 @@ func TestImportAndPool(t *testing.T) {
 		t.Fatalf("任务导入源文件名未留存: %+v", latest.SourceFileName)
 	}
 
-	// 裁决 #162：导入任务直接入池，KR 负责人 bob 应收到入池通知（本人负责的任务除外）
+	// 裁决 12（#183）：KR 无负责人，导入不再发入池通知——入池事实只留任务动态。
 	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
 	wantStatus(t, resp, http.StatusOK)
-	poolNotes := 0
-	for _, n := range dropOkrAssigned(decodeBody[[]api.Notification](t, resp)) {
+	for _, n := range decodeBody[[]api.Notification](t, resp) {
 		if n.Kind == "task_pool_entered" {
-			poolNotes++
+			t.Fatalf("裁决 12 后导入不应发入池通知: %+v", n)
 		}
-	}
-	// alice 两次导入共 5 条任务落在 bob 负责的 KR 下，逐条通知。
-	if poolNotes != 5 {
-		t.Fatalf("KR 负责人应收到 5 条入池通知，实际 %d", poolNotes)
 	}
 }
 
@@ -3960,7 +3914,7 @@ func TestUnifiedPermissionsAcrossIdentities(t *testing.T) {
 	}
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
@@ -4134,7 +4088,7 @@ func TestTaskActivity(t *testing.T) {
 	resp.Body.Close()
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("联调收敛"), KeyResults: &[]api.CreateKeyResultInput{{Description: "打通端到端", OwnerId: &aliceUser.ID}}},
+			{Title: sp("联调收敛"), KeyResults: &[]api.CreateKeyResultInput{{Description: "打通端到端"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	kr1 := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
@@ -4248,7 +4202,7 @@ func TestReceiversAndReceipts(t *testing.T) {
 	}
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("交付到位"), KeyResults: &[]api.CreateKeyResultInput{{Description: "成果按时移交", OwnerId: &bobUser.ID}}},
+			{Title: sp("交付到位"), KeyResults: &[]api.CreateKeyResultInput{{Description: "成果按时移交"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
@@ -4428,7 +4382,7 @@ func TestRemindWaitingTargets(t *testing.T) {
 	}
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("按时推进"), KeyResults: &[]api.CreateKeyResultInput{{Description: "变更及时审批", OwnerId: &bobUser.ID}}},
+			{Title: sp("按时推进"), KeyResults: &[]api.CreateKeyResultInput{{Description: "变更及时审批"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
@@ -4557,7 +4511,7 @@ func TestTimeBlockerActivitySweep(t *testing.T) {
 	resp.Body.Close()
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("按期交付"), KeyResults: &[]api.CreateKeyResultInput{{Description: "无超期任务", OwnerId: &aliceUser.ID}}},
+			{Title: sp("按期交付"), KeyResults: &[]api.CreateKeyResultInput{{Description: "无超期任务"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	kr1 := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
@@ -4698,7 +4652,8 @@ func TestNonMemberProjectReadBoundary(t *testing.T) {
 	}
 }
 
-// O／KR 编辑删除、KR 负责人交接与成员移出守卫（AC-21、AC-61、AC-65，回归 S2／U6）。
+// O／KR 编辑删除与成员移出守卫（AC-21、AC-61、AC-65，回归 S2／U6；
+// 裁决 12 #183：KR 无负责人——编辑收归管理员、职责检查无 KR 项、无交接）。
 func TestOkrEditHandoverAndMemberRemoval(t *testing.T) {
 	q, pool := setupDB(t)
 	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
@@ -4743,21 +4698,13 @@ func TestOkrEditHandoverAndMemberRemoval(t *testing.T) {
 	objectivesURL := fmt.Sprintf("%s/projects/%d/objectives", base, created.Id)
 	resp = doJSON(t, alice, http.MethodPost, objectivesURL,
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
 	objectiveID, kr1 := okr[0].Id, okr[0].KeyResults[0].Id
 
-	// 访客不能被任命为 KR 负责人（创建路径）
-	resp = doJSON(t, alice, http.MethodPost, objectivesURL,
-		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("只读负责人"), KeyResults: &[]api.CreateKeyResultInput{{Description: "不该建成", OwnerId: &daveUser.ID}}},
-		}})
-	wantStatus(t, resp, http.StatusUnprocessableEntity)
-	resp.Body.Close()
-
-	// AC-65：O 只有项目管理员可编辑；KR 由管理员或本 KR 负责人编辑
+	// AC-65（裁决 12 修订）：O 与 KR 都只有项目管理员（含项目负责人）可编辑
 	objURL := fmt.Sprintf("%s/projects/%d/objectives/%d", base, created.Id, objectiveID)
 	krURL := fmt.Sprintf("%s/projects/%d/key-results/%d", base, created.Id, kr1)
 	resp = doJSON(t, bob, http.MethodPatch, objURL, api.UpdateObjectiveRequest{Title: sp("越权改 O")})
@@ -4771,19 +4718,14 @@ func TestOkrEditHandoverAndMemberRemoval(t *testing.T) {
 	resp = doJSON(t, carol, http.MethodPatch, krURL, api.UpdateKeyResultRequest{Description: sp("越权改 KR")})
 	wantStatus(t, resp, http.StatusForbidden)
 	resp.Body.Close()
-	resp = doJSON(t, bob, http.MethodPatch, krURL, api.UpdateKeyResultRequest{Description: sp("上线自动验收 V2")})
+	resp = doJSON(t, bob, http.MethodPatch, krURL, api.UpdateKeyResultRequest{Description: sp("成员也无权改")})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPatch, krURL, api.UpdateKeyResultRequest{Description: sp("上线自动验收 V2")})
 	wantStatus(t, resp, http.StatusOK)
 	if got := decodeBody[api.KeyResult](t, resp); got.Description != "上线自动验收 V2" {
 		t.Fatalf("KR 描述未更新: %+v", got)
 	}
-
-	// AC-61：负责人不可置空；访客不能接任
-	resp = doJSON(t, alice, http.MethodPatch, krURL, map[string]any{"ownerId": nil})
-	wantStatus(t, resp, http.StatusUnprocessableEntity)
-	resp.Body.Close()
-	resp = doJSON(t, alice, http.MethodPatch, krURL, api.UpdateKeyResultRequest{OwnerId: &daveUser.ID})
-	wantStatus(t, resp, http.StatusUnprocessableEntity)
-	resp.Body.Close()
 
 	// 造一件未决审批（裁决 10 后只剩完成审批）：
 	// alice 建任务（负责人 carol），carol 提交完成申请进入待终审（裁决 11：管理员集合或签）
@@ -4808,14 +4750,15 @@ func TestOkrEditHandoverAndMemberRemoval(t *testing.T) {
 	wantStatus(t, resp, http.StatusOK)
 	pendingReviewID := decodeBody[api.TaskDetail](t, resp).CompletionReviews[0].Id
 
-	// AC-21／AC-61：bob 仍是 KR 负责人，不能被移出，409 里点名待交接的 KR
-	resp = doJSON(t, alice, http.MethodDelete, fmt.Sprintf("%s/%d", membersURL, bobUser.ID), nil)
+	// AC-21／AC-61（裁决 12 后无 KR 负责人职责）：carol 仍是任务负责人，不能被移出，
+	// 409 里点名待交接的任务
+	resp = doJSON(t, alice, http.MethodDelete, fmt.Sprintf("%s/%d", membersURL, carolUser.ID), nil)
 	wantStatus(t, resp, http.StatusConflict)
-	if e := decodeBody[api.Error](t, resp); !strings.Contains(e.Message, "上线自动验收 V2") {
-		t.Fatalf("409 未列出待交接的 KR: %+v", e)
+	if e := decodeBody[api.Error](t, resp); !strings.Contains(e.Message, "联调验证") {
+		t.Fatalf("409 未列出待交接的任务: %+v", e)
 	}
 
-	// S2：bob 被降为只读后不能再编辑本 KR；裁决 11：KR 负责人本就不是终审人，成员终审一律 403
+	// S2：bob 被降为只读后同样不能编辑 KR、不能终审（角色失效即职责失效）
 	resp = doJSON(t, alice, http.MethodPut, fmt.Sprintf("%s/%d", membersURL, bobUser.ID),
 		api.UpdateProjectMemberRoleRequest{Role: api.Viewer})
 	wantStatus(t, resp, http.StatusOK)
@@ -4832,20 +4775,7 @@ func TestOkrEditHandoverAndMemberRemoval(t *testing.T) {
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
 
-	// 裁决 11（#181）：更换 KR 负责人不再转交审批、不发 kr_handover 通知——
-	// 终审件在项目管理员（alice）的待我审批，与 KR 负责人是谁无关。
-	resp = doJSON(t, alice, http.MethodPatch, krURL, api.UpdateKeyResultRequest{OwnerId: &carolUser.ID})
-	wantStatus(t, resp, http.StatusOK)
-	if got := decodeBody[api.KeyResult](t, resp); got.OwnerId == nil || *got.OwnerId != carolUser.ID {
-		t.Fatalf("KR 负责人未更换: %+v", got)
-	}
-	resp = doJSON(t, carol, http.MethodGet, base+"/notifications", nil)
-	wantStatus(t, resp, http.StatusOK)
-	for _, n := range decodeBody[[]api.Notification](t, resp) {
-		if n.Kind == "kr_handover" {
-			t.Fatalf("更换负责人不应再发交接通知: %+v", n)
-		}
-	}
+	// 裁决 11／12：终审件在项目管理员（alice）的待我审批；普通成员不持有终审件。
 	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/my-work", base, created.Id), nil)
 	wantStatus(t, resp, http.StatusOK)
 	work := decodeBody[api.MyWork](t, resp)
@@ -4858,7 +4788,6 @@ func TestOkrEditHandoverAndMemberRemoval(t *testing.T) {
 	if !found {
 		t.Fatalf("终审件应在项目管理员的待我审批: %+v", work.Approvals)
 	}
-	// 新任 KR 负责人（普通成员）不持有终审件
 	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/projects/%d/my-work", base, created.Id), nil)
 	wantStatus(t, resp, http.StatusOK)
 	for _, it := range decodeBody[api.MyWork](t, resp).Approvals {
@@ -4921,8 +4850,8 @@ func TestOkrEditHandoverAndMemberRemoval(t *testing.T) {
 	resp.Body.Close()
 }
 
-// 结构变更直接生效（#172 裁决、§5.2.B）：接收方属关键字段，任务负责人修改立即生效，
-// 无变更单；动作写入任务动态并站内通知所属 KR 负责人（本人修改不另发）。
+// 结构变更直接生效（#172 裁决、§5.2.B）：接收方属关键字段，有编辑权限者修改立即生效，
+// 无变更单；动作写入任务动态（裁决 12，#183：KR 无负责人，原站内通知退场）。
 func TestStructureEditDirect(t *testing.T) {
 	q, pool := setupDB(t)
 	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
@@ -4955,7 +4884,7 @@ func TestStructureEditDirect(t *testing.T) {
 	}
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	kr1 := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
@@ -4977,7 +4906,7 @@ func TestStructureEditDirect(t *testing.T) {
 	if applied.ReceiverScope != api.ReceiverScopeAll {
 		t.Fatalf("接收方配置应立即生效: %+v", applied.ReceiverScope)
 	}
-	// 动作写入任务动态（任务字段修改），并站内通知所属 KR 负责人 bob
+	// 动作写入任务动态（任务字段修改）；裁决 12：不再发字段修改站内通知
 	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
 	wantStatus(t, resp, http.StatusOK)
 	detail := decodeBody[api.TaskDetail](t, resp)
@@ -4992,31 +4921,19 @@ func TestStructureEditDirect(t *testing.T) {
 	}
 	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
 	wantStatus(t, resp, http.StatusOK)
-	notes := decodeBody[[]api.Notification](t, resp)
-	foundNote := false
-	for _, n := range notes {
-		if n.Kind == "task_field_edited" && n.TaskId != nil && *n.TaskId == taskID &&
-			strings.Contains(n.Content, "接收方") && strings.Contains(n.Content, "张三") {
-			foundNote = true
+	for _, n := range decodeBody[[]api.Notification](t, resp) {
+		if n.Kind == "task_field_edited" {
+			t.Fatalf("裁决 12 后不应再发字段修改通知: %+v", n)
 		}
 	}
-	if !foundNote {
-		t.Fatalf("字段修改应站内通知所属 KR 负责人: %+v", notes)
-	}
 
-	// KR 负责人本人（升为管理员后）修改不另发通知
-	before := len(notes)
+	// 管理员（bob 升为管理员后）修改同样直接生效
 	resp = doJSON(t, alice, http.MethodPut, fmt.Sprintf("%s/projects/%d/members/%d", base, created.Id, bobUser.ID),
 		api.UpdateProjectMemberRoleRequest{Role: api.Admin})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
 	resp = doJSON(t, bob, http.MethodPut, receiversURL, api.SetReceiversRequest{Scope: api.ReceiverScopeMembers, UserIds: &[]int64{carolUser.ID}})
 	wantStructureAccepted(t, resp)
-	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
-	wantStatus(t, resp, http.StatusOK)
-	if after := decodeBody[[]api.Notification](t, resp); len(after) != before {
-		t.Fatalf("KR 负责人本人修改不应另发通知: %d → %d", before, len(after))
-	}
 }
 
 // 裁决 H1（#141）：提交完成申请之前，交付物项的新增／删除完全自由、即时生效，不走审批；
@@ -5053,7 +4970,7 @@ func TestDeliverableStructureFree(t *testing.T) {
 	}
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	kr1 := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
@@ -5171,7 +5088,7 @@ func TestCloseTaskOnTerminalTask(t *testing.T) {
 	}
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	kr1 := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
@@ -5249,7 +5166,7 @@ func TestDeliverableFileStateUnique(t *testing.T) {
 	created := decodeBody[api.Project](t, resp)
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &aliceUser.ID}}},
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	kr1 := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
@@ -5377,7 +5294,7 @@ func TestWritePathQueryBudget(t *testing.T) {
 	created := decodeBody[api.Project](t, resp)
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &aliceUser.ID}}},
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	kr1 := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
@@ -5496,7 +5413,7 @@ func TestWritePathAudit(t *testing.T) {
 	// 关系解除也留痕（此前完全无痕的一类）
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &aliceUser.ID}}},
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	kr1 := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
@@ -5560,8 +5477,8 @@ func TestEntityCodesStable(t *testing.T) {
 
 	resp = doJSON(t, alice, http.MethodPost, objectivesURL, api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
 		{Title: sp("O 一"), KeyResults: &[]api.CreateKeyResultInput{
-			{Description: "KR 一一", OwnerId: &aliceUser.ID},
-			{Description: "KR 一二", OwnerId: &aliceUser.ID},
+			{Description: "KR 一一"},
+			{Description: "KR 一二"},
 		}},
 		{Title: sp("O 二")},
 		{Title: sp("O 三")},
@@ -5756,7 +5673,7 @@ func TestProjectSettingsThresholds(t *testing.T) {
 	// 建一个停在关闭申请审批的任务（#172 裁决：变更类审批只剩关闭申请），提交时间往前拨 2 天
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("按时推进"), KeyResults: &[]api.CreateKeyResultInput{{Description: "变更及时审批", OwnerId: &bobUser.ID}}},
+			{Title: sp("按时推进"), KeyResults: &[]api.CreateKeyResultInput{{Description: "变更及时审批"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	kr1 := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
@@ -5893,7 +5810,7 @@ func TestTaskParticipants(t *testing.T) {
 	}
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("协作到位"), KeyResults: &[]api.CreateKeyResultInput{{Description: "关键材料按时产出", OwnerId: &bobUser.ID}}},
+			{Title: sp("协作到位"), KeyResults: &[]api.CreateKeyResultInput{{Description: "关键材料按时产出"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
@@ -6020,7 +5937,7 @@ func TestResultUpdateFlow(t *testing.T) {
 	}
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("成果可持续更新"), KeyResults: &[]api.CreateKeyResultInput{{Description: "交付物随迭代更新", OwnerId: &bobUser.ID}}},
+			{Title: sp("成果可持续更新"), KeyResults: &[]api.CreateKeyResultInput{{Description: "交付物随迭代更新"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	okr := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives
@@ -6298,7 +6215,7 @@ func TestPublicProjectImplicitViewer(t *testing.T) {
 	resp.Body.Close()
 	resp = doJSON(t, alice, http.MethodPost, projectURL+"/objectives",
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
-			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收", OwnerId: &bobUser.ID}}},
+			{Title: sp("提升交付质量"), KeyResults: &[]api.CreateKeyResultInput{{Description: "上线自动验收"}}},
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	kr1 := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id

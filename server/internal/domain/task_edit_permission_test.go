@@ -8,8 +8,7 @@ import (
 // 裁决 10（#180）：任务配置类判定收归项目管理员（含项目负责人），裁决 D2（#137）四角色口径作废；
 // 负责人保留的动作只剩交付物项、任务文件与成果审核人配置（上传链路），KR 负责人与创建人全部出局。
 func TestTaskEditPermissionConvergence(t *testing.T) {
-	kr := int64(7)
-	pooled := TaskFacts{Status: TaskInProgress, CreatorID: 3, OwnerID: 5, KrOwnerID: &kr}
+	pooled := TaskFacts{Status: TaskInProgress, CreatorID: 3, OwnerID: 5}
 	member := Actor{Role: RoleMember}
 	admin := Actor{Role: RoleAdmin}
 	owner := Actor{IsOwner: true}
@@ -62,8 +61,7 @@ func TestTaskEditPermissionConvergence(t *testing.T) {
 
 // 裁决 10（#180）：关键字段直接修改收归项目管理员——负责人与 KR 负责人不再可改。
 func TestTaskEditRuleAdminOnly(t *testing.T) {
-	kr := int64(7)
-	pooled := TaskFacts{Status: TaskInProgress, CreatorID: 3, OwnerID: 5, KrOwnerID: &kr}
+	pooled := TaskFacts{Status: TaskInProgress, CreatorID: 3, OwnerID: 5}
 	if err := TaskEditRule(Actor{Role: RoleMember}, 5, pooled); !errors.Is(err, ErrChangeForbidden) {
 		t.Fatalf("负责人修改字段应被拒: %v", err)
 	}

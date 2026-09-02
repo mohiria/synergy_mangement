@@ -16,8 +16,8 @@ func TestMyWorkDropsCancelledTaskItems(t *testing.T) {
 	facts := MyWorkFacts{
 		UserID: me, Now: now, Actor: Actor{Role: RoleMember},
 		Tasks: []WorkTaskFact{
-			{ID: 10, Name: "已关闭任务", DisplayStatus: TaskCancelled, OwnerID: me, CreatorID: me, KrOwnerID: &me, EndDate: &end},
-			{ID: 11, Name: "在办任务", DisplayStatus: TaskInProgress, OwnerID: me, CreatorID: me, KrOwnerID: &me, EndDate: &end},
+			{ID: 10, Name: "已关闭任务", DisplayStatus: TaskCancelled, OwnerID: me, CreatorID: me, EndDate: &end},
+			{ID: 11, Name: "在办任务", DisplayStatus: TaskInProgress, OwnerID: me, CreatorID: me, EndDate: &end},
 		},
 		FinalReviewerIDs:   []int64{me},
 		FinalReviewerNames: []string{"我"},

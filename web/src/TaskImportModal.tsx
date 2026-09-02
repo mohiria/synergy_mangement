@@ -142,7 +142,7 @@ export default function TaskImportModal({
         </>
       )}
       previewNote={
-        <div className="notice">导入后任务直接进入正式任务池（初始状态未开始）；所属 KR 负责人会收到入池通知。</div>
+        <div className="notice">导入后任务直接进入正式任务池（初始状态未开始）；入池记录在任务动态。</div>
       }
       successMessage={(structure) =>
         `已导入 ${structure.reduce((n, g) => n + g.tasks.length, 0)} 项任务，已直接入池`

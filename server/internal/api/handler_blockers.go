@@ -122,7 +122,7 @@ func (s *Server) projectRemindTargets(ctx context.Context, projectID int64) ([]d
 	tasks := make(map[int64]domain.RemindTaskFact, len(facts.Tasks))
 	for _, t := range facts.Tasks {
 		tasks[t.ID] = domain.RemindTaskFact{
-			Name: t.Name, OwnerID: t.OwnerID, KrOwnerID: t.KrOwnerID,
+			Name: t.Name, OwnerID: t.OwnerID,
 			End: t.EndDate, ImpactNote: impact[t.ID],
 		}
 	}
@@ -187,15 +187,13 @@ func (s *Server) projectBlockerFacts(ctx context.Context, projectID int64) (doma
 		return domain.BlockerFacts{}, err
 	}
 	facts := domain.BlockerFacts{Now: s.now(), ApprovalTimeoutDays: settings.ApprovalTimeoutDays}
-	krOwnerNameByTask := make(map[int64]string, len(taskRows))
 	codeByTask := make(map[int64]string, len(taskRows))
 	for _, t := range taskRows {
-		krOwnerNameByTask[t.ID] = t.KrOwnerName.String
 		codeByTask[t.ID] = domain.TaskCode(int(t.ObjectiveCodeSeq), int(t.KrCodeSeq), int(t.CodeSeq))
 		tf := domain.BlockerTaskFact{
 			ID: t.ID, Name: t.Name, Status: t.Status,
 			OwnerID: t.OwnerID, OwnerName: t.OwnerName,
-			KrID: t.KeyResultID, KrOwnerID: fromPgInt8(t.KrOwnerID), KrOwnerName: t.KrOwnerName.String,
+			KrID: t.KeyResultID,
 		}
 		if t.StartDate.Valid {
 			start := t.StartDate.Time

@@ -10,7 +10,6 @@ import (
 func TestMyWorkExcludesReferenceInputs(t *testing.T) {
 	now := time.Date(2026, 8, 28, 10, 0, 0, 0, time.UTC)
 	owner, upstreamOwner := int64(2), int64(3)
-	kr := i64(9)
 
 	cases := []struct {
 		name        string
@@ -25,7 +24,7 @@ func TestMyWorkExcludesReferenceInputs(t *testing.T) {
 			g := MyWork(MyWorkFacts{
 				UserID: owner, Actor: Actor{Role: RoleMember}, Now: now,
 				Tasks: []WorkTaskFact{
-					{ID: 7, Name: "在办任务", DisplayStatus: TaskInProgress, OwnerID: owner, CreatorID: owner, KrOwnerID: kr},
+					{ID: 7, Name: "在办任务", DisplayStatus: TaskInProgress, OwnerID: owner, CreatorID: owner},
 				},
 				Upstreams: []WorkUpstreamFact{{
 					EdgeID: 70, TargetTaskID: 7, TargetName: "在办任务", TargetOwnerID: owner,
@@ -45,7 +44,6 @@ func TestMyWorkExcludesReferenceInputs(t *testing.T) {
 func TestMyWorkUpstreamWaitingScope(t *testing.T) {
 	now := time.Date(2026, 8, 28, 10, 0, 0, 0, time.UTC)
 	me, upstreamOwner := int64(1), int64(2)
-	kr := i64(9)
 
 	cases := []struct {
 		name         string
@@ -65,8 +63,8 @@ func TestMyWorkUpstreamWaitingScope(t *testing.T) {
 			g := MyWork(MyWorkFacts{
 				UserID: me, Actor: Actor{Role: RoleMember}, Now: now,
 				Tasks: []WorkTaskFact{
-					{ID: 1, Name: "我的任务", DisplayStatus: tc.targetStatus, OwnerID: me, CreatorID: me, KrOwnerID: kr},
-					{ID: 2, Name: "上游任务", DisplayStatus: tc.sourceStatus, OwnerID: upstreamOwner, CreatorID: upstreamOwner, KrOwnerID: kr},
+					{ID: 1, Name: "我的任务", DisplayStatus: tc.targetStatus, OwnerID: me, CreatorID: me},
+					{ID: 2, Name: "上游任务", DisplayStatus: tc.sourceStatus, OwnerID: upstreamOwner, CreatorID: upstreamOwner},
 				},
 				Upstreams: []WorkUpstreamFact{{
 					EdgeID: 50, TargetTaskID: 1, TargetName: "我的任务", TargetOwnerID: me,
@@ -117,7 +115,7 @@ func TestMyWorkApprovalTimeoutFromProjectSettings(t *testing.T) {
 				UserID: me, Actor: Actor{Role: RoleMember}, Now: now,
 				ApprovalTimeoutDays: tc.timeoutDays,
 				Tasks: []WorkTaskFact{
-					{ID: 1, Name: "待改任务", DisplayStatus: TaskInProgress, OwnerID: submitter, CreatorID: submitter, KrOwnerID: &me},
+					{ID: 1, Name: "待改任务", DisplayStatus: TaskInProgress, OwnerID: submitter, CreatorID: submitter},
 				},
 				FinalReviewerIDs:   []int64{me},
 				FinalReviewerNames: []string{"我"},

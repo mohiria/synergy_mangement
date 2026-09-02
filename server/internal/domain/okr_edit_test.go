@@ -2,16 +2,16 @@ package domain
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
-// AC-65：O 只有项目管理员可编辑；KR 由项目管理员或本 KR 负责人编辑。
+// AC-65（裁决 12，#183 修订）：O 与 KR 均只有项目管理员（含项目负责人）可编辑。
 func TestOkrEditPermissions(t *testing.T) {
 	admin := Actor{Role: RoleAdmin}
 	owner := Actor{IsOwner: true}
 	member := Actor{Role: RoleMember}
 	viewer := Actor{Role: RoleViewer}
-	krOwner := int64(7)
 
 	if !CanEditObjective(admin) || !CanEditObjective(owner) {
 		t.Fatal("项目管理员与项目负责人应可编辑 O")
@@ -19,17 +19,14 @@ func TestOkrEditPermissions(t *testing.T) {
 	if CanEditObjective(member) || CanEditObjective(viewer) {
 		t.Fatal("项目成员与访客不应可编辑 O")
 	}
-	if !CanEditKeyResult(admin, 9, &krOwner) {
-		t.Fatal("项目管理员应可编辑任意 KR")
+	if !CanEditKeyResult(admin) || !CanEditKeyResult(owner) {
+		t.Fatal("项目管理员与项目负责人应可编辑 KR")
 	}
-	if !CanEditKeyResult(member, krOwner, &krOwner) {
-		t.Fatal("KR 负责人应可编辑本人负责的 KR")
+	if CanEditKeyResult(member) {
+		t.Fatal("普通项目成员不应可编辑 KR（裁决 12）")
 	}
-	if CanEditKeyResult(member, 9, &krOwner) {
-		t.Fatal("非本人负责的 KR 项目成员不应可编辑")
-	}
-	if CanEditKeyResult(viewer, krOwner, &krOwner) {
-		t.Fatal("访客即便挂着 KR 负责人也不应可编辑")
+	if CanEditKeyResult(viewer) {
+		t.Fatal("访客不应可编辑 KR")
 	}
 }
 
@@ -67,39 +64,23 @@ func TestOkrDeleteRules(t *testing.T) {
 	}
 }
 
-// AC-61：KR 负责人不可置空；更换负责人时继任者必须是非只读项目成员。
+// AC-65（裁决 12，#183 修订）：KR 编辑只剩描述与量化指标两个结构字段。
 func TestValidateKeyResultUpdate(t *testing.T) {
-	roleOf := func(id int64) string {
-		switch id {
-		case 5, 7:
-			return RoleMember
-		case 9:
-			return RoleViewer
-		}
-		return ""
-	}
 	desc := "上线自动验收"
-	if err := ValidateKeyResultUpdate(KeyResultUpdate{Description: &desc}, roleOf); err != nil {
+	if err := ValidateKeyResultUpdate(KeyResultUpdate{Description: &desc}); err != nil {
 		t.Fatalf("只改描述应通过: %v", err)
 	}
 	empty := "   "
-	if err := ValidateKeyResultUpdate(KeyResultUpdate{Description: &empty}, roleOf); !errors.Is(err, ErrKrDescriptionEmpty) {
+	if err := ValidateKeyResultUpdate(KeyResultUpdate{Description: &empty}); !errors.Is(err, ErrKrDescriptionEmpty) {
 		t.Fatalf("描述不能改空: %v", err)
 	}
-	newOwner := int64(7)
-	if err := ValidateKeyResultUpdate(KeyResultUpdate{OwnerID: &newOwner}, roleOf); err != nil {
-		t.Fatalf("换成项目成员应通过: %v", err)
+	long := strings.Repeat("述", 201)
+	if err := ValidateKeyResultUpdate(KeyResultUpdate{Description: &long}); !errors.Is(err, ErrKrDescriptionTooLong) {
+		t.Fatalf("描述超长应被拒: %v", err)
 	}
-	viewer := int64(9)
-	if err := ValidateKeyResultUpdate(KeyResultUpdate{OwnerID: &viewer}, roleOf); !errors.Is(err, ErrKrOwnerNotEligible) {
-		t.Fatalf("不能把访客任命为 KR 负责人: %v", err)
-	}
-	if err := ValidateKeyResultUpdate(KeyResultUpdate{ClearOwner: true}, roleOf); !errors.Is(err, ErrKrOwnerRequired) {
-		t.Fatalf("KR 负责人不可置空: %v", err)
-	}
-	start, end := day("2026-09-10"), day("2026-09-01")
-	if err := ValidateKeyResultUpdate(KeyResultUpdate{Start: start, End: end}, roleOf); !errors.Is(err, ErrKrPeriodInverted) {
-		t.Fatalf("周期倒挂应被拒: %v", err)
+	metric := strings.Repeat("标", 101)
+	if err := ValidateKeyResultUpdate(KeyResultUpdate{Metric: &metric}); !errors.Is(err, ErrKrMetricTooLong) {
+		t.Fatalf("量化指标超长应被拒: %v", err)
 	}
 }
 
@@ -108,19 +89,17 @@ func TestMemberRemovalBlockedByDuties(t *testing.T) {
 	if err := RemoveMemberRule(MemberDuties{}); err != nil {
 		t.Fatalf("没有职责占位应可移出: %v", err)
 	}
-	duties := MemberDuties{KeyResults: []string{"上线自动验收"}, Tasks: []string{"联调验证"}}
+	duties := MemberDuties{Tasks: []string{"联调验证"}}
 	err := RemoveMemberRule(duties)
 	if !errors.Is(err, ErrMemberHasDuties) {
-		t.Fatalf("仍在担任 KR 负责人不应被移出: %v", err)
+		t.Fatalf("仍在担任任务负责人不应被移出: %v", err)
 	}
 	summary := MemberDutiesSummary(duties)
 	if summary == "" {
 		t.Fatal("应给出待交接清单")
 	}
-	for _, want := range []string{"上线自动验收", "联调验证"} {
-		if !contains(summary, want) {
-			t.Fatalf("待交接清单缺少 %q: %s", want, summary)
-		}
+	if !contains(summary, "联调验证") {
+		t.Fatalf("待交接清单缺少 %q: %s", "联调验证", summary)
 	}
 	// 只挂成果审核人／接收方同样算职责占位（#178：输入对接人职责随输入请求退场）。
 	for _, d := range []MemberDuties{

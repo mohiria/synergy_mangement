@@ -57,10 +57,9 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 			ID:            t.ID,
 			Name:          t.Name,
 			DisplayStatus: domain.DeriveDisplayStatus(t.Status, unreadyNoteByTask[t.ID] != ""),
-			OwnerID:       t.OwnerID,
-			CreatorID:     t.CreatedBy,
-			KrOwnerID:     fromPgInt8(t.KrOwnerID),
-			UnreadyNote:   unreadyNoteByTask[t.ID],
+			OwnerID:     t.OwnerID,
+			CreatorID:   t.CreatedBy,
+			UnreadyNote: unreadyNoteByTask[t.ID],
 		}
 		if t.EndDate.Valid {
 			end := t.EndDate.Time

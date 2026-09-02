@@ -116,7 +116,7 @@ var contentStateLabels = map[string]string{
 
 // DeriveContentState 由当前内容、候选内容与未决完成申请派生内容状态（读时派生，不落库）。
 // 「在审」以存在未决完成申请为准，不以候选文件在不在为准（§5.3、AC-33、AC-67）：
-// 传了没提交只是「待提交审核」，说成审核中会让 KR 负责人去找根本不存在的待办审批件。
+// 传了没提交只是「待提交审核」，说成审核中会让审批人去找根本不存在的待办审批件。
 func DeriveContentState(hasCurrent, hasCandidate, hasPendingReview bool) string {
 	switch {
 	case hasCandidate && !hasPendingReview:

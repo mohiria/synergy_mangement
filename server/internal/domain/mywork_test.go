@@ -13,8 +13,6 @@ import (
 func TestMyWorkGrouping(t *testing.T) {
 	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
 	me := int64(5)
-	krOwnerMe := i64(5)
-	krOwnerOther := i64(7)
 	old := now.AddDate(0, 0, -5)
 	recent := now.AddDate(0, 0, -1)
 	upstreamEnd := now.AddDate(0, 0, -5)
@@ -24,15 +22,15 @@ func TestMyWorkGrouping(t *testing.T) {
 		Now:    now,
 		Tasks: []WorkTaskFact{
 			// 本人负责进行中 → 待我处理
-			{ID: 1, Name: "执行任务", DisplayStatus: TaskInProgress, OwnerID: me, CreatorID: 3, KrOwnerID: krOwnerOther},
+			{ID: 1, Name: "执行任务", DisplayStatus: TaskInProgress, OwnerID: me, CreatorID: 3},
 			// 本人负责等待输入 → 待我处理（带上游未就绪标记），上游进等待他人
-			{ID: 2, Name: "被卡任务", DisplayStatus: TaskWaitingInput, OwnerID: me, CreatorID: me, KrOwnerID: krOwnerOther, UnreadyNote: "上游未就绪：缺 现场数据包"},
+			{ID: 2, Name: "被卡任务", DisplayStatus: TaskWaitingInput, OwnerID: me, CreatorID: me, UnreadyNote: "上游未就绪：缺 现场数据包"},
 			// 本人负责未开始 → 待我处理（裁决 10：关闭申请机制退场，无退回注记）
-			{ID: 3, Name: "未开始任务", DisplayStatus: TaskNotStarted, OwnerID: me, CreatorID: me, KrOwnerID: krOwnerOther},
+			{ID: 3, Name: "未开始任务", DisplayStatus: TaskNotStarted, OwnerID: me, CreatorID: me},
 			// 本人负责、完成申请审批中 → 只在等待他人（状态排除出待我处理）
-			{ID: 4, Name: "终审中任务", DisplayStatus: TaskInReview, OwnerID: me, CreatorID: me, KrOwnerID: krOwnerOther},
+			{ID: 4, Name: "终审中任务", DisplayStatus: TaskInReview, OwnerID: me, CreatorID: me},
 			// 他人的任务 → 不出现
-			{ID: 6, Name: "别人的任务", DisplayStatus: TaskInProgress, OwnerID: 9, CreatorID: 9, KrOwnerID: krOwnerOther},
+			{ID: 6, Name: "别人的任务", DisplayStatus: TaskInProgress, OwnerID: 9, CreatorID: 9},
 		},
 		// 裁决 11：终审人为项目管理员集合——本例我是管理员，全部待终审申请进待我审批。
 		FinalReviewerIDs:   []int64{me},
@@ -53,11 +51,11 @@ func TestMyWorkGrouping(t *testing.T) {
 		},
 		Blockers: []Blocker{
 			// 我是待行动人 → 与我相关的卡点
-			{Key: "task_overdue:40", TaskID: 40, TaskName: "上游任务", ActionOwnerIDs: []int64{me}, TaskOwnerID: me, KrOwnerID: krOwnerOther, Kind: BlockerTaskOverdue, Missing: "按期完成任务"},
-			// 我负责的 KR 下的卡点 → 与我相关的卡点
-			{Key: "interlock:41", TaskID: 41, TaskName: "KR 下任务", ActionOwnerIDs: []int64{9}, TaskOwnerID: 9, KrOwnerID: krOwnerMe, Kind: BlockerInterlock, Missing: "打破硬前置互锁"},
+			{Key: "task_overdue:40", TaskID: 40, TaskName: "上游任务", ActionOwnerIDs: []int64{me}, TaskOwnerID: me, Kind: BlockerTaskOverdue, Missing: "按期完成任务"},
+			// 裁决 12（#183）：KR 无负责人，「我负责的 KR 下的卡点」相关性随之删除 → 不出现
+			{Key: "interlock:41", TaskID: 41, TaskName: "KR 下任务", ActionOwnerIDs: []int64{9}, TaskOwnerID: 9, Kind: BlockerInterlock, Missing: "打破硬前置互锁"},
 			// 与我无关 → 不出现
-			{Key: "task_overdue:44", TaskID: 44, TaskName: "他人任务", ActionOwnerIDs: []int64{9}, TaskOwnerID: 9, KrOwnerID: krOwnerOther, Kind: BlockerTaskOverdue, Missing: "按期完成任务"},
+			{Key: "task_overdue:44", TaskID: 44, TaskName: "他人任务", ActionOwnerIDs: []int64{9}, TaskOwnerID: 9, Kind: BlockerTaskOverdue, Missing: "按期完成任务"},
 		},
 		Upstreams: []WorkUpstreamFact{
 			// 我任务的未就绪必要上游 → 等待他人（#174：带上游任务截止）
@@ -126,9 +124,10 @@ func TestMyWorkGrouping(t *testing.T) {
 		}
 	}
 
-	// 与我相关的卡点：61、62（63 同源去重、64 已解除）= 2 条
-	if len(g.Blockers) != 2 {
-		t.Fatalf("卡点数量 = %d, want 2: %+v", len(g.Blockers), kinds(g.Blockers))
+	// 与我相关的卡点：只剩 40（我是待行动人兼任务负责人）；
+	// 41 的 KR 负责人相关性随裁决 12 删除，44 与我无关 = 1 条。
+	if len(g.Blockers) != 1 {
+		t.Fatalf("卡点数量 = %d, want 1: %+v", len(g.Blockers), kinds(g.Blockers))
 	}
 
 	// 待接收：接收方建模未落地，恒为空数组
@@ -227,11 +226,11 @@ func TestMyWorkBlockerStageUsesKindLabel(t *testing.T) {
 // 身份卡「当前职责」（模块 PRD §3.1；#69）：由成员仍占着的职责事实派生，
 // 顺序固定，从项目级到事项级；没有职责时给明确文案，不留空白。
 func TestWorkResponsibilities(t *testing.T) {
+	// 裁决 12（#183）：KR 无负责人，「KR 负责人」职责随之删除。
 	full := MemberDuties{
-		KeyResults: []string{"上线自动验收"},
-		Tasks:      []string{"输出验收方案"},
-		Reviewers:  []string{"回归验证分析"},
-		Receivers:  []string{"外部口径汇总"},
+		Tasks:     []string{"输出验收方案"},
+		Reviewers: []string{"回归验证分析"},
+		Receivers: []string{"外部口径汇总"},
 	}
 	cases := []struct {
 		name          string
@@ -258,10 +257,10 @@ func TestWorkResponsibilities(t *testing.T) {
 			projectOwner:  true,
 			pendingInvite: true,
 			want: []string{
-				"项目负责人", "KR 负责人", "任务负责人",
+				"项目负责人", "任务负责人",
 				"成果审核人", "接收方", "被邀请人",
 			},
-			wantLabel: "项目负责人、KR 负责人、任务负责人、成果审核人、接收方、被邀请人",
+			wantLabel: "项目负责人、任务负责人、成果审核人、接收方、被邀请人",
 		},
 		{
 			name:          "只有待处理邀请也算一项职责",

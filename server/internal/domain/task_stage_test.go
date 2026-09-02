@@ -6,7 +6,7 @@ import "testing"
 // 裁决 13，#182：审核中的当前环节从完成申请单读取）。
 func TestCurrentStage(t *testing.T) {
 	facts := func(status string) TaskFacts {
-		return TaskFacts{Status: status, CreatorID: 3, OwnerID: 5, KrOwnerID: i64(7)}
+		return TaskFacts{Status: status, CreatorID: 3, OwnerID: 5}
 	}
 	inReview := func(stage string) TaskFacts {
 		f := facts(TaskInReview)

@@ -39,12 +39,10 @@ func TaskInviteNotification(inviterName, krCode, krDescription, note string) str
 	return content
 }
 
-// CanInviteForKr 判定能否为某 KR 发出任务创建邀请：该 KR 负责人、项目管理员或项目负责人（词汇表「任务创建邀请」）。
-func CanInviteForKr(a Actor, userID int64, krOwnerID *int64) bool {
-	if CanEditProject(a) {
-		return true
-	}
-	return krOwnerID != nil && *krOwnerID == userID
+// CanInviteForKr 判定能否为某 KR 发出任务创建邀请（裁决 12，#183：KR 无负责人，
+// 收归项目管理员与项目负责人——与任务创建权同口径）。
+func CanInviteForKr(a Actor) bool {
+	return CanEditProject(a)
 }
 
 // ValidateInvitees 校验受邀成员：非只读项目成员、不能邀请自己（原型 inviteMemberCandidates）。

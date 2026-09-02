@@ -93,7 +93,7 @@ export default function ArtifactsPage({
     load();
   }, [load]);
 
-  // 分组维度是 KR（AC-17）：一个 KR 一张表，组头给出 KR 负责人与交付物数量。
+  // 分组维度是 KR（AC-17）：一个 KR 一张表，组头给出交付物数量（裁决 12：KR 无负责人）。
   const groups = useMemo<Group[]>(() => {
     const kw = search.trim().toLowerCase();
     const out: Group[] = [];
@@ -332,8 +332,7 @@ export default function ArtifactsPage({
                   {kr.code} · {kr.description}
                 </h3>
                 <span className="muted">
-                  {objective.code} · KR 负责人 {kr.ownerName || "未指定"} ·{" "}
-                  {kr.deliverableCount} 项交付物
+                  {objective.code} · {kr.deliverableCount} 项交付物
                 </span>
               </div>
               <div className="data-table-wrap">

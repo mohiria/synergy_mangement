@@ -2,7 +2,6 @@ package domain
 
 import (
 	"errors"
-	"strings"
 	"testing"
 )
 
@@ -10,7 +9,7 @@ import (
 // 可编辑状态：未开始／等待输入／进行中；关闭申请机制退场后无审批互斥。
 func TestTaskEditRule(t *testing.T) {
 	facts := func(status string) TaskFacts {
-		return TaskFacts{Status: status, CreatorID: 3, OwnerID: 5, KrOwnerID: i64(7)}
+		return TaskFacts{Status: status, CreatorID: 3, OwnerID: 5}
 	}
 	cases := []struct {
 		name  string
@@ -39,22 +38,5 @@ func TestTaskEditRule(t *testing.T) {
 	}
 }
 
-// #172：字段修改直接生效后站内通知所属 KR 负责人（本人修改时不另发），与入池通知同模式。
-func TestFieldEditNotify(t *testing.T) {
-	kr := i64(7)
-	if got := FieldEditNotifyTarget(5, kr); got == nil || *got != 7 {
-		t.Fatalf("他人修改应通知 KR 负责人: %v", got)
-	}
-	if got := FieldEditNotifyTarget(7, kr); got != nil {
-		t.Fatalf("KR 负责人本人修改不另发: %v", got)
-	}
-	if got := FieldEditNotifyTarget(5, nil); got != nil {
-		t.Fatalf("KR 无负责人时不发: %v", got)
-	}
-	msg := FieldEditNotification("张三", "现场数据采集", []string{"任务名称", "截止时间"})
-	for _, want := range []string{"张三", "现场数据采集", "任务名称", "截止时间"} {
-		if !strings.Contains(msg, want) {
-			t.Fatalf("通知内容缺少 %q: %q", want, msg)
-		}
-	}
-}
+// 裁决 12（#183）：KR 负责人退场，原 #172 字段修改站内通知机制删除——
+// 修改事实只体现在任务动态（ActivityFieldEdited），此处不再有通知派生可测。

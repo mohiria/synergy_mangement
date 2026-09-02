@@ -75,8 +75,7 @@ ORDER BY df.id;
 -- name: LatestCompletionReviewsByProject :many
 -- 每个任务最近一次完成申请（我的工作分组用），含任务事实。
 SELECT DISTINCT ON (cr.task_id) cr.*,
-    t.name AS task_name, t.owner_id AS task_owner_id, t.end_date AS task_end_date,
-    k.owner_id AS kr_owner_id
+    t.name AS task_name, t.owner_id AS task_owner_id, t.end_date AS task_end_date
 FROM completion_reviews cr
 JOIN tasks t ON t.id = cr.task_id
 JOIN key_results k ON k.id = t.key_result_id

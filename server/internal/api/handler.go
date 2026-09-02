@@ -557,8 +557,8 @@ func (s *Server) RemoveProjectMember(w http.ResponseWriter, r *http.Request, pro
 		writeForbidden(w)
 		return
 	}
-	// AC-21／AC-61：仍在承担职责的人不能被移出——KR 负责人一走，待终审的完成申请
-	// 就再也无人可决策。先列清待交接项，让管理员知道要先做什么。
+	// AC-21／AC-61：仍在承担职责的人不能被移出——负责人一走，事项就再也无人可处理。
+	// 先列清待交接项，让管理员知道要先做什么。
 	duties, err := s.memberDuties(r.Context(), projectId, userId)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -586,16 +586,9 @@ func (s *Server) RemoveProjectMember(w http.ResponseWriter, r *http.Request, pro
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// memberDuties 汇总某成员在项目里仍占着的职责（AC-21、AC-61）。
+// memberDuties 汇总某成员在项目里仍占着的职责（AC-21、AC-61；裁决 12，#183：无 KR 负责人职责）。
 func (s *Server) memberDuties(ctx context.Context, projectID, userID int64) (domain.MemberDuties, error) {
 	out := domain.MemberDuties{}
-	krs, err := s.q.ListKeyResultsOwnedBy(ctx, store.ListKeyResultsOwnedByParams{ProjectID: projectID, OwnerID: pgtype.Int8{Int64: userID, Valid: true}})
-	if err != nil {
-		return out, err
-	}
-	for _, k := range krs {
-		out.KeyResults = append(out.KeyResults, k.Description)
-	}
 	tasks, err := s.q.ListTasksOwnedBy(ctx, store.ListTasksOwnedByParams{ProjectID: projectID, OwnerID: userID})
 	if err != nil {
 		return out, err
@@ -660,17 +653,8 @@ func (s *Server) CreateOkrBatch(w http.ResponseWriter, r *http.Request, projectI
 		writeForbidden(w)
 		return
 	}
-	members, err := s.q.ListProjectMembers(r.Context(), projectId)
-	if err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	roleByID := make(map[int64]string, len(members))
-	for _, m := range members {
-		roleByID[m.UserID] = m.Role
-	}
 	items := toOkrBatchItems(req.Items)
-	if err := domain.ValidateOkrBatch(items, func(id int64) string { return roleByID[id] }); err != nil {
+	if err := domain.ValidateOkrBatch(items); err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_okr", Message: err.Error()})
 		return
 	}
@@ -704,6 +688,7 @@ func (s *Server) CreateOkrBatch(w http.ResponseWriter, r *http.Request, projectI
 				ProjectID:   projectId,
 				Title:       item.Title,
 				Description: item.Description,
+				CreatedBy:   pgtype.Int8{Int64: currentUser(r).ID, Valid: true},
 			})
 			if err != nil {
 				writeInternalError(w, r, err)
@@ -711,31 +696,17 @@ func (s *Server) CreateOkrBatch(w http.ResponseWriter, r *http.Request, projectI
 			}
 			objectiveID = o.ID
 		}
+		// 裁决 12（#183）：KR 无负责人，#125 指派通知随之退场；创建人落 created_by。
 		for _, k := range item.KeyResults {
 			_, err := qtx.CreateKeyResult(r.Context(), store.CreateKeyResultParams{
 				ObjectiveID: objectiveID,
 				Description: k.Description,
 				Metric:      k.Metric,
-				OwnerID:     toPgInt8(k.OwnerID),
-				StartDate:   toPgDateFromTime(k.Start),
-				EndDate:     toPgDateFromTime(k.End),
+				CreatedBy:   pgtype.Int8{Int64: currentUser(r).ID, Valid: true},
 			})
 			if err != nil {
 				writeInternalError(w, r, err)
 				return
-			}
-			// #125「保存并通知负责人」：本次指派的 KR 负责人逐条收站内通知，本人不收；
-			// 与创建同一事务，创建失败不发通知。
-			if k.OwnerID != nil && *k.OwnerID != currentUser(r).ID {
-				if _, err := qtx.CreateNotification(r.Context(), store.CreateNotificationParams{
-					UserID:    *k.OwnerID,
-					Kind:      domain.NotifyOkrAssigned,
-					Content:   domain.OkrAssignedContent(k.Description),
-					ProjectID: pgtype.Int8{Int64: projectId, Valid: true},
-				}); err != nil {
-					writeInternalError(w, r, err)
-					return
-				}
 			}
 		}
 	}
@@ -748,11 +719,7 @@ func (s *Server) CreateOkrBatch(w http.ResponseWriter, r *http.Request, projectI
 		writeInternalError(w, r, err)
 		return
 	}
-	// 已通知人数按人去重（规则在 domain），提示「已通知 N 名负责人」用。
-	writeJSON(w, http.StatusCreated, CreateOkrBatchResponse{
-		Objectives:    objectivesResp,
-		NotifiedCount: len(domain.OkrNotifyTargets(currentUser(r).ID, items)),
-	})
+	writeJSON(w, http.StatusCreated, CreateOkrBatchResponse{Objectives: objectivesResp})
 }
 
 // okrList 组装 O 含下属 KR 的层级列表（按排序返回）。
@@ -844,10 +811,8 @@ func (s *Server) okrList(ctx context.Context, projectID int64, actor domain.Acto
 			RiskLevelLabel: domain.RiskLevelLabel(risk.Level),
 			Description:    k.Description,
 			Metric:         optString(k.Metric),
-			OwnerId:        fromPgInt8(k.OwnerID),
-			OwnerName:      fromPgText(k.OwnerName),
-			StartDate:      fromPgDate(k.StartDate),
-			EndDate:        fromPgDate(k.EndDate),
+			CreatedByName:  fromPgText(k.CreatedByName),
+			CreatedAt:      timePtr(k.CreatedAt),
 			RiskLevel:      RiskLevel(risk.Level),
 			SortOrder:      int(k.SortOrder),
 			ProgressSummary: &ProgressSummary{
@@ -872,7 +837,7 @@ func (s *Server) okrList(ctx context.Context, projectID int64, actor domain.Acto
 				return &n
 			}(),
 			TaskCount: intPtr(taskCounts[k.ID]),
-			CanEdit:   boolPtr(domain.CanEditKeyResult(actor, userID, fromPgInt8(k.OwnerID))),
+			CanEdit:   boolPtr(domain.CanEditKeyResult(actor)),
 			CanDelete: boolPtr(domain.CanDeleteKeyResult(actor, taskCounts[k.ID])),
 			// 风险队列副行（#122）：KR 下风险最高的一条卡点，挑选规则在 domain。
 			TopBlocker: func() *TopBlocker {
@@ -912,6 +877,8 @@ func (s *Server) okrList(ctx context.Context, projectID int64, actor domain.Acto
 			Code:           domain.ObjectiveCode(int(o.CodeSeq)),
 			Title:          o.Title,
 			Description:    optString(o.Description),
+			CreatedByName:  fromPgText(o.CreatedByName),
+			CreatedAt:      timePtr(o.CreatedAt),
 			SortOrder:      int(o.SortOrder),
 			KeyResults:     kr,
 			CanEdit:        boolPtr(domain.CanEditObjective(actor)),
@@ -934,12 +901,7 @@ func toOkrBatchItems(reqItems []CreateOkrBatchItem) []domain.OkrBatchItem {
 		}
 		if it.KeyResults != nil {
 			for _, k := range *it.KeyResults {
-				kr := domain.NewKeyResult{
-					Description: strings.TrimSpace(k.Description),
-					OwnerID:     k.OwnerId,
-					Start:       toTimePtr(k.StartDate),
-					End:         toTimePtr(k.EndDate),
-				}
+				kr := domain.NewKeyResult{Description: strings.TrimSpace(k.Description)}
 				if k.Metric != nil {
 					kr.Metric = strings.TrimSpace(*k.Metric)
 				}
@@ -1053,6 +1015,15 @@ func fromPgText(t pgtype.Text) *string {
 		return nil
 	}
 	return &t.String
+}
+
+// timePtr 把 pgtype.Timestamptz 装进契约的可选时间字段。
+func timePtr(t pgtype.Timestamptz) *time.Time {
+	if !t.Valid {
+		return nil
+	}
+	v := t.Time
+	return &v
 }
 
 // boolPtr／intPtr 把派生标志装进契约的可选字段。

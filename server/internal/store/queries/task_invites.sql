@@ -4,8 +4,8 @@ VALUES ($1, $2, $3, $4)
 RETURNING *;
 
 -- name: GetTaskInviteInProject :one
--- 邀请连同所属 KR 负责人与项目归属（权限判定与项目内寻址）。
-SELECT ti.*, k.owner_id AS kr_owner_id, o.project_id
+-- 邀请连同项目归属（权限判定与项目内寻址；裁决 12 后 KR 无负责人）。
+SELECT ti.*, o.project_id
 FROM task_invites ti
 JOIN key_results k ON k.id = ti.key_result_id
 JOIN objectives o ON o.id = k.objective_id

@@ -6,17 +6,16 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
 	"synergy/server/internal/domain"
 	"synergy/server/internal/store"
 )
 
 // 结构变更（输入、输入源、接收方）：#172 裁决后不再走变更单审批——
-// 有编辑权限者直接修改生效（TaskEditRule 同口径），动作写入任务动态并通知所属 KR 负责人。
+// 有编辑权限者直接修改生效（TaskEditRule 同口径），动作写入任务动态
+// （裁决 12，#183：KR 无负责人，原站内通知退场）。
 
 // structurePayload 一次结构变更的展示事实（差异行）+ 原样请求体；
-// #172 后不再落库，仅用于当场执行、动态摘要与通知文案。
+// #172 后不再落库，仅用于当场执行与动态摘要。
 type structurePayload struct {
 	Op       string          `json:"op"`
 	Label    string          `json:"label"`
@@ -46,7 +45,7 @@ func (s *Server) routeStructureChange(w http.ResponseWriter, r *http.Request, ta
 	return true
 }
 
-// commitStructureChange 直接落地一次结构变更：执行写入并通知所属 KR 负责人，整个过程一个事务。
+// commitStructureChange 直接落地一次结构变更（裁决 12，#183：KR 无负责人，原 #172 站内通知退场）。
 func (s *Server) commitStructureChange(w http.ResponseWriter, r *http.Request, projectID, taskID, uid int64,
 	p structurePayload,
 ) bool {
@@ -59,25 +58,6 @@ func (s *Server) commitStructureChange(w http.ResponseWriter, r *http.Request, p
 	qtx := s.q.WithTx(tx)
 	if !s.applyStructureOrFail(w, r, qtx, projectID, taskID, uid, p) {
 		return false
-	}
-	// 站内通知所属 KR 负责人（#172 裁决；本人修改不另发），与写入同事务。
-	task, err := qtx.GetTaskInProject(r.Context(), store.GetTaskInProjectParams{ID: taskID, ProjectID: projectID})
-	if err != nil {
-		writeInternalError(w, r, err)
-		return false
-	}
-	if target := domain.FieldEditNotifyTarget(uid, fromPgInt8(task.KrOwnerID)); target != nil {
-		if _, err := qtx.CreateNotification(r.Context(), store.CreateNotificationParams{
-			UserID: *target,
-			Kind:   domain.NotifyTaskFieldEdited,
-			Content: domain.FieldEditNotification(
-				currentUser(r).DisplayName, task.Name, []string{p.Label}),
-			ProjectID: pgtype.Int8{Int64: projectID, Valid: true},
-			TaskID:    pgtype.Int8{Int64: taskID, Valid: true},
-		}); err != nil {
-			writeInternalError(w, r, err)
-			return false
-		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
 		writeInternalError(w, r, err)

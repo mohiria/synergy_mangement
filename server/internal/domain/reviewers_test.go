@@ -59,7 +59,7 @@ func TestSubmitCompletionOutcome(t *testing.T) {
 // 裁决 C2（#136，裁决 11 #181 改写）：或签组**包含项目管理员**时，管理员通过即视同终审通过
 // 一次闭环；其他审核人通过仍进待终审；退回路径不变。
 func TestDecideIntermediateRule(t *testing.T) {
-	facts := TaskFacts{Status: TaskInReview, CreatorID: 3, OwnerID: 5, KrOwnerID: i64(7)}
+	facts := TaskFacts{Status: TaskInReview, CreatorID: 3, OwnerID: 5}
 	member := Actor{Role: RoleMember}
 	admin := Actor{Role: RoleAdmin}
 	defaultGroup := map[int64]bool{11: true, 12: true}
@@ -84,7 +84,7 @@ func TestDecideIntermediateRule(t *testing.T) {
 		{"任务负责人非组员不可处理", member, facts, nil, 5, true, "", "", "", ErrNotReviewer},
 		{"管理员非组员不可处理", admin, facts, nil, 9, true, "", "", "", ErrNotReviewer},
 		// 裁决 13：环节由申请单把关，状态冲突用非审核中状态验证。
-		{"非审核中状态冲突", member, TaskFacts{Status: TaskInProgress, KrOwnerID: i64(7)}, nil, 11, true, "", "", "", ErrCompletionNotIntermediate},
+		{"非审核中状态冲突", member, TaskFacts{Status: TaskInProgress}, nil, 11, true, "", "", "", ErrCompletionNotIntermediate},
 		{"KR 负责人在组内通过仅进待终审（C2 改写）", member, facts, map[int64]bool{7: true, 11: true}, 7, true, "", TaskInReview, CompletionPendingFinal, nil},
 		{"组含管理员：其通过即视同终审通过", admin, facts, withAdmin, 9, true, "", TaskCompleted, CompletionApproved, nil},
 		{"组含管理员：其他审核人通过仍待终审", member, facts, withAdmin, 11, true, "", TaskInReview, CompletionPendingFinal, nil},

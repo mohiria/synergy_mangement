@@ -149,7 +149,7 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 		}
 	}
 	// 整批一个事务：全部成功或全部失败。裁决 #162：创建即入正式任务池，初始状态未开始；
-	// 补偿机制——入池通知所属 KR 负责人（本人创建不另发），通知与创建同事务。
+	// 裁决 12（#183）：KR 无负责人，原入池通知随之无对象、退场——入池事实只留任务动态。
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -158,7 +158,7 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 	defer func() { _ = tx.Rollback(r.Context()) }()
 	qtx := s.q.WithTx(tx)
 	createdIDs := make([]int64, 0, len(req.Items))
-	for i, item := range req.Items {
+	for _, item := range req.Items {
 		params := store.CreateTaskParams{
 			KeyResultID: item.KeyResultId,
 			Name:        strings.TrimSpace(item.Name),
@@ -180,19 +180,6 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 			return
 		}
 		createdIDs = append(createdIDs, task.ID)
-		if target := domain.PoolEntryNotifyTarget(uid, fromPgInt8(krs[i].OwnerID)); target != nil {
-			krCode := domain.KeyResultCode(int(krs[i].ObjectiveCodeSeq), int(krs[i].CodeSeq))
-			if _, err := qtx.CreateNotification(r.Context(), store.CreateNotificationParams{
-				UserID:    *target,
-				Kind:      domain.NotifyTaskPoolEntered,
-				Content:   domain.PoolEntryNotification(currentUser(r).DisplayName, task.Name, krCode, krs[i].Description),
-				ProjectID: pgtype.Int8{Int64: projectId, Valid: true},
-				TaskID:    pgtype.Int8{Int64: task.ID, Valid: true},
-			}); err != nil {
-				writeInternalError(w, r, err)
-				return
-			}
-		}
 		// 裁决 #164：参与人、成果审核人与接收方随创建一并落库（选填）。
 		if item.ParticipantIds != nil {
 			for _, id := range domain.NormalizeParticipants(*item.ParticipantIds) {
@@ -387,7 +374,7 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		return
 	}
 	factsForReviews := domain.TaskFacts{Status: task.Status, CreatorID: task.CreatedBy, OwnerID: task.OwnerID,
-		KrOwnerID: fromPgInt8(task.KrOwnerID), ResultUpdate: task.ResultUpdate}
+		ResultUpdate: task.ResultUpdate}
 	_, finalNames, err := s.projectFinalReviewers(r.Context(), projectId)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -579,7 +566,6 @@ func (s *Server) fetchTask(w http.ResponseWriter, r *http.Request, projectID, ta
 		Status:       task.Status,
 		CreatorID:    task.CreatedBy,
 		OwnerID:      task.OwnerID,
-		KrOwnerID:    fromPgInt8(task.KrOwnerID),
 		ResultUpdate: task.ResultUpdate,
 	}
 	return task, facts, true
@@ -601,7 +587,6 @@ func lockTaskFacts(r *http.Request, w http.ResponseWriter, qtx *store.Queries, p
 		Status:       task.Status,
 		CreatorID:    task.CreatedBy,
 		OwnerID:      task.OwnerID,
-		KrOwnerID:    fromPgInt8(task.KrOwnerID),
 		ResultUpdate: task.ResultUpdate,
 	}
 	return task, facts, true
@@ -695,8 +680,8 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 	resp := make([]Task, 0, len(rows))
 	for _, t := range rows {
 		facts := domain.TaskFacts{Status: t.Status, CreatorID: t.CreatedBy, OwnerID: t.OwnerID,
-			KrOwnerID: fromPgInt8(t.KrOwnerID), ResultUpdate: t.ResultUpdate,
-			ReviewStage: reviewStageByTask[t.ID]}
+			ResultUpdate: t.ResultUpdate,
+			ReviewStage:  reviewStageByTask[t.ID]}
 		item := Task{
 			Id:                 t.ID,
 			KeyResultId:        t.KeyResultID,
@@ -733,8 +718,6 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 				item.PendingActorName = &t.OwnerName
 			case *actorID == t.CreatedBy:
 				item.PendingActorName = &t.CreatorName
-			case t.KrOwnerID.Valid && *actorID == t.KrOwnerID.Int64:
-				item.PendingActorName = fromPgText(t.KrOwnerName)
 			}
 		}
 		// 裁决 10：关键字段直接修改收归项目管理员，前端只消费编辑权限标志。
