@@ -137,10 +137,8 @@ const (
 )
 
 // 卡片动作文案（模块 PRD §5.3；AC-55 只用文字按钮）。
-const (
-	WorkActionHandle = "去处理"
-	WorkActionView   = "查看详情"
-)
+// #168（#14 反馈）：只读组（等待他人、卡点）不再派生文字按钮，动作文案为空，点条目行打开抽屉。
+const WorkActionHandle = "去处理"
 
 type MyWorkGroups struct {
 	Pending   []WorkItem
@@ -417,9 +415,15 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 			continue
 		}
 		days, _ := waitingDays(b.Since)
+		// #168（#15 反馈）：卡点条目补所属任务截止，参与超期标红与组内排序。
+		var due *time.Time
+		if t, ok := taskByID[b.TaskID]; ok {
+			due = t.EndDate
+		}
 		g.Blockers = append(g.Blockers, WorkItem{
 			Kind: "blocker", Title: "[卡点] " + b.TaskName + "：缺 " + b.Missing,
 			TaskID: tid(b.TaskID), TaskName: b.TaskName, RefKey: b.Key,
+			Due: due, Overdue: Overdue(due, f.Now),
 			WaitingDays: days, Stage: BlockerKindLabel(b.Kind), DrawerTab: "overview",
 		})
 	}
@@ -486,8 +490,9 @@ func workWaitingDays(it WorkItem) int {
 	return *it.WaitingDays
 }
 
-// decorateWorkCards 按分组补齐卡片动作（模块 PRD §5.3、MW-13）：
-// 待我处理／待我审批／待我接收是本人要办的事，用「去处理」；等待他人与卡点只读，用「查看详情」。
+// decorateWorkCards 按分组补齐卡片动作（模块 PRD §5.3、MW-13；#168 调整）：
+// 待我处理／待我审批／待我接收是本人要办的事，用「去处理」；等待他人与卡点只读、
+// 不派生文字按钮（动作文案为空，点条目行打开抽屉）。
 // 提醒事实在各组派生时已按各自的提醒目标定好：等待他人指向事项本身，卡点指向卡点。
 func decorateWorkCards(f MyWorkFacts, g *MyWorkGroups) {
 	byKey := make(map[string]Blocker, len(f.Blockers))
@@ -499,11 +504,7 @@ func decorateWorkCards(f MyWorkFacts, g *MyWorkGroups) {
 			group[i].ActionLabel = WorkActionHandle
 		}
 	}
-	for i := range g.Waiting {
-		g.Waiting[i].ActionLabel = WorkActionView
-	}
 	for i := range g.Blockers {
-		g.Blockers[i].ActionLabel = WorkActionView
 		if b, ok := byKey[g.Blockers[i].RefKey]; ok {
 			g.Blockers[i].CanRemind = CanRemindBlocker(f.Actor, f.UserID, b) &&
 				RemindQuotaLeft(BlockerRemindTarget(b, nil), f.RemindDailyLimit, f.RemindSentToday)

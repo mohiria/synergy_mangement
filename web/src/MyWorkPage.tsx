@@ -179,9 +179,12 @@ export default function MyWorkPage({
                     提醒
                   </button>
                 )}
-                <button type="button" className="work-text-action">
-                  {it.actionLabel} ›
-                </button>
+                {/* #168：只读组（等待他人、卡点）actionLabel 为空、不渲染文字按钮，点条目行开抽屉。 */}
+                {it.actionLabel && (
+                  <button type="button" className="work-text-action">
+                    {it.actionLabel} ›
+                  </button>
+                )}
               </div>
             </div>
           </article>

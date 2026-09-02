@@ -5,8 +5,9 @@ import (
 	"time"
 )
 
-// 我的工作卡片动作与提醒（模块 PRD §5.3、AC-55、MW-21、MW-13）：
-// 待我处理／待我审批／待我接收用「去处理」，等待他人与卡点用「查看详情」；
+// 我的工作卡片动作与提醒（模块 PRD §5.3、AC-55、MW-21、MW-13；#168 调整）：
+// 待我处理／待我审批／待我接收用「去处理」；等待他人与卡点只读、不再派生「查看详情」
+// 文字按钮（动作文案为空，点条目行打开抽屉）；
 // 提醒按各自的提醒目标寻址：卡点用卡点键，等待他人用事项自身的 wait 键；待行动人是本人或访客时不可提醒。
 func TestMyWorkCardActionAndRemind(t *testing.T) {
 	now := time.Date(2026, 8, 26, 10, 0, 0, 0, time.UTC)
@@ -42,8 +43,8 @@ func TestMyWorkCardActionAndRemind(t *testing.T) {
 			{"待我处理", g.Pending, WorkActionHandle},
 			{"待我审批", g.Approvals, WorkActionHandle},
 			{"待我接收", g.Receipts, WorkActionHandle},
-			{"等待他人", g.Waiting, WorkActionView},
-			{"与我相关的卡点", g.Blockers, WorkActionView},
+			{"等待他人", g.Waiting, ""},
+			{"与我相关的卡点", g.Blockers, ""},
 		} {
 			for _, it := range c.items {
 				if it.ActionLabel != c.want {
@@ -53,6 +54,21 @@ func TestMyWorkCardActionAndRemind(t *testing.T) {
 		}
 		if len(g.Pending) == 0 || len(g.Waiting) == 0 {
 			t.Fatalf("用例前提失效：待我处理 %d 条、等待他人 %d 条", len(g.Pending), len(g.Waiting))
+		}
+	})
+
+	// #168（#15 反馈）：卡点条目补所属任务的截止日期，参与超期标红与组内排序。
+	t.Run("卡点条目带任务截止并参与超期", func(t *testing.T) {
+		g := MyWork(base(Actor{Role: RoleMember}, []Blocker{overdueBlocker}))
+		if len(g.Blockers) != 1 {
+			t.Fatalf("卡点组条数 = %d, want 1", len(g.Blockers))
+		}
+		it := g.Blockers[0]
+		if it.Due == nil || !it.Due.Equal(end) {
+			t.Errorf("卡点条目应带所属任务截止 %v: %+v", end, it.Due)
+		}
+		if !it.Overdue {
+			t.Errorf("任务已超期，卡点条目应标超期: %+v", it)
 		}
 	})
 

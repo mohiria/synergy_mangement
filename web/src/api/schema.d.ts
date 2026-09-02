@@ -2242,7 +2242,7 @@ export interface components {
             stage?: string;
             /** @description 建议打开的任务详情 Tab（overview/audit/discussion） */
             drawerTab?: string;
-            /** @description 卡片文字按钮文案（我的工作 PRD §5.3、AC-55；派生字段）：本人要办的三组为「去处理」，等待他人与卡点为「查看详情」 */
+            /** @description 卡片文字按钮文案（我的工作 PRD §5.3、AC-55；派生字段）：本人要办的三组为「去处理」；等待他人与卡点只读、不派生文字按钮（空串，点条目行打开抽屉，#168） */
             actionLabel: string;
             /** @description 卡片能否直接一键提醒当前待行动人（MW-13；派生字段）；按 refKey 指向的提醒目标寻址，不提醒本人、访客不可，提醒频次上限为同一人对同一任务每天 1 次 */
             canRemind: boolean;

@@ -925,6 +925,8 @@ body {
 .work-text-action {
   min-height: 30px; padding: 0 5px; border: 0; border-radius: var(--radius); background: transparent;
   color: var(--accent); font-size: var(--type-body); font-weight: 600; cursor: pointer;
+  /* #168：「提醒」等文字按钮任何宽度下单行展示，不折行。 */
+  white-space: nowrap; flex: none;
 }
 .work-text-action:hover { background: var(--accent-soft); }
 .work-text-action.quiet { color: var(--muted); font-weight: 500; }
