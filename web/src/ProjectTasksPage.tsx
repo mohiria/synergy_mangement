@@ -146,7 +146,10 @@ export default function ProjectTasksPage({
   const taskCode = useMemo(() => new Map(tasks.map((t) => [t.id, t.code])), [tasks]);
   const filtered = tasks.filter((t) => {
     if (krFilter !== "all" && t.keyResultId !== krFilter) return false;
-    if (statusFilter !== "all" && t.status !== statusFilter) return false;
+    // 裁决 9（#179）：默认不含已关闭，与进度汇总、未就绪计数的剔除口径一致；选「已关闭」可主动查看。
+    if (statusFilter === "all") {
+      if (t.status === "cancelled") return false;
+    } else if (t.status !== statusFilter) return false;
     const q = search.trim().toLowerCase();
     if (!q) return true;
     return `${taskCode.get(t.id)}${t.name}${t.ownerName}`.toLowerCase().includes(q);
@@ -330,11 +333,11 @@ export default function ProjectTasksPage({
                 ]}
               />
               <Select
-                style={{ width: 150 }}
+                style={{ width: 170 }}
                 value={statusFilter}
                 onChange={setStatusFilter}
                 options={[
-                  { value: "all" as const, label: "全部状态" },
+                  { value: "all" as const, label: "全部（不含已关闭）" },
                   ...(Object.keys(STATUS_FILTER_LABEL) as TaskStatus[]).map((s) => ({
                     value: s,
                     label: STATUS_FILTER_LABEL[s],
