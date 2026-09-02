@@ -34,13 +34,16 @@ func TestMyWorkGrouping(t *testing.T) {
 			// 他人的任务 → 不出现
 			{ID: 6, Name: "别人的任务", DisplayStatus: TaskInProgress, OwnerID: 9, CreatorID: 9, KrOwnerID: krOwnerOther},
 		},
+		// 裁决 11：终审人为项目管理员集合——本例我是管理员，全部待终审申请进待我审批。
+		FinalReviewerIDs:   []int64{me},
+		FinalReviewerNames: []string{"赵文琪"},
 		Completions: []WorkCompletionFact{
 			// 中间或签、我在组内 → 待我审批
-			{ID: 31, TaskID: 22, TaskName: "或签任务", SubmittedBy: 9, TaskOwnerID: 9, KrOwnerID: krOwnerOther, State: CompletionIntermediate, Reviewers: []int64{me, 8}, SubmittedAt: recent},
-			// KR 终审、我是 KR 负责人 → 待我审批（AC-16 明确；5 天前提交，用于等待天数断言）
-			{ID: 32, TaskID: 23, TaskName: "终审任务", SubmittedBy: 9, TaskOwnerID: 9, KrOwnerID: krOwnerMe, State: CompletionPendingFinal, SubmittedAt: old},
-			// 我负责任务的完成申请在终审 → 等待他人
-			{ID: 33, TaskID: 4, TaskName: "终审中任务", SubmittedBy: me, TaskOwnerID: me, KrOwnerID: krOwnerOther, State: CompletionPendingFinal, SubmittedAt: recent},
+			{ID: 31, TaskID: 22, TaskName: "或签任务", SubmittedBy: 9, TaskOwnerID: 9, State: CompletionIntermediate, Reviewers: []int64{me, 8}, SubmittedAt: recent},
+			// 待终审、我在管理员集合 → 待我审批（AC-16；5 天前提交，用于等待天数断言）
+			{ID: 32, TaskID: 23, TaskName: "终审任务", SubmittedBy: 9, TaskOwnerID: 9, State: CompletionPendingFinal, SubmittedAt: old},
+			// 我负责任务的完成申请在终审、我也是终审人 → 只进待我审批（避免与等待他人重复）
+			{ID: 33, TaskID: 4, TaskName: "终审中任务", SubmittedBy: me, TaskOwnerID: me, State: CompletionPendingFinal, SubmittedAt: recent},
 		},
 		Invites: []WorkInviteFact{
 			// 我被邀请且待处理 → 待我处理
@@ -93,9 +96,9 @@ func TestMyWorkGrouping(t *testing.T) {
 		t.Fatalf("待我处理上游未就绪标记缺失")
 	}
 
-	// 待我审批：中间 31、KR 终审 32 = 2 条（AC-16：终审在本组；裁决 10 后无关闭申请）
-	if len(g.Approvals) != 2 {
-		t.Fatalf("待我审批数量 = %d, want 2: %+v", len(g.Approvals), kinds(g.Approvals))
+	// 待我审批：中间 31、终审 32、33 = 3 条（AC-16：终审在本组；裁决 11：管理员集合或签）
+	if len(g.Approvals) != 3 {
+		t.Fatalf("待我审批数量 = %d, want 3: %+v", len(g.Approvals), kinds(g.Approvals))
 	}
 	var hasFinal bool
 	for _, it := range g.Approvals {
@@ -107,9 +110,9 @@ func TestMyWorkGrouping(t *testing.T) {
 		t.Fatal("KR 终审应归入待我审批")
 	}
 
-	// 等待他人：上游 71、完成申请 33 = 2 条（#178 无输入请求；裁决 10 无关闭申请条目）
-	if len(g.Waiting) != 2 {
-		t.Fatalf("等待他人数量 = %d, want 2: %+v", len(g.Waiting), kinds(g.Waiting))
+	// 等待他人：上游 71 = 1 条（33 因我是终审人归入待我审批，避免重复；裁决 11）
+	if len(g.Waiting) != 1 {
+		t.Fatalf("等待他人数量 = %d, want 1: %+v", len(g.Waiting), kinds(g.Waiting))
 	}
 	// #174 裁决：上游等待条目按上游任务截止日期展示并判定超期（任务 40 截止 5 天前）。
 	for _, it := range g.Waiting {
@@ -147,15 +150,17 @@ func TestMyWorkGrouping(t *testing.T) {
 func TestMyWorkWaitingApprovalCopy(t *testing.T) {
 	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
 	me := int64(5)
-	krOwnerOther := i64(7)
 	recent := now.AddDate(0, 0, -1)
 
 	facts := MyWorkFacts{
 		UserID: me,
 		Now:    now,
+		// 裁决 11：终审人为项目管理员集合（本例我不是管理员）。
+		FinalReviewerIDs:   []int64{7},
+		FinalReviewerNames: []string{"周宁"},
 		Completions: []WorkCompletionFact{
-			{ID: 33, TaskID: 4, TaskName: "终审中任务", SubmittedBy: me, TaskOwnerID: me, KrOwnerID: krOwnerOther, KrOwnerName: "周宁", State: CompletionPendingFinal, SubmittedAt: recent},
-			{ID: 34, TaskID: 5, TaskName: "或签中任务", SubmittedBy: me, TaskOwnerID: me, KrOwnerID: krOwnerOther, KrOwnerName: "周宁", State: CompletionIntermediate, Reviewers: []int64{8, 9}, ReviewerNames: []string{"张三", "李四"}, SubmittedAt: recent},
+			{ID: 33, TaskID: 4, TaskName: "终审中任务", SubmittedBy: me, TaskOwnerID: me, State: CompletionPendingFinal, SubmittedAt: recent},
+			{ID: 34, TaskID: 5, TaskName: "或签中任务", SubmittedBy: me, TaskOwnerID: me, State: CompletionIntermediate, Reviewers: []int64{8, 9}, ReviewerNames: []string{"张三", "李四"}, SubmittedAt: recent},
 		},
 	}
 

@@ -14,7 +14,8 @@ func CurrentStage(t TaskFacts) (string, *int64) {
 	case TaskPendingIntermediateReview:
 		return StageIntermediateReview, nil
 	case TaskPendingFinalReview:
-		return StageFinalReview, t.KrOwnerID
+		// 裁决 11（#181）：终审人为项目管理员集合，无单一待行动人（与或签同口径）。
+		return StageFinalReview, nil
 	case TaskCompleted:
 		return StageCompleted, nil
 	case TaskCancelled:

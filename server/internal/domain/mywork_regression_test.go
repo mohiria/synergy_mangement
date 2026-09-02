@@ -19,9 +19,11 @@ func TestMyWorkDropsCancelledTaskItems(t *testing.T) {
 			{ID: 10, Name: "已关闭任务", DisplayStatus: TaskCancelled, OwnerID: me, CreatorID: me, KrOwnerID: &me, EndDate: &end},
 			{ID: 11, Name: "在办任务", DisplayStatus: TaskInProgress, OwnerID: me, CreatorID: me, KrOwnerID: &me, EndDate: &end},
 		},
+		FinalReviewerIDs:   []int64{me},
+		FinalReviewerNames: []string{"我"},
 		Completions: []WorkCompletionFact{
-			{ID: 90, TaskID: 10, TaskName: "已关闭任务", SubmittedBy: other, TaskOwnerID: other, KrOwnerID: &me, KrOwnerName: "我", State: CompletionPendingFinal, SubmittedAt: now.AddDate(0, 0, -1), TaskEnd: &end},
-			{ID: 91, TaskID: 11, TaskName: "在办任务", SubmittedBy: other, TaskOwnerID: other, KrOwnerID: &me, KrOwnerName: "我", State: CompletionPendingFinal, SubmittedAt: now.AddDate(0, 0, -1), TaskEnd: &end},
+			{ID: 90, TaskID: 10, TaskName: "已关闭任务", SubmittedBy: other, TaskOwnerID: other, State: CompletionPendingFinal, SubmittedAt: now.AddDate(0, 0, -1), TaskEnd: &end},
+			{ID: 91, TaskID: 11, TaskName: "在办任务", SubmittedBy: other, TaskOwnerID: other, State: CompletionPendingFinal, SubmittedAt: now.AddDate(0, 0, -1), TaskEnd: &end},
 		},
 	}
 	g := MyWork(facts)
@@ -94,10 +96,12 @@ func TestMyWorkSortingWithoutDueDate(t *testing.T) {
 	other := int64(2)
 	facts := MyWorkFacts{
 		UserID: me, Now: now, Actor: Actor{Role: RoleMember},
+		FinalReviewerIDs:   []int64{other},
+		FinalReviewerNames: []string{"周宁"},
 		Completions: []WorkCompletionFact{
-			{ID: 1, TaskID: 101, TaskName: "等 1 天", SubmittedBy: me, TaskOwnerID: me, KrOwnerID: &other, KrOwnerName: "周宁", State: CompletionPendingFinal, SubmittedAt: now.AddDate(0, 0, -1)},
-			{ID: 2, TaskID: 102, TaskName: "等 6 天", SubmittedBy: me, TaskOwnerID: me, KrOwnerID: &other, KrOwnerName: "周宁", State: CompletionPendingFinal, SubmittedAt: now.AddDate(0, 0, -6)},
-			{ID: 3, TaskID: 103, TaskName: "等 3 天", SubmittedBy: me, TaskOwnerID: me, KrOwnerID: &other, KrOwnerName: "周宁", State: CompletionPendingFinal, SubmittedAt: now.AddDate(0, 0, -3)},
+			{ID: 1, TaskID: 101, TaskName: "等 1 天", SubmittedBy: me, TaskOwnerID: me, State: CompletionPendingFinal, SubmittedAt: now.AddDate(0, 0, -1)},
+			{ID: 2, TaskID: 102, TaskName: "等 6 天", SubmittedBy: me, TaskOwnerID: me, State: CompletionPendingFinal, SubmittedAt: now.AddDate(0, 0, -6)},
+			{ID: 3, TaskID: 103, TaskName: "等 3 天", SubmittedBy: me, TaskOwnerID: me, State: CompletionPendingFinal, SubmittedAt: now.AddDate(0, 0, -3)},
 		},
 	}
 	g := MyWork(facts)

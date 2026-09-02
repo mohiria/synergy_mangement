@@ -388,7 +388,12 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 	}
 	factsForReviews := domain.TaskFacts{Status: task.Status, CreatorID: task.CreatedBy, OwnerID: task.OwnerID,
 		KrOwnerID: fromPgInt8(task.KrOwnerID), ResultUpdate: task.ResultUpdate}
-	completions, err := s.completionReviewList(r.Context(), taskId, factsForReviews, actor, uid)
+	_, finalNames, err := s.projectFinalReviewers(r.Context(), projectId)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	completions, err := s.completionReviewList(r.Context(), taskId, factsForReviews, actor, uid, finalNames)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -608,6 +613,11 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 	if err != nil {
 		return nil, err
 	}
+	// 终审人集合（裁决 11，#181）：待终审的显示文案取项目管理员姓名。
+	_, finalNames, err := s.projectFinalReviewers(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
 	// 必要输入未就绪的任务显示「等待输入」（AC-48、§5.1）；成员来源按输入请求状态判定就绪。
 	unreadyNoteByTask, err := s.unreadyRequiredInputsByProject(ctx, projectID)
 	if err != nil {
@@ -704,12 +714,12 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 		displayFacts := facts
 		displayFacts.Status = domain.DeriveDisplayStatus(t.Status, unreadyNoteByTask[t.ID] != "")
 		item.Status = TaskStatus(displayFacts.Status)
-		// AC-04：审批等待状态面向用户显示「待{审批人姓名}审批」。
-		item.StatusLabel = domain.StatusLabel(displayFacts.Status, t.KrOwnerName.String, reviewerNamesByTask[t.ID])
+		// AC-04：审批等待状态面向用户显示「待{审批人姓名}审批」（裁决 11：终审取管理员集合）。
+		item.StatusLabel = domain.StatusLabel(displayFacts.Status, finalNames, reviewerNamesByTask[t.ID])
 		// 当前环节与待行动人（AC-31 基础信息；名字按身份就近解析）。
 		// 环节文案同样按 AC-04 收口：审批等待环节显示当前审批人姓名。
 		stage, actorID := domain.CurrentStage(displayFacts)
-		item.CurrentStage = domain.StageLabel(stage, t.KrOwnerName.String, reviewerNamesByTask[t.ID])
+		item.CurrentStage = domain.StageLabel(stage, finalNames, reviewerNamesByTask[t.ID])
 		if actorID != nil {
 			item.PendingActorId = actorID
 			switch {

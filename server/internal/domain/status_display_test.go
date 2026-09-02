@@ -26,28 +26,29 @@ func TestApprovalWaitingLabel(t *testing.T) {
 }
 
 // 任务主状态显示文案（AC-04）：审批等待状态按当前审批人姓名显示，其余为固定中文标签；
-// 内部状态名不变，仅显示层转换。
+// 裁决 11（#181）：终审人为项目管理员集合，多人为“待{首位姓名}等N人审批”。
 func TestStatusLabel(t *testing.T) {
 	cases := []struct {
-		name      string
-		status    string
-		krOwner   string
-		reviewers []string
-		want      string
+		name           string
+		status         string
+		finalReviewers []string
+		reviewers      []string
+		want           string
 	}{
-		{"未开始", TaskNotStarted, "周宁", nil, "未开始"},
-		{"等待输入", TaskWaitingInput, "周宁", nil, "等待输入"},
-		{"进行中", TaskInProgress, "周宁", nil, "进行中"},
-		{"中间或签单人", TaskPendingIntermediateReview, "周宁", []string{"张三"}, "待张三审批"},
-		{"中间或签多人", TaskPendingIntermediateReview, "周宁", []string{"张三", "李四"}, "待张三等2人审批"},
-		{"终审显示 KR 负责人", TaskPendingFinalReview, "周宁", nil, "待周宁审批"},
-		{"KR 无负责人时退化", TaskPendingFinalReview, "", nil, "待审批"},
-		{"已完成", TaskCompleted, "周宁", nil, "已完成"},
-		{"已关闭", TaskCancelled, "周宁", nil, "已关闭"},
+		{"未开始", TaskNotStarted, []string{"周宁"}, nil, "未开始"},
+		{"等待输入", TaskWaitingInput, []string{"周宁"}, nil, "等待输入"},
+		{"进行中", TaskInProgress, []string{"周宁"}, nil, "进行中"},
+		{"中间或签单人", TaskPendingIntermediateReview, []string{"周宁"}, []string{"张三"}, "待张三审批"},
+		{"中间或签多人", TaskPendingIntermediateReview, []string{"周宁"}, []string{"张三", "李四"}, "待张三等2人审批"},
+		{"终审单管理员显示姓名", TaskPendingFinalReview, []string{"周宁"}, nil, "待周宁审批"},
+		{"终审多管理员显示首位加人数", TaskPendingFinalReview, []string{"周宁", "张三"}, nil, "待周宁等2人审批"},
+		{"无管理员名单退化", TaskPendingFinalReview, nil, nil, "待审批"},
+		{"已完成", TaskCompleted, []string{"周宁"}, nil, "已完成"},
+		{"已关闭", TaskCancelled, []string{"周宁"}, nil, "已关闭"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := StatusLabel(tc.status, tc.krOwner, tc.reviewers); got != tc.want {
+			if got := StatusLabel(tc.status, tc.finalReviewers, tc.reviewers); got != tc.want {
 				t.Fatalf("StatusLabel(%q) = %q, want %q", tc.status, got, tc.want)
 			}
 		})
@@ -58,19 +59,19 @@ func TestStatusLabel(t *testing.T) {
 func TestReviewStateLabels(t *testing.T) {
 	t.Run("完成申请", func(t *testing.T) {
 		cases := []struct {
-			name      string
-			state     string
-			krOwner   string
-			reviewers []string
-			want      string
+			name           string
+			state          string
+			finalReviewers []string
+			reviewers      []string
+			want           string
 		}{
-			{"中间或签显示审核人", CompletionIntermediate, "周宁", []string{"张三", "李四"}, "待张三等2人审批"},
-			{"待终审显示 KR 负责人", CompletionPendingFinal, "周宁", nil, "待周宁审批"},
-			{"已通过", CompletionApproved, "周宁", nil, "已通过"},
-			{"已退回", CompletionRejected, "周宁", nil, "已退回"},
+			{"中间或签显示审核人", CompletionIntermediate, []string{"周宁"}, []string{"张三", "李四"}, "待张三等2人审批"},
+			{"待终审显示管理员集合（裁决 11）", CompletionPendingFinal, []string{"周宁", "张三"}, nil, "待周宁等2人审批"},
+			{"已通过", CompletionApproved, []string{"周宁"}, nil, "已通过"},
+			{"已退回", CompletionRejected, []string{"周宁"}, nil, "已退回"},
 		}
 		for _, tc := range cases {
-			if got := CompletionStateLabel(tc.state, tc.krOwner, tc.reviewers); got != tc.want {
+			if got := CompletionStateLabel(tc.state, tc.finalReviewers, tc.reviewers); got != tc.want {
 				t.Fatalf("%s: CompletionStateLabel = %q, want %q", tc.name, got, tc.want)
 			}
 		}
@@ -80,25 +81,25 @@ func TestReviewStateLabels(t *testing.T) {
 // 当前环节显示文案（AC-04、AC-31）：审批等待环节按当前审批人姓名显示，其余沿用环节名。
 func TestStageLabel(t *testing.T) {
 	cases := []struct {
-		name      string
-		stage     string
-		krOwner   string
-		reviewers []string
-		want      string
+		name           string
+		stage          string
+		finalReviewers []string
+		reviewers      []string
+		want           string
 	}{
-		{"中间或签显示审核组", StageIntermediateReview, "周宁", []string{"张三", "李四"}, "待张三等2人审批"},
-		{"中间或签单人显示姓名", StageIntermediateReview, "周宁", []string{"张三"}, "待张三审批"},
-		{"KR 终审显示 KR 负责人", StageFinalReview, "周宁", nil, "待周宁审批"},
-		{"KR 无负责人退化为待审批", StageFinalReview, "", nil, "待审批"},
-		{"待开始执行沿用环节名", StageNotStarted, "周宁", nil, "待开始执行"},
-		{"等待输入沿用环节名", StageWaitingInput, "周宁", nil, "等待输入"},
-		{"任务执行沿用环节名", StageInProgress, "周宁", nil, "任务执行"},
-		{"已闭环沿用环节名", StageCompleted, "周宁", nil, "已闭环"},
-		{"已关闭沿用环节名", StageCancelled, "周宁", nil, "已关闭"},
+		{"中间或签显示审核组", StageIntermediateReview, []string{"周宁"}, []string{"张三", "李四"}, "待张三等2人审批"},
+		{"中间或签单人显示姓名", StageIntermediateReview, []string{"周宁"}, []string{"张三"}, "待张三审批"},
+		{"终审显示管理员集合（裁决 11）", StageFinalReview, []string{"周宁", "张三"}, nil, "待周宁等2人审批"},
+		{"无管理员名单退化为待审批", StageFinalReview, nil, nil, "待审批"},
+		{"待开始执行沿用环节名", StageNotStarted, []string{"周宁"}, nil, "待开始执行"},
+		{"等待输入沿用环节名", StageWaitingInput, []string{"周宁"}, nil, "等待输入"},
+		{"任务执行沿用环节名", StageInProgress, []string{"周宁"}, nil, "任务执行"},
+		{"已闭环沿用环节名", StageCompleted, []string{"周宁"}, nil, "已闭环"},
+		{"已关闭沿用环节名", StageCancelled, []string{"周宁"}, nil, "已关闭"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := StageLabel(tc.stage, tc.krOwner, tc.reviewers); got != tc.want {
+			if got := StageLabel(tc.stage, tc.finalReviewers, tc.reviewers); got != tc.want {
 				t.Fatalf("StageLabel(%q) = %q, want %q", tc.stage, got, tc.want)
 			}
 		})

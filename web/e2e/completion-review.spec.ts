@@ -47,7 +47,7 @@ test("配置审核人 → 提交完成申请 → 审核人在抽屉或签通过�
   const pendingCard = page.locator(".audit-card.pending", { hasText: "完成申请" });
   await expect(pendingCard).toBeVisible();
   await expect(pendingCard.getByText(`或签组：${REVIEWER.displayName}`)).toBeVisible();
-  await expect(pendingCard.getByRole("button", { name: "通过（进入 KR 终审）" })).toHaveCount(0);
+  await expect(pendingCard.getByRole("button", { name: "通过（进入终审）" })).toHaveCount(0);
 
   // 3) 审核人在抽屉里或签通过
   await page.context().clearCookies();
@@ -55,12 +55,12 @@ test("配置审核人 → 提交完成申请 → 审核人在抽屉或签通过�
   await openAuditTab(page);
   const card = page.locator(".audit-card.pending", { hasText: "完成申请" });
   await expect(card.getByRole("button", { name: /退\s*回/ })).toBeVisible();
-  await card.getByRole("button", { name: "通过（进入 KR 终审）" }).click();
+  await card.getByRole("button", { name: "通过（进入终审）" }).click();
 
-  // 或签通过：留痕显示处理人，进入待 KR 终审，审核人自己不再有处理按钮
+  // 或签通过：留痕显示处理人，进入待终审，审核人自己不再有处理按钮
   await expect(
     page.locator(".audit-card", { hasText: "完成申请" }).getByText(`或签通过 · ${REVIEWER.displayName}`),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "通过（进入 KR 终审）" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "通过（进入终审）" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "通过 / 闭环" })).toHaveCount(0);
 });

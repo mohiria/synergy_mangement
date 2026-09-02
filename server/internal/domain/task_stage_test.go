@@ -17,10 +17,10 @@ func TestCurrentStage(t *testing.T) {
 		{"等待输入停在负责人", facts(TaskWaitingInput), "等待输入", i64(5)},
 		{"进行中为任务执行", facts(TaskInProgress), "任务执行", i64(5)},
 		{"待成果审核", facts(TaskPendingIntermediateReview), "成果审核（或签）", nil},
-		{"待 KR 终审停在 KR 负责人", facts(TaskPendingFinalReview), "KR 终审", i64(7)},
+		// 裁决 11（#181）：终审人为项目管理员集合，无单一待行动人（与或签同口径）。
+		{"待终审无单一待行动人", facts(TaskPendingFinalReview), "终审", nil},
 		{"已完成即已闭环", facts(TaskCompleted), "已闭环", nil},
 		{"已关闭无待行动人", facts(TaskCancelled), "已关闭", nil},
-		{"KR 无负责人时终审待行动人为空", TaskFacts{Status: TaskPendingFinalReview, OwnerID: 5}, "KR 终审", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

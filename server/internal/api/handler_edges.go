@@ -210,11 +210,14 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 		return nil, err
 	}
 	durations := make(map[int64]int, len(taskRows))
-	krOwnerNameByTask := make(map[int64]string, len(taskRows))
+	// 终审人集合（裁决 11，#181）：待终审的显示文案取项目管理员姓名。
+	_, finalNames, err := s.projectFinalReviewers(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
 	// 来源任务编号（#101）：编号是持久字段，由 O／KR／任务三级序号拼出，前端不再自己拼。
 	codeByTask := make(map[int64]string, len(taskRows))
 	for _, t := range taskRows {
-		krOwnerNameByTask[t.ID] = t.KrOwnerName.String
 		codeByTask[t.ID] = domain.TaskCode(int(t.ObjectiveCodeSeq), int(t.KrCodeSeq), int(t.CodeSeq))
 		if t.StartDate.Valid && t.EndDate.Valid {
 			d := int(t.EndDate.Time.Sub(t.StartDate.Time).Hours()/24) + 1
@@ -286,7 +289,7 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 		if e.SourceTaskStatus.Valid {
 			st := TaskStatus(e.SourceTaskStatus.String)
 			item.SourceTaskStatus = &st
-			label := domain.StatusLabel(e.SourceTaskStatus.String, krOwnerNameByTask[sourceID], reviewerNamesByTask[sourceID])
+			label := domain.StatusLabel(e.SourceTaskStatus.String, finalNames, reviewerNamesByTask[sourceID])
 			item.SourceTaskStatusLabel = &label
 		}
 		if e.SourceOwnerName.Valid {

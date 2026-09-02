@@ -22,14 +22,14 @@ type WorkTaskFact struct {
 	CompletionRejected *string
 }
 
+// WorkCompletionFact 完成申请事实。裁决 11（#181）：终审人为项目管理员集合
+// （见 MyWorkFacts.FinalReviewerIDs），不再按所属 KR 负责人寻址。
 type WorkCompletionFact struct {
 	ID            int64
 	TaskID        int64
 	TaskName      string
 	SubmittedBy   int64
 	TaskOwnerID   int64
-	KrOwnerID     *int64
-	KrOwnerName   string
 	State         string
 	Reviewers     []int64
 	ReviewerNames []string
@@ -75,7 +75,11 @@ type MyWorkFacts struct {
 	RemindSentToday  func(recipientID, taskID int64) int
 	Tasks       []WorkTaskFact
 	Completions []WorkCompletionFact
-	Invites     []WorkInviteFact
+	// FinalReviewerIDs 终审人集合（裁决 11，#181）：项目管理员含项目负责人，
+	// 按处理时点动态解析角色、不快照。
+	FinalReviewerIDs   []int64
+	FinalReviewerNames []string
+	Invites            []WorkInviteFact
 	Blockers      []Blocker
 	Upstreams     []WorkUpstreamFact
 	Receipts      []ReceiptFact
@@ -169,6 +173,13 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 
 	// —— 待我审批（判定顺序 Q1）——
 	// 裁决 10：关闭申请审批退场，本组只剩完成申请（或签与终审）。
+	isFinalReviewer := false
+	for _, id := range f.FinalReviewerIDs {
+		if id == me {
+			isFinalReviewer = true
+			break
+		}
+	}
 	for _, cr := range f.Completions {
 		if terminal[cr.TaskID] {
 			continue
@@ -188,14 +199,14 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 				}
 			}
 		case CompletionPendingFinal:
-			// AC-16：KR 终审归入待我审批（终审永不豁免）。
-			if cr.KrOwnerID != nil && *cr.KrOwnerID == me {
+			// AC-16：终审归入待我审批（裁决 11：本人属项目管理员集合时）。
+			if isFinalReviewer {
 				days, overdue := waitingDays(cr.SubmittedAt)
 				g.Approvals = append(g.Approvals, WorkItem{
-					Kind: "final_review", Title: "[KR 终审] " + cr.TaskName,
+					Kind: "final_review", Title: "[终审] " + cr.TaskName,
 					TaskID: tid(cr.TaskID), TaskName: cr.TaskName, RefID: tid(cr.ID),
 					Due: cr.TaskEnd, WaitingDays: days, Overdue: overdue,
-					Stage: "KR 终审", DrawerTab: "audit",
+					Stage: "终审", DrawerTab: "audit",
 				})
 			}
 		}
@@ -275,11 +286,11 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		if cr.State != CompletionIntermediate && cr.State != CompletionPendingFinal {
 			continue
 		}
-		// 我同时是终审人的情形已在待我审批，避免重复。
-		if cr.State == CompletionPendingFinal && cr.KrOwnerID != nil && *cr.KrOwnerID == me {
+		// 我同时是终审人（项目管理员）的情形已在待我审批，避免重复（裁决 11）。
+		if cr.State == CompletionPendingFinal && isFinalReviewer {
 			continue
 		}
-		stage := ApprovalWaitingLabel([]string{cr.KrOwnerName})
+		stage := ApprovalWaitingLabel(f.FinalReviewerNames)
 		if cr.State == CompletionIntermediate {
 			stage = ApprovalWaitingLabel(cr.ReviewerNames)
 		}
@@ -289,7 +300,8 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 			TaskID: tid(cr.TaskID), TaskName: cr.TaskName, RefID: tid(cr.ID),
 			WaitingDays: days, Overdue: overdue, Stage: stage, DrawerTab: "audit",
 		}
-		wait := ApprovalWaitFact("final_review", cr.ID, cr.TaskID, singleApprover(cr.KrOwnerID), []string{cr.KrOwnerName}, days)
+		wait := ApprovalWaitFact("final_review", cr.ID, cr.TaskID,
+			append([]int64(nil), f.FinalReviewerIDs...), f.FinalReviewerNames, days)
 		if cr.State == CompletionIntermediate {
 			wait = ApprovalWaitFact("intermediate_review", cr.ID, cr.TaskID,
 				append([]int64(nil), cr.Reviewers...), cr.ReviewerNames, days)
@@ -432,14 +444,6 @@ func ReportRangeFrom(name string, now time.Time) (*time.Time, error) {
 		return nil, nil
 	}
 	return nil, ErrReportRangeInvalid
-}
-
-// singleApprover 单审批人环节的待行动人列表（未指定 KR 负责人时为空，不给提醒入口）。
-func singleApprover(id *int64) []int64 {
-	if id == nil {
-		return nil
-	}
-	return []int64{*id}
 }
 
 // 身份卡「当前职责」（模块 PRD §3.1）：回答「我凭什么会收到这些事项」。

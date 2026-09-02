@@ -19,10 +19,12 @@ var (
 	ErrCompletionNoteRequired  = errors.New("提交完成申请需要填写提交说明")
 	ErrCompletionNotPending    = errors.New("完成申请不在待终审状态")
 	ErrRejectOpinionRequired   = errors.New("退回意见必填")
+	ErrNotFinalReviewer        = errors.New("只能由项目管理员终审")
 )
 
 // SubmitCompletionRule 校验提交完成申请（AC-13、§9.1）：
-// 进行中、至少一项候选内容、提交说明必填、KR 已指定负责人（终审人存在）。
+// 进行中、至少一项候选内容、提交说明必填。
+// 裁决 11（#181）：终审人为项目管理员集合（项目负责人恒存在），无「无人可审批」情形。
 func SubmitCompletionRule(t TaskFacts, candidateCount int, note string) error {
 	// 成果更新走同一道完成审批：已完成任务在成果更新已发起、尚未提交时同样可提交（AC-66）。
 	if t.Status != TaskInProgress && !(t.Status == TaskCompleted && t.ResultUpdate == ResultUpdateOpen) {
@@ -33,9 +35,6 @@ func SubmitCompletionRule(t TaskFacts, candidateCount int, note string) error {
 	}
 	if strings.TrimSpace(note) == "" {
 		return ErrCompletionNoteRequired
-	}
-	if t.KrOwnerID == nil {
-		return ErrKrOwnerMissing
 	}
 	return nil
 }
@@ -51,16 +50,17 @@ func CanSubmitCompletion(a Actor, userID int64, t TaskFacts, candidateCount int)
 	return userID == t.OwnerID || CanEditProject(a)
 }
 
-// DecideCompletionRule 终审规则（AC-15、AC-38）：仅所属 KR 负责人处理待终审申请；
-// 通过→任务完成（意见选填），退回→意见必填、任务回到进行中。
-func DecideCompletionRule(a Actor, t TaskFacts, actorID int64, approve bool, opinion string) (string, error) {
+// DecideCompletionRule 终审规则（AC-15、AC-38；裁决 11，#181）：终审人为项目管理员集合
+// （含项目负责人）或签，审批人按处理时点动态解析角色、不快照；
+// 任一人通过→任务完成（意见选填），退回→意见必填、任务回到进行中。
+func DecideCompletionRule(a Actor, t TaskFacts, approve bool, opinion string) (string, error) {
 	// 成果更新的终审在任务已完成的前提下进行，处理结果不改变生命周期状态（AC-66）。
 	inResultUpdate := ResultUpdateReviewInFlight(t)
 	if t.Status != TaskPendingFinalReview && !inResultUpdate {
 		return "", ErrCompletionNotPending
 	}
-	if !CanWriteProject(a) || t.KrOwnerID == nil || *t.KrOwnerID != actorID {
-		return "", ErrNotKrOwner
+	if !CanEditProject(a) {
+		return "", ErrNotFinalReviewer
 	}
 	if approve {
 		return TaskCompleted, nil

@@ -127,7 +127,7 @@ export default function TaskDrawerHost({
       body: { note },
     });
     if (res.data) {
-      message.success("完成申请已提交，进入待 KR 终审");
+      message.success("完成申请已提交，进入待终审");
       refresh();
     } else {
       message.error(res.error?.message ?? "提交失败");
@@ -179,7 +179,7 @@ export default function TaskDrawerHost({
         decision === "rejected"
           ? "已退回，候选文件删除，任务回到进行中"
           : intermediate
-            ? "或签通过，进入待 KR 终审"
+            ? "或签通过，进入待终审"
             : "终审通过，候选交付物已覆盖当前内容，任务完成",
       );
       refresh();
@@ -327,7 +327,7 @@ export default function TaskDrawerHost({
         }}
       >
         <p className="muted" style={{ marginTop: 0 }}>
-          本次全部候选交付物整体提交；已配置成果审核人时进入多人或签，否则直接进入待 KR 终审。
+          本次全部候选交付物整体提交；已配置成果审核人时进入多人或签，否则直接进入待终审。
         </p>
         <Input.TextArea
           rows={3}

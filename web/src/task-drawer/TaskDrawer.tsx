@@ -648,7 +648,7 @@ export default function TaskDrawer({
                 <PeopleSelect
                   value={reviewers.map((r) => r.userId)}
                   options={members.filter((m) => m.role !== "viewer")}
-                  placeholder="未配置（或签：任一人通过即进入待 KR 终审）"
+                  placeholder="未配置（或签：任一人通过即进入待终审）"
                   onSave={(ids) => actions.saveReviewers(task, ids)}
                 />
               ) : (
@@ -1197,7 +1197,7 @@ export default function TaskDrawer({
             <div className="muted" style={{ fontSize: 12 }}>
               提交说明:{cr.note}；本次 {cr.items.length} 项候选整体通过或退回。
               {cr.reviewers && cr.reviewers.length > 0 &&
-                `或签组：${cr.reviewers.map((r) => r.displayName).join("、")}（任一人通过即进入待 KR 终审）。`}
+                `或签组：${cr.reviewers.map((r) => r.displayName).join("、")}（任一人通过即进入待终审）。`}
             </div>
             {cr.intermediateByName && (
               <div className="handled-fact" style={{ marginTop: 6 }}>
@@ -1245,7 +1245,7 @@ export default function TaskDrawer({
                   actions.approveCompletion(task, cr.id, cr.state === "intermediate_review")
                 }
               >
-                {cr.state === "intermediate_review" ? "通过（进入 KR 终审）" : "通过 / 闭环"}
+                {cr.state === "intermediate_review" ? "通过（进入终审）" : "通过 / 闭环"}
               </Button>
             </div>
           )}

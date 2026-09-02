@@ -95,7 +95,7 @@ INSERT INTO notifications (user_id, kind, content, project_id, task_id, created_
      || to_char(current_date + 15, 'YYYY-MM-DD') || '；沿硬前置影响下游 2 项任务：汇总 UAT 问题并跟踪闭环、组织售后场景 UAT',
      2, 29, now() - interval '1 day' + interval '4 hours'),
 (2,  'blocker_remind',
-     '任务「编制割接实施方案」提醒：缺「KR 终审处理」（KR 终审已等待 3 天，超过阈值 3 天）；截止 '
+     '任务「编制割接实施方案」提醒：缺「终审处理」（终审已等待 3 天，超过阈值 3 天）；截止 '
      || to_char(current_date + 2, 'YYYY-MM-DD') || '；沿硬前置影响下游 1 项任务：组织割接方案公司级评审',
      1, 14, now() - interval '2 days' + interval '3 hours');
 

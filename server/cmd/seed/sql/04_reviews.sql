@@ -50,7 +50,7 @@ OVERRIDING SYSTEM VALUE VALUES
      now() - interval '151 days', 11, now() - interval '149 days', NULL, NULL, ''),
 (23, 62, 11, '首次自查 11 个问题全部闭环。',                                 'approved', '',
      now() - interval '121 days', 11, now() - interval '119 days', NULL, NULL, ''),
--- 14 号任务：中间或签已通过，停在 KR 终审 5 天（审批超时卡点）。
+-- 14 号任务：中间或签已通过，停在终审 5 天（审批超时卡点）。
 (24, 14, 9,  '割接方案 V2.1 送审稿，含时序、分工、通信机制与观察指标；分工联络表一并提交。',
      'pending_final', '', now() - interval '6 days', NULL, NULL,
      3, now() - interval '5 days', '方案结构没问题，割接时序第三步和第四步的并行关系再确认一下'),

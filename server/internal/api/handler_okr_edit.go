@@ -4,13 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"synergy/server/internal/domain"
 	"synergy/server/internal/store"
@@ -90,24 +88,8 @@ func (s *Server) DeleteObjective(w http.ResponseWriter, r *http.Request, project
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// GetKrHandoverPreview 更换 KR 负责人前的确认信息：该 KR 下未决审批单条数（AC-61）。
-func (s *Server) GetKrHandoverPreview(w http.ResponseWriter, r *http.Request, projectId int64, keyResultId int64) {
-	if _, ok := s.fetchProject(w, r, projectId); !ok {
-		return
-	}
-	if _, ok := s.fetchKeyResult(w, r, projectId, keyResultId); !ok {
-		return
-	}
-	n, err := s.q.CountPendingApprovalsByKeyResult(r.Context(), keyResultId)
-	if err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, KrHandoverPreview{PendingApprovals: int(n)})
-}
-
-// UpdateKeyResult 编辑 KR：项目管理员或本 KR 负责人；负责人不可置空，
-// 更换负责人时按 transferPendingApprovals 决定未决审批单是否转交继任者（AC-61）。
+// UpdateKeyResult 编辑 KR：项目管理员或本 KR 负责人；负责人不可置空。
+// 裁决 11（#181）：审批人按处理时点动态解析角色，无未决审批转交机制。
 func (s *Server) UpdateKeyResult(w http.ResponseWriter, r *http.Request, projectId int64, keyResultId int64) {
 	var req UpdateKeyResultRequest
 	raw, err := readAllBody(r)
@@ -169,17 +151,7 @@ func (s *Server) UpdateKeyResult(w http.ResponseWriter, r *http.Request, project
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: code, Message: err.Error()})
 		return
 	}
-	handover := update.OwnerID != nil && (!kr.OwnerID.Valid || kr.OwnerID.Int64 != *update.OwnerID)
-	transfer := handover && (req.TransferPendingApprovals == nil || *req.TransferPendingApprovals)
-
-	tx, err := s.db.Begin(r.Context())
-	if err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	defer func() { _ = tx.Rollback(r.Context()) }()
-	qtx := s.q.WithTx(tx)
-	if _, err := qtx.UpdateKeyResult(r.Context(), store.UpdateKeyResultParams{
+	if _, err := s.q.UpdateKeyResult(r.Context(), store.UpdateKeyResultParams{
 		ID:          keyResultId,
 		Description: toPgTextPtr(update.Description),
 		Metric:      toPgTextPtr(update.Metric),
@@ -187,30 +159,6 @@ func (s *Server) UpdateKeyResult(w http.ResponseWriter, r *http.Request, project
 		StartDate:   toPgDateFromTime(update.Start),
 		EndDate:     toPgDateFromTime(update.End),
 	}); err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	pending := int64(0)
-	if handover {
-		// 未决审批单跟着 KR 负责人走：审批人本就是「所属 KR 负责人」这一职责，
-		// 不转交就得让离任者继续处理，转交与否由发起人在确认框里定（AC-61）。
-		if pending, err = qtx.CountPendingApprovalsByKeyResult(r.Context(), keyResultId); err != nil {
-			writeInternalError(w, r, err)
-			return
-		}
-		if transfer && pending > 0 {
-			if _, err := qtx.CreateNotification(r.Context(), store.CreateNotificationParams{
-				UserID:    *update.OwnerID,
-				Kind:      domain.NotifyKrHandover,
-				Content:   fmt.Sprintf("你已接任 KR「%s」负责人，%d 件未决审批已转交你处理", krDescriptionAfter(kr, update), pending),
-				ProjectID: pgtype.Int8{Int64: projectId, Valid: true},
-			}); err != nil {
-				writeInternalError(w, r, err)
-				return
-			}
-		}
-	}
-	if err := tx.Commit(r.Context()); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
@@ -308,13 +256,6 @@ func (s *Server) writeKeyResult(w http.ResponseWriter, r *http.Request, projectI
 		}
 	}
 	writeJSON(w, http.StatusNotFound, Error{Code: "key_result_not_found", Message: "KR 不存在"})
-}
-
-func krDescriptionAfter(kr store.GetKeyResultInProjectRow, u domain.KeyResultUpdate) string {
-	if u.Description != nil {
-		return *u.Description
-	}
-	return kr.Description
 }
 
 func trimmedPtr(s *string) *string {

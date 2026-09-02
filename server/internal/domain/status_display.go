@@ -24,8 +24,8 @@ func ApprovalWaitingLabel(names []string) string {
 }
 
 // StatusLabel 派生任务主状态的面向用户显示文案：审批等待状态按当前审批人姓名显示
-// （终审的审批人是所属 KR 负责人，中间或签取审核组），其余为固定中文标签。
-func StatusLabel(status, krOwnerName string, reviewerNames []string) string {
+// （裁决 11：终审的审批人是项目管理员集合，中间或签取审核组），其余为固定中文标签。
+func StatusLabel(status string, finalReviewerNames, reviewerNames []string) string {
 	switch status {
 	case TaskNotStarted:
 		return "未开始"
@@ -36,7 +36,7 @@ func StatusLabel(status, krOwnerName string, reviewerNames []string) string {
 	case TaskPendingIntermediateReview:
 		return ApprovalWaitingLabel(reviewerNames)
 	case TaskPendingFinalReview:
-		return ApprovalWaitingLabel([]string{krOwnerName})
+		return ApprovalWaitingLabel(finalReviewerNames)
 	case TaskCompleted:
 		return "已完成"
 	case TaskCancelled:
@@ -45,13 +45,14 @@ func StatusLabel(status, krOwnerName string, reviewerNames []string) string {
 	return status
 }
 
-// CompletionStateLabel 完成申请显示文案：中间或签取审核组姓名，待终审显示所属 KR 负责人。
-func CompletionStateLabel(state, krOwnerName string, reviewerNames []string) string {
+// CompletionStateLabel 完成申请显示文案：中间或签取审核组姓名，
+// 待终审显示项目管理员集合（裁决 11）。
+func CompletionStateLabel(state string, finalReviewerNames, reviewerNames []string) string {
 	switch state {
 	case CompletionIntermediate:
 		return ApprovalWaitingLabel(reviewerNames)
 	case CompletionPendingFinal:
-		return ApprovalWaitingLabel([]string{krOwnerName})
+		return ApprovalWaitingLabel(finalReviewerNames)
 	case CompletionApproved:
 		return "已通过"
 	case CompletionRejected:
@@ -66,17 +67,18 @@ const (
 	StageWaitingInput       = "等待输入"
 	StageInProgress         = "任务执行"
 	StageIntermediateReview = "成果审核（或签）"
-	StageFinalReview        = "KR 终审"
-	StageCompleted          = "已闭环"
-	StageCancelled          = "已关闭"
+	// StageFinalReview 裁决 11（#181）：终审人改项目管理员集合，词条「KR 终审」更名「终审」。
+	StageFinalReview = "终审"
+	StageCompleted   = "已闭环"
+	StageCancelled   = "已关闭"
 )
 
 // StageLabel 当前环节的面向用户显示文案（AC-04）：审批等待环节按当前审批人姓名显示，
 // 其余环节沿用环节名。
-func StageLabel(stage, krOwnerName string, reviewerNames []string) string {
+func StageLabel(stage string, finalReviewerNames, reviewerNames []string) string {
 	switch stage {
 	case StageFinalReview:
-		return ApprovalWaitingLabel([]string{krOwnerName})
+		return ApprovalWaitingLabel(finalReviewerNames)
 	case StageIntermediateReview:
 		return ApprovalWaitingLabel(reviewerNames)
 	}

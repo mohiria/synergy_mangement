@@ -300,8 +300,13 @@ function OkrEditDrawer({
     }
   };
 
-  const patchKeyResult = async (transfer: boolean) => {
+  // 裁决 11（#181）：审批人按处理时点动态解析角色，更换 KR 负责人无审批转交与确认框。
+  const saveKeyResult = async () => {
     if (target.kind !== "KR") return;
+    if (!ownerId) {
+      setError("KR 负责人不可为空，请直接指定继任者");
+      return;
+    }
     setSaving(true);
     setError(null);
     const res = await client.PATCH("/projects/{projectId}/key-results/{keyResultId}", {
@@ -312,7 +317,6 @@ function OkrEditDrawer({
         ownerId,
         startDate: period?.[0] ? period[0]!.format("YYYY-MM-DD") : undefined,
         endDate: period?.[1] ? period[1]!.format("YYYY-MM-DD") : undefined,
-        transferPendingApprovals: transfer,
       },
     });
     setSaving(false);
@@ -322,52 +326,6 @@ function OkrEditDrawer({
     } else {
       setError(res.error?.message ?? "保存失败");
     }
-  };
-
-  const saveKeyResult = async () => {
-    if (target.kind !== "KR") return;
-    if (!ownerId) {
-      setError("KR 负责人不可为空，请直接指定继任者");
-      return;
-    }
-    if (ownerId === target.k.ownerId) {
-      await patchKeyResult(true);
-      return;
-    }
-    // AC-61：换人前先看该 KR 下有多少未决审批，有才弹确认框。
-    const preview = await client.GET("/projects/{projectId}/key-results/{keyResultId}", {
-      params: { path: { projectId, keyResultId: target.k.id } },
-    });
-    const pending = preview.data?.pendingApprovals ?? 0;
-    if (pending === 0) {
-      await patchKeyResult(true);
-      return;
-    }
-    let transfer = true;
-    Modal.confirm({
-      title: "该 KR 下有未决审批",
-      content: (
-        <div>
-          <p style={{ marginTop: 0 }}>
-            共 {pending} 件未决审批。默认转交继任者处理，继任者会收到站内通知；
-            取消勾选则保留给原负责人处理。
-          </p>
-          <label>
-            <input
-              type="checkbox"
-              defaultChecked
-              onChange={(e) => {
-                transfer = e.target.checked;
-              }}
-            />
-            　把未决审批转交继任者
-          </label>
-        </div>
-      ),
-      okText: "确认更换",
-      cancelText: "返回",
-      onOk: () => patchKeyResult(transfer),
-    });
   };
 
   const remove = async () => {

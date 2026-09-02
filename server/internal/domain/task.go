@@ -23,8 +23,6 @@ var (
 	ErrTaskNameTooLong      = errors.New("任务名称不能超过 200 字")
 	ErrTaskOwnerNotEligible = errors.New("任务负责人必须是非只读的项目成员")
 	ErrTaskPeriodInverted   = errors.New("任务截止时间不能早于开始时间")
-	ErrKrOwnerMissing       = errors.New("所属 KR 尚未指定负责人，无人可审批")
-	ErrNotKrOwner           = errors.New("只能由所属 KR 负责人处理")
 )
 
 // NewTask 待创建的任务草稿最小骨架（PRD §9.1）。

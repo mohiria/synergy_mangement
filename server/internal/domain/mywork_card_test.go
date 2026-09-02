@@ -1,4 +1,4 @@
-﻿package domain
+package domain
 
 import (
 	"testing"
@@ -21,9 +21,12 @@ func TestMyWorkCardActionAndRemind(t *testing.T) {
 			Tasks: []WorkTaskFact{
 				{ID: 10, Name: "联调验证", DisplayStatus: TaskInProgress, OwnerID: me, CreatorID: me, EndDate: &end},
 			},
-			// 裁决 10：关闭申请退场，等待他人用完成申请（终审中）事实。
+			// 裁决 10：关闭申请退场，等待他人用完成申请（终审中）事实；
+			// 裁决 11：终审人为项目管理员集合（本例为「周宁」，非本人）。
+			FinalReviewerIDs:   []int64{other},
+			FinalReviewerNames: []string{"周宁"},
 			Completions: []WorkCompletionFact{
-				{ID: 7, TaskID: 10, TaskName: "联调验证", SubmittedBy: me, TaskOwnerID: me, KrOwnerID: &other, KrOwnerName: "周宁", State: CompletionPendingFinal, SubmittedAt: now.AddDate(0, 0, -5), TaskEnd: &end},
+				{ID: 7, TaskID: 10, TaskName: "联调验证", SubmittedBy: me, TaskOwnerID: me, State: CompletionPendingFinal, SubmittedAt: now.AddDate(0, 0, -5), TaskEnd: &end},
 			},
 			Blockers: blockers,
 		}

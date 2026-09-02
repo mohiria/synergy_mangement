@@ -53,7 +53,7 @@ func TestTimeTriggeredBlockerActivities(t *testing.T) {
 	occurred := time.Date(2026, 9, 5, 9, 0, 0, 0, time.UTC)
 	bs := []Blocker{
 		{Key: "upstream_unready:edge:1", Kind: BlockerUpstreamUnready, TaskID: 7, TaskName: "联调", Missing: "接口清单", OccurredAt: occurred},
-		{Key: "approval_timeout:final_review:31", Kind: BlockerApprovalTimeout, TaskID: 7, TaskName: "联调", Missing: "KR 终审处理", OccurredAt: occurred},
+		{Key: "approval_timeout:final_review:31", Kind: BlockerApprovalTimeout, TaskID: 7, TaskName: "联调", Missing: "终审处理", OccurredAt: occurred},
 		{Key: "task_overdue:7", Kind: BlockerTaskOverdue, TaskID: 7, TaskName: "联调", Missing: "按期完成任务", OccurredAt: occurred},
 		{Key: "interlock:7", Kind: BlockerInterlock, TaskID: 7, TaskName: "联调", Missing: "打破硬前置互锁", OccurredAt: occurred},
 	}
@@ -75,7 +75,7 @@ func TestTimeTriggeredBlockerActivities(t *testing.T) {
 			t.Fatalf("系统派生事件不应带行动人: %+v", a)
 		}
 	}
-	if got[0].Summary != "卡点出现：审批超时 · 缺 KR 终审处理" {
+	if got[0].Summary != "卡点出现：审批超时 · 缺 终审处理" {
 		t.Fatalf("文案应与写触发口径一致: %q", got[0].Summary)
 	}
 }

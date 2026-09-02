@@ -14,7 +14,33 @@ import (
 	"synergy/server/internal/store"
 )
 
-// 完成申请与 KR 终审（AC-13、AC-15、AC-38～40）。业务规则在 domain，handler 仅编排。
+// 完成申请与终审（AC-13、AC-15、AC-38～40；裁决 11 #181：终审人为项目管理员集合或签）。
+// 业务规则在 domain，handler 仅编排。
+
+// projectFinalReviewers 终审人集合（裁决 11，#181）：项目负责人 + 管理员成员，
+// 按处理时点动态解析角色、不快照；项目负责人排首位（显示文案「待{首位姓名}等N人审批」）。
+func (s *Server) projectFinalReviewers(ctx context.Context, projectID int64) ([]int64, []string, error) {
+	proj, err := s.q.GetProject(ctx, store.GetProjectParams{ID: projectID})
+	if err != nil {
+		return nil, nil, err
+	}
+	members, err := s.q.ListProjectMembers(ctx, projectID)
+	if err != nil {
+		return nil, nil, err
+	}
+	ids := []int64{proj.OwnerID}
+	names := []string{proj.OwnerName}
+	seen := map[int64]bool{proj.OwnerID: true}
+	for _, m := range members {
+		if m.Role != domain.RoleAdmin || seen[m.UserID] {
+			continue
+		}
+		ids = append(ids, m.UserID)
+		names = append(names, m.DisplayName)
+		seen[m.UserID] = true
+	}
+	return ids, names, nil
+}
 
 // SubmitCompletion 提交完成申请：纳入任务全部候选内容，无成果审核直接进入待 KR 终审（AC-13）。
 func (s *Server) SubmitCompletion(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64) {
@@ -182,7 +208,7 @@ func (s *Server) DecideCompletion(w http.ResponseWriter, r *http.Request, projec
 		newStatus = domain.TaskCompleted
 	} else {
 		var err error
-		newStatus, err = domain.DecideCompletionRule(actor, facts, uid, approve, opinion)
+		newStatus, err = domain.DecideCompletionRule(actor, facts, approve, opinion)
 		if err != nil {
 			switch {
 			case errors.Is(err, domain.ErrCompletionNotPending):
@@ -432,7 +458,8 @@ func (s *Server) SetTaskReviewers(w http.ResponseWriter, r *http.Request, projec
 }
 
 // completionReviewList 组装完成申请记录（含项快照与派生动作标志）。
-func (s *Server) completionReviewList(ctx context.Context, taskID int64, facts domain.TaskFacts, actor domain.Actor, userID int64) ([]CompletionReview, error) {
+// finalReviewerNames 为项目管理员集合姓名（裁决 11：待终审的显示文案来源）。
+func (s *Server) completionReviewList(ctx context.Context, taskID int64, facts domain.TaskFacts, actor domain.Actor, userID int64, finalReviewerNames []string) ([]CompletionReview, error) {
 	rows, err := s.q.ListCompletionReviewsByTask(ctx, taskID)
 	if err != nil {
 		return nil, err
@@ -468,16 +495,10 @@ func (s *Server) completionReviewList(ctx context.Context, taskID int64, facts d
 			_, _, err := domain.DecideIntermediateRule(actor, facts, userID, func(id int64) bool { return reviewerSet[id] }, true, "")
 			canDecide = err == nil
 		case domain.CompletionPendingFinal:
-			_, err := domain.DecideCompletionRule(actor, facts, userID, true, "")
+			_, err := domain.DecideCompletionRule(actor, facts, true, "")
 			canDecide = err == nil
 		}
-		// AC-04：等待状态按当前审批人姓名显示。
-		krOwnerName := ""
-		if facts.KrOwnerID != nil {
-			if u, err := s.q.GetUserByID(ctx, *facts.KrOwnerID); err == nil {
-				krOwnerName = u.DisplayName
-			}
-		}
+		// AC-04：等待状态按当前审批人姓名显示（裁决 11：终审取项目管理员集合）。
 		reviewerNames := make([]string, 0, len(reviewerRows))
 		for _, rv := range reviewerRows {
 			reviewerNames = append(reviewerNames, rv.DisplayName)
@@ -485,7 +506,7 @@ func (s *Server) completionReviewList(ctx context.Context, taskID int64, facts d
 		item := CompletionReview{
 			Id:              cr.ID,
 			State:           CompletionReviewState(cr.State),
-			StateLabel:      domain.CompletionStateLabel(cr.State, krOwnerName, reviewerNames),
+			StateLabel:      domain.CompletionStateLabel(cr.State, finalReviewerNames, reviewerNames),
 			Note:            cr.Note,
 			Opinion:         optString(cr.Opinion),
 			Items:           views,

@@ -21,7 +21,7 @@ var (
 
 // StartResultUpdateRule 校验发起成果更新（AC-66）：仅已完成任务；同一任务至多一件在途
 // （裁决 10 后关闭申请退场，已完成任务上不再有其他未决审批单可互斥）；
-// KR 必须已指定负责人，否则无人终审；
+// 裁决 11（#181）：终审人为项目管理员集合，无「KR 无负责人则无人终审」情形；
 // 发起人限任务负责人与可编辑项目者（创建人不在其列——成果由负责人交付）。
 func StartResultUpdateRule(a Actor, userID int64, t TaskFacts) error {
 	if t.Status != TaskCompleted {
@@ -32,9 +32,6 @@ func StartResultUpdateRule(a Actor, userID int64, t TaskFacts) error {
 	}
 	if t.ResultUpdate != ResultUpdateNone {
 		return ErrResultUpdateExists
-	}
-	if t.KrOwnerID == nil {
-		return ErrKrOwnerMissing
 	}
 	if userID != t.OwnerID && !CanEditProject(a) {
 		return ErrResultUpdateForbidden

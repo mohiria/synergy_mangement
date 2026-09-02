@@ -38,7 +38,7 @@ const KIND_BADGE: Record<string, string> = {
   blocker: "卡",
 };
 
-// 五分组的固定顺序与空态文案（AC-16；KR 终审归入待我审批）。
+// 五分组的固定顺序与空态文案（AC-16；终审归入待我审批）。
 const GROUPS = [
   { key: "pending", label: "待我处理", empty: "暂无需要你处理的事项" },
   { key: "approvals", label: "待我审批", empty: "暂无等待你审批的事项" },

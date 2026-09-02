@@ -36,8 +36,6 @@ func (s *Server) StartResultUpdate(w http.ResponseWriter, r *http.Request, proje
 		switch {
 		case errors.Is(err, domain.ErrResultUpdateForbidden):
 			writeForbidden(w)
-		case errors.Is(err, domain.ErrKrOwnerMissing):
-			writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "kr_owner_missing", Message: err.Error()})
 		default:
 			writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: err.Error()})
 		}

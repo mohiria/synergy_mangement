@@ -134,9 +134,11 @@ func TestMyWorkWaitingRemindWithoutBlocker(t *testing.T) {
 			{ID: 2, Name: "等输入的任务", DisplayStatus: TaskWaitingInput, OwnerID: me, CreatorID: me, KrOwnerID: krOther},
 			{ID: 3, Name: "上游任务", DisplayStatus: TaskInProgress, OwnerID: 9, CreatorID: 9, KrOwnerID: krOther},
 		},
+		FinalReviewerIDs:   []int64{7},
+		FinalReviewerNames: []string{"李四"},
 		Completions: []WorkCompletionFact{
-			{ID: 33, TaskID: 1, TaskName: "我的任务", SubmittedBy: me, TaskOwnerID: me, KrOwnerID: krOther,
-				KrOwnerName: "李四", State: CompletionPendingFinal, SubmittedAt: recent},
+			{ID: 33, TaskID: 1, TaskName: "我的任务", SubmittedBy: me, TaskOwnerID: me,
+				State: CompletionPendingFinal, SubmittedAt: recent},
 		},
 		Upstreams: []WorkUpstreamFact{
 			{EdgeID: 51, TargetTaskID: 2, TargetName: "等输入的任务", TargetOwnerID: me,
@@ -174,8 +176,10 @@ func TestMyWorkWaitingRemindNotSelf(t *testing.T) {
 		Tasks: []WorkTaskFact{
 			{ID: 1, Name: "我的任务", DisplayStatus: TaskPendingFinalReview, OwnerID: me, CreatorID: me, KrOwnerID: krMe},
 		},
+		FinalReviewerIDs:   []int64{me},
+		FinalReviewerNames: []string{"张三"},
 		Completions: []WorkCompletionFact{
-			{ID: 21, TaskID: 1, TaskName: "我的任务", SubmittedBy: 9, TaskOwnerID: me, KrOwnerID: krMe, KrOwnerName: "张三", State: CompletionPendingFinal, SubmittedAt: recent},
+			{ID: 21, TaskID: 1, TaskName: "我的任务", SubmittedBy: 9, TaskOwnerID: me, State: CompletionPendingFinal, SubmittedAt: recent},
 		},
 	})
 	for _, it := range g.Waiting {

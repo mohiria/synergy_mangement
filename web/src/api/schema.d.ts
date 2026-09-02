@@ -241,15 +241,14 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** 更换 KR 负责人前的确认信息（AC-61；返回该 KR 下未决审批单条数） */
-        get: operations["getKrHandoverPreview"];
+        get?: never;
         put?: never;
         post?: never;
         /** 删除 KR（AC-65；仅项目管理员，且 KR 下没有任务，含已完成与已取消） */
         delete: operations["deleteKeyResult"];
         options?: never;
         head?: never;
-        /** 编辑 KR（AC-61、AC-65；项目管理员或本 KR 负责人；负责人不可置空，更换时可转交未决审批） */
+        /** 编辑 KR（AC-61、AC-65；项目管理员或本 KR 负责人；负责人不可置空。裁决 11（#181）：无审批转交——审批人按处理时点动态解析角色） */
         patch: operations["updateKeyResult"];
         trace?: never;
     };
@@ -671,7 +670,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 提交完成申请（AC-13；未配置成果审核人时直接进入待 KR 终审；含全部候选交付物与提交说明） */
+        /** 提交完成申请（AC-13；未配置成果审核人时直接进入待终审；含全部候选交付物与提交说明） */
         post: operations["submitCompletion"];
         delete?: never;
         options?: never;
@@ -692,7 +691,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** KR 负责人终审（AC-15／39／40）：通过则候选整体覆盖对应当前内容且旧文件永久删除、任务完成；退回则删除候选、任务回到进行中 */
+        /** 终审（AC-15／39／40；裁决 11 */
         post: operations["decideCompletion"];
         delete?: never;
         options?: never;
@@ -1316,16 +1315,6 @@ export interface components {
             startDate?: string;
             /** Format: date */
             endDate?: string;
-            /**
-             * @description 更换负责人时是否把该 KR 下的未决审批单转交继任者（AC-61）。 默认转交并向继任者发站内通知；取消勾选则保留给原负责人处理
-             * @default true
-             */
-            transferPendingApprovals: boolean;
-        };
-        /** @description 更换 KR 负责人前的确认信息（AC-61）：该 KR 下当前有多少未决审批单 */
-        KrHandoverPreview: {
-            /** @description 待处理变更单与待终审完成申请的合计条数 */
-            pendingApprovals: number;
         };
         CreateKeyResultInput: {
             description: string;
@@ -1362,7 +1351,7 @@ export interface components {
          */
         TaskStatus: "not_started" | "waiting_input" | "in_progress" | "pending_intermediate_review" | "pending_final_review" | "completed" | "cancelled";
         /**
-         * @description 成果更新进程（词汇表「成果更新」；派生自任务事实，接口不接受直接写入）： none＝无；open＝已发起、候选内容尚未随完成申请提交；reviewing＝已提交，或签或 KR 终审在审。 整个过程中任务生命周期状态保持 completed
+         * @description 成果更新进程（词汇表「成果更新」；派生自任务事实，接口不接受直接写入）： none＝无；open＝已发起、候选内容尚未随完成申请提交；reviewing＝已提交，或签或终审在审。 整个过程中任务生命周期状态保持 completed
          * @enum {string}
          */
         ResultUpdateState: "none" | "open" | "reviewing";
@@ -2064,7 +2053,7 @@ export interface components {
             /** @description 职责一行文案；一项不担时为「当前未承担行动职责」（派生字段） */
             responsibilitiesLabel: string;
         };
-        /** @description 我的工作五分组（AC-16；KR 终审归入待我审批）与身份卡 */
+        /** @description 我的工作五分组（AC-16；终审归入待我审批）与身份卡 */
         MyWork: {
             identity: components["schemas"]["WorkIdentity"];
             pending: components["schemas"]["WorkItem"][];
@@ -2224,7 +2213,7 @@ export interface components {
             /** Format: int64 */
             id: number;
             state: components["schemas"]["CompletionReviewState"];
-            /** @description 面向用户的显示文案（AC-04；派生字段）：中间或签为“待{审核人姓名}审批”（多人为“待{首位姓名}等N人审批”），待终审为“待{所属 KR 负责人姓名}审批”，其余为“已通过／已退回” */
+            /** @description 面向用户的显示文案（AC-04；派生字段）：中间或签为“待{审核人姓名}审批”（多人为“待{首位姓名}等N人审批”），待终审为项目管理员集合（裁决 11：多人为“待{首位姓名}等N人审批”），其余为“已通过／已退回” */
             stateLabel: string;
             /** @description 提交说明 */
             note: string;
@@ -2244,7 +2233,7 @@ export interface components {
             /** Format: date-time */
             intermediateAt?: string;
             intermediateOpinion?: string;
-            /** @description 当前用户能否处理本申请（派生字段；成果审核中为或签组成员，待 KR 终审时仅所属 KR 负责人，AC-37） */
+            /** @description 当前用户能否处理本申请（派生字段；成果审核中为或签组成员，待终审时任一项目管理员（裁决 11），AC-37） */
             canDecide?: boolean;
         };
         SubmitCompletionRequest: {
@@ -2920,32 +2909,6 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["ValidationError"];
-        };
-    };
-    getKrHandoverPreview: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-                keyResultId: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 未决审批单条数 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["KrHandoverPreview"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
         };
     };
     deleteKeyResult: {

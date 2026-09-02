@@ -2020,8 +2020,9 @@ func TestCompletionReviewFlow(t *testing.T) {
 	resp = doJSON(t, carol, http.MethodPost, completionURL, api.SubmitCompletionRequest{Note: "第一批成果，请终审"})
 	wantStatus(t, resp, http.StatusOK)
 	pending := decodeBody[api.Task](t, resp)
-	if pending.Status != api.TaskStatusPendingFinalReview || pending.CurrentStage != "待李四审批" {
-		t.Fatalf("提交后应待 KR 终审: %+v", pending)
+	// 裁决 11：终审人为项目管理员集合——本项目只有项目负责人张三。
+	if pending.Status != api.TaskStatusPendingFinalReview || pending.CurrentStage != "待张三审批" {
+		t.Fatalf("提交后应待终审: %+v", pending)
 	}
 
 	// 审核期间不可另传候选 409
@@ -2030,7 +2031,7 @@ func TestCompletionReviewFlow(t *testing.T) {
 	wantStatus(t, resp, http.StatusConflict)
 	resp.Body.Close()
 
-	// AC-38：非 KR 负责人不能终审；退回意见必填
+	// AC-38（裁决 11 修订）：非项目管理员不能终审（KR 负责人 bob 亦不能）；退回意见必填
 	resp = doJSON(t, carol, http.MethodGet, detailURL, nil)
 	wantStatus(t, resp, http.StatusOK)
 	detail = decodeBody[api.TaskDetail](t, resp)
@@ -2039,16 +2040,16 @@ func TestCompletionReviewFlow(t *testing.T) {
 		t.Fatalf("申请应含全部候选: %+v", detail.CompletionReviews[0].Items)
 	}
 	decisionURL := fmt.Sprintf("%s/%d/decision", completionURL, reviewID)
-	resp = doJSON(t, alice, http.MethodPost, decisionURL, api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
+	resp = doJSON(t, bob, http.MethodPost, decisionURL, api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
 	wantStatus(t, resp, http.StatusForbidden)
 	resp.Body.Close()
-	resp = doJSON(t, bob, http.MethodPost, decisionURL, api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionRejected})
+	resp = doJSON(t, alice, http.MethodPost, decisionURL, api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionRejected})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 
 	// AC-40（裁决 #165 修订）：退回后候选保留、任务回进行中、审核事实保留
 	op := "样例覆盖不足"
-	resp = doJSON(t, bob, http.MethodPost, decisionURL, api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionRejected, Opinion: &op})
+	resp = doJSON(t, alice, http.MethodPost, decisionURL, api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionRejected, Opinion: &op})
 	wantStatus(t, resp, http.StatusOK)
 	rejected := decodeBody[api.Task](t, resp)
 	if rejected.Status != api.TaskStatusInProgress {
@@ -2104,7 +2105,7 @@ func TestCompletionReviewFlow(t *testing.T) {
 	if len(detail.CompletionReviews[0].Items) != 1 {
 		t.Fatalf("第二次申请只应含新候选: %+v", detail.CompletionReviews[0].Items)
 	}
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/decision", completionURL, newReviewID),
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/decision", completionURL, newReviewID),
 		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
 	wantStatus(t, resp, http.StatusOK)
 	done := decodeBody[api.Task](t, resp)
@@ -2288,7 +2289,7 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 	wantStatus(t, resp, http.StatusOK)
 	detailA := decodeBody[api.TaskDetail](t, resp)
 	reviewID := detailA.CompletionReviews[0].Id
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, taskA.Id, reviewID),
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, taskA.Id, reviewID),
 		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
@@ -2503,7 +2504,7 @@ func TestIntermediateReviewOrSign(t *testing.T) {
 	wantStatus(t, resp, http.StatusForbidden)
 	resp.Body.Close()
 
-	// 或签通过留痕；KR 负责人终审闭环
+	// 或签通过留痕；终审（项目管理员或签，裁决 11）闭环——KR 负责人 bob 不能终审
 	resp = doJSON(t, erin, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
 	wantStatus(t, resp, http.StatusOK)
 	detail = decodeBody[api.TaskDetail](t, resp)
@@ -2512,6 +2513,9 @@ func TestIntermediateReviewOrSign(t *testing.T) {
 		t.Fatalf("或签处理事实未留痕: %+v", cr)
 	}
 	resp = doJSON(t, bob, http.MethodPost, newDecisionURL, api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPost, newDecisionURL, api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
 	wantStatus(t, resp, http.StatusOK)
 	if got := decodeBody[api.Task](t, resp); got.Status != api.TaskStatusCompleted {
 		t.Fatalf("终审后应完成: %+v", got)
@@ -3005,7 +3009,7 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, upstream.Id), nil)
 	wantStatus(t, resp, http.StatusOK)
 	reviewID := decodeBody[api.TaskDetail](t, resp).CompletionReviews[0].Id
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, upstream.Id, reviewID),
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, upstream.Id, reviewID),
 		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
@@ -3103,17 +3107,26 @@ func TestMyWorkFiveGroups(t *testing.T) {
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
 
-	resp = doJSON(t, bob, http.MethodGet, myWorkURL, nil)
+	// 裁决 11：终审归入项目管理员（alice）的待我审批；KR 负责人 bob 不再持有终审件。
+	resp = doJSON(t, alice, http.MethodGet, myWorkURL, nil)
 	wantStatus(t, resp, http.StatusOK)
-	bobWork = decodeBody[api.MyWork](t, resp)
+	aliceWork := decodeBody[api.MyWork](t, resp)
 	var hasFinal bool
-	for _, it := range bobWork.Approvals {
+	for _, it := range aliceWork.Approvals {
 		if it.Kind == "final_review" {
 			hasFinal = true
 		}
 	}
 	if !hasFinal {
-		t.Fatalf("KR 终审应归入待我审批: %+v", bobWork.Approvals)
+		t.Fatalf("终审应归入项目管理员的待我审批: %+v", aliceWork.Approvals)
+	}
+	resp = doJSON(t, bob, http.MethodGet, myWorkURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	bobWork = decodeBody[api.MyWork](t, resp)
+	for _, it := range bobWork.Approvals {
+		if it.Kind == "final_review" {
+			t.Fatalf("KR 负责人不应再持有终审件（裁决 11）: %+v", it)
+		}
 	}
 	resp = doJSON(t, carol, http.MethodGet, myWorkURL, nil)
 	wantStatus(t, resp, http.StatusOK)
@@ -3123,8 +3136,8 @@ func TestMyWorkFiveGroups(t *testing.T) {
 	}
 	var hasWaitingCompletion bool
 	for _, it := range carolWork.Waiting {
-		// AC-04：等待环节显示当前审批人姓名（KR 终审的审批人是 KR 负责人 bob／李四）。
-		if it.Kind == "waiting_completion" && it.Stage != nil && *it.Stage == "待李四审批" {
+		// AC-04：等待环节显示当前审批人姓名（裁决 11：终审人为项目管理员 alice／张三）。
+		if it.Kind == "waiting_completion" && it.Stage != nil && *it.Stage == "待张三审批" {
 			hasWaitingCompletion = true
 		}
 	}
@@ -3148,7 +3161,7 @@ func TestMyWorkFiveGroups(t *testing.T) {
 	}
 	resp = doJSON(t, alice, http.MethodGet, myWorkURL, nil)
 	wantStatus(t, resp, http.StatusOK)
-	aliceWork := decodeBody[api.MyWork](t, resp)
+	aliceWork = decodeBody[api.MyWork](t, resp)
 	wantKey := fmt.Sprintf("task_overdue:%d", overdueTask.Id)
 	if len(aliceWork.Blockers) != 1 || aliceWork.Blockers[0].Kind != "blocker" ||
 		aliceWork.Blockers[0].RefKey == nil || *aliceWork.Blockers[0].RefKey != wantKey {
@@ -3339,7 +3352,7 @@ func TestArtifacts(t *testing.T) {
 	wantStatus(t, resp, http.StatusOK)
 	detail := decodeBody[api.TaskDetail](t, resp)
 	reviewID := detail.CompletionReviews[0].Id
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, taskID, reviewID),
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, taskID, reviewID),
 		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
@@ -3605,7 +3618,7 @@ func TestProjectReport(t *testing.T) {
 	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskA.Id), nil)
 	wantStatus(t, resp, http.StatusOK)
 	detail := decodeBody[api.TaskDetail](t, resp)
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, taskA.Id, detail.CompletionReviews[0].Id),
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, taskA.Id, detail.CompletionReviews[0].Id),
 		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
@@ -4301,7 +4314,7 @@ func TestReceiversAndReceipts(t *testing.T) {
 		r = doJSON(t, carol, http.MethodGet, detailURL, nil)
 		wantStatus(t, r, http.StatusOK)
 		d := decodeBody[api.TaskDetail](t, r)
-		r = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, taskID, d.CompletionReviews[0].Id),
+		r = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, taskID, d.CompletionReviews[0].Id),
 			api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
 		wantStatus(t, r, http.StatusOK)
 		r.Body.Close()
@@ -4468,8 +4481,8 @@ func TestRemindWaitingTargets(t *testing.T) {
 	}
 
 	remindURL := fmt.Sprintf("%s/projects/%d/reminders", base, created.Id)
-	// 不提醒本人：待行动人（KR 负责人 bob）自己不能提醒
-	resp = doJSON(t, bob, http.MethodPost, remindURL, api.RemindRequest{TargetKey: *waiting.RefKey})
+	// 不提醒本人：待行动人（终审人＝项目负责人 alice，裁决 11）自己不能提醒
+	resp = doJSON(t, alice, http.MethodPost, remindURL, api.RemindRequest{TargetKey: *waiting.RefKey})
 	wantStatus(t, resp, http.StatusForbidden)
 	resp.Body.Close()
 
@@ -4477,7 +4490,7 @@ func TestRemindWaitingTargets(t *testing.T) {
 	resp = doJSON(t, carol, http.MethodPost, remindURL, api.RemindRequest{TargetKey: *waiting.RefKey})
 	wantStatus(t, resp, http.StatusNoContent)
 	resp.Body.Close()
-	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
+	resp = doJSON(t, alice, http.MethodGet, base+"/notifications", nil)
 	wantStatus(t, resp, http.StatusOK)
 	notes := []api.Notification{}
 	for _, n := range decodeBody[[]api.Notification](t, resp) {
@@ -4488,7 +4501,7 @@ func TestRemindWaitingTargets(t *testing.T) {
 	if len(notes) != 1 || notes[0].TaskId == nil || *notes[0].TaskId != task.Id {
 		t.Fatalf("提醒通知异常: %+v", notes)
 	}
-	for _, want := range []string{"等审批的任务", "KR 终审处理", "2026-09-30"} {
+	for _, want := range []string{"等审批的任务", "终审处理", "2026-09-30"} {
 		if !strings.Contains(notes[0].Content, want) {
 			t.Fatalf("提醒正文缺「%s」: %s", want, notes[0].Content)
 		}
@@ -4499,11 +4512,11 @@ func TestRemindWaitingTargets(t *testing.T) {
 	wantStatus(t, resp, http.StatusConflict)
 	resp.Body.Close()
 
-	// 目标已处理后按不存在处理：bob 通过终审，等待事项消失
+	// 目标已处理后按不存在处理：alice 通过终审，等待事项消失
 	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, task.Id), nil)
 	wantStatus(t, resp, http.StatusOK)
 	reviewID := decodeBody[api.TaskDetail](t, resp).CompletionReviews[0].Id
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, task.Id, reviewID),
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, task.Id, reviewID),
 		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
@@ -4773,7 +4786,7 @@ func TestOkrEditHandoverAndMemberRemoval(t *testing.T) {
 	resp.Body.Close()
 
 	// 造一件未决审批（裁决 10 后只剩完成审批）：
-	// alice 建任务（负责人 carol），carol 提交完成申请进入待 KR 负责人 bob 终审
+	// alice 建任务（负责人 carol），carol 提交完成申请进入待终审（裁决 11：管理员集合或签）
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
@@ -4795,13 +4808,6 @@ func TestOkrEditHandoverAndMemberRemoval(t *testing.T) {
 	wantStatus(t, resp, http.StatusOK)
 	pendingReviewID := decodeBody[api.TaskDetail](t, resp).CompletionReviews[0].Id
 
-	// AC-61：交接确认信息给出未决审批条数
-	resp = doJSON(t, alice, http.MethodGet, krURL, nil)
-	wantStatus(t, resp, http.StatusOK)
-	if preview := decodeBody[api.KrHandoverPreview](t, resp); preview.PendingApprovals != 1 {
-		t.Fatalf("未决审批条数异常: %+v", preview)
-	}
-
 	// AC-21／AC-61：bob 仍是 KR 负责人，不能被移出，409 里点名待交接的 KR
 	resp = doJSON(t, alice, http.MethodDelete, fmt.Sprintf("%s/%d", membersURL, bobUser.ID), nil)
 	wantStatus(t, resp, http.StatusConflict)
@@ -4809,7 +4815,7 @@ func TestOkrEditHandoverAndMemberRemoval(t *testing.T) {
 		t.Fatalf("409 未列出待交接的 KR: %+v", e)
 	}
 
-	// S2：bob 被降为只读后，仍挂着 KR 负责人也不能再审批
+	// S2：bob 被降为只读后不能再编辑本 KR；裁决 11：KR 负责人本就不是终审人，成员终审一律 403
 	resp = doJSON(t, alice, http.MethodPut, fmt.Sprintf("%s/%d", membersURL, bobUser.ID),
 		api.UpdateProjectMemberRoleRequest{Role: api.Viewer})
 	wantStatus(t, resp, http.StatusOK)
@@ -4826,36 +4832,38 @@ func TestOkrEditHandoverAndMemberRemoval(t *testing.T) {
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
 
-	// AC-61：交接给 carol，未决审批转交并发站内通知，审批件进入其「待我审批」
+	// 裁决 11（#181）：更换 KR 负责人不再转交审批、不发 kr_handover 通知——
+	// 终审件在项目管理员（alice）的待我审批，与 KR 负责人是谁无关。
 	resp = doJSON(t, alice, http.MethodPatch, krURL, api.UpdateKeyResultRequest{OwnerId: &carolUser.ID})
 	wantStatus(t, resp, http.StatusOK)
 	if got := decodeBody[api.KeyResult](t, resp); got.OwnerId == nil || *got.OwnerId != carolUser.ID {
-		t.Fatalf("KR 负责人未交接: %+v", got)
+		t.Fatalf("KR 负责人未更换: %+v", got)
 	}
 	resp = doJSON(t, carol, http.MethodGet, base+"/notifications", nil)
 	wantStatus(t, resp, http.StatusOK)
-	notes := decodeBody[[]api.Notification](t, resp)
-	if len(notes) != 1 || notes[0].Kind != "kr_handover" {
-		t.Fatalf("继任者未收到交接通知: %+v", notes)
+	for _, n := range decodeBody[[]api.Notification](t, resp) {
+		if n.Kind == "kr_handover" {
+			t.Fatalf("更换负责人不应再发交接通知: %+v", n)
+		}
 	}
-	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/projects/%d/my-work", base, created.Id), nil)
+	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/my-work", base, created.Id), nil)
 	wantStatus(t, resp, http.StatusOK)
 	work := decodeBody[api.MyWork](t, resp)
 	found := false
 	for _, it := range work.Approvals {
-		if it.TaskId != nil && *it.TaskId == taskID {
+		if it.Kind == "final_review" && it.TaskId != nil && *it.TaskId == taskID {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("转交后审批件应进入继任者待我审批: %+v", work.Approvals)
+		t.Fatalf("终审件应在项目管理员的待我审批: %+v", work.Approvals)
 	}
-	// 原负责人不再持有该审批件
-	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/projects/%d/my-work", base, created.Id), nil)
+	// 新任 KR 负责人（普通成员）不持有终审件
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/projects/%d/my-work", base, created.Id), nil)
 	wantStatus(t, resp, http.StatusOK)
 	for _, it := range decodeBody[api.MyWork](t, resp).Approvals {
-		if it.TaskId != nil && *it.TaskId == taskID {
-			t.Fatalf("交接后原负责人不应再持有审批件: %+v", it)
+		if it.Kind == "final_review" {
+			t.Fatalf("普通成员不应持有终审件（裁决 11）: %+v", it)
 		}
 	}
 
@@ -5113,7 +5121,7 @@ func TestDeliverableStructureFree(t *testing.T) {
 	resp = doJSON(t, carol, http.MethodGet, detailURL, nil)
 	wantStatus(t, resp, http.StatusOK)
 	d := decodeBody[api.TaskDetail](t, resp)
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, taskID, d.CompletionReviews[0].Id),
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, taskID, d.CompletionReviews[0].Id),
 		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
@@ -5793,7 +5801,8 @@ func TestProjectSettingsThresholds(t *testing.T) {
 	}
 	approvalOverdue := func() bool {
 		t.Helper()
-		r := doJSON(t, bob, http.MethodGet, myWorkURL, nil)
+		// 裁决 11：终审件在项目管理员（alice）的待我审批。
+		r := doJSON(t, alice, http.MethodGet, myWorkURL, nil)
 		wantStatus(t, r, http.StatusOK)
 		items := decodeBody[api.MyWork](t, r).Approvals
 		if len(items) != 1 {
@@ -6042,7 +6051,7 @@ func TestResultUpdateFlow(t *testing.T) {
 	resp = doJSON(t, carol, http.MethodGet, detailURL, nil)
 	wantStatus(t, resp, http.StatusOK)
 	detail := decodeBody[api.TaskDetail](t, resp)
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/decision", completionURL, detail.CompletionReviews[0].Id),
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/decision", completionURL, detail.CompletionReviews[0].Id),
 		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
 	wantStatus(t, resp, http.StatusOK)
 	done := decodeBody[api.Task](t, resp)
@@ -6149,7 +6158,7 @@ func TestResultUpdateFlow(t *testing.T) {
 
 	// AC-39：终审通过后候选覆盖当前内容，旧文件永久删除
 	updateReviewID := detail.CompletionReviews[0].Id
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/decision", completionURL, updateReviewID),
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/decision", completionURL, updateReviewID),
 		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
 	wantStatus(t, resp, http.StatusOK)
 	updated := decodeBody[api.Task](t, resp)
@@ -6191,7 +6200,7 @@ func TestResultUpdateFlow(t *testing.T) {
 	wantStatus(t, resp, http.StatusOK)
 	detail = decodeBody[api.TaskDetail](t, resp)
 	op := "错误码仍有遗漏"
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/decision", completionURL, detail.CompletionReviews[0].Id),
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/decision", completionURL, detail.CompletionReviews[0].Id),
 		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionRejected, Opinion: &op})
 	wantStatus(t, resp, http.StatusOK)
 	rejected := decodeBody[api.Task](t, resp)

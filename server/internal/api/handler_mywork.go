@@ -73,17 +73,19 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 	for i := range facts.Tasks {
 		taskFactByID[facts.Tasks[i].ID] = &facts.Tasks[i]
 	}
-	// 审批显示文案需要 KR 负责人姓名（AC-04）。
-	krOwnerNameByTask := map[int64]string{}
-	for _, t := range taskRows {
-		krOwnerNameByTask[t.ID] = t.KrOwnerName.String
+	// 终审人集合（裁决 11，#181）：项目管理员含项目负责人，按处理时点动态解析。
+	finalIDs, finalNames, err := s.projectFinalReviewers(ctx, projectId)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
 	}
+	facts.FinalReviewerIDs = finalIDs
+	facts.FinalReviewerNames = finalNames
 	// 裁决 10（#180）：关闭申请审批退场，审批件事实只剩完成申请。
 	for _, cr := range completionRows {
 		fact := domain.WorkCompletionFact{
 			ID: cr.ID, TaskID: cr.TaskID, TaskName: cr.TaskName, SubmittedBy: cr.SubmittedBy,
-			TaskOwnerID: cr.TaskOwnerID, KrOwnerID: fromPgInt8(cr.KrOwnerID), State: cr.State,
-			KrOwnerName: krOwnerNameByTask[cr.TaskID],
+			TaskOwnerID: cr.TaskOwnerID, State: cr.State,
 		}
 		if cr.SubmittedAt.Valid {
 			fact.SubmittedAt = cr.SubmittedAt.Time

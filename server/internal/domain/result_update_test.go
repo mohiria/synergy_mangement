@@ -27,7 +27,7 @@ func TestStartResultUpdateRule(t *testing.T) {
 		{"已关闭任务不可发起", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCancelled, OwnerID: 5, KrOwnerID: &krOwner}, ErrResultUpdateNotCompleted},
 		{"已有未提交的成果更新不可再发起", Actor{Role: RoleMember}, 5, withResultUpdate(completed, ResultUpdateOpen), ErrResultUpdateExists},
 		{"审批中的成果更新不可再发起", Actor{Role: RoleMember}, 5, withResultUpdate(completed, ResultUpdateReviewing), ErrResultUpdateExists},
-		{"KR 无负责人时无人终审", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCompleted, OwnerID: 5}, ErrKrOwnerMissing},
+		{"KR 无负责人也可发起（裁决 11：终审人为管理员集合）", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCompleted, OwnerID: 5}, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -111,18 +111,18 @@ func TestDecideCompletionUnderResultUpdate(t *testing.T) {
 	admin := Actor{Role: RoleAdmin}
 	member := Actor{Role: RoleMember}
 
-	status, err := DecideCompletionRule(member, reviewing, krOwner, true, "")
+	status, err := DecideCompletionRule(admin, reviewing, true, "")
 	if err != nil || status != TaskCompleted {
 		t.Fatalf("成果更新终审通过应保持已完成: (%s, %v)", status, err)
 	}
-	status, err = DecideCompletionRule(member, reviewing, krOwner, false, "内容不完整")
+	status, err = DecideCompletionRule(admin, reviewing, false, "内容不完整")
 	if err != nil || status != TaskCompleted {
 		t.Fatalf("成果更新终审退回应保持已完成: (%s, %v)", status, err)
 	}
-	if _, err := DecideCompletionRule(admin, reviewing, 9, true, ""); !errors.Is(err, ErrNotKrOwner) {
-		t.Fatalf("非 KR 负责人不应可终审: %v", err)
+	if _, err := DecideCompletionRule(member, reviewing, true, ""); !errors.Is(err, ErrNotFinalReviewer) {
+		t.Fatalf("非项目管理员不应可终审（裁决 11）: %v", err)
 	}
-	if _, err := DecideCompletionRule(member, TaskFacts{Status: TaskCompleted, OwnerID: 5, KrOwnerID: &krOwner}, krOwner, true, ""); !errors.Is(err, ErrCompletionNotPending) {
+	if _, err := DecideCompletionRule(admin, TaskFacts{Status: TaskCompleted, OwnerID: 5, KrOwnerID: &krOwner}, true, ""); !errors.Is(err, ErrCompletionNotPending) {
 		t.Fatalf("没有在审的成果更新时不应可终审: %v", err)
 	}
 

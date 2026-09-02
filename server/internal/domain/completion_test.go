@@ -5,7 +5,8 @@ import (
 	"testing"
 )
 
-// AC-13／§9.1：提交完成申请——负责人在进行中提交，须有候选内容与提交说明，KR 须有负责人。
+// AC-13／§9.1：提交完成申请——负责人在进行中提交，须有候选内容与提交说明；
+// 裁决 11（#181）：终审人为项目管理员集合，「KR 无负责人则无人可审批」校验退场。
 func TestSubmitCompletionRule(t *testing.T) {
 	facts := func(status string) TaskFacts {
 		return TaskFacts{Status: status, CreatorID: 3, OwnerID: 5, KrOwnerID: i64(7)}
@@ -22,7 +23,7 @@ func TestSubmitCompletionRule(t *testing.T) {
 		{"提交说明必填", facts(TaskInProgress), 1, "  ", ErrCompletionNoteRequired},
 		{"未开始不可提交", facts(TaskNotStarted), 1, "x", ErrCompletionNotInProgress},
 		{"已在终审不可重复提交", facts(TaskPendingFinalReview), 1, "x", ErrCompletionNotInProgress},
-		{"KR 无负责人不可提交", TaskFacts{Status: TaskInProgress, OwnerID: 5}, 1, "x", ErrKrOwnerMissing},
+		{"KR 无负责人也可提交（裁决 11）", TaskFacts{Status: TaskInProgress, OwnerID: 5}, 1, "x", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -50,28 +51,34 @@ func TestCanSubmitCompletion(t *testing.T) {
 	}
 }
 
-// AC-15／38：终审仅 KR 负责人处理；通过→已完成，退回→进行中且退回意见必填。
+// AC-15／38（裁决 11 #181 修订）：终审人为项目管理员集合（含项目负责人）或签，
+// 任一人通过→已完成，退回→进行中且退回意见必填；KR 负责人与任务负责人不再可终审。
 func TestDecideCompletionRule(t *testing.T) {
 	pending := TaskFacts{Status: TaskPendingFinalReview, CreatorID: 3, OwnerID: 5, KrOwnerID: i64(7)}
+	admin := Actor{Role: RoleAdmin}
+	owner := Actor{IsOwner: true}
+	member := Actor{Role: RoleMember}
 	cases := []struct {
 		name       string
+		actor      Actor
 		t          TaskFacts
-		actor      int64
 		approve    bool
 		opinion    string
 		wantStatus string
 		wantErr    error
 	}{
-		{"KR 负责人通过（意见选填）", pending, 7, true, "", TaskCompleted, nil},
-		{"KR 负责人退回需意见", pending, 7, false, "", "", ErrRejectOpinionRequired},
-		{"KR 负责人退回回进行中", pending, 7, false, "验收样例不足", TaskInProgress, nil},
-		{"非 KR 负责人不可终审", pending, 9, true, "", "", ErrNotKrOwner},
-		{"任务负责人不可自审", pending, 5, true, "", "", ErrNotKrOwner},
-		{"非待终审状态冲突", TaskFacts{Status: TaskInProgress, KrOwnerID: i64(7)}, 7, true, "", "", ErrCompletionNotPending},
+		{"项目管理员通过（意见选填）", admin, pending, true, "", TaskCompleted, nil},
+		{"项目负责人通过", owner, pending, true, "", TaskCompleted, nil},
+		{"管理员退回需意见", admin, pending, false, "", "", ErrRejectOpinionRequired},
+		{"管理员退回回进行中", admin, pending, false, "验收样例不足", TaskInProgress, nil},
+		{"KR 负责人（成员）不可终审", member, pending, true, "", "", ErrNotFinalReviewer},
+		{"任务负责人不可自审", member, pending, true, "", "", ErrNotFinalReviewer},
+		{"访客不可终审", Actor{Role: RoleViewer}, pending, true, "", "", ErrNotFinalReviewer},
+		{"非待终审状态冲突", admin, TaskFacts{Status: TaskInProgress, KrOwnerID: i64(7)}, true, "", "", ErrCompletionNotPending},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			status, err := DecideCompletionRule(Actor{Role: RoleMember}, tc.t, tc.actor, tc.approve, tc.opinion)
+			status, err := DecideCompletionRule(tc.actor, tc.t, tc.approve, tc.opinion)
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("DecideCompletionRule() err = %v, want %v", err, tc.wantErr)
 			}

@@ -98,10 +98,11 @@ type Blocker struct {
 	SourceOwnerName string
 }
 
-// 裁决 10（#180）：关闭申请审批退场，审批超时只对保留的两个环节计时——成果审核、KR 终审。
+// 裁决 10（#180）：关闭申请审批退场，审批超时只对保留的两个环节计时——成果审核、终审
+// （裁决 11 #181：「KR 终审」更名「终审」，审批人为项目管理员集合）。
 var approvalStageLabels = map[string]string{
 	"intermediate_review": "成果审核",
-	"final_review":        "KR 终审",
+	"final_review":        "终审",
 }
 
 // DeriveBlockers 由四类结构化事实派生当前全部卡点（AC-11）。

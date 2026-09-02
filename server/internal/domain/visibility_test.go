@@ -110,7 +110,7 @@ func TestImplicitViewerReadsAllButWritesNothing(t *testing.T) {
 	if err := CloseTaskRule(implicit, facts); !errors.Is(err, ErrCancelForbidden) {
 		t.Fatalf("隐式访客不应可关闭任务: %v", err)
 	}
-	if _, err := DecideCompletionRule(implicit, finalPending, me, true, ""); !errors.Is(err, ErrNotKrOwner) {
+	if _, err := DecideCompletionRule(implicit, finalPending, true, ""); !errors.Is(err, ErrNotFinalReviewer) {
 		t.Fatalf("隐式访客不应可终审: %v", err)
 	}
 	if _, _, err := DecideIntermediateRule(implicit, intermediate, me,

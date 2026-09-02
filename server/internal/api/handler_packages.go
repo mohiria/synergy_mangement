@@ -66,16 +66,19 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 	for _, id := range pendingReviewTasks {
 		pendingReviewByTask[id] = true
 	}
-	// 任务状态显示文案（AC-04）：入池与终审取所属 KR 负责人，或签取审核组姓名。
+	// 任务状态显示文案（AC-04；裁决 11：终审取项目管理员集合，或签取审核组姓名）。
 	taskRows, err := s.q.ListProjectTasks(ctx, projectId)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
-	krOwnerNameByTask := map[int64]string{}
+	_, finalNames, err := s.projectFinalReviewers(ctx, projectId)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
 	taskFactsByID := map[int64]store.ListProjectTasksRow{}
 	for _, t := range taskRows {
-		krOwnerNameByTask[t.ID] = t.KrOwnerName.String
 		taskFactsByID[t.ID] = t
 	}
 	// 接收方名单（词汇表「接收方」）：归档列表按项展示成果交给谁。
@@ -161,7 +164,7 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 					// #171：归档接收方列只显示成员信息——指定成员列名单、全员「项目全体成员」、未配置空。
 					ReceiverLabel: domain.ReceiverDisplay(facts.ReceiverScope, receiverNamesByTask[d.TaskID]),
 					Status:         TaskStatus(d.TaskStatus),
-					StatusLabel:    domain.StatusLabel(d.TaskStatus, krOwnerNameByTask[d.TaskID], reviewerNamesByTask[d.TaskID]),
+					StatusLabel:    domain.StatusLabel(d.TaskStatus, finalNames, reviewerNamesByTask[d.TaskID]),
 					FileState:      &fs,
 					FileStateLabel: &fsLabel,
 					ReviewCount:    countByTask[d.TaskID],
@@ -222,7 +225,7 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 				OwnerName:      facts.OwnerName,
 				ReceiverLabel:  domain.ReceiverDisplay(facts.ReceiverScope, receiverNamesByTask[f.TaskID]),
 				Status:         TaskStatus(facts.Status),
-				StatusLabel:    domain.StatusLabel(facts.Status, krOwnerNameByTask[f.TaskID], reviewerNamesByTask[f.TaskID]),
+				StatusLabel:    domain.StatusLabel(facts.Status, finalNames, reviewerNamesByTask[f.TaskID]),
 				FileState:      &fs,
 				FileStateLabel: &fsLabel,
 				ReviewCount:    countByTask[f.TaskID],

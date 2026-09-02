@@ -9,9 +9,6 @@ import (
 
 // O／KR 的编辑、删除与成员移出前的职责检查（AC-61、AC-65；PRD §7.2、§3.4）。
 
-// NotifyKrHandover 站内通知类型：KR 负责人交接，未决审批已转交继任者（AC-61）。
-const NotifyKrHandover = "kr_handover"
-
 var (
 	ErrObjectiveHasKeyResults = errors.New("该 O 下还有 KR，请先处理下级再删除")
 	ErrKeyResultHasTasks      = errors.New("该 KR 下还有任务（含已完成、已关闭），请先处理下级再删除")

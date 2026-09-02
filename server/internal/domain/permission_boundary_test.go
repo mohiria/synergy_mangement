@@ -57,7 +57,7 @@ func TestWriteActionsRequireNonViewerMembership(t *testing.T) {
 			if err := CloseTaskRule(actor, facts); !errors.Is(err, ErrCancelForbidden) {
 				t.Fatalf("不应可关闭任务: %v", err)
 			}
-			if _, err := DecideCompletionRule(actor, finalPending, me, true, ""); !errors.Is(err, ErrNotKrOwner) {
+			if _, err := DecideCompletionRule(actor, finalPending, true, ""); !errors.Is(err, ErrNotFinalReviewer) {
 				t.Fatalf("不应可终审: %v", err)
 			}
 			if _, _, err := DecideIntermediateRule(actor, intermediate, me,

@@ -229,7 +229,12 @@ func (s *Server) projectBlockerFacts(ctx context.Context, projectID int64) (doma
 		}
 	}
 
-	// 停在当前环节的审批件（裁决 10，#180：关闭申请退场，只剩中间或签、KR 终审）。
+	// 停在当前环节的审批件（裁决 10，#180：关闭申请退场，只剩中间或签、终审）。
+	// 终审的待行动人为项目管理员集合（裁决 11，#181）。
+	finalIDs, finalNames, err := s.projectFinalReviewers(ctx, projectID)
+	if err != nil {
+		return domain.BlockerFacts{}, err
+	}
 	for _, cr := range completionRows {
 		switch cr.State {
 		case domain.CompletionIntermediate:
@@ -254,22 +259,13 @@ func (s *Server) projectBlockerFacts(ctx context.Context, projectID int64) (doma
 			}
 			facts.Approvals = append(facts.Approvals, domain.BlockerApprovalFact{
 				Kind: "final_review", RefID: cr.ID, TaskID: cr.TaskID, StageSince: since,
-				ApproverIDs: approverIDs(taskRows, cr.TaskID), ApproverNames: []string{krOwnerNameByTask[cr.TaskID]},
+				ApproverIDs:   append([]int64(nil), finalIDs...),
+				ApproverNames: append([]string(nil), finalNames...),
 			})
 		}
 	}
 
 	return facts, nil
-}
-
-// approverIDs 取任务所属 KR 负责人（关闭申请与终审的审批人）。
-func approverIDs(tasks []store.ListProjectTasksRow, taskID int64) []int64 {
-	for _, t := range tasks {
-		if t.ID == taskID && t.KrOwnerID.Valid {
-			return []int64{t.KrOwnerID.Int64}
-		}
-	}
-	return nil
 }
 
 func blockerViews(bs []domain.Blocker, actor domain.Actor, userID int64, remindLimit int, remindCounts func(recipientID, taskID int64) int) []Blocker {

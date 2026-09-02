@@ -68,13 +68,6 @@ LEFT JOIN tasks t ON t.key_result_id = kr.id
 WHERE o.project_id = $1
 GROUP BY kr.id;
 
--- name: CountPendingApprovalsByKeyResult :one
--- 该 KR 下未决审批单条数：待终审完成申请
--- （AC-61 交接确认；裁决 10（#180）关闭申请审批退场，只剩完成审批）。
-SELECT (
-    SELECT COUNT(*) FROM tasks t WHERE t.key_result_id = $1 AND t.status = 'pending_final_review'
-) AS n;
-
 -- name: ListKeyResultsOwnedBy :many
 SELECT kr.id, kr.description
 FROM key_results kr
