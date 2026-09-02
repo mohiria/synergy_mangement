@@ -91,14 +91,14 @@ func uploadCandidate(t *testing.T, c *http.Client, tasksURL string, taskID, deli
 	resp := doJSON(t, c, http.MethodPost, url, req)
 	wantStatus(t, resp, http.StatusCreated)
 	up := decodeBody[api.UploadCandidateResponse](t, resp)
-	if up.UploadUrl == "" || up.File.State != api.DeliverableFileStateUploading {
+	if up.UploadUrl == "" || up.File.State != api.Uploading {
 		t.Fatalf("候选登记异常: %+v", up)
 	}
 	putObject(t, up.UploadUrl, content)
 	resp = doJSON(t, c, http.MethodPost, url+"/commit", api.CommitUploadRequest{FileId: up.File.Id})
 	wantStatus(t, resp, http.StatusOK)
 	f := decodeBody[api.DeliverableFile](t, resp)
-	if f.State != api.DeliverableFileStateCandidate {
+	if f.State != api.Candidate {
 		t.Fatalf("确认后应为候选: %+v", f)
 	}
 	return f
@@ -1738,7 +1738,7 @@ func TestDeliverablesAndFiles(t *testing.T) {
 		api.UploadCandidateRequest{FileName: "现场验收记录.xlsx", FileType: sp("xlsx")})
 	wantStatus(t, resp, http.StatusCreated)
 	up := decodeBody[api.UploadCandidateResponse](t, resp)
-	if up.UploadUrl == "" || up.File.State != api.DeliverableFileStateUploading {
+	if up.UploadUrl == "" || up.File.State != api.Uploading {
 		t.Fatalf("候选登记异常: %+v", up)
 	}
 	// R4：文件没真的上传就点确认，必须被拒；此时也还不是候选内容
@@ -2512,9 +2512,9 @@ func TestIntermediateReviewOrSign(t *testing.T) {
 	}
 }
 
-// 指定成员输入请求（#14，AC-29/30；MW-10／MW-11）：输入关系建立后立即带上下文通知（裁决 #162）→同意接收（不就绪）
-// →提交内容后输入就绪；无拒绝/转派端点。
-func TestMemberInputRequests(t *testing.T) {
+// 替指定成员创建上游任务（#178 裁决：输入请求机制退场）：新任务直接入池并通知
+// 新任务负责人，自动建立「新上游任务 → 当前任务」的必要输入边，就绪按来源任务已完成判定。
+func TestCreateUpstreamTask(t *testing.T) {
 	q, pool := setupDB(t)
 	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
 	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
@@ -2558,121 +2558,93 @@ func TestMemberInputRequests(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
-	// carol 建任务（直接入池）→ 配置成员输入（dave）→ 输入关系建立后立即通知（裁决 #162）
+	// carol 建任务（直接入池）→ 替 dave 创建上游任务
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "回归验证分析", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
 	})
 	wantStatus(t, resp, http.StatusCreated)
-	tasks := decodeBody[[]api.Task](t, resp)
-	taskID := tasks[0].Id
-	expected := openapiDate(t, "2026-09-10")
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/member-inputs", tasksURL, taskID),
-		api.CreateMemberInputRequest{
-			Necessity: api.Required, ProviderIds: []int64{daveUser.ID},
-			ContentNote: "请提供最新接口字段口径说明", ExpectedDate: expected,
-		})
-	// 输入源属关键字段（#172 裁决：直接生效，边立即建立、通知立即发出）。
-	wantStructureAccepted(t, resp)
-	edge := edgeOf(t, carol, base, created.Id, taskID, "接口字段口径")
-	if edge.InputRequest == nil || edge.InputRequest.State != api.InputRequestStatePending || edge.Ready {
-		t.Fatalf("成员输入边异常: %+v", edge)
-	}
-	requestID := edge.InputRequest.Id
-	resp = doJSON(t, dave, http.MethodGet, base+"/notifications", nil)
-	wantStatus(t, resp, http.StatusOK)
-	notes := decodeBody[[]api.Notification](t, resp)
-	if len(notes) != 1 || notes[0].Kind != "input_request" || notes[0].TaskId == nil || *notes[0].TaskId != taskID {
-		t.Fatalf("输入关系建立后应立即发带上下文通知: %+v", notes)
-	}
+	taskID := decodeBody[[]api.Task](t, resp)[0].Id
+	upstreamURL := fmt.Sprintf("%s/%d/upstream-tasks", tasksURL, taskID)
 
-	// 期望时间必填 422
-	bad := api.CreateMemberInputRequest{Necessity: api.Required, ProviderIds: []int64{daveUser.ID}, ContentNote: "x"}
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/member-inputs", tasksURL, taskID), map[string]any{
-		"necessity": bad.Necessity, "providerIds": bad.ProviderIds, "contentNote": bad.ContentNote,
+	// 校验仍然生效：所属 KR 必须存在、负责人须为非只读成员
+	resp = doJSON(t, carol, http.MethodPost, upstreamURL, api.CreateUpstreamTaskRequest{
+		KeyResultId: 999999, Name: "无效 KR", OwnerId: daveUser.ID, StartDate: start, EndDate: end,
+	})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodPost, upstreamURL, api.CreateUpstreamTaskRequest{
+		KeyResultId: kr1, Name: "无效负责人", OwnerId: 999999, StartDate: start, EndDate: end,
 	})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 
-	// 必要输入未到：任务显示等待输入
+	// 正常创建：新任务直接入池、边立即建立
+	upstreamEnd := openapiDate(t, "2026-09-20")
+	resp = doJSON(t, carol, http.MethodPost, upstreamURL, api.CreateUpstreamTaskRequest{
+		KeyResultId: kr1, Name: "补充现场口径说明", OwnerId: daveUser.ID,
+		StartDate: start, EndDate: upstreamEnd,
+	})
+	wantStatus(t, resp, http.StatusOK)
+	currentTask := decodeBody[api.Task](t, resp)
+	// 必要输入未到：当前任务显示等待输入
+	if currentTask.Status != api.TaskStatusWaitingInput {
+		t.Fatalf("必要输入未到应显示等待输入: %+v", currentTask.Status)
+	}
+
+	// 边事实：来源为新任务、必要、未就绪；期望时间＝上游任务截止（#174）
+	edge := edgeOf(t, carol, base, created.Id, taskID, "补充现场口径说明")
+	if edge.Ready || edge.Necessity != api.Required {
+		t.Fatalf("新建上游边应为未就绪的必要输入: %+v", edge)
+	}
+	if edge.SourceTaskName == nil || *edge.SourceTaskName != "补充现场口径说明" {
+		t.Fatalf("边应指向新上游任务: %+v", edge)
+	}
+	if edge.ExpectedDate == nil || edge.ExpectedDate.Time.Format("2006-01-02") != "2026-09-20" {
+		t.Fatalf("期望时间应取上游任务截止日期: %+v", edge.ExpectedDate)
+	}
+
+	// 新任务事实：直接入池、负责人 dave、未开始
 	resp = doJSON(t, carol, http.MethodGet, tasksURL, nil)
 	wantStatus(t, resp, http.StatusOK)
-	for _, task := range decodeBody[[]api.Task](t, resp) {
-		if task.Id == taskID && task.Status != api.TaskStatusWaitingInput {
-			t.Fatalf("必要输入未到应显示等待输入: %+v", task.Status)
+	var upstream *api.Task
+	for _, tk := range decodeBody[[]api.Task](t, resp) {
+		if tk.Name == "补充现场口径说明" {
+			v := tk
+			upstream = &v
 		}
 	}
-
-	// AC-30：他人不能接收；dave 同意接收（接收≠就绪）；未接收不能提交
-	acceptURL := fmt.Sprintf("%s/projects/%d/input-requests/%d/accept", base, created.Id, requestID)
-	provideURL := fmt.Sprintf("%s/projects/%d/input-requests/%d/provide", base, created.Id, requestID)
-	resp = doJSON(t, carol, http.MethodPost, acceptURL, nil)
-	wantStatus(t, resp, http.StatusForbidden)
-	resp.Body.Close()
-	resp = doJSON(t, dave, http.MethodPost, provideURL, api.ProvideInputRequest{Text: sp("先提交试试")})
-	wantStatus(t, resp, http.StatusConflict)
-	resp.Body.Close()
-	resp = doJSON(t, dave, http.MethodPost, acceptURL, nil)
-	wantStatus(t, resp, http.StatusOK)
-	accepted := decodeBody[api.InputRequest](t, resp)
-	if accepted.State != api.InputRequestStateAccepted {
-		t.Fatalf("接收状态异常: %+v", accepted)
+	if upstream == nil || upstream.OwnerId != daveUser.ID || upstream.Status != api.TaskStatusNotStarted {
+		t.Fatalf("新上游任务应直接入池且负责人为指定成员: %+v", upstream)
 	}
-	resp = doJSON(t, carol, http.MethodGet, tasksURL, nil)
+
+	// dave 收到「被指定为负责人」通知（无认领确认环节）
+	resp = doJSON(t, dave, http.MethodGet, base+"/notifications", nil)
 	wantStatus(t, resp, http.StatusOK)
-	for _, task := range decodeBody[[]api.Task](t, resp) {
-		if task.Id == taskID && task.Status != api.TaskStatusWaitingInput {
-			t.Fatalf("接收不等于就绪，应仍等待输入: %+v", task.Status)
+	foundAssigned := false
+	for _, n := range decodeBody[[]api.Notification](t, resp) {
+		if n.Kind == "upstream_task_assigned" && n.TaskId != nil && *n.TaskId == upstream.Id &&
+			strings.Contains(n.Content, "王五") && strings.Contains(n.Content, "补充现场口径说明") {
+			foundAssigned = true
 		}
 	}
-
-	// 空内容提交 422；提交文字+文件 → 已提供、输入就绪、任务不再等待输入
-	resp = doJSON(t, dave, http.MethodPost, provideURL, api.ProvideInputRequest{})
-	wantStatus(t, resp, http.StatusUnprocessableEntity)
-	resp.Body.Close()
-	resp = doJSON(t, dave, http.MethodPost, provideURL, api.ProvideInputRequest{Text: sp("口径见附件"), FileName: sp("接口口径.xlsx")})
-	wantStatus(t, resp, http.StatusOK)
-	provided := decodeBody[api.ProvideInputResponse](t, resp)
-	// R4：带附件时先停在 uploading，文件真的写进对象存储并确认后才转已提供
-	if provided.Request.State != api.InputRequestStateUploading || provided.UploadUrl == nil {
-		t.Fatalf("提交结果异常: %+v", provided)
-	}
-	commitURL := fmt.Sprintf("%s/projects/%d/input-requests/%d/commit", base, created.Id, requestID)
-	resp = doJSON(t, dave, http.MethodPost, commitURL, nil)
-	wantStatus(t, resp, http.StatusConflict)
-	resp.Body.Close()
-	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
-	wantStatus(t, resp, http.StatusOK)
-	if d := decodeBody[api.TaskDetail](t, resp); d.Inputs[0].Ready || d.Task.Status != api.TaskStatusWaitingInput {
-		t.Fatalf("附件未上传前不应就绪: %+v %v", d.Inputs[0], d.Task.Status)
-	}
-	putObject(t, *provided.UploadUrl, "input-bytes")
-	resp = doJSON(t, dave, http.MethodPost, commitURL, nil)
-	wantStatus(t, resp, http.StatusOK)
-	if got := decodeBody[api.InputRequest](t, resp); got.State != api.InputRequestStateProvided {
-		t.Fatalf("确认后应为已提供: %+v", got)
+	if !foundAssigned {
+		t.Fatalf("新任务负责人应收到通知")
 	}
 
-	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
+	// KR 负责人 bob 收到新任务入池通知（#162 口径）
+	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
 	wantStatus(t, resp, http.StatusOK)
-	detail := decodeBody[api.TaskDetail](t, resp)
-	if !detail.Inputs[0].Ready || detail.Task.Status != api.TaskStatusNotStarted {
-		t.Fatalf("提交后输入应就绪: %+v %v", detail.Inputs[0], detail.Task.Status)
+	foundPool := false
+	for _, n := range decodeBody[[]api.Notification](t, resp) {
+		if n.Kind == "task_pool_entered" && n.TaskId != nil && *n.TaskId == upstream.Id {
+			foundPool = true
+		}
 	}
-	if detail.Inputs[0].InputRequest == nil || detail.Inputs[0].InputRequest.ProvidedText == nil {
-		t.Fatalf("提交内容缺失: %+v", detail.Inputs[0].InputRequest)
+	if !foundPool {
+		t.Fatalf("KR 负责人应收到新任务入池通知")
 	}
-
-	// 文件下载地址；重复提交冲突
-	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/projects/%d/input-requests/%d/file-url", base, created.Id, requestID), nil)
-	wantStatus(t, resp, http.StatusOK)
-	if u := decodeBody[api.DownloadUrlResponse](t, resp); u.Url == "" {
-		t.Fatalf("文件地址为空")
-	}
-	resp = doJSON(t, dave, http.MethodPost, provideURL, api.ProvideInputRequest{Text: sp("再提一次")})
-	wantStatus(t, resp, http.StatusConflict)
-	resp.Body.Close()
 }
 
 // AC-53 后端：一次配置可多选来源任务或多名对接人，分别建边；各边独立参与就绪判定，
@@ -2782,97 +2754,52 @@ func TestMultiSourceInputs(t *testing.T) {
 		t.Fatalf("多来源未就绪应等待输入: %+v", detail.Task.Status)
 	}
 
-	// AC-53：一次选择两名对接人 → 各自建边、各自生成输入请求与通知
-	expected := openapiDate(t, "2026-09-10")
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/member-inputs", tasksURL, taskD),
-		api.CreateMemberInputRequest{
-			Necessity: api.Required, ProviderIds: []int64{daveUser.ID, erinUser.ID},
-			ContentNote: "请各自提供本方口径说明", ExpectedDate: expected,
+	// #178 裁决：成员来源随输入请求机制退场——为 D 替 dave、erin 各创建一个上游任务，
+	// 各自建立必要输入边并独立参与就绪判定。
+	upstreamURL := fmt.Sprintf("%s/%d/upstream-tasks", tasksURL, taskD)
+	for i, ownerID := range []int64{daveUser.ID, erinUser.ID} {
+		resp = doJSON(t, carol, http.MethodPost, upstreamURL, api.CreateUpstreamTaskRequest{
+			KeyResultId: kr1, Name: fmt.Sprintf("本方口径说明整理 %d", i+1), OwnerId: ownerID,
+			StartDate: start, EndDate: end,
 		})
-	wantStructureAccepted(t, resp)
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
 	memberEdges := []api.DeliverableEdge{}
 	for _, e := range projectEdges(t, carol, base, created.Id) {
-		// 成员来源没有来源任务，标识取「所需内容」摘要（#112）。
-		if e.TargetTaskId == taskD && e.Name == "请各自提供本方口径说明" {
+		if e.TargetTaskId == taskD {
 			memberEdges = append(memberEdges, e)
 		}
 	}
 	if len(memberEdges) != 2 {
-		t.Fatalf("多对接人应分别建边: %+v", memberEdges)
+		t.Fatalf("两个上游任务应分别建边: %+v", memberEdges)
 	}
-	requestIDs := map[int64]int64{}
 	for _, e := range memberEdges {
-		if e.InputRequest == nil || e.InputRequest.State != api.InputRequestStatePending || e.Ready {
-			t.Fatalf("每名对接人应各自生成待接收输入请求: %+v", e)
+		if e.Ready || e.Necessity != api.Required {
+			t.Fatalf("新建上游边应为未就绪的必要输入: %+v", e)
 		}
-		requestIDs[e.InputRequest.ProviderId] = e.InputRequest.Id
 	}
-	if len(requestIDs) != 2 {
-		t.Fatalf("输入请求应按对接人各一条: %+v", requestIDs)
-	}
+	// 各上游负责人收到「被指定为负责人」通知
 	for _, c := range []*http.Client{dave, erin} {
 		resp = doJSON(t, c, http.MethodGet, base+"/notifications", nil)
 		wantStatus(t, resp, http.StatusOK)
-		notes := decodeBody[[]api.Notification](t, resp)
-		if len(notes) != 1 || notes[0].Kind != "input_request" || notes[0].TaskId == nil || *notes[0].TaskId != taskD {
-			t.Fatalf("每名对接人应各收到一条带上下文通知: %+v", notes)
+		found := false
+		for _, n := range decodeBody[[]api.Notification](t, resp) {
+			if n.Kind == "upstream_task_assigned" {
+				found = true
+			}
 		}
-	}
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/member-inputs", tasksURL, taskD),
-		api.CreateMemberInputRequest{
-			Necessity: api.Required, ProviderIds: []int64{daveUser.ID, daveUser.ID},
-			ContentNote: "x", ExpectedDate: expected,
-		})
-	wantStatus(t, resp, http.StatusUnprocessableEntity)
-	resp.Body.Close()
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/member-inputs", tasksURL, taskD),
-		api.CreateMemberInputRequest{
-			Necessity: api.Required, ProviderIds: []int64{},
-			ContentNote: "x", ExpectedDate: expected,
-		})
-	wantStatus(t, resp, http.StatusUnprocessableEntity)
-	resp.Body.Close()
-
-	// 各对接人独立走「同意接收 → 提交内容」；只完成一人时 D 仍等待输入
-	act := func(c *http.Client, providerID int64) {
-		t.Helper()
-		id := requestIDs[providerID]
-		r := doJSON(t, c, http.MethodPost, fmt.Sprintf("%s/projects/%d/input-requests/%d/accept", base, created.Id, id), nil)
-		wantStatus(t, r, http.StatusOK)
-		r.Body.Close()
-		r = doJSON(t, c, http.MethodPost, fmt.Sprintf("%s/projects/%d/input-requests/%d/provide", base, created.Id, id),
-			api.ProvideInputRequest{Text: sp("本方口径说明")})
-		wantStatus(t, r, http.StatusOK)
-		r.Body.Close()
-	}
-	act(dave, daveUser.ID)
-	resp = doJSON(t, dave, http.MethodPost, fmt.Sprintf("%s/projects/%d/input-requests/%d/accept", base, created.Id, requestIDs[erinUser.ID]), nil)
-	wantStatus(t, resp, http.StatusForbidden)
-	resp.Body.Close()
-	resp = doJSON(t, carol, http.MethodGet, edgesURL, nil)
-	wantStatus(t, resp, http.StatusOK)
-	readyByProvider := map[int64]bool{}
-	for _, e := range decodeBody[[]api.DeliverableEdge](t, resp) {
-		if e.TargetTaskId == taskD && e.InputRequest != nil {
-			readyByProvider[e.InputRequest.ProviderId] = e.Ready
+		if !found {
+			t.Fatalf("上游任务负责人应收到通知")
 		}
-	}
-	if !readyByProvider[daveUser.ID] || readyByProvider[erinUser.ID] {
-		t.Fatalf("对接人各边应独立就绪: %+v", readyByProvider)
 	}
 	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskD), nil)
 	wantStatus(t, resp, http.StatusOK)
-	if detail := decodeBody[api.TaskDetail](t, resp); detail.Task.Status != api.TaskStatusWaitingInput {
-		t.Fatalf("仍有对接人未提交时应继续等待输入: %+v", detail.Task.Status)
+	if detail := decodeBody[api.TaskDetail](t, resp); detail.Task.Status != api.TaskStatusWaitingInput || len(detail.Inputs) != 2 {
+		t.Fatalf("上游未完成时应等待输入: %+v", detail.Task.Status)
 	}
-
-	// 两名对接人都提交后不再等待输入
-	act(erin, erinUser.ID)
-	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskD), nil)
-	wantStatus(t, resp, http.StatusOK)
-	if detail := decodeBody[api.TaskDetail](t, resp); detail.Task.Status != api.TaskStatusNotStarted {
-		t.Fatalf("全部对接人提交后应解除等待输入: %+v", detail.Task.Status)
-	}
+	_ = sp
+	_ = edgesURL
 }
 
 // 结构化卡点与一键提醒（#15，AC-11）：执行者填写类型/缺失/原因/希望行动人上报，
@@ -4115,17 +4042,17 @@ func TestUnifiedPermissionsAcrossIdentities(t *testing.T) {
 		t.Fatalf("访客不应有行动事项: %+v", w)
 	}
 
-	// AC-22：外部传递不产生外部账号——对接人必须是项目内非访客；
-	// 外部材料由内部协调人（成员）代为接收与提交。
-	expected := openapiDate(t, "2026-09-10")
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/member-inputs", tasksURL, taskID),
-		api.CreateMemberInputRequest{Necessity: api.Required, ProviderIds: []int64{daveUser.ID},
-			ContentNote: "外部材料需由内部协调人代录", ExpectedDate: expected})
+	// AC-22（#178 修订）：外部传递不产生外部账号——替他人创建上游任务时，
+	// 新任务负责人必须是项目内非访客成员。
+	start2, end2 := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/upstream-tasks", tasksURL, taskID),
+		api.CreateUpstreamTaskRequest{KeyResultId: kr1, Name: "外部材料代录",
+			OwnerId: daveUser.ID, StartDate: start2, EndDate: end2})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/member-inputs", tasksURL, taskID),
-		api.CreateMemberInputRequest{Necessity: api.Required, ProviderIds: []int64{bobUser.ID},
-			ContentNote: "外部材料由协调人李四收集后代录", ExpectedDate: expected})
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/upstream-tasks", tasksURL, taskID),
+		api.CreateUpstreamTaskRequest{KeyResultId: kr1, Name: "外部材料由协调人李四收集后代录",
+			OwnerId: bobUser.ID, StartDate: start2, EndDate: end2})
 	wantStructureAccepted(t, resp)
 }
 

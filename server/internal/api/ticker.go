@@ -73,17 +73,13 @@ func (s *Server) sweepStaleBlockerResolutions(ctx context.Context, projectID int
 // 「同一交付物项至多一条待上传」的名额。
 const staleUploadAge = 2 * presignExpiry
 
-// SweepStaleUploads 清理迟迟未确认的两阶段上传（R4）：删掉过期的待上传记录与其占位对象，
-// 输入请求回到已接受状态等对接人重提。
+// SweepStaleUploads 清理迟迟未确认的两阶段上传（R4；#178 后输入请求机制退场，
+// 只剩候选内容与任务文件两类）：删掉过期的待上传记录与其占位对象。
 func (s *Server) SweepStaleUploads(ctx context.Context) {
 	interval := pgtype.Interval{Microseconds: staleUploadAge.Microseconds(), Valid: true}
 	keys, err := s.q.DeleteStaleUploadingFiles(ctx, interval)
 	if err != nil {
 		log.Printf("upload sweep: 清理候选待上传记录失败: %v", err)
-	}
-	inputKeys, err := s.q.ResetStaleInputUploads(ctx, interval)
-	if err != nil {
-		log.Printf("upload sweep: 重置输入待上传记录失败: %v", err)
 	}
 	// 过程文件与外部材料同走两阶段提交，未确认的记录同样会留下孤儿对象（§7.7、#79）。
 	taskFileKeys, err := s.q.DeleteStaleUploadingTaskFiles(ctx, interval)
@@ -91,7 +87,7 @@ func (s *Server) SweepStaleUploads(ctx context.Context) {
 		log.Printf("upload sweep: 清理任务文件待上传记录失败: %v", err)
 	}
 	keys = append(keys, taskFileKeys...)
-	for _, key := range append(keys, inputKeys...) {
+	for _, key := range keys {
 		if key == "" {
 			continue
 		}

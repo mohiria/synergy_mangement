@@ -687,11 +687,6 @@ export default function CollaborationPage({
     objectives.forEach((o) => opts.push({ value: `o:${o.id}`, label: `O · ${o.title}` }));
     krList.forEach((k) => opts.push({ value: `kr:${k.id}`, label: `${k.code} · ${k.description}` }));
     tasks.forEach((t) => opts.push({ value: `task:${t.id}`, label: `任务 · ${t.name}` }));
-    const providers = new Map<number, string>();
-    edges.forEach((e) => {
-      if (e.inputRequest) providers.set(e.inputRequest.providerId, e.inputRequest.providerName);
-    });
-    providers.forEach((name, id) => opts.push({ value: `member:${id}`, label: `成员 · ${name}` }));
     edges.forEach((e) => opts.push({ value: `edge:${e.id}`, label: `关系 · ${e.name}（→ ${e.targetTaskName ?? ""}）` }));
     openBlockers.forEach((b) =>
       opts.push({
@@ -720,18 +715,6 @@ export default function CollaborationPage({
         if (t) {
           enter({ kind: "kr", krId: t.keyResultId });
           setSelectedTask(id);
-        }
-        break;
-      }
-      case "member": {
-        // CR-13：定位到该成员承担的第一条输入关系并选中，画布上的成员节点随之高亮。
-        const memberEdge = edges.find((e) => e.inputRequest?.providerId === id);
-        const target = memberEdge ? taskById.get(memberEdge.targetTaskId) : undefined;
-        if (memberEdge && target) {
-          enter({ kind: "kr", krId: target.keyResultId });
-          setSelectedEdge(memberEdge.id);
-        } else {
-          enter({ kind: "full" });
         }
         break;
       }
@@ -769,8 +752,8 @@ export default function CollaborationPage({
       // CR §5.2：图谱与关系列表共享搜索词，切视图不丢输入。
       const q = searchText.trim().toLowerCase();
       if (q) {
-        // 裁决 J1（#142）：「交付物边」列已删，搜索匹配不再含边名，保留任务名与成员名。
-        const hay = `${e.sourceTaskName ?? ""}${e.targetTaskName ?? ""}${e.inputRequest?.providerName ?? ""}`.toLowerCase();
+        // 裁决 J1（#142）：「交付物边」列已删，搜索匹配不再含边名，保留任务名。
+        const hay = `${e.sourceTaskName ?? ""}${e.targetTaskName ?? ""}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
@@ -1209,10 +1192,10 @@ export default function CollaborationPage({
             onClick={() => {
               if (selectedEdgeObj.sourceTaskId != null) enterFocus(selectedEdgeObj.sourceTaskId);
             }}
-            title={selectedEdgeObj.sourceTaskName ?? selectedEdgeObj.inputRequest?.providerName}
+            title={selectedEdgeObj.sourceTaskName}
           >
-            <span>{selectedEdgeObj.sourceTaskCode ?? "项目成员"}</span>
-            <b>{selectedEdgeObj.sourceTaskName ?? selectedEdgeObj.inputRequest?.providerName ?? "—"}</b>
+            <span>{selectedEdgeObj.sourceTaskCode ?? ""}</span>
+            <b>{selectedEdgeObj.sourceTaskName ?? "—"}</b>
           </button>
           <i>→</i>
           <button
@@ -1232,9 +1215,7 @@ export default function CollaborationPage({
           </div>
           <div className="gi-prop">
             <span>提供方</span>
-            <strong>
-              {selectedEdgeObj.sourceOwnerName ?? selectedEdgeObj.inputRequest?.providerName ?? "—"}
-            </strong>
+            <strong>{selectedEdgeObj.sourceOwnerName ?? "—"}</strong>
           </div>
           <div className="gi-prop">
             <span>接收方</span>
@@ -1411,10 +1392,7 @@ export default function CollaborationPage({
               </span>
             </div>
             {inspectorDetail.inputs.map((e) => {
-              const src =
-                e.sourceTaskId != null
-                  ? `${e.sourceTaskCode ?? ""} ${e.sourceTaskName ?? ""}`
-                  : (e.inputRequest?.providerName ?? "");
+              const src = `${e.sourceTaskCode ?? ""} ${e.sourceTaskName ?? ""}`;
               return (
                 <button
                   key={e.id}
@@ -1896,9 +1874,7 @@ export default function CollaborationPage({
                     )}
                     {listRows.map((e) => (
                       <tr key={e.id}>
-                        <td title={e.sourceTaskName ?? e.inputRequest?.providerName ?? "—"}>
-                          {e.sourceTaskName ?? e.inputRequest?.providerName ?? "—"}
-                        </td>
+                        <td title={e.sourceTaskName ?? "—"}>{e.sourceTaskName ?? "—"}</td>
                         <td>{e.necessityLabel}</td>
                         {/* 裁决 J1（#142）＋#163：「当前交付物」列显示来源任务当前文件的「类型 · 大小」
                             （类型由服务端派生），多项时显示「N 项」并悬停列出各项「文件名 · 大小」。 */}
@@ -1906,9 +1882,7 @@ export default function CollaborationPage({
                           {edgeCurrentCell(e) ?? <span className="muted">暂无</span>}
                         </td>
                         <td title={e.targetTaskName}>{e.targetTaskName}</td>
-                        <td title={e.sourceOwnerName ?? e.inputRequest?.providerName ?? "—"}>
-                          {e.sourceOwnerName ?? e.inputRequest?.providerName ?? "—"}
-                        </td>
+                        <td title={e.sourceOwnerName ?? "—"}>{e.sourceOwnerName ?? "—"}</td>
                         <td>
                           <span className={`status-pill ${e.ready ? "completed" : "warning"}`}>
                             {e.ready ? "已就绪" : "未就绪"}

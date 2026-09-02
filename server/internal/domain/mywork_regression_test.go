@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-// MW-14：任务关闭后，该任务相关的审批件、输入请求与卡点卡片全部从我的工作消失。
-// 卡点侧本来就按「执行中才派生」排除了取消任务，审批件与输入请求此前没有跟着终态收口。
+// MW-14（#178 修订：输入请求机制退场）：任务关闭后，该任务相关的审批件与卡点卡片
+// 全部从我的工作消失。卡点侧本来就按「执行中才派生」排除了取消任务。
 func TestMyWorkDropsCancelledTaskItems(t *testing.T) {
 	now := time.Date(2026, 8, 26, 10, 0, 0, 0, time.UTC)
 	me := int64(1)
@@ -23,12 +23,6 @@ func TestMyWorkDropsCancelledTaskItems(t *testing.T) {
 			{ID: 90, TaskID: 10, TaskName: "已关闭任务", SubmittedBy: other, KrOwnerID: &me, KrOwnerName: "我", SubmittedAt: now.AddDate(0, 0, -1), TaskEnd: &end},
 			{ID: 91, TaskID: 11, TaskName: "在办任务", SubmittedBy: other, KrOwnerID: &me, KrOwnerName: "我", SubmittedAt: now.AddDate(0, 0, -1), TaskEnd: &end},
 		},
-		InputRequests: []WorkInputRequestFact{
-			{ID: 80, TaskID: 10, TaskName: "已关闭任务", InputName: "接口清单", Necessity: NecessityRequired, ProviderID: me, TaskOwnerID: other,
-				State: InputRequestPending, CreatedAt: now.AddDate(0, 0, -1), Notified: true},
-			{ID: 81, TaskID: 11, TaskName: "在办任务", InputName: "现场数据", Necessity: NecessityRequired, ProviderID: me, TaskOwnerID: other,
-				State: InputRequestPending, CreatedAt: now.AddDate(0, 0, -1), Notified: true},
-		},
 	}
 	g := MyWork(facts)
 
@@ -37,23 +31,9 @@ func TestMyWorkDropsCancelledTaskItems(t *testing.T) {
 			t.Errorf("已关闭任务的审批件不应出现在待我审批: %+v", it)
 		}
 	}
-	for _, it := range g.Pending {
-		if it.TaskID != nil && *it.TaskID == 10 {
-			t.Errorf("已关闭任务的输入请求不应出现在待我处理: %+v", it)
-		}
-	}
 	// 在办任务的同类事项仍在，确认不是被一刀切掉的
 	if len(g.Approvals) != 1 || g.Approvals[0].TaskID == nil || *g.Approvals[0].TaskID != 11 {
 		t.Fatalf("在办任务的审批件应保留: %+v", g.Approvals)
-	}
-	var kept bool
-	for _, it := range g.Pending {
-		if it.Kind == "input_request" && it.TaskID != nil && *it.TaskID == 11 {
-			kept = true
-		}
-	}
-	if !kept {
-		t.Fatalf("在办任务的输入请求应保留: %+v", g.Pending)
 	}
 }
 

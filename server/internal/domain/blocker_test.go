@@ -58,15 +58,13 @@ func TestUpstreamBlockerCarriesSourceFacts(t *testing.T) {
 	if b.SourceTaskCode != "T1.2.1" || b.SourceTaskName != "地质勘察" || b.SourceOwnerName != "孙六" {
 		t.Fatalf("卡点应带上游编号＋标题＋负责人: %+v", b)
 	}
-	// 成员来源没有上游任务，三个字段保持缺省。
+	// 来源事实缺失（异常数据）时三个字段保持缺省（#178 后来源恒为任务）。
 	f2 := baseBlockerFacts()
 	f2.Tasks[0].Status = TaskNotStarted
 	f2.Inputs[0].Ready = false
-	f2.Inputs[0].ProviderID = 9
-	f2.Inputs[0].ProviderName = "钱九"
 	b2 := findBlocker(DeriveBlockers(f2), "upstream_unready:edge:100")
 	if b2 == nil || b2.SourceTaskCode != "" || b2.SourceTaskName != "" || b2.SourceOwnerName != "" {
-		t.Fatalf("成员来源不应带上游任务字段: %+v", b2)
+		t.Fatalf("无来源任务事实时不应带上游任务字段: %+v", b2)
 	}
 }
 
@@ -207,12 +205,6 @@ func TestDeriveBlockersActionOwners(t *testing.T) {
 			f.Inputs[0].SourceOwnerID = 6
 			f.Inputs[0].SourceOwnerName = "孙六"
 		}, "upstream_unready:edge:100", []string{"孙六"}},
-		{"来源为指定成员时指向对接人", func(f *BlockerFacts) {
-			f.Tasks[0].Status = TaskNotStarted
-			f.Inputs[0].Ready = false
-			f.Inputs[0].ProviderID = 9
-			f.Inputs[0].ProviderName = "吴九"
-		}, "upstream_unready:edge:100", []string{"吴九"}},
 		{"任务超期指向任务负责人", func(f *BlockerFacts) {
 			f.Tasks[0].EndDate = blockerDay(-1)
 		}, "task_overdue:1", []string{"王五"}},

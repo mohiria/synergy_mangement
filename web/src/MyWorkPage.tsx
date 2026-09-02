@@ -28,14 +28,12 @@ const STATUS_CLASS: Record<TaskStatus, string> = {
 // 事项类型的单字标记（原型 work-kind 徽标）；分组语义由 Tab 表达，卡片正文不再展开原因。
 const KIND_BADGE: Record<string, string> = {
   task: "办",
-  input_request: "输",
   invite: "邀",
   cancel_request: "审",
   intermediate_review: "审",
   final_review: "审",
   receipt: "收",
   upstream: "等",
-  waiting_input_request: "等",
   waiting_cancel_request: "等",
   waiting_completion: "等",
   blocker: "卡",
@@ -154,7 +152,7 @@ export default function MyWorkPage({
             </div>
             <div className="work-main">
               <h3 title={title}>{title}</h3>
-              {/* #130：五组副行统一「KR 编号 · 截止 日期」；输入请求的期望时间也写「截止」。 */}
+              {/* #130：五组副行统一「KR 编号 · 截止 日期」。 */}
               <div className="work-meta">
                 <span title={kr}>{kr}</span>
                 <span>· 截止 {it.dueDate ?? "—"}</span>

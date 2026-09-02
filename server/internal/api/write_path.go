@@ -98,11 +98,9 @@ func routeTemplate(path string) string {
 		"key-results":        "{keyResultId}",
 		"edges":              "{edgeId}",
 		"deliverables":       "{deliverableId}",
-		"field-changes":      "{changeId}",
+		"cancel-requests":    "{requestId}",
 		"completion-reviews": "{reviewId}",
-		"input-requests":     "{requestId}",
 		"task-invites":       "{inviteId}",
-		"packages":           "{packageId}",
 	}
 	for i, seg := range segs {
 		if seg == "" || !isNumeric(seg) {

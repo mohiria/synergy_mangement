@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -122,12 +120,6 @@ func (s *Server) applyStructureChange(ctx context.Context, qtx *store.Queries,
 			return err
 		}
 		return applyAddTaskInput(ctx, qtx, projectID, taskID, uid, req)
-	case domain.StructureAddMemberInput:
-		var req CreateMemberInputRequest
-		if err := json.Unmarshal(p.Request, &req); err != nil {
-			return err
-		}
-		return s.applyAddMemberInput(ctx, qtx, projectID, taskID, uid, req)
 	case domain.StructureRemoveEdge:
 		var req struct {
 			EdgeID int64 `json:"edgeId"`
@@ -150,56 +142,15 @@ func applyAddTaskInput(ctx context.Context, qtx *store.Queries, projectID, taskI
 		// name 列保留（历史值不动），建边时写一份当时的快照；带编号的完整标识读时现算（#112）。
 		display := ""
 		if src, err := qtx.GetTaskInProject(ctx, store.GetTaskInProjectParams{ID: sourceID, ProjectID: projectID}); err == nil {
-			display = domain.EdgeDisplayName("", src.Name, "")
+			display = domain.EdgeDisplayName("", src.Name)
 		}
-		// #174 裁决：任务来源边不再维护期望时间，展示与超期判断取上游任务截止日期。
+		// #174 裁决：边不维护期望时间，展示与超期判断取上游任务截止日期。
 		if _, err := qtx.CreateEdge(ctx, store.CreateEdgeParams{
 			TargetTaskID: taskID,
-			SourceTaskID: pgtype.Int8{Int64: sourceID, Valid: true},
+			SourceTaskID: sourceID,
 			Name:         display,
 			Necessity:    string(req.Necessity),
 			CreatedBy:    uid,
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (s *Server) applyAddMemberInput(ctx context.Context, qtx *store.Queries, projectID, taskID, uid int64, req CreateMemberInputRequest) error {
-	task, err := qtx.GetTaskInProject(ctx, store.GetTaskInProjectParams{ID: taskID, ProjectID: projectID})
-	if err != nil {
-		return err
-	}
-	// 裁决 #162：对接通知时点为「输入关系建立后」，随建边立即逐人发送。
-	note := strings.TrimSpace(req.ContentNote)
-	// 同上：写入当时派生的标识，读取现算（#112）。
-	name := domain.EdgeDisplayName("", "", note)
-	for _, providerID := range req.ProviderIds {
-		edge, err := qtx.CreateEdge(ctx, store.CreateEdgeParams{
-			TargetTaskID: taskID,
-			SourceUserID: pgtype.Int8{Int64: providerID, Valid: true},
-			Name:         name,
-			Necessity:    string(req.Necessity),
-			ExpectedDate: pgtype.Date{Time: req.ExpectedDate.Time, Valid: true},
-			CreatedBy:    uid,
-		})
-		if err != nil {
-			return err
-		}
-		if _, err := qtx.CreateInputRequest(ctx, store.CreateInputRequestParams{
-			EdgeID: edge.ID, ProviderID: providerID, ContentNote: note,
-			NotifiedAt: pgtype.Timestamptz{Time: s.now(), Valid: true},
-		}); err != nil {
-			return err
-		}
-		// AC-29：带上下文的站内通知，每名对接人各发一条。
-		if _, err := qtx.CreateNotification(ctx, store.CreateNotificationParams{
-			UserID:    providerID,
-			Kind:      domain.NotifyInputRequest,
-			Content:   fmt.Sprintf("请你为任务「%s」提供输入「%s」：%s", task.Name, name, note),
-			ProjectID: pgtype.Int8{Int64: projectID, Valid: true},
-			TaskID:    pgtype.Int8{Int64: taskID, Valid: true},
 		}); err != nil {
 			return err
 		}

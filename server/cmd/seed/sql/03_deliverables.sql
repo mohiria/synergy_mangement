@@ -110,80 +110,53 @@ SET object_key = 'deliverables/' || deliverable_id || '/'
               || (extract(epoch FROM uploaded_at) * 1000000000)::bigint || '-' || file_name;
 
 -- ── 交付物边 ──────────────────────────────────────────────────────────────────
-INSERT INTO deliverable_edges (id, target_task_id, source_task_id, source_user_id, name, necessity, expected_date, created_by, created_at)
+INSERT INTO deliverable_edges (id, target_task_id, source_task_id, name, necessity, created_by, created_at)
 OVERRIDING SYSTEM VALUE VALUES
 -- 迁移项目
-(1,  2,  1,    NULL,    '核心库不兼容对象清单',       'required',  current_date - 166, 3,  now() - interval '170 days'),
-(2,  4,  1,    NULL,    '不兼容对象清单（评审输入）', 'reference', NULL,               3,  now() - interval '147 days'),
-(3,  5,  2,    NULL,    '存储过程改造清单',           'required',  current_date - 138, 4,  now() - interval '142 days'),
-(4,  6,  2,    NULL,    '存储过程改造清单',           'required',  current_date - 98,  4,  now() - interval '103 days'),
-(5,  7,  3,    NULL,    '字符集与排序规则差异确认单', 'reference', NULL,               3,  now() - interval '83 days'),
-(6,  8,  5,    NULL,    '订单模块 SQL 改造对照表',     'required',  current_date - 58,  6,  now() - interval '62 days'),
-(7,  8,  6,    NULL,    '资金模块驱动切换说明',       'required',  current_date - 10,  6,  now() - interval '62 days'),
-(8,  9,  NULL, 9, '新库测试环境连接信息与只读账号', 'required',  current_date + 3,   4,  now() - interval '12 days'),
-(9,  11, 10,   NULL,   '全量迁移数据校验方案',       'required',  current_date - 88,  9,  now() - interval '92 days'),
-(10, 12, 11,   NULL,   '第一轮迁移演练报告',         'required',  current_date - 18,  6,  now() - interval '26 days'),
-(11, 13, 12,   NULL,   '第二轮迁移演练报告',         'required',  current_date + 8,   9,  now() - interval '18 days'),
-(12, 14, 11,   NULL,   '第一轮演练暴露的问题',       'reference', NULL,               2,  now() - interval '63 days'),
-(13, 16, 14,   NULL,   '割接实施方案（定稿）',       'required',  current_date + 6,   2,  now() - interval '30 days'),
-(14, 17, 15,   NULL,   '回退预案（定稿）',           'required',  current_date + 10,  2,  now() - interval '28 days'),
-(15, 19, 18,   NULL,   '迁移前性能基线报告',         'required',  current_date - 28,  6,  now() - interval '32 days'),
-(16, 22, NULL, 11, '安全基线要求覆盖的监控项',   'reference', current_date - 30,  9,  now() - interval '50 days'),
+(1, 2, 1, '核心库不兼容对象清单', 'required', 3, now() - interval '170 days'),
+(2, 4, 1, '不兼容对象清单（评审输入）', 'reference', 3, now() - interval '147 days'),
+(3, 5, 2, '存储过程改造清单', 'required', 4, now() - interval '142 days'),
+(4, 6, 2, '存储过程改造清单', 'required', 4, now() - interval '103 days'),
+(5, 7, 3, '字符集与排序规则差异确认单', 'reference', 3, now() - interval '83 days'),
+(6, 8, 5, '订单模块 SQL 改造对照表', 'required', 6, now() - interval '62 days'),
+(7, 8, 6, '资金模块驱动切换说明', 'required', 6, now() - interval '62 days'),
+(9, 11, 10, '全量迁移数据校验方案', 'required', 9, now() - interval '92 days'),
+(10, 12, 11, '第一轮迁移演练报告', 'required', 6, now() - interval '26 days'),
+(11, 13, 12, '第二轮迁移演练报告', 'required', 9, now() - interval '18 days'),
+(12, 14, 11, '第一轮演练暴露的问题', 'reference', 2, now() - interval '63 days'),
+(13, 16, 14, '割接实施方案（定稿）', 'required', 2, now() - interval '30 days'),
+(14, 17, 15, '回退预案（定稿）', 'required', 2, now() - interval '28 days'),
+(15, 19, 18, '迁移前性能基线报告', 'required', 6, now() - interval '32 days'),
 -- 客服中台
-(17, 25, 24,   NULL,   '工单域模型与状态机说明',     'required',  current_date - 78,  3,  now() - interval '82 days'),
-(18, 26, 25,   NULL,   '接口契约（字段映射依据）',   'reference', NULL,               8,  now() - interval '72 days'),
-(19, 27, 25,   NULL,   '工单接口契约',               'required',  current_date - 63,  4,  now() - interval '67 days'),
-(20, 28, 25,   NULL,   '客户信息接口契约',           'required',  current_date - 48,  4,  now() - interval '52 days'),
-(21, 29, 27,   NULL,   '工单受理服务（联调可用版本）', 'required', current_date - 5,  6,  now() - interval '27 days'),
-(22, 29, 28,   NULL,   '客户信息聚合服务（联调可用版本）', 'required', current_date + 2, 6, now() - interval '27 days'),
-(23, 33, 32,   NULL,   '工作台交互改版方案',         'required',  current_date - 33,  5,  now() - interval '37 days'),
-(24, 34, 33,   NULL,   '工作台前端组件（可测版本）', 'required',  current_date + 8,   5,  now() - interval '20 days'),
-(25, 36, 25,   NULL,   '接口契约（用例编写依据）',   'reference', NULL,               12, now() - interval '30 days'),
-(26, 37, 29,   NULL,   '联调通过的中台环境',         'required',  current_date + 3,   12, now() - interval '22 days'),
-(27, 37, 36,   NULL,   'UAT 用例集（售后场景）',      'required',  current_date + 3,   12, now() - interval '22 days'),
-(28, 38, 36,   NULL,   'UAT 用例集（投诉场景）',      'required',  current_date + 6,   12, now() - interval '22 days'),
-(29, 39, 37,   NULL, '售后场景 UAT 问题记录',       'reference', NULL,               12, now() - interval '20 days'),
-(30, 40, 32,   NULL,   '工作台改版后的操作路径',     'reference', NULL,               14, now() - interval '14 days'),
-(31, 41, 40,   NULL,   '坐席操作手册（培训版）',     'required',  current_date + 16,  14, now() - interval '16 days'),
-(32, 44, 43,   NULL,   '客服核心指标口径说明',       'required',  current_date - 20,  8,  now() - interval '25 days'),
-(33, 44, NULL, 12, '班组维度的服务质量口径确认', 'required',  current_date - 10,  8,  now() - interval '20 days'),
-(34, 45, 44,   NULL,   '服务质量看板（试运行版本）', 'required',  current_date + 10,  8,  now() - interval '18 days'),
-(35, 30, NULL, 3, '网关鉴权与限流方案确认',     'required',  current_date + 5,   4,  now() - interval '15 days'),
+(17, 25, 24, '工单域模型与状态机说明', 'required', 3, now() - interval '82 days'),
+(18, 26, 25, '接口契约（字段映射依据）', 'reference', 8, now() - interval '72 days'),
+(19, 27, 25, '工单接口契约', 'required', 4, now() - interval '67 days'),
+(20, 28, 25, '客户信息接口契约', 'required', 4, now() - interval '52 days'),
+(21, 29, 27, '工单受理服务（联调可用版本）', 'required', 6, now() - interval '27 days'),
+(22, 29, 28, '客户信息聚合服务（联调可用版本）', 'required', 6, now() - interval '27 days'),
+(23, 33, 32, '工作台交互改版方案', 'required', 5, now() - interval '37 days'),
+(24, 34, 33, '工作台前端组件（可测版本）', 'required', 5, now() - interval '20 days'),
+(25, 36, 25, '接口契约（用例编写依据）', 'reference', 12, now() - interval '30 days'),
+(26, 37, 29, '联调通过的中台环境', 'required', 12, now() - interval '22 days'),
+(27, 37, 36, 'UAT 用例集（售后场景）', 'required', 12, now() - interval '22 days'),
+(28, 38, 36, 'UAT 用例集（投诉场景）', 'required', 12, now() - interval '22 days'),
+(29, 39, 37, '售后场景 UAT 问题记录', 'reference', 12, now() - interval '20 days'),
+(30, 40, 32, '工作台改版后的操作路径', 'reference', 14, now() - interval '14 days'),
+(31, 41, 40, '坐席操作手册（培训版）', 'required', 14, now() - interval '16 days'),
+(32, 44, 43, '客服核心指标口径说明', 'required', 8, now() - interval '25 days'),
+(34, 45, 44, '服务质量看板（试运行版本）', 'required', 8, now() - interval '18 days'),
 -- 知识库试点
-(36, 47, 46,   NULL,   '知识条目撰写规范',           'required',  current_date - 28,  12, now() - interval '32 days'),
-(37, 47, NULL, 12, '首批条目的业务口径复核意见', 'reference', current_date + 2,   14, now() - interval '9 days'),
-(38, 50, 49,   NULL,   '检索评测集与评分口径',       'required',  current_date - 16,  8,  now() - interval '20 days'),
-(39, 51, 50,   NULL,   '两轮评测结论',               'required',  current_date + 8,   8,  now() - interval '14 days'),
-(40, 52, 47,   NULL,   '首批知识条目（可用版本）',   'required',  current_date - 2,   7,  now() - interval '10 days'),
-(41, 53, 52,   NULL,   '试运行环境（两条业务线）',   'required',  current_date + 12,  7,  now() - interval '12 days'),
-(42, 54, 53,   NULL, '坐席反馈与问题记录',         'required',  current_date + 32,  7,  now() - interval '10 days'),
+(36, 47, 46, '知识条目撰写规范', 'required', 12, now() - interval '32 days'),
+(38, 50, 49, '检索评测集与评分口径', 'required', 8, now() - interval '20 days'),
+(39, 51, 50, '两轮评测结论', 'required', 8, now() - interval '14 days'),
+(40, 52, 47, '首批知识条目（可用版本）', 'required', 7, now() - interval '10 days'),
+(41, 53, 52, '试运行环境（两条业务线）', 'required', 7, now() - interval '12 days'),
+(42, 54, 53, '坐席反馈与问题记录', 'required', 7, now() - interval '10 days'),
 -- 等保整改
-(43, 58, 56,   NULL,   '主机与数据库加固记录',       'required',  current_date - 188, 11, now() - interval '162 days'),
-(44, 58, 57,   NULL,   '身份鉴别与审计整改说明',     'required',  current_date - 168, 11, now() - interval '162 days'),
-(45, 60, 59,   NULL,   '日志审计接入清单',           'required',  current_date - 173, 9,  now() - interval '198 days'),
-(46, 62, 61,   NULL,   '季度安全自查清单',           'required',  current_date - 148, 11, now() - interval '152 days');
+(43, 58, 56, '主机与数据库加固记录', 'required', 11, now() - interval '162 days'),
+(44, 58, 57, '身份鉴别与审计整改说明', 'required', 11, now() - interval '162 days'),
+(45, 60, 59, '日志审计接入清单', 'required', 9, now() - interval '198 days'),
+(46, 62, 61, '季度安全自查清单', 'required', 11, now() - interval '152 days');
 
--- 裁决 #174：任务来源边不再维护期望时间（展示与超期判断取上游任务截止日期），
--- 上面按历史留下的取值统一作废；成员来源边保留。
-UPDATE deliverable_edges SET expected_date = NULL WHERE source_task_id IS NOT NULL;
-
--- ── 输入请求（成员 → 任务 的那几条边）─────────────────────────────────────────
-INSERT INTO input_requests (id, edge_id, provider_id, content_note, state, notified_at, accepted_at, provided_at, provided_text, file_name, object_key, created_at)
-OVERRIDING SYSTEM VALUE VALUES
-(1, 8,  9,  '需要新库测试环境的连接串、只读账号和白名单开通，报表工具要连过去跑兼容性用例。', 'pending',
-    now() - interval '12 days', NULL, NULL, '', '', '', now() - interval '12 days'),
-(2, 16, 11, '安全基线里要求必须监控的项，麻烦确认一下清单，我按这个配告警。', 'provided',
-    now() - interval '50 days', now() - interval '49 days', now() - interval '46 days',
-    '按等保整改的基线，数据库这边必须监控：特权账号登录、失败登录次数、审计日志写入失败、表空间使用率。前两项要留痕 6 个月。', '', '', now() - interval '50 days'),
-(3, 33, 12, '看板要出班组维度，需要业务侧确认「一次解决率」在班组口径下怎么算，是否排除转派工单。', 'provided',
-    now() - interval '20 days', now() - interval '20 days', now() - interval '16 days',
-    '班组口径下一次解决率＝该班组首次接触即结案工单 ÷ 该班组受理工单，转派出去的不计入分母，转派进来的算接收班组。', '客服指标口径补充说明_班组维度.docx', '', now() - interval '20 days'),
-(4, 35, 3,  '网关鉴权走统一 token 还是各服务自校验，限流按坐席工号还是按班组，需要架构给个结论。', 'pending',
-    now() - interval '15 days', NULL, NULL, '', '', '', now() - interval '15 days'),
-(5, 37, 12, '首批 300 条已经审校完，麻烦业务侧抽检 50 条看口径有没有跑偏。', 'accepted',
-    now() - interval '9 days', now() - interval '8 days', NULL, '', '', '', now() - interval '9 days');
-
--- 输入请求附件的对象键同样按 handler 的规则拼：input-requests/{请求 id}/{提交时刻纳秒}-{文件名}
-UPDATE input_requests
-SET object_key = 'input-requests/' || id || '/' || (extract(epoch FROM provided_at) * 1000000000)::bigint || '-' || file_name
-WHERE file_name <> '';
+-- 裁决 #178：输入请求机制退场（原成员来源边 8/16/33/35/37 与输入请求随之删除，
+-- 上游关系一律为任务与任务之间）。

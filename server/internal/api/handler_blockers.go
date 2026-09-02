@@ -135,16 +135,12 @@ func (s *Server) projectRemindTargets(ctx context.Context, projectID int64) ([]d
 		}
 		waits = append(waits, domain.ApprovalWaitFact(a.Kind, a.RefID, a.TaskID, a.ApproverIDs, a.ApproverNames, days))
 	}
+	// #178 后输入来源恒为上游任务。
 	for _, in := range facts.Inputs {
-		if in.Ready || in.Necessity != domain.NecessityRequired {
+		if in.Ready || in.Necessity != domain.NecessityRequired || in.SourceTaskID == nil {
 			continue
 		}
-		switch {
-		case in.RequestID != 0:
-			waits = append(waits, domain.InputRequestWaitFact(in.RequestID, in.TargetTaskID, in.InputName, in.ProviderID, in.ProviderName))
-		case in.SourceTaskID != nil:
-			waits = append(waits, domain.UpstreamWaitFact(in.EdgeID, in.TargetTaskID, in.InputName, in.SourceTaskName, in.SourceOwnerID, in.SourceOwnerName))
-		}
+		waits = append(waits, domain.UpstreamWaitFact(in.EdgeID, in.TargetTaskID, in.InputName, in.SourceTaskName, in.SourceOwnerID, in.SourceOwnerName))
 	}
 	return domain.RemindTargets(domain.RemindFacts{
 		Blockers: domain.DeriveBlockers(facts), Waits: waits, Tasks: tasks,
@@ -178,10 +174,6 @@ func (s *Server) projectBlockerFacts(ctx context.Context, projectID int64) (doma
 		return domain.BlockerFacts{}, err
 	}
 	edgeRows, err := s.q.ListEdgesByProject(ctx, projectID)
-	if err != nil {
-		return domain.BlockerFacts{}, err
-	}
-	requestRows, err := s.q.ListInputRequestsByProject(ctx, projectID)
 	if err != nil {
 		return domain.BlockerFacts{}, err
 	}
@@ -220,35 +212,23 @@ func (s *Server) projectBlockerFacts(ctx context.Context, projectID int64) (doma
 		facts.Tasks = append(facts.Tasks, tf)
 	}
 
-	// 输入就绪：来源为上游任务时看当前内容是否生效，来源为指定成员时看输入请求是否已提供。
-	requestByEdge := make(map[int64]store.ListInputRequestsByProjectRow, len(requestRows))
-	for _, ir := range requestRows {
-		requestByEdge[ir.EdgeID] = ir
-	}
+	// 输入就绪（裁决 #163／#178）：来源恒为上游任务，就绪只看来源任务已完成。
 	for _, e := range edgeRows {
 		in := domain.BlockerInputFact{
 			EdgeID: e.ID, TargetTaskID: e.TargetTaskID, InputName: e.Name,
 			Necessity: e.Necessity, Ready: domain.EdgeReady(e.SourceTaskStatus.String),
 		}
-		if e.SourceTaskID.Valid {
-			src := e.SourceTaskID.Int64
-			in.SourceTaskID = &src
-			in.SourceTaskCode = codeByTask[src]
-			in.SourceTaskName = e.SourceTaskName.String
-			in.SourceOwnerID = e.SourceOwnerID.Int64
-			in.SourceOwnerName = e.SourceOwnerName.String
-		}
-		if ir, ok := requestByEdge[e.ID]; ok {
-			in.Ready = domain.MemberEdgeReady(ir.State)
-			in.ProviderID = ir.ProviderID
-			in.ProviderName = ir.ProviderName
-			in.RequestID = ir.ID
-		}
+		src := e.SourceTaskID
+		in.SourceTaskID = &src
+		in.SourceTaskCode = codeByTask[src]
+		in.SourceTaskName = e.SourceTaskName.String
+		in.SourceOwnerID = e.SourceOwnerID.Int64
+		in.SourceOwnerName = e.SourceOwnerName.String
 		facts.Inputs = append(facts.Inputs, in)
 		// #173 裁决：互锁与下游影响沿「必要」边。
-		if e.Necessity == domain.NecessityRequired && e.SourceTaskID.Valid {
+		if e.Necessity == domain.NecessityRequired {
 			facts.RequiredEdges = append(facts.RequiredEdges, domain.RequiredEdge{
-				ID: e.ID, Source: e.SourceTaskID.Int64, Target: e.TargetTaskID,
+				ID: e.ID, Source: e.SourceTaskID, Target: e.TargetTaskID,
 			})
 		}
 	}

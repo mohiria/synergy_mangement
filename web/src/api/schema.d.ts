@@ -183,7 +183,7 @@ export interface paths {
         /** 调整成员角色（仅项目管理员／项目负责人） */
         put: operations["updateProjectMemberRole"];
         post?: never;
-        /** 将成员移出项目（仅项目管理员／项目负责人；此人仍在担任 KR 负责人、任务负责人、成果审核人、接收方或输入对接人时返回 409 并列出待交接项，AC-61） */
+        /** 将成员移出项目（仅项目管理员／项目负责人；此人仍在担任 KR 负责人、任务负责人、成果审核人或接收方时返回 409 并列出待交接项，AC-61；#178 后无输入对接人职责） */
         delete: operations["removeProjectMember"];
         options?: never;
         head?: never;
@@ -762,7 +762,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/projects/{projectId}/tasks/{taskId}/member-inputs": {
+    "/projects/{projectId}/tasks/{taskId}/upstream-tasks": {
         parameters: {
             query?: never;
             header?: never;
@@ -774,88 +774,8 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 指定项目成员提供输入（AC-29；可一次多选对接人，AC-53）：为每名对接人建立「成员 → 目标任务」交付物边并生成输入请求；输入源属关键字段，进所属 KR 负责人审批（AC-23），输入关系建立后即发站内通知（裁决 */
-        post: operations["createMemberInput"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/projects/{projectId}/input-requests/{requestId}/accept": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-                requestId: number;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 对接人同意接收（AC-30）；接收只表示承担责任，不代表输入就绪 */
-        post: operations["acceptInputRequest"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/projects/{projectId}/input-requests/{requestId}/provide": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-                requestId: number;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 对接人提交内容或文件（AC-30）；提交后输入请求变为已提供，目标任务输入更新为就绪 */
-        post: operations["provideInput"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/projects/{projectId}/input-requests/{requestId}/commit": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-                requestId: number;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 确认输入附件已写入对象存储（两阶段提交第二步；校验通过后输入才转为已提供） */
-        post: operations["commitInputRequestFile"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/projects/{projectId}/input-requests/{requestId}/file-url": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-                requestId: number;
-            };
-            cookie?: never;
-        };
-        /** 输入请求已提交文件的预签名下载地址 */
-        get: operations["getInputRequestFileUrl"];
-        put?: never;
-        post?: never;
+        /** 替指定成员创建上游任务（#178 裁决：上游任务不存在时由其完成，输入请求机制退场）——新任务直接入池（#162）并通知新任务负责人，自动建立「新上游任务 → 当前任务」的必要输入边 */
+        post: operations["createUpstreamTask"];
         delete?: never;
         options?: never;
         head?: never;
@@ -969,7 +889,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 一键提醒当前待行动人（AC-11、MW-13）：目标既可以是派生卡点，也可以是尚未成卡点的等待事项（审批件、输入请求、上游任务）；通知自动带入任务、缺失输入、截止时间与下游影响 */
+        /** 一键提醒当前待行动人（AC-11、MW-13）：目标既可以是派生卡点，也可以是尚未成卡点的等待事项（审批件、上游任务）；通知自动带入任务、缺失输入、截止时间与下游影响 */
         post: operations["createReminder"];
         delete?: never;
         options?: never;
@@ -1960,13 +1880,11 @@ export interface components {
             ready: boolean;
             /**
              * Format: date
-             * @description 期望时间（#174 裁决：任务来源边为派生字段＝上游任务截止日期；成员来源边为录入的期望时间）
+             * @description 期望时间（#174 裁决：派生字段＝上游任务截止日期；#178 后来源恒为任务）
              */
             expectedDate?: string;
             /** @description 当前用户能否解除该边（派生字段；目标任务负责人／可编辑项目者） */
             canRemove?: boolean;
-            /** @description 来源为指定项目成员时的输入请求（AC-29／30） */
-            inputRequest?: components["schemas"]["InputRequest"];
             /** @description 必要边循环互锁风险（派生字段，AC-10；#173 裁决改沿必要边）；循环部分暂停关键路径计算 */
             interlockRisk?: boolean;
             /** @description 位于必要边关键路径上（派生字段，AC-10；#173 裁决改沿必要边）；日期不足时不派生（此时仅依赖链） */
@@ -2179,7 +2097,7 @@ export interface components {
         };
         /** @description 我的工作事项（词汇表「我的工作事项」）；卡片派生事实，动作在任务详情抽屉完成 */
         WorkItem: {
-            /** @description 事项类型（task/cancel_request/intermediate_review/final_review/input_request/invite/upstream/blocker 等） */
+            /** @description 事项类型（task/cancel_request/intermediate_review/final_review/invite/upstream/blocker 等；#178 后无 input_request） */
             kind: string;
             title: string;
             /** Format: int64 */
@@ -2187,7 +2105,7 @@ export interface components {
             taskName?: string;
             /**
              * Format: int64
-             * @description 事项自身 ID（审批单／输入请求／邀请）
+             * @description 事项自身 ID（审批单／邀请）
              */
             refId?: number;
             /** @description 提醒目标的合成键；一键提醒按此寻址（卡点组为本条卡点的键，等待他人组为该等待事项自身的 wait:<事项类型>:<事项 ID>） */
@@ -2197,7 +2115,7 @@ export interface components {
              * @description 任务截止或输入期望时间
              */
             dueDate?: string;
-            /** @description 审批件与输入请求的已等待天数（排序事实；模块 PRD §5.2 规定卡片不显示，仅供排序与详情使用） */
+            /** @description 审批件的已等待天数（排序事实；模块 PRD §5.2 规定卡片不显示，仅供排序与详情使用） */
             waitingDays?: number;
             /** @description 超期标红（模块 PRD §5.4） */
             overdue?: boolean;
@@ -2302,65 +2220,32 @@ export interface components {
             targetKey: string;
         };
         /**
-         * @description 输入请求状态（词汇表「输入请求」；PRD §5.5）。uploading：已登记待上传，文件确认写入后才转 provided
-         * @enum {string}
+         * @description 替指定成员创建上游任务（#178 裁决：输入请求机制退场，关系回归任务与任务之间）。
+         *     新任务直接入池（#162）并通知新任务负责人；系统自动建立「新上游任务 → 当前任务」的必要输入边。
          */
-        InputRequestState: "pending" | "accepted" | "provided" | "uploading";
-        /** @description 指定项目成员的输入请求（附着在成员 → 目标任务的交付物边上） */
-        InputRequest: {
-            /** Format: int64 */
-            id: number;
-            /** Format: int64 */
-            edgeId: number;
-            /** Format: int64 */
-            providerId: number;
-            providerName: string;
-            /** @description 所需内容说明 */
-            contentNote?: string;
-            state: components["schemas"]["InputRequestState"];
+        CreateUpstreamTaskRequest: {
             /**
-             * Format: date-time
-             * @description 站内通知发送时间（裁决
+             * Format: int64
+             * @description 新任务所属 KR（弹窗内选择，默认带出当前任务所属 KR）
              */
-            notifiedAt?: string;
-            /** Format: date-time */
-            acceptedAt?: string;
-            /** Format: date-time */
-            providedAt?: string;
-            /** @description 对接人提交的文字内容 */
-            providedText?: string;
-            providedFileName?: string;
-            /** @description 当前用户能否同意接收（派生字段；对接人本人且待接收） */
-            canAccept?: boolean;
-            /** @description 当前用户能否提交内容（派生字段；对接人本人且已接收） */
-            canProvide?: boolean;
-        };
-        /**
-         * @description 新增输入要求（来源＝指定项目成员，AC-29；可一次多选对接人，AC-53）。
-         *     不收输入名称：输入源的可读标识取「所需内容」摘要（裁决 F1），见 DeliverableEdge.name。
-         */
-        CreateMemberInputRequest: {
-            necessity: components["schemas"]["Necessity"];
-            /** @description 对接人（非只读项目成员，AC-53 多选）；每人分别建边并生成输入请求与通知，不可重复 */
-            providerIds: number[];
-            /** @description 所需内容（§9.1 必填） */
-            contentNote: string;
+            keyResultId: number;
+            name: string;
+            /**
+             * Format: int64
+             * @description 新任务负责人（单选＝指定成员；须为非只读项目成员）
+             */
+            ownerId: number;
+            /** Format: date */
+            startDate: string;
             /**
              * Format: date
-             * @description 期望时间（§9.1 必填）
+             * @description 截止时间（取代原「期望时间」；边的期望时间派生自它，#174）
              */
-            expectedDate: string;
-        };
-        ProvideInputRequest: {
-            /** @description 文字内容；与文件至少提交其一 */
-            text?: string;
-            /** @description 上传文件名；返回预签名上传地址 */
-            fileName?: string;
-        };
-        ProvideInputResponse: {
-            request: components["schemas"]["InputRequest"];
-            /** @description 提交了 fileName 时返回的预签名上传地址 */
-            uploadUrl?: string;
+            endDate: string;
+            /** @description 量化标准（选填，#164 字段集） */
+            completionCriteria?: string;
+            /** @description 任务说明（选填） */
+            description?: string;
         };
         /**
          * @description 完成申请状态（词汇表「完成申请」；PRD §5.2.C）
@@ -4020,7 +3905,7 @@ export interface operations {
             422: components["responses"]["ValidationError"];
         };
     };
-    createMemberInput: {
+    createUpstreamTask: {
         parameters: {
             query?: never;
             header?: never;
@@ -4032,11 +3917,11 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateMemberInputRequest"];
+                "application/json": components["schemas"]["CreateUpstreamTaskRequest"];
             };
         };
         responses: {
-            /** @description 已受理，返回任务最新状态（进入审批时边与输入请求尚未建立，任务上带待审批变更单） */
+            /** @description 已创建并建边，返回当前任务最新状态 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4048,118 +3933,8 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    acceptInputRequest: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-                requestId: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 已接收 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["InputRequest"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-        };
-    };
-    provideInput: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-                requestId: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ProvideInputRequest"];
-            };
-        };
-        responses: {
-            /** @description 已提交 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProvideInputResponse"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["ValidationError"];
-        };
-    };
-    commitInputRequestFile: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-                requestId: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 已确认，输入转为已提供 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["InputRequest"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-        };
-    };
-    getInputRequestFileUrl: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-                requestId: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 预签名地址 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DownloadUrlResponse"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
         };
     };
     removeEdge: {

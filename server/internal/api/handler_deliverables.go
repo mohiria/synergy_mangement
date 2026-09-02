@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"synergy/server/internal/domain"
 	"synergy/server/internal/store"
@@ -407,7 +406,7 @@ func (s *Server) deliverableList(ctx context.Context, taskID int64, actor domain
 		byDeliverable[f.DeliverableID] = append(byDeliverable[f.DeliverableID], f)
 	}
 	// 裁决 #163：边不再挂具体交付物项，「来源关系边」按所属任务的输出边归组，各项共用同一组。
-	edgeRows, err := s.q.ListEdgeRefsByDeliverableTask(ctx, pgtype.Int8{Int64: taskID, Valid: true})
+	edgeRows, err := s.q.ListEdgeRefsByDeliverableTask(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -470,7 +469,7 @@ func fillContentState(item *Deliverable, hasPendingReview bool) {
 // edgeRefsBySourceTask 把关系边行按来源任务归拢（裁决 #163）；两处查询行结构一致。
 type edgeRefRow struct {
 	ID             int64
-	SourceTaskID   pgtype.Int8
+	SourceTaskID   int64
 	Necessity      string
 	TargetTaskID   int64
 	TargetTaskName string
@@ -479,10 +478,7 @@ type edgeRefRow struct {
 func edgeRefsBySourceTask(rows []edgeRefRow) map[int64][]DeliverableEdgeRef {
 	out := map[int64][]DeliverableEdgeRef{}
 	for _, row := range rows {
-		if !row.SourceTaskID.Valid {
-			continue
-		}
-		out[row.SourceTaskID.Int64] = append(out[row.SourceTaskID.Int64], DeliverableEdgeRef{
+		out[row.SourceTaskID] = append(out[row.SourceTaskID], DeliverableEdgeRef{
 			EdgeId:         row.ID,
 			Necessity:      Necessity(row.Necessity),
 			NecessityLabel: domain.NecessityLabel(row.Necessity),

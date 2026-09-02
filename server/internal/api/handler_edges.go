@@ -17,30 +17,20 @@ import (
 // 必要输入与交付物边（AC-07、AC-28、AC-48）。业务规则在 domain，handler 仅编排。
 
 // unreadyRequiredInputs 汇总每个下游任务的必要输入未就绪注记（§5.1「等待输入」的唯一口径）：
-// 值为「上游未就绪：缺 XX」，取首条未就绪的必要输入；成员来源按输入请求状态判定就绪。
+// 值为「上游未就绪：缺 XX」，取首条未就绪的必要输入（#178 后来源恒为任务）。
 // 同一任务的多条输入（AC-53 多来源）各自独立判定，任一必要输入未就绪即等待输入。
-func unreadyRequiredInputs(edges []store.ListEdgesByProjectRow, requests []store.ListInputRequestsByProjectRow) map[int64]string {
-	stateByEdge := make(map[int64]string, len(requests))
-	noteByEdge := make(map[int64]string, len(requests))
-	for _, ir := range requests {
-		stateByEdge[ir.EdgeID] = ir.State
-		noteByEdge[ir.EdgeID] = ir.ContentNote
-	}
+func unreadyRequiredInputs(edges []store.ListEdgesByProjectRow) map[int64]string {
 	targets := []int64{}
 	byTarget := map[int64][]domain.InputEdgeState{}
 	for _, e := range edges {
-		ready := domain.EdgeReady(e.SourceTaskStatus.String)
-		if state, ok := stateByEdge[e.ID]; ok {
-			ready = domain.MemberEdgeReady(state)
-		}
 		if _, seen := byTarget[e.TargetTaskID]; !seen {
 			targets = append(targets, e.TargetTaskID)
 		}
-		// 缺哪一项按派生标识说（#112）：注记里不带任务编号，读作「缺 <来源任务>」或「缺 <所需内容摘要>」。
+		// 缺哪一项按派生标识说（#112）：注记里不带任务编号，读作「缺 <来源任务>」。
 		byTarget[e.TargetTaskID] = append(byTarget[e.TargetTaskID],
 			domain.InputEdgeState{
-				Name:      domain.EdgeDisplayName("", e.SourceTaskName.String, noteByEdge[e.ID]),
-				Necessity: e.Necessity, Ready: ready,
+				Name:      domain.EdgeDisplayName("", e.SourceTaskName.String),
+				Necessity: e.Necessity, Ready: domain.EdgeReady(e.SourceTaskStatus.String),
 			})
 	}
 	notes := map[int64]string{}
@@ -52,17 +42,13 @@ func unreadyRequiredInputs(edges []store.ListEdgesByProjectRow, requests []store
 	return notes
 }
 
-// unreadyRequiredInputsByProject 取项目边与输入请求后汇总未就绪注记。
+// unreadyRequiredInputsByProject 取项目边后汇总未就绪注记。
 func (s *Server) unreadyRequiredInputsByProject(ctx context.Context, projectID int64) (map[int64]string, error) {
 	edges, err := s.q.ListEdgesByProject(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
-	requests, err := s.q.ListInputRequestsByProject(ctx, projectID)
-	if err != nil {
-		return nil, err
-	}
-	return unreadyRequiredInputs(edges, requests), nil
+	return unreadyRequiredInputs(edges), nil
 }
 
 // CreateTaskInput 新增输入要求：为每个选中的来源任务分别建立「来源任务 → 目标任务」交付物边
@@ -218,17 +204,6 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 	if err != nil {
 		return nil, err
 	}
-	requestRows, err := s.q.ListInputRequestsByProject(ctx, projectID)
-	if err != nil {
-		return nil, err
-	}
-	requestByEdge := make(map[int64]store.ListInputRequestsByProjectRow, len(requestRows))
-	// 成员来源的输入源标识取「所需内容」摘要（#112），按边先索引一份。
-	noteByEdge := make(map[int64]string, len(requestRows))
-	for _, ir := range requestRows {
-		requestByEdge[ir.EdgeID] = ir
-		noteByEdge[ir.EdgeID] = ir.ContentNote
-	}
 	// 硬依赖分析（AC-10）：循环互锁与关键路径。工期取任务计划天数（截止-开始+1）。
 	taskRows, err := s.q.ListProjectTasks(ctx, projectID)
 	if err != nil {
@@ -276,8 +251,8 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 	// #173 裁决：互锁与关键路径沿「必要」边分析。
 	requiredEdges := []domain.RequiredEdge{}
 	for _, e := range rows {
-		if e.Necessity == domain.NecessityRequired && e.SourceTaskID.Valid {
-			requiredEdges = append(requiredEdges, domain.RequiredEdge{ID: e.ID, Source: e.SourceTaskID.Int64, Target: e.TargetTaskID})
+		if e.Necessity == domain.NecessityRequired {
+			requiredEdges = append(requiredEdges, domain.RequiredEdge{ID: e.ID, Source: e.SourceTaskID, Target: e.TargetTaskID})
 		}
 	}
 	analysis := domain.AnalyzeRequiredEdges(requiredEdges, durations)
@@ -297,41 +272,31 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 			CanRemove:      &canRemove,
 		}
 		item.TargetTaskName = optString(e.TargetTaskName)
-		item.SourceTaskId = fromPgInt8(e.SourceTaskID)
+		sourceID := e.SourceTaskID
+		item.SourceTaskId = &sourceID
 		item.SourceTaskName = fromPgText(e.SourceTaskName)
 		sourceCode := ""
-		if e.SourceTaskID.Valid {
-			if code := codeByTask[e.SourceTaskID.Int64]; code != "" {
-				sourceCode = code
-				item.SourceTaskCode = &code
-			}
+		if code := codeByTask[sourceID]; code != "" {
+			sourceCode = code
+			item.SourceTaskCode = &code
 		}
 		// 输入源标识读时现算（裁决 F1、#112）：库里的 name 只是建边当时的快照，
-		// 来源任务改名后要跟着变，成员来源则取「所需内容」摘要。
-		item.Name = domain.EdgeDisplayName(sourceCode, e.SourceTaskName.String, noteByEdge[e.ID])
+		// 来源任务改名后要跟着变。
+		item.Name = domain.EdgeDisplayName(sourceCode, e.SourceTaskName.String)
 		if e.SourceTaskStatus.Valid {
 			st := TaskStatus(e.SourceTaskStatus.String)
 			item.SourceTaskStatus = &st
-			sourceID := e.SourceTaskID.Int64
 			label := domain.StatusLabel(e.SourceTaskStatus.String, krOwnerNameByTask[sourceID], reviewerNamesByTask[sourceID])
 			item.SourceTaskStatusLabel = &label
 		}
 		if e.SourceOwnerName.Valid {
 			item.SourceOwnerName = &e.SourceOwnerName.String
-		} else if e.SourceUserName.Valid {
-			item.SourceOwnerName = &e.SourceUserName.String
 		}
-		if e.SourceTaskID.Valid {
-			if files := currentFilesByTask[e.SourceTaskID.Int64]; len(files) > 0 {
-				item.SourceCurrentFiles = &files
-			}
+		if files := currentFilesByTask[sourceID]; len(files) > 0 {
+			item.SourceCurrentFiles = &files
 		}
-		// #174 裁决：任务来源边的「期望时间」取上游任务截止日期（派生）；成员来源取录入值。
-		if e.SourceTaskID.Valid {
-			item.ExpectedDate = fromPgDate(e.SourceEndDate)
-		} else {
-			item.ExpectedDate = fromPgDate(e.ExpectedDate)
-		}
+		// #174 裁决：「期望时间」取上游任务截止日期（派生；#178 后来源恒为任务）。
+		item.ExpectedDate = fromPgDate(e.SourceEndDate)
 		if e.Necessity == domain.NecessityRequired {
 			interlock := analysis.Interlocked[e.ID]
 			item.InterlockRisk = &interlock
@@ -339,16 +304,6 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 				onPath := analysis.OnCriticalPath[e.ID]
 				item.OnCriticalPath = &onPath
 			}
-		}
-		// 成员来源：附输入请求，就绪按「已提供」判定（AC-30、词汇表「输入就绪」）。
-		if ir, ok := requestByEdge[e.ID]; ok {
-			view := s.inputRequestView(store.InputRequest{
-				ID: ir.ID, EdgeID: ir.EdgeID, ProviderID: ir.ProviderID, ContentNote: ir.ContentNote,
-				State: ir.State, NotifiedAt: ir.NotifiedAt, AcceptedAt: ir.AcceptedAt, ProvidedAt: ir.ProvidedAt,
-				ProvidedText: ir.ProvidedText, FileName: ir.FileName, ObjectKey: ir.ObjectKey, CreatedAt: ir.CreatedAt,
-			}, ir.ProviderName, userID)
-			item.InputRequest = &view
-			item.Ready = domain.MemberEdgeReady(ir.State)
 		}
 		out = append(out, item)
 	}

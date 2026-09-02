@@ -76,18 +76,7 @@ JOIN objectives o ON o.id = k.objective_id
 WHERE t.owner_id <> d.author_id
   AND NOT EXISTS (SELECT 1 FROM discussion_mentions m WHERE m.discussion_id = d.id AND m.user_id = t.owner_id);
 
--- 输入请求通知：输入关系建立后发给对接人（裁决 #162）。
-INSERT INTO notifications (user_id, kind, content, project_id, task_id, created_at)
-SELECT ir.provider_id,
-       'input_request',
-       '请你为任务「' || t.name || '」提供输入「' || e.name || '」：' || ir.content_note,
-       o.project_id, t.id, ir.notified_at
-FROM input_requests ir
-JOIN deliverable_edges e ON e.id = ir.edge_id
-JOIN tasks t ON t.id = e.target_task_id
-JOIN key_results k ON k.id = t.key_result_id
-JOIN objectives o ON o.id = k.objective_id
-WHERE ir.notified_at IS NOT NULL;
+-- 裁决 #178：输入请求机制退场，输入请求通知随之删除。
 
 -- 一键提醒通知：与 remind_logs 一一对应，文案同 domain.RemindContent。
 INSERT INTO notifications (user_id, kind, content, project_id, task_id, created_at) VALUES
@@ -108,11 +97,7 @@ INSERT INTO notifications (user_id, kind, content, project_id, task_id, created_
 (2,  'blocker_remind',
      '任务「编制割接实施方案」提醒：缺「KR 终审处理」（KR 终审已等待 3 天，超过阈值 3 天）；截止 '
      || to_char(current_date + 2, 'YYYY-MM-DD') || '；沿硬前置影响下游 1 项任务：组织割接方案公司级评审',
-     1, 14, now() - interval '2 days' + interval '3 hours'),
-(9,  'blocker_remind',
-     '任务「完成第三方报表工具兼容性验证」提醒：缺「新库测试环境连接信息与只读账号」（输入对接人尚未提供内容）；截止 '
-     || to_char(current_date + 20, 'YYYY-MM-DD'),
-     1, 9,  now() - interval '1 day' + interval '6 hours');
+     1, 14, now() - interval '2 days' + interval '3 hours');
 
 -- 半个月前的通知都已读；最近的留一批未读。
 UPDATE notifications SET read_at = created_at + interval '4 hours' WHERE created_at < now() - interval '15 days';

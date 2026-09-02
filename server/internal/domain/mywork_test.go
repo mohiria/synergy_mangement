@@ -48,14 +48,6 @@ func TestMyWorkGrouping(t *testing.T) {
 			// 我负责任务的完成申请在终审 → 等待他人
 			{ID: 33, TaskID: 4, TaskName: "终审中任务", SubmittedBy: me, TaskOwnerID: me, KrOwnerID: krOwnerOther, State: CompletionPendingFinal, SubmittedAt: recent},
 		},
-		InputRequests: []WorkInputRequestFact{
-			// 我是对接人、待接收、已通知 → 待我处理
-			{ID: 41, TaskID: 30, TaskName: "下游任务", InputName: "接口口径", Necessity: NecessityRequired, ProviderID: me, TaskOwnerID: 9, State: InputRequestPending, Notified: true, CreatedAt: old},
-			// 我是对接人但未通知 → 不出现
-			{ID: 42, TaskID: 31, TaskName: "草稿下游", InputName: "评审意见", Necessity: NecessityRequired, ProviderID: me, TaskOwnerID: 9, State: InputRequestPending, Notified: false, CreatedAt: recent},
-			// 我任务上我发起的请求（对接人他人）→ 等待他人
-			{ID: 43, TaskID: 2, TaskName: "被卡任务", InputName: "现场数据包", Necessity: NecessityRequired, ProviderID: 9, TaskOwnerID: me, State: InputRequestAccepted, Notified: true, CreatedAt: recent},
-		},
 		Invites: []WorkInviteFact{
 			// 我被邀请且待处理 → 待我处理
 			{ID: 51, KrDescription: "上线自动验收", InviteeID: me, State: TaskInvitePending, CreatedAt: recent},
@@ -67,8 +59,6 @@ func TestMyWorkGrouping(t *testing.T) {
 			{Key: "task_overdue:40", TaskID: 40, TaskName: "上游任务", ActionOwnerIDs: []int64{me}, TaskOwnerID: me, KrOwnerID: krOwnerOther, Kind: BlockerTaskOverdue, Missing: "按期完成任务"},
 			// 我负责的 KR 下的卡点 → 与我相关的卡点
 			{Key: "interlock:41", TaskID: 41, TaskName: "KR 下任务", ActionOwnerIDs: []int64{9}, TaskOwnerID: 9, KrOwnerID: krOwnerMe, Kind: BlockerInterlock, Missing: "打破硬前置互锁"},
-			// 「等我提供输入」与待我处理的输入请求同源 → 不进本组（任务 30 上我有待接收请求）
-			{Key: "upstream_unready:edge:81", TaskID: 30, TaskName: "下游任务", ActionOwnerIDs: []int64{me}, InputProviderID: me, TaskOwnerID: 9, KrOwnerID: krOwnerOther, Kind: BlockerUpstreamUnready, Missing: "接口口径"},
 			// 与我无关 → 不出现
 			{Key: "task_overdue:44", TaskID: 44, TaskName: "他人任务", ActionOwnerIDs: []int64{9}, TaskOwnerID: 9, KrOwnerID: krOwnerOther, Kind: BlockerTaskOverdue, Missing: "按期完成任务"},
 		},
@@ -92,9 +82,9 @@ func TestMyWorkGrouping(t *testing.T) {
 		return m
 	}
 
-	// 待我处理：任务 1、2（带标记）、退回任务 3、输入请求 41、邀请 51 = 5 条
-	if len(g.Pending) != 5 {
-		t.Fatalf("待我处理数量 = %d, want 5: %+v", len(g.Pending), kinds(g.Pending))
+	// 待我处理：任务 1、2（带标记）、退回任务 3、邀请 51 = 4 条（#178：无输入请求条目）
+	if len(g.Pending) != 4 {
+		t.Fatalf("待我处理数量 = %d, want 4: %+v", len(g.Pending), kinds(g.Pending))
 	}
 	var foundUnready, foundRejected bool
 	for _, it := range g.Pending {
@@ -126,9 +116,9 @@ func TestMyWorkGrouping(t *testing.T) {
 		t.Fatal("KR 终审应归入待我审批")
 	}
 
-	// 等待他人：上游 71、我发起的输入请求 43、关闭申请 21、完成申请 33 = 4 条
-	if len(g.Waiting) != 4 {
-		t.Fatalf("等待他人数量 = %d, want 4: %+v", len(g.Waiting), kinds(g.Waiting))
+	// 等待他人：上游 71、关闭申请 21、完成申请 33 = 3 条（#178：无输入请求条目）
+	if len(g.Waiting) != 3 {
+		t.Fatalf("等待他人数量 = %d, want 3: %+v", len(g.Waiting), kinds(g.Waiting))
 	}
 	// #174 裁决：上游等待条目按上游任务截止日期展示并判定超期（任务 40 截止 5 天前）。
 	for _, it := range g.Waiting {
@@ -246,11 +236,10 @@ func TestMyWorkBlockerStageUsesKindLabel(t *testing.T) {
 // 顺序固定，从项目级到事项级；没有职责时给明确文案，不留空白。
 func TestWorkResponsibilities(t *testing.T) {
 	full := MemberDuties{
-		KeyResults:     []string{"上线自动验收"},
-		Tasks:          []string{"输出验收方案"},
-		Reviewers:      []string{"回归验证分析"},
-		Receivers:      []string{"外部口径汇总"},
-		InputProviders: []string{"现场数据包"},
+		KeyResults: []string{"上线自动验收"},
+		Tasks:      []string{"输出验收方案"},
+		Reviewers:  []string{"回归验证分析"},
+		Receivers:  []string{"外部口径汇总"},
 	}
 	cases := []struct {
 		name          string
@@ -278,9 +267,9 @@ func TestWorkResponsibilities(t *testing.T) {
 			pendingInvite: true,
 			want: []string{
 				"项目负责人", "KR 负责人", "任务负责人",
-				"成果审核人", "接收方", "输入对接人", "被邀请人",
+				"成果审核人", "接收方", "被邀请人",
 			},
-			wantLabel: "项目负责人、KR 负责人、任务负责人、成果审核人、接收方、输入对接人、被邀请人",
+			wantLabel: "项目负责人、KR 负责人、任务负责人、成果审核人、接收方、被邀请人",
 		},
 		{
 			name:          "只有待处理邀请也算一项职责",

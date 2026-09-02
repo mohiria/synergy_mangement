@@ -122,11 +122,10 @@ func TestMemberRemovalBlockedByDuties(t *testing.T) {
 			t.Fatalf("待交接清单缺少 %q: %s", want, summary)
 		}
 	}
-	// 只挂成果审核人／接收方／输入对接人同样算职责占位。
+	// 只挂成果审核人／接收方同样算职责占位（#178：输入对接人职责随输入请求退场）。
 	for _, d := range []MemberDuties{
 		{Reviewers: []string{"联调验证"}},
 		{Receivers: []string{"联调验证"}},
-		{InputProviders: []string{"接口口径"}},
 	} {
 		if err := RemoveMemberRule(d); !errors.Is(err, ErrMemberHasDuties) {
 			t.Fatalf("%+v 应算职责占位: %v", d, err)

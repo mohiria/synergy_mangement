@@ -33,18 +33,13 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 		RemindSentToday:     remindCounts,
 	}
 
-	// 交付物边与输入请求：上游事实、未就绪标记、对接人视角。
+	// 交付物边：上游事实与未就绪标记（#178 后输入请求机制退场）。
 	edgeRows, err := s.q.ListEdgesByProject(ctx, projectId)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
-	requestRows, err := s.q.ListInputRequestsByProject(ctx, projectId)
-	if err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	unreadyNoteByTask := unreadyRequiredInputs(edgeRows, requestRows)
+	unreadyNoteByTask := unreadyRequiredInputs(edgeRows)
 	taskNameByID := map[int64]string{}
 
 	// 任务事实（含显示状态与退回注记）。
@@ -153,54 +148,24 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 		facts.Completions = append(facts.Completions, fact)
 	}
 
-	// 输入请求与上游事实。
-	edgeByID := map[int64]int{}
-	for i, e := range edgeRows {
-		edgeByID[e.ID] = i
-	}
-	for _, ir := range requestRows {
-		fact := domain.WorkInputRequestFact{
-			ID: ir.ID, TaskID: ir.TargetTaskID, TaskName: taskNameByID[ir.TargetTaskID],
-			ProviderID: ir.ProviderID, State: ir.State, ContentNote: ir.ContentNote,
-			Notified: ir.NotifiedAt.Valid,
-		}
-		// 必要性取所在交付物边：参考输入不进任何分组、不计入徽标（模块 PRD §4.2 规则 8）。
-		if ir.CreatedAt.Valid {
-			fact.CreatedAt = ir.CreatedAt.Time
-		}
-		if idx, ok := edgeByID[ir.EdgeID]; ok {
-			e := edgeRows[idx]
-			fact.InputName = e.Name
-			fact.Necessity = e.Necessity
-			if e.ExpectedDate.Valid {
-				exp := e.ExpectedDate.Time
-				fact.Expected = &exp
-			}
-		}
-		if tf, ok := taskFactByID[ir.TargetTaskID]; ok {
-			fact.TaskOwnerID = tf.OwnerID
-		}
-		facts.InputRequests = append(facts.InputRequests, fact)
-	}
+	// 上游事实（#178 后来源恒为任务）。
 	for _, e := range edgeRows {
-		if e.SourceTaskID.Valid {
-			ready := domain.EdgeReady(e.SourceTaskStatus.String)
-			fact := domain.WorkUpstreamFact{
-				EdgeID: e.ID, TargetTaskID: e.TargetTaskID, TargetName: e.TargetTaskName,
-				SourceTaskID: &e.SourceTaskID.Int64, SourceName: e.SourceTaskName.String,
-				SourceOwnerID: e.SourceOwnerID.Int64, SourceOwnerName: e.SourceOwnerName.String,
-				InputName: e.Name, Ready: ready, Necessity: e.Necessity,
-			}
-			// #174 裁决：上游等待条目按上游任务截止日期展示与判定超期。
-			if e.SourceEndDate.Valid {
-				end := e.SourceEndDate.Time
-				fact.SourceEndDate = &end
-			}
-			if tf, ok := taskFactByID[e.TargetTaskID]; ok {
-				fact.TargetOwnerID = tf.OwnerID
-			}
-			facts.Upstreams = append(facts.Upstreams, fact)
+		sourceID := e.SourceTaskID
+		fact := domain.WorkUpstreamFact{
+			EdgeID: e.ID, TargetTaskID: e.TargetTaskID, TargetName: e.TargetTaskName,
+			SourceTaskID: &sourceID, SourceName: e.SourceTaskName.String,
+			SourceOwnerID: e.SourceOwnerID.Int64, SourceOwnerName: e.SourceOwnerName.String,
+			InputName: e.Name, Ready: domain.EdgeReady(e.SourceTaskStatus.String), Necessity: e.Necessity,
 		}
+		// #174 裁决：上游等待条目按上游任务截止日期展示与判定超期。
+		if e.SourceEndDate.Valid {
+			end := e.SourceEndDate.Time
+			fact.SourceEndDate = &end
+		}
+		if tf, ok := taskFactByID[e.TargetTaskID]; ok {
+			fact.TargetOwnerID = tf.OwnerID
+		}
+		facts.Upstreams = append(facts.Upstreams, fact)
 	}
 
 	// 邀请与卡点。

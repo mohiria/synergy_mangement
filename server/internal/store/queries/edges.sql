@@ -1,6 +1,7 @@
 -- name: CreateEdge :one
-INSERT INTO deliverable_edges (target_task_id, source_task_id, source_user_id, name, necessity, expected_date, created_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+-- #178：来源恒为任务（source_user_id 与 expected_date 已随输入请求机制删除）。
+INSERT INTO deliverable_edges (target_task_id, source_task_id, name, necessity, created_by)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: GetEdgeInProject :one
@@ -22,7 +23,6 @@ SELECT e.*,
     st.name AS source_task_name, st.status AS source_task_status,
     st.end_date AS source_end_date,
     st.owner_id AS source_owner_id, su.display_name AS source_owner_name,
-    mu.display_name AS source_user_name,
     tt.name AS target_task_name, tt.owner_id AS target_owner_id, tt.created_by AS target_created_by
 FROM deliverable_edges e
 JOIN tasks tt ON tt.id = e.target_task_id
@@ -30,22 +30,19 @@ JOIN key_results k ON k.id = tt.key_result_id
 JOIN objectives o ON o.id = k.objective_id
 LEFT JOIN tasks st ON st.id = e.source_task_id
 LEFT JOIN users su ON su.id = st.owner_id
-LEFT JOIN users mu ON mu.id = e.source_user_id
 WHERE o.project_id = $1
 ORDER BY e.id;
 
 -- name: ListInputReadinessByProject :many
 -- #150 风险队列「未就绪摘要」：项目全部输入边的就绪事实——目标任务所属 KR、
--- 目标任务状态、来源任务状态与成员来源的输入请求状态（与 AC-48 修订同源）；计数规则在 domain。
+-- 目标任务状态、来源任务状态（与 AC-48 修订同源；#178 后来源恒为任务）；计数规则在 domain。
 SELECT tt.key_result_id, tt.status AS target_status,
-    st.status AS source_task_status,
-    ir.state AS input_request_state
+    st.status AS source_task_status
 FROM deliverable_edges e
 JOIN tasks tt ON tt.id = e.target_task_id
 JOIN key_results k ON k.id = tt.key_result_id
 JOIN objectives o ON o.id = k.objective_id
 LEFT JOIN tasks st ON st.id = e.source_task_id
-LEFT JOIN input_requests ir ON ir.edge_id = e.id
 WHERE o.project_id = $1;
 
 -- name: ListCurrentFilesByProjectTask :many

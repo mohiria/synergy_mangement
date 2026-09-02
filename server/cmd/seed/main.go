@@ -145,9 +145,7 @@ func seedObjects(ctx context.Context, conn *pgx.Conn) error {
 	}
 
 	rows, err := conn.Query(ctx, `
-        SELECT object_key, file_name FROM deliverable_files WHERE object_key <> ''
-        UNION ALL
-        SELECT object_key, file_name FROM input_requests WHERE object_key <> ''`)
+        SELECT object_key, file_name FROM deliverable_files WHERE object_key <> ''`)
 	if err != nil {
 		return fmt.Errorf("列出对象键: %w", err)
 	}
@@ -180,7 +178,7 @@ func summarize(ctx context.Context, conn *pgx.Conn, password string) error {
 	tables := []string{
 		"users", "projects", "project_members", "objectives", "key_results", "tasks",
 		"completion_reviews", "field_change_requests", "task_invites",
-		"deliverables", "deliverable_files", "deliverable_edges", "input_requests",
+		"deliverables", "deliverable_files", "deliverable_edges",
 		"task_receivers", "task_receipts", "discussions", "notifications",
 		"task_activities", "remind_logs",
 	}

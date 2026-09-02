@@ -9,8 +9,8 @@ import (
 // 提醒目标（模块 PRD §5.3、MW-13）。
 //
 // 提醒目标是「可寻址的当前待行动人」，不等于派生卡点：等待他人分组里尚未成卡点的等待
-// （刚提交还没到审批超时阈值的审批件、待对接人提供的输入请求、未交付的上游任务）同样
-// 是提醒目标。卡点目标按卡点合成键寻址，等待事项按 wait:<事项类型>:<事项 ID> 寻址。
+// （刚提交还没到审批超时阈值的审批件、未交付的上游任务）同样是提醒目标。
+// 卡点目标按卡点合成键寻址，等待事项按 wait:<事项类型>:<事项 ID> 寻址。
 
 // ErrRemindCooldown 冷却（MW-13）：按（发起人、被提醒人、任务）三元组计，
 // 每天次数上限取项目规则设置，默认 1 次。
@@ -34,7 +34,7 @@ type RemindTarget struct {
 
 // RemindWaitFact 一条「等待他人」事项作为提醒目标的事实。
 type RemindWaitFact struct {
-	Kind             string // cancel_request／intermediate_review／final_review／input_request／upstream
+	Kind             string // cancel_request／intermediate_review／final_review／upstream
 	RefID            int64
 	TaskID           int64
 	TaskName         string
@@ -97,15 +97,6 @@ func UpstreamWaitFact(edgeID, targetTaskID int64, inputName, sourceName string, 
 		Kind: "upstream", RefID: edgeID, TaskID: targetTaskID,
 		Missing: inputName, Reason: "上游任务「" + sourceName + "」尚未交付当前内容",
 		ActionOwnerIDs: []int64{sourceOwnerID}, ActionOwnerNames: []string{sourceOwnerName},
-	}
-}
-
-// InputRequestWaitFact 必要输入来源为指定成员、对接人尚未提供时的提醒目标事实。
-func InputRequestWaitFact(requestID, taskID int64, inputName string, providerID int64, providerName string) RemindWaitFact {
-	return RemindWaitFact{
-		Kind: "input_request", RefID: requestID, TaskID: taskID,
-		Missing: inputName, Reason: "输入对接人尚未提供内容",
-		ActionOwnerIDs: []int64{providerID}, ActionOwnerNames: []string{providerName},
 	}
 }
 

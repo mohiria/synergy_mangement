@@ -50,21 +50,6 @@ type WorkCompletionFact struct {
 	TaskEnd       *time.Time
 }
 
-type WorkInputRequestFact struct {
-	ID          int64
-	TaskID      int64
-	TaskName    string
-	InputName   string
-	ContentNote string
-	Necessity   string
-	ProviderID  int64
-	TaskOwnerID int64
-	State       string
-	Expected    *time.Time
-	CreatedAt   time.Time
-	Notified    bool
-}
-
 type WorkInviteFact struct {
 	ID            int64
 	KrDescription string
@@ -105,8 +90,7 @@ type MyWorkFacts struct {
 	// CancelRequests #172 裁决：审批件里的变更单只剩关闭申请。
 	CancelRequests []WorkApprovalFact
 	Completions    []WorkCompletionFact
-	InputRequests []WorkInputRequestFact
-	Invites       []WorkInviteFact
+	Invites        []WorkInviteFact
 	Blockers      []Blocker
 	Upstreams     []WorkUpstreamFact
 	Receipts      []ReceiptFact
@@ -245,24 +229,7 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		}
 	}
 
-	// —— 待我处理（Q3：输入对接人；及本人任务）——
-	for _, ir := range f.InputRequests {
-		if terminal[ir.TaskID] {
-			continue
-		}
-		if ir.Necessity != NecessityRequired {
-			continue // 参考输入不生成本页事项、不计数（模块 PRD §4.2 规则 8）
-		}
-		if ir.ProviderID == me && ir.Notified && (ir.State == InputRequestPending || ir.State == InputRequestAccepted) {
-			days, _ := waitingDays(ir.CreatedAt)
-			overdue := Overdue(ir.Expected, f.Now)
-			g.Pending = append(g.Pending, WorkItem{
-				Kind: "input_request", Title: "[输入请求] " + ir.InputName + " → " + ir.TaskName,
-				TaskID: tid(ir.TaskID), TaskName: ir.TaskName, RefID: tid(ir.ID),
-				Due: ir.Expected, WaitingDays: days, Overdue: overdue, DrawerTab: "overview",
-			})
-		}
-	}
+	// —— 待我处理（本人任务与邀请；#178 裁决：输入请求机制退场，「输」类条目删除）——
 	for _, iv := range f.Invites {
 		if iv.InviteeID == me && iv.State == TaskInvitePending {
 			g.Pending = append(g.Pending, WorkItem{
@@ -329,26 +296,6 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 			g.Waiting = append(g.Waiting, item)
 		}
 	}
-	for _, ir := range f.InputRequests {
-		if terminal[ir.TaskID] {
-			continue
-		}
-		if ir.Necessity != NecessityRequired {
-			continue // 与待我处理、提醒目标同口径
-		}
-		if ir.TaskOwnerID == me && ir.ProviderID != me && (ir.State == InputRequestPending || ir.State == InputRequestAccepted) {
-			days, _ := waitingDays(ir.CreatedAt)
-			overdue := Overdue(ir.Expected, f.Now)
-			item := WorkItem{
-				Kind: "waiting_input_request", Title: "[输入请求] " + ir.InputName + " → " + ir.TaskName,
-				TaskID: tid(ir.TaskID), TaskName: ir.TaskName, RefID: tid(ir.ID),
-				Due: ir.Expected, WaitingDays: days, Overdue: overdue,
-				Stage: "等待对接人提供", DrawerTab: "overview",
-			}
-			setWaitRemind(&item, InputRequestWaitFact(ir.ID, ir.TaskID, ir.InputName, ir.ProviderID, ""))
-			g.Waiting = append(g.Waiting, item)
-		}
-	}
 	for _, fc := range f.CancelRequests {
 		if terminal[fc.TaskID] {
 			continue
@@ -408,10 +355,6 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 			}
 		}
 		if !isActionOwner && b.TaskOwnerID != me && !(b.KrOwnerID != nil && *b.KrOwnerID == me) {
-			continue
-		}
-		// 「等我提供输入」类与待我处理的输入请求同源，不进本组、不计数（模块 PRD §3.2.E）。
-		if b.InputProviderID == me {
 			continue
 		}
 		days, _ := waitingDays(b.Since)
@@ -551,8 +494,9 @@ func singleApprover(id *int64) []int64 {
 // 会挡住移出的职责，正是会给人派活的职责。
 
 // workResponsibilityOrder 职责显示顺序：从项目级到事项级，横排一行读得下来。
+// #178 裁决：输入请求机制退场，「输入对接人」职责随之删除。
 var workResponsibilityOrder = []string{
-	"项目负责人", "KR 负责人", "任务负责人", "成果审核人", "接收方", "输入对接人", "被邀请人",
+	"项目负责人", "KR 负责人", "任务负责人", "成果审核人", "接收方", "被邀请人",
 }
 
 // WorkResponsibilities 派生当前用户在本项目承担的职责标签（读时派生，不落库）。
@@ -563,7 +507,6 @@ func WorkResponsibilities(d MemberDuties, isProjectOwner, hasPendingInvite bool)
 		"任务负责人":  len(d.Tasks) > 0,
 		"成果审核人":  len(d.Reviewers) > 0,
 		"接收方":    len(d.Receivers) > 0,
-		"输入对接人":  len(d.InputProviders) > 0,
 		"被邀请人":   hasPendingInvite,
 	}
 	out := []string{}

@@ -18,7 +18,7 @@ TRUNCATE TABLE
     sessions, notifications, discussion_mentions, discussions,
     task_activities, remind_logs,
     completion_review_items, completion_review_reviewers, completion_reviews,
-    field_change_requests, input_requests, deliverable_edges,
+    field_change_requests, deliverable_edges,
     deliverable_files, deliverables,
     task_receipts, task_receivers, task_reviewers, task_invites,
     tasks, key_results, objectives,

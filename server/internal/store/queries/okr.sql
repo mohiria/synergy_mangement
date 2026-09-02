@@ -107,12 +107,3 @@ JOIN key_results kr ON kr.id = t.key_result_id
 JOIN objectives o ON o.id = kr.objective_id
 WHERE o.project_id = $1 AND rc.user_id = $2 AND t.status NOT IN ('completed', 'cancelled');
 
--- name: ListInputProviderDutiesOf :many
-SELECT DISTINCT e.name
-FROM input_requests ir
-JOIN deliverable_edges e ON e.id = ir.edge_id
-JOIN tasks t ON t.id = e.target_task_id
-JOIN key_results kr ON kr.id = t.key_result_id
-JOIN objectives o ON o.id = kr.objective_id
-WHERE o.project_id = $1 AND ir.provider_id = $2
-  AND ir.state <> 'provided' AND t.status NOT IN ('completed', 'cancelled');

@@ -7,19 +7,18 @@ package domain
 // 结构变更动作。
 // 裁决 H1（#141）：「输出（交付物项）」已从关键字段清单移除，增删不再走结构变更审批
 // （见 DeliverableStructureRule），此处不再有 add_deliverable 动作。
+// #178 裁决：输入请求机制退场，add_member_input 动作删除（成员模式改为创建上游任务）。
 const (
-	StructureAddTaskInput   = "add_task_input"
-	StructureAddMemberInput = "add_member_input"
-	StructureRemoveEdge     = "remove_edge"
-	StructureSetReceivers   = "set_receivers"
+	StructureAddTaskInput = "add_task_input"
+	StructureRemoveEdge   = "remove_edge"
+	StructureSetReceivers = "set_receivers"
 )
 
 // structureFieldLabels 差异行的中文字段名，对齐 §5.2.B 的关键字段用词。
 var structureFieldLabels = map[string]string{
-	StructureAddTaskInput:   "任务输入",
-	StructureAddMemberInput: "输入源",
-	StructureRemoveEdge:     "输入源",
-	StructureSetReceivers:   "接收方",
+	StructureAddTaskInput: "任务输入",
+	StructureRemoveEdge:   "输入源",
+	StructureSetReceivers: "接收方",
 }
 
 // StructureFieldLabel 结构变更在变更单里显示的字段名（派生字段）。

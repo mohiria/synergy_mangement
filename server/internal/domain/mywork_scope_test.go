@@ -5,41 +5,35 @@ import (
 	"time"
 )
 
-// R11-1（模块 PRD §4.2 规则 8、AC-16）：只有未就绪的必要输入进本页；
-// 参考输入既不进「待我处理」也不进「等待他人」，也不计入徽标。
-func TestMyWorkExcludesReferenceInputRequests(t *testing.T) {
+// R11-1（模块 PRD §4.2 规则 8、AC-16；#178 修订：输入请求退场，只剩上游任务等待项）：
+// 只有未就绪的必要输入进「等待他人」；参考输入不进组、不计入徽标。
+func TestMyWorkExcludesReferenceInputs(t *testing.T) {
 	now := time.Date(2026, 8, 28, 10, 0, 0, 0, time.UTC)
-	provider, owner := int64(1), int64(2)
+	owner, upstreamOwner := int64(2), int64(3)
 	kr := i64(9)
 
 	cases := []struct {
 		name        string
 		necessity   string
-		wantPending int
 		wantWaiting int
 	}{
-		{"必要输入两侧都进组", NecessityRequired, 1, 1},
-		{"参考输入两侧都不进组", NecessityReference, 0, 0},
+		{"必要输入进等待他人", NecessityRequired, 1},
+		{"参考输入不进组", NecessityReference, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			facts := func(uid int64) MyWorkFacts {
-				return MyWorkFacts{
-					UserID: uid, Actor: Actor{Role: RoleMember}, Now: now,
-					Tasks: []WorkTaskFact{
-						{ID: 7, Name: "在办任务", DisplayStatus: TaskInProgress, OwnerID: owner, CreatorID: owner, KrOwnerID: kr},
-					},
-					InputRequests: []WorkInputRequestFact{{
-						ID: 70, TaskID: 7, TaskName: "在办任务", InputName: "现场数据",
-						Necessity: tc.necessity, ProviderID: provider, TaskOwnerID: owner,
-						State: InputRequestPending, CreatedAt: now.AddDate(0, 0, -1), Notified: true,
-					}},
-				}
-			}
-			if got := countKind(MyWork(facts(provider)).Pending, "input_request"); got != tc.wantPending {
-				t.Errorf("对接人视角待我处理 = %d，期望 %d", got, tc.wantPending)
-			}
-			if got := countKind(MyWork(facts(owner)).Waiting, "waiting_input_request"); got != tc.wantWaiting {
+			g := MyWork(MyWorkFacts{
+				UserID: owner, Actor: Actor{Role: RoleMember}, Now: now,
+				Tasks: []WorkTaskFact{
+					{ID: 7, Name: "在办任务", DisplayStatus: TaskInProgress, OwnerID: owner, CreatorID: owner, KrOwnerID: kr},
+				},
+				Upstreams: []WorkUpstreamFact{{
+					EdgeID: 70, TargetTaskID: 7, TargetName: "在办任务", TargetOwnerID: owner,
+					SourceTaskID: i64(8), SourceName: "上游任务", SourceOwnerID: upstreamOwner,
+					SourceOwnerName: "李四", InputName: "现场数据", Ready: false, Necessity: tc.necessity,
+				}},
+			})
+			if got := countKind(g.Waiting, "upstream"); got != tc.wantWaiting {
 				t.Errorf("任务负责人视角等待他人 = %d，期望 %d", got, tc.wantWaiting)
 			}
 		})

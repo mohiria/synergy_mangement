@@ -60,11 +60,9 @@ type Deliverable struct {
 type DeliverableEdge struct {
 	ID           int64
 	TargetTaskID int64
-	SourceTaskID pgtype.Int8
-	SourceUserID pgtype.Int8
+	SourceTaskID int64
 	Name         string
 	Necessity    string
-	ExpectedDate pgtype.Date
 	CreatedBy    int64
 	CreatedAt    pgtype.Timestamptz
 }
@@ -135,21 +133,6 @@ type ImportRecord struct {
 	Result         string
 	FailureSummary string
 	ImportedAt     pgtype.Timestamptz
-}
-
-type InputRequest struct {
-	ID           int64
-	EdgeID       int64
-	ProviderID   int64
-	ContentNote  string
-	State        string
-	NotifiedAt   pgtype.Timestamptz
-	AcceptedAt   pgtype.Timestamptz
-	ProvidedAt   pgtype.Timestamptz
-	ProvidedText string
-	FileName     string
-	ObjectKey    string
-	CreatedAt    pgtype.Timestamptz
 }
 
 type KeyResult struct {

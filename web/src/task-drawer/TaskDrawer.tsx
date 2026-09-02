@@ -63,9 +63,6 @@ export default function TaskDrawer({
     saveParticipants: (t: Task, userIds: number[]) => void;
     confirmReceipt: (t: Task) => void;
     startResultUpdate: (t: Task) => void;
-    acceptInput: (requestId: number) => void;
-    openProvide: (requestId: number) => void;
-    openInputFile: (requestId: number) => void;
     remindBlocker: (blockerKey: string) => void;
     removeEdge: (edgeId: number) => void;
     openTask: (taskId: number) => void;
@@ -754,8 +751,7 @@ export default function TaskDrawer({
       </section>
       {/* 输入源（§7.5、#101）：必要与参考同区块展示，合并只合展示不合语义——
           只有必要输入未就绪才派生卡点与「等待他人」，参考输入永远只提示，故每行必须标出类别。
-          每条输入是一行事实：来源为已有任务时读作「编号 · 标题 · 提供人 · 关系类型」并可点开来源任务；
-          来源为指定项目成员时没有来源任务，保留「对接人 · 所需内容」的读法。 */}
+          每条输入是一行事实（#178 后来源一律为任务）：读作「编号 · 标题 · 提供人」并可点开来源任务。 */}
       {inputs.length > 0 && (
         <section className="drawer-section" data-focus="inputs">
           <h3>
@@ -768,16 +764,13 @@ export default function TaskDrawer({
             const required = e.necessity === "required";
             // 未就绪的必要输入才补缺失原因与待行动人，取同一条边派生的上游未就绪卡点。
             const blocker = required && !e.ready ? inputBlockers.get(e.id) : undefined;
-            const fact = e.inputRequest
-              ? `对接人 ${e.inputRequest.providerName}` +
-                (e.inputRequest.contentNote ? ` · ${e.inputRequest.contentNote}` : "")
-              : [
-                  e.sourceTaskCode,
-                  e.sourceTaskName,
-                  e.sourceOwnerName ? `提供人 ${e.sourceOwnerName}` : "",
-                ]
-                  .filter(Boolean)
-                  .join(" · ");
+            const fact = [
+              e.sourceTaskCode,
+              e.sourceTaskName,
+              e.sourceOwnerName ? `提供人 ${e.sourceOwnerName}` : "",
+            ]
+              .filter(Boolean)
+              .join(" · ");
             const openSource = e.sourceTaskId ? () => actions.openTask(e.sourceTaskId!) : undefined;
             return (
               <div key={e.id} className="fact-card fact-card-aux input-row">
@@ -797,20 +790,6 @@ export default function TaskDrawer({
                       <span className="cell-text">{fact}</span>
                     </div>
                   )}
-                  {e.inputRequest?.state === "provided" && (
-                    <small className="input-row-note">
-                      已提供:{e.inputRequest.providedText || ""}
-                      {e.inputRequest.providedFileName && (
-                        <span
-                          className="file-link"
-                          style={{ marginLeft: 6 }}
-                          onClick={() => actions.openInputFile(e.inputRequest!.id)}
-                        >
-                          {e.inputRequest.providedFileName}
-                        </span>
-                      )}
-                    </small>
-                  )}
                   {blocker && (
                     <small
                       className="input-row-note"
@@ -821,37 +800,9 @@ export default function TaskDrawer({
                   )}
                 </div>
                 <div className="fact-card-actions">
-                  {e.inputRequest ? (
-                    <span
-                      className={`status-pill ${
-                        e.inputRequest.state === "provided"
-                          ? "completed"
-                          : e.inputRequest.state === "accepted"
-                            ? "review"
-                            : "warning"
-                      }`}
-                    >
-                      {e.inputRequest.state === "provided"
-                        ? "已提供"
-                        : e.inputRequest.state === "accepted"
-                          ? "已接收"
-                          : "待接收"}
-                    </span>
-                  ) : (
-                    <span className={`status-pill ${e.ready ? "completed" : "warning"}`}>
-                      {e.ready ? "已就绪" : "未就绪"}
-                    </span>
-                  )}
-                  {e.inputRequest?.canAccept && (
-                    <Button size="small" onClick={() => actions.acceptInput(e.inputRequest!.id)}>
-                      同意接收
-                    </Button>
-                  )}
-                  {e.inputRequest?.canProvide && (
-                    <Button size="small" type="primary" onClick={() => actions.openProvide(e.inputRequest!.id)}>
-                      提交内容
-                    </Button>
-                  )}
+                  <span className={`status-pill ${e.ready ? "completed" : "warning"}`}>
+                    {e.ready ? "已就绪" : "未就绪"}
+                  </span>
                   {e.canRemove && (
                     <Button size="small" type="text" onClick={() => actions.removeEdge(e.id)}>
                       解除

@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { Input, Modal, message } from "antd";
 import { client } from "../api/client";
 import type { components } from "../api/schema";
-import FileUploadField from "../FileUploadField";
 import TaskDrawer from "./TaskDrawer";
 import ConfigureInputModal from "./ConfigureInputModal";
 import { CancelTaskModal } from "./modals";
@@ -87,10 +86,6 @@ export default function TaskDrawerHost({
   const [fcReject, setFcReject] = useState<{ task: Task; changeId: number } | null>(null);
   const [fcRejectOpinion, setFcRejectOpinion] = useState("");
   const [inputTask, setInputTask] = useState<Task | null>(null);
-  const [provideReq, setProvideReq] = useState<number | null>(null);
-  const [provideText, setProvideText] = useState("");
-  const [provideFile, setProvideFile] = useState<File | null>(null);
-  const [providing, setProviding] = useState(false);
   const [completionTask, setCompletionTask] = useState<Task | null>(null);
   const [completionNote, setCompletionNote] = useState("");
   const [crReject, setCrReject] = useState<{ task: Task; reviewId: number } | null>(null);
@@ -149,68 +144,6 @@ export default function TaskDrawerHost({
     } else {
       message.error(res.error?.message ?? "提醒失败");
     }
-  };
-
-  const acceptInput = async (requestId: number) => {
-    const res = await client.POST("/projects/{projectId}/input-requests/{requestId}/accept", {
-      params: { path: { projectId, requestId } },
-    });
-    if (res.data) {
-      message.success("已同意接收；提交内容后输入才更新为就绪");
-      refresh();
-    } else {
-      message.error(res.error?.message ?? "操作失败");
-    }
-  };
-
-  const closeProvide = () => {
-    setProvideReq(null);
-    setProvideText("");
-    setProvideFile(null);
-  };
-
-  const provideInput = async () => {
-    if (provideReq == null) return;
-    setProviding(true);
-    const res = await client.POST("/projects/{projectId}/input-requests/{requestId}/provide", {
-      params: { path: { projectId, requestId: provideReq } },
-      body: {
-        text: provideText.trim() || undefined,
-        fileName: provideFile?.name,
-      },
-    });
-    if (res.data) {
-      if (res.data.uploadUrl && provideFile) {
-        try {
-          const put = await fetch(res.data.uploadUrl, { method: "PUT", body: provideFile });
-          if (!put.ok) throw new Error(String(put.status));
-          // 附件先落 uploading，确认写入后输入才转为已提供，下游就绪度随之更新。
-          const commit = await client.POST(
-            "/projects/{projectId}/input-requests/{requestId}/commit",
-            { params: { path: { projectId, requestId: provideReq } } },
-          );
-          if (!commit.data) throw new Error(commit.error?.message ?? "确认失败");
-        } catch {
-          message.error("文件上传失败，请确认文件服务可用后重试");
-          setProviding(false);
-          refresh();
-          return;
-        }
-      }
-      message.success("已提交，目标任务输入更新为就绪");
-      closeProvide();
-      refresh();
-    } else {
-      message.error(res.error?.message ?? "提交失败");
-    }
-    setProviding(false);
-  };
-
-  const openInputFile = async (requestId: number) => {
-    const res = await client.GET("/projects/{projectId}/input-requests/{requestId}/file-url", {
-      params: { path: { projectId, requestId } },
-    });
-    if (res.data) window.location.assign(res.data.url);
   };
 
   const removeEdge = async (edgeId: number) => {
@@ -394,13 +327,6 @@ export default function TaskDrawerHost({
           },
           confirmReceipt,
           startResultUpdate,
-          acceptInput,
-          openProvide: (id) => {
-            setProvideReq(id);
-            setProvideText("");
-            setProvideFile(null);
-          },
-          openInputFile,
           remindBlocker,
           removeEdge,
           openTask: (id) => {
@@ -429,33 +355,6 @@ export default function TaskDrawerHost({
           refresh();
         }}
       />
-      <Modal
-        title="提交输入内容"
-        open={provideReq != null}
-        okText="提交"
-        cancelText="取消"
-        confirmLoading={providing}
-        okButtonProps={{ disabled: !provideText.trim() && !provideFile }}
-        onCancel={closeProvide}
-        onOk={provideInput}
-      >
-        <p className="muted" style={{ marginTop: 0 }}>
-          提交后输入请求变为已提供，目标任务输入更新为就绪；文字内容与文件至少提交其一。
-        </p>
-        <Input.TextArea
-          rows={3}
-          maxLength={2000}
-          placeholder="文字内容"
-          value={provideText}
-          onChange={(e) => setProvideText(e.target.value)}
-        />
-        <div style={{ marginTop: 8 }}>
-          <FileUploadField value={provideFile} onChange={setProvideFile} />
-        </div>
-        <div className="notice" style={{ marginTop: 8 }}>
-          文件在点击「提交」后才上传；关闭窗口不保留本次选择。
-        </div>
-      </Modal>
       <Modal
         title="提交完成申请"
         open={!!completionTask}

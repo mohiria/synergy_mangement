@@ -146,17 +146,17 @@ func ValidateObjectiveUpdate(u ObjectiveUpdate) error {
 // 判定只比对 ID 是不够的：人被移出后这些职责会变成无人可处理的死锁
 // （典型是 KR 负责人一走，待终审的完成申请永远无法决策），所以移出前必须先交接。
 type MemberDuties struct {
-	KeyResults     []string // 仍在担任负责人的 KR 描述
-	Tasks          []string // 仍在担任负责人的任务名
-	Reviewers      []string // 仍在成果审核组里的任务名
-	Receivers      []string // 仍是接收方的任务名
-	InputProviders []string // 仍是输入对接人的输入名
+	// #178 裁决：输入请求机制退场，「输入对接人」职责随之删除。
+	KeyResults []string // 仍在担任负责人的 KR 描述
+	Tasks      []string // 仍在担任负责人的任务名
+	Reviewers  []string // 仍在成果审核组里的任务名
+	Receivers  []string // 仍是接收方的任务名
 }
 
 // Empty 报告是否没有任何职责占位。
 func (d MemberDuties) Empty() bool {
 	return len(d.KeyResults) == 0 && len(d.Tasks) == 0 && len(d.Reviewers) == 0 &&
-		len(d.Receivers) == 0 && len(d.InputProviders) == 0
+		len(d.Receivers) == 0
 }
 
 // RemoveMemberRule 移出成员的规则：仍有职责占位时不能移出（AC-21、AC-61）。
@@ -179,6 +179,5 @@ func MemberDutiesSummary(d MemberDuties) string {
 	add("任务负责人", d.Tasks)
 	add("成果审核人", d.Reviewers)
 	add("接收方", d.Receivers)
-	add("输入对接人", d.InputProviders)
 	return strings.Join(parts, "；")
 }

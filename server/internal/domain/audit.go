@@ -32,7 +32,7 @@ var auditActions = map[string]string{
 	"POST /projects/{projectId}/tasks/{taskId}/cancel-requests/{requestId}/abandon":      "放弃关闭申请",
 	"POST /projects/{projectId}/tasks/{taskId}/edits":                                    "修改任务字段",
 	"POST /projects/{projectId}/tasks/{taskId}/inputs":                                   "配置任务输入",
-	"POST /projects/{projectId}/tasks/{taskId}/member-inputs":                            "指定输入对接人",
+	"POST /projects/{projectId}/tasks/{taskId}/upstream-tasks":                           "替他人创建上游任务",
 	"POST /projects/{projectId}/tasks/{taskId}/deliverables":                             "配置交付物项",
 	"DELETE /projects/{projectId}/tasks/{taskId}/deliverables/{deliverableId}/candidate": "删除候选文件",
 	"PUT /projects/{projectId}/tasks/{taskId}/reviewers":                                 "配置成果审核人",

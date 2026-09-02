@@ -36,11 +36,14 @@ export default function ConfigureInputModal({
   onSaved: () => void;
 }) {
   const [mode, setMode] = useState<"task" | "member">("task");
-  const [providerIds, setProviderIds] = useState<number[]>([]);
-  const [contentNote, setContentNote] = useState("");
   const [sourceTaskIds, setSourceTaskIds] = useState<number[]>([]);
   const [necessity, setNecessity] = useState<"required" | "reference">("required");
-  const [expectedDate, setExpectedDate] = useState<Dayjs | null>(null);
+  // #178 裁决：成员来源改为「替他人创建上游任务」，新任务字段与创建任务弹窗同源（#164 精简集）。
+  const [upName, setUpName] = useState("");
+  const [upOwnerIds, setUpOwnerIds] = useState<number[]>([]);
+  const [upKrId, setUpKrId] = useState<number | null>(null);
+  const [upStart, setUpStart] = useState<Dayjs | null>(null);
+  const [upEnd, setUpEnd] = useState<Dayjs | null>(null);
   const [searchText, setSearchText] = useState("");
   const [krFilter, setKrFilter] = useState<number | "all">("all");
   const [error, setError] = useState<string | null>(null);
@@ -49,11 +52,13 @@ export default function ConfigureInputModal({
   useEffect(() => {
     if (task) {
       setMode("task");
-      setProviderIds([]);
-      setContentNote("");
       setSourceTaskIds([]);
       setNecessity("required");
-      setExpectedDate(null);
+      setUpName("");
+      setUpOwnerIds([]);
+      setUpKrId(task.keyResultId);
+      setUpStart(null);
+      setUpEnd(null);
       setSearchText("");
       setKrFilter("all");
       setError(null);
@@ -88,41 +93,44 @@ export default function ConfigureInputModal({
   }, [tasks, task, searchText, krFilter, krById, krOrder, objectiveTitle, taskCode]);
   if (!task) return null;
 
-  // #166：对接人选择统一为人员选择组件（搜索框 + 头像行）。
-  const providerPeople = members
+  // #166：负责人选择统一为人员选择组件（搜索框 + 头像行）；#178 单选＝指定成员。
+  const ownerPeople = members
     .filter((m) => m.role !== "viewer")
     .map((m) => ({ userId: m.userId, displayName: m.displayName, username: m.username }));
 
   const save = async () => {
     if (mode === "member") {
-      if (providerIds.length === 0) {
-        setError("请至少选择一名对接人");
+      if (!upName.trim()) {
+        setError("请填写上游任务名称");
         return;
       }
-      if (!contentNote.trim()) {
-        setError("请填写所需内容");
+      if (upOwnerIds.length === 0) {
+        setError("请选择任务负责人");
         return;
       }
-      if (!expectedDate) {
-        setError("请填写期望时间");
+      if (!upKrId) {
+        setError("请选择所属 KR");
+        return;
+      }
+      if (!upStart || !upEnd) {
+        setError("请填写开始与截止时间");
         return;
       }
       setSaving(true);
       setError(null);
-      const res = await client.POST("/projects/{projectId}/tasks/{taskId}/member-inputs", {
+      const res = await client.POST("/projects/{projectId}/tasks/{taskId}/upstream-tasks", {
         params: { path: { projectId, taskId: task.id } },
         body: {
-          necessity,
-          providerIds,
-          contentNote: contentNote.trim(),
-          expectedDate: expectedDate.format("YYYY-MM-DD"),
+          keyResultId: upKrId,
+          name: upName.trim(),
+          ownerId: upOwnerIds[0],
+          startDate: upStart.format("YYYY-MM-DD"),
+          endDate: upEnd.format("YYYY-MM-DD"),
         },
       });
       setSaving(false);
       if (res.data) {
-        message.success(
-          structureMessage(res.data, `已为 ${providerIds.length} 名对接人建立输入请求；对接人会收到站内通知`),
-        );
+        message.success("已创建上游任务并建立必要输入边；新任务负责人会收到站内通知");
         onSaved();
       } else {
         setError(res.error?.message ?? "保存失败");
@@ -182,32 +190,58 @@ export default function ConfigureInputModal({
             onChange={setMode}
             options={[
               { value: "task", label: "已有任务（默认搜索系统内任务）" },
-              { value: "member", label: "指定项目成员提供" },
+              { value: "member", label: "替他人创建上游任务" },
             ]}
           />
         </div>
         {mode === "member" && (
           <>
             <div>
-              <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
-                对接人（可多选；非只读项目成员）
-              </div>
-              <PersonPicker
-                people={providerPeople}
-                value={providerIds}
-                placeholder="选择对接人"
-                size="middle"
-                onSave={setProviderIds}
+              <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>上游任务名称（必填）</div>
+              <Input
+                maxLength={200}
+                value={upName}
+                onChange={(e) => setUpName(e.target.value)}
+                placeholder="要请对方完成的事"
               />
             </div>
-            <div>
-              <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>所需内容（必填）</div>
-              <Input.TextArea
-                rows={2}
-                maxLength={500}
-                value={contentNote}
-                onChange={(e) => setContentNote(e.target.value)}
-              />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div>
+                <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+                  任务负责人（单选＝指定成员；非只读项目成员）
+                </div>
+                <PersonPicker
+                  people={ownerPeople}
+                  value={upOwnerIds}
+                  multiple={false}
+                  placeholder="选择负责人"
+                  size="middle"
+                  onSave={setUpOwnerIds}
+                />
+              </div>
+              <div>
+                <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>所属 KR（默认当前任务所属 KR）</div>
+                <Select
+                  style={{ width: "100%" }}
+                  value={upKrId}
+                  onChange={setUpKrId}
+                  options={krList.map((k) => ({ value: k.id, label: `${k.code} · ${k.description}` }))}
+                  optionLabelProp="label"
+                  popupMatchSelectWidth={360}
+                />
+              </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div>
+                <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>开始时间</div>
+                <DatePicker style={{ width: "100%" }} value={upStart} onChange={setUpStart} />
+              </div>
+              <div>
+                <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+                  截止时间（作为本任务该输入的期望时间）
+                </div>
+                <DatePicker style={{ width: "100%" }} value={upEnd} onChange={setUpEnd} />
+              </div>
             </div>
           </>
         )}
@@ -296,31 +330,28 @@ export default function ConfigureInputModal({
         </div>
         )}
         {/* #173 裁决：关系类型删除，只填必要性。
-            #174 裁决：任务来源无期望时间（统一取上游任务截止日期）；成员来源保留必填期望时间。 */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <div>
-            <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>必要性</div>
-            <Select
-              style={{ width: "100%" }}
-              value={necessity}
-              onChange={setNecessity}
-              options={[
-                { value: "required", label: "必要" },
-                { value: "reference", label: "参考" },
-              ]}
-            />
-          </div>
-          {mode === "member" && (
+            #174 裁决：任务来源无期望时间（统一取上游任务截止日期）。
+            #178 裁决：替他人创建上游任务固定建必要边，不选必要性。 */}
+        {mode === "task" && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div>
-              <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>期望时间</div>
-              <DatePicker style={{ width: "100%" }} value={expectedDate} onChange={setExpectedDate} />
+              <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>必要性</div>
+              <Select
+                style={{ width: "100%" }}
+                value={necessity}
+                onChange={setNecessity}
+                options={[
+                  { value: "required", label: "必要" },
+                  { value: "reference", label: "参考" },
+                ]}
+              />
             </div>
-          )}
-        </div>
+          </div>
+        )}
         <div className="notice">
-          缺了它下游就做不了时选「必要」，仅供参考时选「参考」；必要输入未就绪的未开始任务显示“等待输入”，
-          但不阻断开始、上传文件或提交完成申请，任务开始后该状态与“上游未就绪”卡点自动消失。
-          偶发的外部材料不产生外部账号：由内部协调人（项目成员）作为对接人收集后代为提交。
+          {mode === "task"
+            ? "缺了它下游就做不了时选「必要」，仅供参考时选「参考」；必要输入未就绪的未开始任务显示“等待输入”，但不阻断开始、上传文件或提交完成申请，任务开始后该状态与“上游未就绪”卡点自动消失。"
+            : "新任务直接入池并通知负责人，同时自动建立「新上游任务 → 本任务」的必要输入边；上游任务完成后输入自动就绪。偶发的外部材料不产生外部账号：由内部协调人（项目成员）作为新任务负责人收集后代为完成。"}
         </div>
       </div>
     </Modal>

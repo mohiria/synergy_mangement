@@ -609,9 +609,6 @@ func (s *Server) memberDuties(ctx context.Context, projectID, userID int64) (dom
 	if out.Receivers, err = s.q.ListReceiverDutiesOf(ctx, store.ListReceiverDutiesOfParams{ProjectID: projectID, UserID: userID}); err != nil {
 		return out, err
 	}
-	if out.InputProviders, err = s.q.ListInputProviderDutiesOf(ctx, store.ListInputProviderDutiesOfParams{ProjectID: projectID, ProviderID: userID}); err != nil {
-		return out, err
-	}
 	return out, nil
 }
 
@@ -820,14 +817,10 @@ func (s *Server) okrList(ctx context.Context, projectID int64, actor domain.Acto
 	}
 	inputFactsByKr := make(map[int64][]domain.KrInputFact)
 	for _, row := range readinessRows {
-		// 裁决 #163：任务来源按来源任务已完成判定，成员来源按输入请求已提供判定。
-		ready := domain.EdgeReady(row.SourceTaskStatus.String)
-		if row.InputRequestState.Valid {
-			ready = domain.MemberEdgeReady(row.InputRequestState.String)
-		}
+		// 裁决 #163／#178：来源恒为任务，就绪只看来源任务已完成。
 		inputFactsByKr[row.KeyResultID] = append(inputFactsByKr[row.KeyResultID], domain.KrInputFact{
 			TargetStatus: row.TargetStatus,
-			Ready:        ready,
+			Ready:        domain.EdgeReady(row.SourceTaskStatus.String),
 		})
 	}
 	// KR 下任务数（含已完成与已关闭）：OKR 表「任务」列与删除守卫同源（AC-65）。

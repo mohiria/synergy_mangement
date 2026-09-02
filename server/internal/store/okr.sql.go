@@ -202,42 +202,6 @@ func (q *Queries) GetObjective(ctx context.Context, arg GetObjectiveParams) (Obj
 	return i, err
 }
 
-const listInputProviderDutiesOf = `-- name: ListInputProviderDutiesOf :many
-SELECT DISTINCT e.name
-FROM input_requests ir
-JOIN deliverable_edges e ON e.id = ir.edge_id
-JOIN tasks t ON t.id = e.target_task_id
-JOIN key_results kr ON kr.id = t.key_result_id
-JOIN objectives o ON o.id = kr.objective_id
-WHERE o.project_id = $1 AND ir.provider_id = $2
-  AND ir.state <> 'provided' AND t.status NOT IN ('completed', 'cancelled')
-`
-
-type ListInputProviderDutiesOfParams struct {
-	ProjectID  int64
-	ProviderID int64
-}
-
-func (q *Queries) ListInputProviderDutiesOf(ctx context.Context, arg ListInputProviderDutiesOfParams) ([]string, error) {
-	rows, err := q.db.Query(ctx, listInputProviderDutiesOf, arg.ProjectID, arg.ProviderID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
-		}
-		items = append(items, name)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listKeyResultsByProject = `-- name: ListKeyResultsByProject :many
 SELECT kr.id, kr.objective_id, kr.description, kr.metric, kr.owner_id, kr.start_date, kr.end_date, kr.sort_order, kr.created_at, kr.code_seq, u.display_name AS owner_name, o.code_seq AS objective_code_seq
 FROM key_results kr

@@ -12,7 +12,7 @@ import (
 // V4.5 起卡点全部由结构化事实读时派生：没有人工上报、协调人、手动解除，
 // 触发条件消失即自动解除。四类触发与待行动人：
 //
-//	上游未就绪 | 必要输入未就绪、已到开始时间且任务尚未开始 | 上游任务负责人／输入对接人 | 输入就绪或任务开始
+//	上游未就绪 | 必要输入未就绪、已到开始时间且任务尚未开始 | 上游任务负责人 | 输入就绪或任务开始
 //	任务超期   | 截止已过且未完成                 | 任务负责人                 | 完成或改期生效
 //	审批超时   | 当前环节等待达到 N×24 小时       | 该审批人（或签为各审核人） | 审批处理或审批单关闭
 //	硬依赖互锁 | 硬前置交付物边成环               | 环内各任务所属 KR 负责人   | 任一边被改掉
@@ -52,9 +52,6 @@ type BlockerInputFact struct {
 	SourceTaskName  string
 	SourceOwnerID   int64
 	SourceOwnerName string
-	ProviderID      int64 // 来源为指定成员时的对接人
-	ProviderName    string
-	RequestID       int64 // 来源为指定成员时的输入请求 ID（提醒目标寻址用）
 }
 
 // BlockerApprovalFact 停在当前环节等待处理的审批件事实。
@@ -94,9 +91,6 @@ type Blocker struct {
 	// 以下为分组与权限判定用的任务事实，不出现在 API 契约里。
 	TaskOwnerID int64
 	KrOwnerID   *int64
-	// InputProviderID 上游未就绪且来源为指定成员时的对接人 ID；其余为 0。
-	// 我的工作用它剔除「等我提供输入」类（与输入请求同源，见模块 PRD §3.2.E）。
-	InputProviderID int64
 	// 上游任务事实（#167）：仅「上游未就绪」且来源为任务时有值——
 	// 卡点条目按「编号＋标题＋负责人」展示，前端只消费不拼算。
 	SourceTaskCode  string
@@ -159,8 +153,8 @@ func DeriveBlockers(f BlockerFacts) []Blocker {
 			Since:      *t.StartDate,
 			OccurredAt: *t.StartDate,
 		}
-		switch {
-		case in.SourceTaskID != nil:
+		// #178 裁决：输入来源恒为上游任务（输入请求机制退场）。
+		if in.SourceTaskID != nil {
 			b.Reason = fmt.Sprintf("上游任务「%s」尚未交付当前内容", in.SourceTaskName)
 			b.ActionOwnerIDs = []int64{in.SourceOwnerID}
 			b.ActionOwnerNames = []string{in.SourceOwnerName}
@@ -168,12 +162,7 @@ func DeriveBlockers(f BlockerFacts) []Blocker {
 			b.SourceTaskCode = in.SourceTaskCode
 			b.SourceTaskName = in.SourceTaskName
 			b.SourceOwnerName = in.SourceOwnerName
-		case in.ProviderID != 0:
-			b.Reason = "输入对接人尚未提供内容"
-			b.ActionOwnerIDs = []int64{in.ProviderID}
-			b.ActionOwnerNames = []string{in.ProviderName}
-			b.InputProviderID = in.ProviderID
-		default:
+		} else {
 			b.Reason = "必要输入尚未指定来源"
 		}
 		add(t, b)

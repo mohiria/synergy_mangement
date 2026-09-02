@@ -138,10 +138,6 @@ func TestMyWorkWaitingRemindWithoutBlocker(t *testing.T) {
 			{ID: 33, TaskID: 1, TaskName: "我的任务", SubmittedBy: me, TaskOwnerID: me, KrOwnerID: krOther,
 				KrOwnerName: "李四", State: CompletionPendingFinal, SubmittedAt: recent},
 		},
-		InputRequests: []WorkInputRequestFact{
-			{ID: 41, TaskID: 2, TaskName: "等输入的任务", InputName: "接口口径", Necessity: NecessityRequired, ProviderID: 8,
-				TaskOwnerID: me, State: InputRequestPending, Notified: true, CreatedAt: recent},
-		},
 		Upstreams: []WorkUpstreamFact{
 			{EdgeID: 51, TargetTaskID: 2, TargetName: "等输入的任务", TargetOwnerID: me,
 				SourceTaskID: i64(3), SourceName: "上游任务", SourceOwnerID: 9, SourceOwnerName: "王五",
@@ -152,8 +148,8 @@ func TestMyWorkWaitingRemindWithoutBlocker(t *testing.T) {
 	if len(g.Blockers) != 0 {
 		t.Fatalf("本例不应有卡点: %+v", g.Blockers)
 	}
-	if len(g.Waiting) != 3 {
-		t.Fatalf("等待他人应有三条: %+v", g.Waiting)
+	if len(g.Waiting) != 2 {
+		t.Fatalf("等待他人应有两条: %+v", g.Waiting)
 	}
 	for _, it := range g.Waiting {
 		if !it.CanRemind {

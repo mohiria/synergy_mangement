@@ -6,7 +6,7 @@ BEGIN
     FOREACH t IN ARRAY ARRAY[
         'users', 'projects', 'objectives', 'key_results', 'tasks',
         'task_receipts', 'task_invites', 'deliverables', 'deliverable_files',
-        'deliverable_edges', 'input_requests', 'completion_reviews',
+        'deliverable_edges', 'completion_reviews',
         'field_change_requests', 'remind_logs',
         'discussions', 'notifications', 'task_activities'
     ] LOOP
