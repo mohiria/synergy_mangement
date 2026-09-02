@@ -455,14 +455,15 @@ body {
 
 /* 协作关系图谱（原型 graph-shell 生效样式；手绘 SVG + 绝对定位节点）。 */
 .graph-layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 12px; }
-/* #154：条目多时列表区自适应滚动，底部「回到 O／KR 层级树」常驻可见——
-   队列整体封顶与画布同高（graph-shell 的 calc），条目滚动交给 .risk-queue-list。 */
+/* #154：条目多时列表区自适应滚动，条目滚动交给 .risk-queue-list。
+   #169（#3 反馈）：队列与画布同高（原型 cp-lens 全高），底部「回到 O／KR 层级树」
+   margin-top:auto 常驻页面底部，不随条目数量与列表滚动位置变化。 */
 .risk-queue {
   background: #fff; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;
-  align-self: start; display: flex; flex-direction: column; max-height: calc(100vh - 250px);
+  align-self: start; display: flex; flex-direction: column; height: calc(100vh - 250px); min-height: 560px;
 }
 .risk-queue-head { flex: none; padding: 10px 14px; border-bottom: 1px solid var(--line); font-weight: 600; font-size: var(--type-body); background: #f8f9fb; }
-.risk-queue-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.risk-queue-list { flex: 0 1 auto; min-height: 0; overflow-y: auto; }
 .risk-queue-item {
   width: 100%; text-align: left; border: 0; background: #fff; padding: 10px 14px;
   border-bottom: 1px solid #edf0f2; cursor: pointer; font: inherit;
@@ -479,8 +480,8 @@ body {
 .risk-queue-counts i, .risk-queue-counts em { display: block; font-style: normal; font-size: var(--type-aux); white-space: nowrap; }
 .risk-queue-counts i { color: var(--red); font-weight: 600; }
 .risk-queue-counts em { color: var(--amber); margin-top: 3px; }
-/* #150 原型 cp-lens-foot：语义说明＋回层级树入口。 */
-.risk-queue-foot { flex: none; padding: 10px 14px; background: #f8fafc; border-top: 1px solid #e5e9ef; }
+/* #150 原型 cp-lens-foot：语义说明＋回层级树入口；#169 margin-top:auto 钉在队列底部。 */
+.risk-queue-foot { flex: none; margin-top: auto; padding: 10px 14px; background: #f8fafc; border-top: 1px solid #e5e9ef; }
 .risk-queue-foot span { display: block; color: #7b8798; font-size: var(--type-aux); }
 .risk-queue-foot button { margin-top: 6px; border: 0; background: none; color: var(--accent); font-size: var(--type-aux); padding: 0; cursor: pointer; }
 /* 画布本身不滚动：详情面板与画布操作层要常驻，滚动交给内层 graph-scroll（CR-22、CR-23）。 */
@@ -489,8 +490,12 @@ body {
   background: #f8f9fc; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;
   background-image: radial-gradient(#d9e1e6 0.7px, transparent 0.7px); background-size: 18px 18px;
 }
-/* #145：画布不滚动，改平移＋缩放视口；舞台顶部固定让出 44px 给操作簇。 */
-.graph-viewport { position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none; }
+/* #145：画布不滚动，改平移＋缩放视口；舞台顶部固定让出 44px 给操作簇。
+   #169（#1 反馈）：拖动画布/节点不产生文字与节点选中态（原型 #cp-graph-svg 同款 user-select:none）。 */
+.graph-viewport {
+  position: absolute; inset: 0; overflow: hidden; cursor: grab; touch-action: none;
+  user-select: none; -webkit-user-select: none;
+}
 .graph-viewport.dragging { cursor: grabbing; }
 .graph-stage { position: absolute; top: 44px; left: 0; transform-origin: top left; }
 /* 画布操作三簇（原型 cp-canvas-action／cp-canvas-controls）：返回左上、缩放顶部居中、重新布局右上。 */
