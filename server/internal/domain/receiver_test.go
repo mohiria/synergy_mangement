@@ -7,6 +7,33 @@ import (
 	"time"
 )
 
+// 归档等列表的接收方展示文案（#171，#17/#18 反馈）：指定成员只列名单、无「指定成员：」
+// 前缀；全员统一「项目全体成员」；未配置不显示口径文字（空串）。
+func TestReceiverDisplay(t *testing.T) {
+	cases := []struct {
+		name  string
+		scope string
+		names []string
+		want  string
+	}{
+		{"指定成员只列名单", ReceiverScopeMembers, []string{"张三", "李四"}, "张三、李四"},
+		{"全员统一文案", ReceiverScopeAll, nil, "项目全体成员"},
+		{"未配置不显示口径文字", ReceiverScopeNone, nil, ""},
+		{"未知取值按未配置", "weird", nil, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ReceiverDisplay(tc.scope, tc.names); got != tc.want {
+				t.Fatalf("ReceiverDisplay(%q, %v) = %q, want %q", tc.scope, tc.names, got, tc.want)
+			}
+		})
+	}
+	// 抽屉等共用 ReceiverScopeLabel 处同步（#171）：全员文案统一「项目全体成员」。
+	if got := ReceiverScopeLabel(ReceiverScopeAll); got != "项目全体成员" {
+		t.Fatalf("ReceiverScopeLabel(all) = %q, want 项目全体成员", got)
+	}
+}
+
 // 接收方配置校验（模块 PRD §8.6；主 PRD §9.2 按需字段）。
 func TestValidateReceivers(t *testing.T) {
 	members := map[int64]bool{1: true, 2: true, 3: true}

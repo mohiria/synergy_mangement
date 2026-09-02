@@ -2171,7 +2171,7 @@ export interface components {
             name: string;
             /** @description 任务负责人姓名（派生字段） */
             ownerName: string;
-            /** @description 接收方展示文案（词汇表「接收方」；空接收方为「未配置」，#124；派生字段） */
+            /** @description 接收方展示文案（词汇表「接收方」；#171 只显示成员信息——指定成员列名单、全员「项目全体成员」、未配置为空串不显示口径文字；派生字段） */
             receiverLabel: string;
             status: components["schemas"]["TaskStatus"];
             /** @description 状态显示文案（AC-04；派生字段） */
@@ -2418,7 +2418,7 @@ export interface components {
             displayName: string;
         };
         /**
-         * @description 接收方范围（词汇表「接收方」；模块 PRD §8.6）：不配置、指定成员或所有项目成员
+         * @description 接收方范围（词汇表「接收方」；模块 PRD §8.6）：不配置、指定成员或项目全体成员
          * @enum {string}
          */
         ReceiverScope: "none" | "members" | "all";

@@ -107,6 +107,9 @@ export default function ArtifactsPage({
           for (const deliverable of task.deliverables) {
             // 「文件类型」三类（裁决 G1）：交付物不再分当前／候选。
             if (kindFilter === "process" || kindFilter === "external") continue;
+            // #171（#17 反馈）：没有任何成果文件的交付物项不出现——不再有「—」空行；
+            // 任务全部行为空时整任务自然不出现。
+            if (!deliverable.current && !deliverable.candidate) continue;
             if (
               kw &&
               ![deliverable.name, task.name, task.code, task.ownerName].some(
@@ -172,15 +175,16 @@ export default function ArtifactsPage({
           <span className="muted">—</span>
         )}
       </td>
+      {/* #171：「文件类型」列与筛选维同口径，交付物行固定「交付物」。 */}
+      <td>交付物</td>
       {/* 裁决 G1（#140）：内容状态五档改「文件状态」两档（按所属任务派生）；来源关系列删除。 */}
       <td>
         <span className={`status-pill ${t.fileState === "published" ? "completed" : "archived"}`}>
           {t.fileStateLabel ?? "—"}
         </span>
       </td>
-      <td className={t.receiverLabel === "未配置" ? "muted" : ""} title={t.receiverLabel}>
-        {t.receiverLabel}
-      </td>
+      {/* #171（#18 反馈）：接收方列只显示成员信息（服务端派生：名单／项目全体成员／未配置为空）。 */}
+      <td title={t.receiverLabel || undefined}>{t.receiverLabel}</td>
       <td className="task-date">{fmtTime(d.contentStateAt) || "—"}</td>
     </tr>
   );
@@ -336,10 +340,12 @@ export default function ArtifactsPage({
                 <table className="data-table artifact-table">
                   <thead>
                     <tr>
-                      {/* #124 去名称列；裁决 G1（#140）：无勾选列、无来源关系列，「文件状态」两档。 */}
+                      {/* #124 去名称列；裁决 G1（#140）：无勾选列、无来源关系列，「文件状态」两档。
+                          #171（#17 反馈）：列名「成果文件」＋「文件类型」列（与文件类型筛选维同口径）。 */}
                       <th style={{ width: 90 }}>来源任务</th>
                       <th style={{ width: 100 }}>任务负责人</th>
-                      <th>交付物</th>
+                      <th>成果文件</th>
+                      <th style={{ width: 110 }}>文件类型</th>
                       <th style={{ width: 110 }}>文件状态</th>
                       <th style={{ width: 140 }}>接收方</th>
                       <th style={{ width: 140 }}>提交／生效时间</th>
@@ -372,6 +378,8 @@ export default function ArtifactsPage({
                               </span>
                             </span>
                           </td>
+                          {/* #171：过程文件／重要外部材料行的「文件类型」取自身 kindLabel。 */}
+                          <td>{row.file.kindLabel}</td>
                           <td>
                             <span
                               className={`status-pill ${row.task.fileState === "published" ? "completed" : "archived"}`}
@@ -379,12 +387,7 @@ export default function ArtifactsPage({
                               {row.task.fileStateLabel ?? "—"}
                             </span>
                           </td>
-                          <td
-                            className={
-                              row.task.receiverLabel === "未配置" ? "muted" : ""
-                            }
-                            title={row.task.receiverLabel}
-                          >
+                          <td title={row.task.receiverLabel || undefined}>
                             {row.task.receiverLabel}
                           </td>
                           <td className="task-date">

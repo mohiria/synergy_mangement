@@ -505,10 +505,10 @@ export default function TaskDrawer({
   if (!task) return null;
   const reviewers = detail?.reviewers ?? [];
   const receipts = detail?.receipts ?? [];
-  // 接收方展示口径（模块 PRD §8.6）：不配置、指定成员名单，或「所有项目成员」。
+  // 接收方展示口径（模块 PRD §8.6；#171 全员文案统一「项目全体成员」）。
   const receiverLabel =
     task.receiverScope === "all"
-      ? "所有项目成员"
+      ? "项目全体成员"
       : task.receiverScope === "members"
         ? (task.receivers ?? []).map((r) => r.displayName).join("、") || "未配置"
         : "未配置";
@@ -641,7 +641,7 @@ export default function TaskDrawer({
               {task.canManageReceivers ? (
                 <PersonPicker
                   people={[
-                    { userId: ALL_RECEIVERS, displayName: "所有项目成员" },
+                    { userId: ALL_RECEIVERS, displayName: "项目全体成员" },
                     ...members.map((m) => ({
                       userId: m.userId,
                       displayName: m.displayName,
@@ -649,7 +649,7 @@ export default function TaskDrawer({
                     })),
                   ]}
                   value={receiverValue}
-                  placeholder="未配置：选择成员或「所有项目成员」"
+                  placeholder="未配置：选择成员或「项目全体成员」"
                   normalizeDraft={(next, prev) =>
                     next.includes(ALL_RECEIVERS) && !prev.includes(ALL_RECEIVERS)
                       ? [ALL_RECEIVERS]

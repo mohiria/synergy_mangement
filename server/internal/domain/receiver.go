@@ -3,6 +3,7 @@ package domain
 import (
 	"errors"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -22,7 +23,8 @@ var receiverScopeLabels = map[string]string{
 	// #124：空接收方显示「未配置」（原「不配置」），归档列表与抽屉共用。
 	ReceiverScopeNone:    "未配置",
 	ReceiverScopeMembers: "指定成员",
-	ReceiverScopeAll:     "所有项目成员",
+	// #171（#18 反馈）：全员口径文案统一「项目全体成员」，抽屉与列表共用。
+	ReceiverScopeAll: "项目全体成员",
 }
 
 // ReceiverScopeLabel 接收方范围显示文案（派生字段）；未知取值不回显枚举原文。
@@ -31,6 +33,18 @@ func ReceiverScopeLabel(scope string) string {
 		return label
 	}
 	return "未配置"
+}
+
+// ReceiverDisplay 归档等列表的接收方展示文案（#171，#17/#18 反馈）：
+// 指定成员只列名单（无「指定成员：」前缀）；全员「项目全体成员」；未配置不显示口径文字。
+func ReceiverDisplay(scope string, names []string) string {
+	switch scope {
+	case ReceiverScopeMembers:
+		return strings.Join(names, "、")
+	case ReceiverScopeAll:
+		return receiverScopeLabels[ReceiverScopeAll]
+	}
+	return ""
 }
 
 var (

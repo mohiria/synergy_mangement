@@ -715,7 +715,7 @@ function CreateTaskModal({
                     options={[
                       { value: "none", label: "未配置" },
                       { value: "members", label: "指定成员" },
-                      { value: "all", label: "所有项目成员" },
+                      { value: "all", label: "项目全体成员" },
                     ]}
                   />
                 </div>

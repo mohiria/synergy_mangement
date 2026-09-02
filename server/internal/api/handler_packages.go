@@ -158,7 +158,8 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 					Code:           domain.TaskCode(int(facts.ObjectiveCodeSeq), int(facts.KrCodeSeq), int(facts.CodeSeq)),
 					Name:           d.TaskName,
 					OwnerName:      facts.OwnerName,
-					ReceiverLabel:  receiverScopeSummary(facts.ReceiverScope, receiverNamesByTask[d.TaskID]),
+					// #171：归档接收方列只显示成员信息——指定成员列名单、全员「项目全体成员」、未配置空。
+					ReceiverLabel: domain.ReceiverDisplay(facts.ReceiverScope, receiverNamesByTask[d.TaskID]),
 					Status:         TaskStatus(d.TaskStatus),
 					StatusLabel:    domain.StatusLabel(d.TaskStatus, krOwnerNameByTask[d.TaskID], reviewerNamesByTask[d.TaskID]),
 					FileState:      &fs,
@@ -219,7 +220,7 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 				Code:           domain.TaskCode(int(facts.ObjectiveCodeSeq), int(facts.KrCodeSeq), int(facts.CodeSeq)),
 				Name:           facts.Name,
 				OwnerName:      facts.OwnerName,
-				ReceiverLabel:  receiverScopeSummary(facts.ReceiverScope, receiverNamesByTask[f.TaskID]),
+				ReceiverLabel:  domain.ReceiverDisplay(facts.ReceiverScope, receiverNamesByTask[f.TaskID]),
 				Status:         TaskStatus(facts.Status),
 				StatusLabel:    domain.StatusLabel(facts.Status, krOwnerNameByTask[f.TaskID], reviewerNamesByTask[f.TaskID]),
 				FileState:      &fs,

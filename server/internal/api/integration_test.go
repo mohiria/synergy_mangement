@@ -3504,7 +3504,8 @@ func TestArtifacts(t *testing.T) {
 	if akr.OwnerName != "李四" || akr.DeliverableCount != 1 {
 		t.Fatalf("KR 分组头异常: 负责人=%q 交付物数=%d", akr.OwnerName, akr.DeliverableCount)
 	}
-	if at.OwnerName != "李四" || at.ReceiverLabel != "未配置" {
+	// #171：未配置接收方不显示口径文字（空串），不再回「未配置」。
+	if at.OwnerName != "李四" || at.ReceiverLabel != "" {
 		t.Fatalf("归档任务负责人／接收方异常: %q / %q", at.OwnerName, at.ReceiverLabel)
 	}
 	// 裁决 G1（#140）：文件状态两档——所属任务已完成→已发布。
