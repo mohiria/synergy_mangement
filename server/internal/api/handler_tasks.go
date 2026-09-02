@@ -448,17 +448,11 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 	}
 	facts := domain.TaskFacts{Status: string(item.Status), CreatorID: task.CreatedBy, OwnerID: task.OwnerID,
 		KrOwnerID: fromPgInt8(task.KrOwnerID), ResultUpdate: task.ResultUpdate}
-	fcs := make([]FieldChange, 0, len(changeRows))
+	fcs := make([]CancelRequest, 0, len(changeRows))
 	for _, fc := range changeRows {
-		fcs = append(fcs, s.fieldChangeView(r.Context(), store.FieldChangeRequest{
+		fcs = append(fcs, s.cancelRequestView(r.Context(), store.FieldChangeRequest{
 			ID: fc.ID, TaskID: fc.TaskID, SubmittedBy: fc.SubmittedBy, Reason: fc.Reason,
 			State: fc.State, Exempt: fc.Exempt, Opinion: fc.Opinion, Resolved: fc.Resolved,
-			ChangeType: fc.ChangeType, OldStatus: fc.OldStatus, NewStatus: fc.NewStatus, Payload: fc.Payload,
-			OldName: fc.OldName, NewName: fc.NewName,
-			OldDescription: fc.OldDescription, NewDescription: fc.NewDescription,
-			OldCompletionCriteria: fc.OldCompletionCriteria, NewCompletionCriteria: fc.NewCompletionCriteria,
-			OldOwnerID: fc.OldOwnerID, NewOwnerID: fc.NewOwnerID,
-			OldEndDate: fc.OldEndDate, NewEndDate: fc.NewEndDate,
 			SubmittedAt: fc.SubmittedAt, DecidedBy: fc.DecidedBy, DecidedAt: fc.DecidedAt,
 		}, fc.SubmittedByName, fc.DecidedByName, facts, actor, uid))
 	}
@@ -548,7 +542,7 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 	// F1：未决审批计数由后端派生，前端不再把审批单各自过滤后相加。
 	pendingCount := 0
 	for _, fc := range fcs {
-		if fc.State == FieldChangeStatePending {
+		if fc.State == CancelRequestStatePending {
 			pendingCount++
 		}
 	}
@@ -562,7 +556,7 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		Task:              *item,
 		ObjectiveTitle:    obj.Title,
 		KrDescription:     kr.Description,
-		FieldChanges:      fcs,
+		CancelRequests:    fcs,
 		Deliverables:      deliverables,
 		Files:             &taskFiles,
 		Discussions:       discussions,
@@ -628,7 +622,7 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 	if err != nil {
 		return nil, err
 	}
-	// 每个任务最近一张需要关注的变更单（待审批＝拟议值标示，退回未处理＝退回待处理事项）。
+	// 每个任务最近一张需要关注的关闭申请（待审批，或退回未处理＝退回待处理事项，#172）。
 	changeRows, err := s.q.LatestFieldChangesByProject(ctx, projectID)
 	if err != nil {
 		return nil, err
@@ -710,9 +704,9 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 	for _, t := range rows {
 		facts := domain.TaskFacts{Status: t.Status, CreatorID: t.CreatedBy, OwnerID: t.OwnerID,
 			KrOwnerID: fromPgInt8(t.KrOwnerID), ResultUpdate: t.ResultUpdate}
-		// 待审批变更单（含关闭单）决定编辑与取消入口是否可用（AC-23、AC-57 互斥）。
+		// 待审批关闭申请决定编辑与关闭入口是否可用（AC-57 互斥；#172 裁决）。
 		fc, hasChange := changeByTask[t.ID]
-		hasPending := hasChange && fc.State == domain.FieldChangePendingState
+		hasPending := hasChange && fc.State == domain.CancelRequestPendingState
 		item := Task{
 			Id:                 t.ID,
 			KeyResultId:        t.KeyResultID,
@@ -753,32 +747,21 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 				item.PendingActorName = fromPgText(t.KrOwnerName)
 			}
 		}
-		// 编辑／关键字段修改动作标志与需要关注的变更单（AC-23）。
+		// 需要关注的关闭申请（待审批，或退回未处理＝退回待处理事项，#172 裁决）。
 		if hasChange {
 			// 任务终止后退回待处理事项随之结束（词汇表）。
 			terminal := t.Status == domain.TaskCompleted || t.Status == domain.TaskCancelled
 			if hasPending || !terminal {
-				view := s.fieldChangeView(ctx, store.FieldChangeRequest{
+				view := s.cancelRequestView(ctx, store.FieldChangeRequest{
 					ID: fc.ID, TaskID: fc.TaskID, SubmittedBy: fc.SubmittedBy, Reason: fc.Reason,
 					State: fc.State, Exempt: fc.Exempt, Opinion: fc.Opinion, Resolved: fc.Resolved,
-					ChangeType: fc.ChangeType, OldStatus: fc.OldStatus, NewStatus: fc.NewStatus, Payload: fc.Payload,
-					OldName: fc.OldName, NewName: fc.NewName,
-					OldDescription: fc.OldDescription, NewDescription: fc.NewDescription,
-					OldCompletionCriteria: fc.OldCompletionCriteria, NewCompletionCriteria: fc.NewCompletionCriteria,
-					OldOwnerID: fc.OldOwnerID, NewOwnerID: fc.NewOwnerID,
-					OldEndDate: fc.OldEndDate, NewEndDate: fc.NewEndDate,
 					SubmittedAt: fc.SubmittedAt, DecidedBy: fc.DecidedBy, DecidedAt: fc.DecidedAt,
 				}, fc.SubmittedByName, fc.DecidedByName, facts, actor, userID)
-				item.FieldChange = &view
+				item.CancelRequest = &view
 			}
 		}
-		routeOutcome, routeErr := domain.FieldChangeRoute(actor, userID, facts, hasPending)
-		item.CanProposeFieldChange = routeErr == nil
-		// #138 就地编辑的保存路由（裁决 E1）：前端只消费，不复算规则。
-		if routeErr == nil {
-			mode := TaskFieldEditMode(domain.FieldEditMode(routeOutcome))
-			item.FieldEditMode = &mode
-		}
+		// #172 裁决：关键字段直接修改，前端只消费编辑权限标志。
+		item.CanEditFields = domain.TaskEditRule(actor, userID, facts, hasPending) == nil
 		canDiscuss := domain.CanDiscuss(actor)
 		item.CanDiscuss = &canDiscuss
 		canManageDeliverables := domain.CanManageDeliverables(actor, userID, facts)

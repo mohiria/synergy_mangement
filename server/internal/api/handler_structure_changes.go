@@ -14,12 +14,11 @@ import (
 	"synergy/server/internal/store"
 )
 
-// 结构变更（输入、输入源、输出、接收方）走关键字段修改审批（AC-23、§5.2.B）。
-// 三条路由与标量关键字段同源：草稿直接生效、KR 负责人本人免审即时生效、其余进入审批。
-// 待审批期间结构不变，通过时才由 applyStructureChange 真正写入。
+// 结构变更（输入、输入源、接收方）：#172 裁决后不再走变更单审批——
+// 有编辑权限者直接修改生效（TaskEditRule 同口径），动作写入任务动态并通知所属 KR 负责人。
 
-// structurePayload 变更单里存的结构变更：展示用差异行 + 原样保留的请求体。
-// 请求体在提交时已校验过一遍；审批通过时按 Op 重新执行。
+// structurePayload 一次结构变更的展示事实（差异行）+ 原样请求体；
+// #172 后不再落库，仅用于当场执行、动态摘要与通知文案。
 type structurePayload struct {
 	Op       string          `json:"op"`
 	Label    string          `json:"label"`
@@ -28,43 +27,36 @@ type structurePayload struct {
 	Request  json.RawMessage `json:"request"`
 }
 
-var errStructureUnknownOp = errors.New("变更单记录了未知的结构变更动作")
+var errStructureUnknownOp = errors.New("未知的结构变更动作")
 
-// routeStructureChange 判定本次结构变更走哪条路由，并给出统一的错误回报。
+// routeStructureChange 判定本次结构变更能否直接执行，并给出统一的错误回报。
 // 返回 ok=false 时响应已写出。
 func (s *Server) routeStructureChange(w http.ResponseWriter, r *http.Request, taskID int64,
 	actor domain.Actor, uid int64, facts domain.TaskFacts,
-) (domain.FieldChangeOutcome, bool) {
-	hasPending, err := s.q.HasPendingFieldChange(r.Context(), taskID)
-	if err != nil {
-		writeInternalError(w, r, err)
-		return 0, false
-	}
-	outcome, err := domain.StructureChangeRoute(actor, uid, facts, hasPending)
-	if err != nil {
-		switch {
-		case errors.Is(err, domain.ErrChangeForbidden):
-			writeForbidden(w)
-		case errors.Is(err, domain.ErrChangePendingExists), errors.Is(err, domain.ErrChangeNotAllowed):
-			writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: err.Error()})
-		default:
-			writeInternalError(w, r, err)
-		}
-		return 0, false
-	}
-	return outcome, true
-}
-
-// commitStructureChange 按路由落地一次结构变更：直改与免审当场执行，
-// 进入审批时只落一张待审批变更单。整个过程一个事务。
-func (s *Server) commitStructureChange(w http.ResponseWriter, r *http.Request, projectID, taskID, uid int64,
-	outcome domain.FieldChangeOutcome, p structurePayload, reason string,
 ) bool {
-	raw, err := json.Marshal(p)
+	hasPendingCancel, err := s.q.HasPendingFieldChange(r.Context(), taskID)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return false
 	}
+	if err := domain.TaskEditRule(actor, uid, facts, hasPendingCancel); err != nil {
+		switch {
+		case errors.Is(err, domain.ErrChangeForbidden):
+			writeForbidden(w)
+		case errors.Is(err, domain.ErrChangeNotAllowed), errors.Is(err, domain.ErrCancelBlocked):
+			writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: err.Error()})
+		default:
+			writeInternalError(w, r, err)
+		}
+		return false
+	}
+	return true
+}
+
+// commitStructureChange 直接落地一次结构变更：执行写入并通知所属 KR 负责人，整个过程一个事务。
+func (s *Server) commitStructureChange(w http.ResponseWriter, r *http.Request, projectID, taskID, uid int64,
+	p structurePayload,
+) bool {
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -72,26 +64,24 @@ func (s *Server) commitStructureChange(w http.ResponseWriter, r *http.Request, p
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
 	qtx := s.q.WithTx(tx)
-	switch outcome {
-	case domain.FieldChangeExempt:
-		if _, err := qtx.CreateFieldChange(r.Context(), structureChangeParams(taskID, uid, reason, raw,
-			domain.FieldChangeApprovedState, true, domain.FieldChangeExemptOpinion,
-			pgtype.Int8{Int64: uid, Valid: true}, pgtype.Timestamptz{Time: s.now(), Valid: true})); err != nil {
-			writeInternalError(w, r, err)
-			return false
-		}
-		if !s.applyStructureOrFail(w, r, qtx, projectID, taskID, uid, p) {
-			return false
-		}
-	default:
-		// 重新提交时清除本人此前的退回待处理事项，与标量关键字段同口径。
-		if _, err := qtx.ResolveRejectedFieldChanges(r.Context(),
-			store.ResolveRejectedFieldChangesParams{TaskID: taskID, SubmittedBy: uid}); err != nil {
-			writeInternalError(w, r, err)
-			return false
-		}
-		if _, err := qtx.CreateFieldChange(r.Context(), structureChangeParams(taskID, uid, reason, raw,
-			domain.FieldChangePendingState, false, "", pgtype.Int8{}, pgtype.Timestamptz{})); err != nil {
+	if !s.applyStructureOrFail(w, r, qtx, projectID, taskID, uid, p) {
+		return false
+	}
+	// 站内通知所属 KR 负责人（#172 裁决；本人修改不另发），与写入同事务。
+	task, err := qtx.GetTaskInProject(r.Context(), store.GetTaskInProjectParams{ID: taskID, ProjectID: projectID})
+	if err != nil {
+		writeInternalError(w, r, err)
+		return false
+	}
+	if target := domain.FieldEditNotifyTarget(uid, fromPgInt8(task.KrOwnerID)); target != nil {
+		if _, err := qtx.CreateNotification(r.Context(), store.CreateNotificationParams{
+			UserID: *target,
+			Kind:   domain.NotifyTaskFieldEdited,
+			Content: domain.FieldEditNotification(
+				currentUser(r).DisplayName, task.Name, []string{p.Label}),
+			ProjectID: pgtype.Int8{Int64: projectID, Valid: true},
+			TaskID:    pgtype.Int8{Int64: taskID, Valid: true},
+		}); err != nil {
 			writeInternalError(w, r, err)
 			return false
 		}
@@ -100,12 +90,7 @@ func (s *Server) commitStructureChange(w http.ResponseWriter, r *http.Request, p
 		writeInternalError(w, r, err)
 		return false
 	}
-	switch outcome {
-	case domain.FieldChangeExempt:
-		s.actionActivity(r.Context(), taskID, domain.ActivityFieldChangeApproved, uid, domain.FieldChangeExemptOpinion)
-	case domain.FieldChangePending:
-		s.actionActivity(r.Context(), taskID, domain.ActivityFieldChangeSubmitted, uid, reason)
-	}
+	s.actionActivity(r.Context(), taskID, domain.ActivityFieldEdited, uid, p.Label)
 	return true
 }
 
@@ -248,14 +233,3 @@ func applySetReceivers(ctx context.Context, qtx *store.Queries, taskID int64, re
 	return nil
 }
 
-// structureChangeParams 组装结构变更单：变更字段与差异行都在 payload 里。
-func structureChangeParams(taskID, uid int64, reason string, payload []byte, state string,
-	exempt bool, opinion string, decidedBy pgtype.Int8, decidedAt pgtype.Timestamptz,
-) store.CreateFieldChangeParams {
-	return store.CreateFieldChangeParams{
-		TaskID: taskID, SubmittedBy: uid, Reason: reason, State: state,
-		Exempt: exempt, Opinion: opinion, DecidedBy: decidedBy, DecidedAt: decidedAt,
-		ChangeType: domain.FieldChangeTypeStructure,
-		Payload:    payload,
-	}
-}

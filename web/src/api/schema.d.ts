@@ -373,7 +373,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/projects/{projectId}/tasks/{taskId}/field-changes": {
+    "/projects/{projectId}/tasks/{taskId}/edits": {
         parameters: {
             query?: never;
             header?: never;
@@ -385,50 +385,50 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 编辑任务／提交关键字段修改（AC-23；KR 负责人本人免审即时生效，其余进入审批且旧值继续生效） */
-        post: operations["submitFieldChange"];
+        /** 直接修改任务关键字段（AC-23、#172 裁决：有编辑权限者立即生效、无修改原因；动态留痕并站内通知所属 KR 负责人） */
+        post: operations["editTaskFields"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/projects/{projectId}/tasks/{taskId}/field-changes/{changeId}/decision": {
+    "/projects/{projectId}/tasks/{taskId}/cancel-requests/{requestId}/decision": {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 projectId: number;
                 taskId: number;
-                changeId: number;
+                requestId: number;
             };
             cookie?: never;
         };
         get?: never;
         put?: never;
-        /** 所属 KR 负责人通过或退回关键字段修改（AC-23；通过后拟议值生效，退回后拟议值作废） */
-        post: operations["decideFieldChange"];
+        /** 所属 KR 负责人通过或退回关闭申请（AC-57、#172 裁决：通过后任务进入已关闭并保留原因） */
+        post: operations["decideCancelRequest"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/projects/{projectId}/tasks/{taskId}/field-changes/{changeId}/abandon": {
+    "/projects/{projectId}/tasks/{taskId}/cancel-requests/{requestId}/abandon": {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 projectId: number;
                 taskId: number;
-                changeId: number;
+                requestId: number;
             };
             cookie?: never;
         };
         get?: never;
         put?: never;
-        /** 放弃已退回的本次变更（清除退回待处理事项） */
-        post: operations["abandonFieldChange"];
+        /** 放弃已退回的关闭申请（清除退回待处理事项） */
+        post: operations["abandonCancelRequest"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1537,18 +1537,13 @@ export interface components {
             canUpdateProgress: boolean;
             /** @description 当前用户能否发起取消申请（派生字段；任务负责人／项目管理员，非终态且任务上没有未决审批单，AC-57） */
             canCancel: boolean;
-            /** @description 最近一张需要关注的变更单（待审批＝拟议值标示，或退回未处理＝退回待处理事项）；无则不返回 */
-            fieldChange?: components["schemas"]["FieldChange"];
+            /** @description 最近一张需要关注的关闭申请（待审批，或退回未处理＝退回待处理事项，#172 裁决）；无则不返回 */
+            cancelRequest?: components["schemas"]["CancelRequest"];
             /** @description 交付物项名称列表（列表「预期交付物」列展示用，派生字段） */
             deliverableNames?: string[];
-            /** @description 当前用户能否编辑任务／提交关键字段修改（派生字段） */
-            canProposeFieldChange: boolean;
-            /**
-             * @description 就地编辑的保存路由（#138 裁决 E1；派生自 FieldChangeRoute，前端不复算规则）： exempt=KR 负责人本人免审即时生效；approval=生成变更单进入审批 （保存时须填修改原因）。不可编辑时不返回（以 canProposeFieldChange 为准）
-             * @enum {string}
-             */
-            fieldEditMode?: "exempt" | "approval";
-            /** @description 本任务上未决审批单条数（派生字段；关键字段变更／取消、完成申请合计，前端不再自行相加） */
+            /** @description 当前用户能否直接修改任务关键字段（派生字段，#172 裁决：负责人／KR 负责人／可编辑项目者，未开始／等待输入／进行中；关闭申请审批期间不可） */
+            canEditFields: boolean;
+            /** @description 本任务上未决审批单条数（派生字段；关闭申请、完成申请合计，前端不再自行相加） */
             pendingReviewCount?: number;
             /** @description 当前用户能否提交任务讨论（派生字段；全体项目内成员含访客，公开项目的隐式访客不可，见词汇表「隐式访客」） */
             canDiscuss?: boolean;
@@ -1618,8 +1613,8 @@ export interface components {
             objectiveTitle: string;
             /** @description 所属 KR 描述（派生字段） */
             krDescription: string;
-            /** @description 关键字段变更单记录，最新在前（词汇表「关键字段变更单」） */
-            fieldChanges: components["schemas"]["FieldChange"][];
+            /** @description 关闭申请记录，最新在前（词汇表「关闭申请」，#172 裁决） */
+            cancelRequests: components["schemas"]["CancelRequest"][];
             /** @description 交付物项列表（含当前内容与候选审核提示，AC-32／AC-33） */
             deliverables: components["schemas"]["Deliverable"][];
             /** @description 任务下的过程文件与重要外部材料（§7.7）：不进入完成审批、不作为下游正式输入， 可按需选进成果包；未配置时为空数组 */
@@ -1651,7 +1646,7 @@ export interface components {
          * @description 任务动态类型（ADR 0002）；blocker_* 为系统派生，无行动人
          * @enum {string}
          */
-        TaskActivityKind: "pool_entered" | "field_change_submitted" | "field_change_approved" | "field_change_rejected" | "field_change_abandoned" | "completion_submitted" | "completion_approved" | "completion_rejected" | "receipt_confirmed" | "blocker_opened" | "blocker_resolved";
+        TaskActivityKind: "pool_entered" | "field_edited" | "field_change_submitted" | "field_change_approved" | "field_change_rejected" | "field_change_abandoned" | "completion_submitted" | "completion_approved" | "completion_rejected" | "receipt_confirmed" | "blocker_opened" | "blocker_resolved";
         /** @description 任务动态的一条事实（词汇表「任务动态」）：已经发生、不可撤销，只记录不派生，不可编辑或删除 */
         TaskActivity: {
             /** Format: int64 */
@@ -1687,38 +1682,22 @@ export interface components {
             ready: boolean;
         };
         /** @enum {string} */
-        FieldChangeState: "pending" | "approved" | "rejected";
-        /** @description 单个关键字段的修改前后差异（展示用字符串） */
-        FieldChangeDiff: {
-            /** @description 字段名（name／description／completionCriteria／ownerId／endDate） */
-            field: string;
-            /** @description 中文字段名（派生字段） */
-            label: string;
-            oldValue: string;
-            newValue: string;
-        };
-        /**
-         * @description 变更类型（PRD §5.2.B）：关键字段修改（标题／说明／量化标准／负责人／截止时间）、 结构变更（输入、输入源、输出、接收方）或任务取消申请，三者复用同一张变更单
-         * @enum {string}
-         */
-        FieldChangeType: "key_fields" | "structure" | "cancel";
-        /** @description 关键字段变更单（词汇表）；rejected 且 resolved=false 即「退回待处理事项」 */
-        FieldChange: {
+        CancelRequestState: "pending" | "approved" | "rejected";
+        /** @description 关闭申请（词汇表「关闭申请」，#172 裁决：任务关闭审批从变更单机制独立）；rejected 且 resolved=false 即「退回待处理事项」 */
+        CancelRequest: {
             /** Format: int64 */
             id: number;
-            changeType: components["schemas"]["FieldChangeType"];
-            state: components["schemas"]["FieldChangeState"];
+            state: components["schemas"]["CancelRequestState"];
             /** @description 面向用户的显示文案（AC-04；派生字段）：待审批为“待{所属 KR 负责人姓名}审批”，免审为“免审生效”，其余为“已通过／已退回” */
             stateLabel: string;
-            /** @description 修改原因 */
+            /** @description 关闭原因（必填） */
             reason: string;
             /** @description 审批意见 */
             opinion?: string;
             /** @description 退回后是否已处理（重新提交或放弃） */
             resolved: boolean;
-            /** @description KR 负责人本人修改免审即时生效时由系统标记 */
+            /** @description KR 负责人本人负责 KR 下关闭免审即时生效时由系统标记 */
             exempt: boolean;
-            changes: components["schemas"]["FieldChangeDiff"][];
             /** Format: int64 */
             submittedById?: number;
             submittedByName?: string;
@@ -1727,26 +1706,22 @@ export interface components {
             submittedAt?: string;
             /** Format: date-time */
             decidedAt?: string;
-            /** @description 当前用户能否处理本变更单（派生字段；仅所属 KR 负责人且待审批） */
+            /** @description 当前用户能否处理本关闭申请（派生字段；仅所属 KR 负责人且待审批） */
             canDecide?: boolean;
-            /** @description 当前用户能否放弃本次变更（派生字段；退回未处理且为提交人／可编辑项目者） */
+            /** @description 当前用户能否放弃本次关闭申请（派生字段；退回未处理且为提交人／可编辑项目者） */
             canAbandon?: boolean;
         };
-        SubmitFieldChangeRequest: {
-            /** @description 拟议值；至少一项。KR 负责人改本人 KR 下任务免审即时生效 */
-            changes: {
-                name?: string;
-                description?: string;
-                completionCriteria?: string;
-                /** Format: int64 */
-                ownerId?: number;
-                /** Format: date */
-                endDate?: string;
-            };
-            /** @description 修改原因；进入审批（含免审留痕）时必填 */
-            reason?: string;
+        /** @description 直接修改任务关键字段（#172 裁决：立即生效、无修改原因）；至少一项 */
+        EditTaskFieldsRequest: {
+            name?: string;
+            description?: string;
+            completionCriteria?: string;
+            /** Format: int64 */
+            ownerId?: number;
+            /** Format: date */
+            endDate?: string;
         };
-        FieldChangeDecisionRequest: {
+        CancelRequestDecisionRequest: {
             /** @enum {string} */
             decision: "approved" | "rejected";
             opinion?: string;
@@ -2156,7 +2131,8 @@ export interface components {
             blockers: components["schemas"]["ReportBlocker"][];
             /** @description 待决策：停留在审批队列中的事项数 */
             pendingApprovals: {
-                fieldChanges: number;
+                /** @description 待审批关闭申请条数（#172 裁决后变更类审批只剩关闭申请） */
+                cancelRequests: number;
                 completions: number;
             };
             /** @description 下一步：临近截止或已超期的未完成任务（按截止时间升序） */
@@ -2212,7 +2188,7 @@ export interface components {
         };
         /** @description 我的工作事项（词汇表「我的工作事项」）；卡片派生事实，动作在任务详情抽屉完成 */
         WorkItem: {
-            /** @description 事项类型（task/field_change/intermediate_review/final_review/input_request/invite/upstream/blocker 等） */
+            /** @description 事项类型（task/cancel_request/intermediate_review/final_review/input_request/invite/upstream/blocker 等） */
             kind: string;
             title: string;
             /** Format: int64 */
@@ -3445,7 +3421,7 @@ export interface operations {
             422: components["responses"]["ValidationError"];
         };
     };
-    submitFieldChange: {
+    editTaskFields: {
         parameters: {
             query?: never;
             header?: never;
@@ -3457,11 +3433,11 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["SubmitFieldChangeRequest"];
+                "application/json": components["schemas"]["EditTaskFieldsRequest"];
             };
         };
         responses: {
-            /** @description 已受理，返回任务最新状态（含拟议值标示） */
+            /** @description 已生效，返回任务最新状态 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -3477,20 +3453,20 @@ export interface operations {
             422: components["responses"]["ValidationError"];
         };
     };
-    decideFieldChange: {
+    decideCancelRequest: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 projectId: number;
                 taskId: number;
-                changeId: number;
+                requestId: number;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["FieldChangeDecisionRequest"];
+                "application/json": components["schemas"]["CancelRequestDecisionRequest"];
             };
         };
         responses: {
@@ -3510,14 +3486,14 @@ export interface operations {
             422: components["responses"]["ValidationError"];
         };
     };
-    abandonFieldChange: {
+    abandonCancelRequest: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 projectId: number;
                 taskId: number;
-                changeId: number;
+                requestId: number;
             };
             cookie?: never;
         };

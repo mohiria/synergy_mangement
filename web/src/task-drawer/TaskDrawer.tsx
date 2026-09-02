@@ -50,10 +50,10 @@ export default function TaskDrawer({
     start: (t: Task) => void;
     openCancel: (t: Task) => void;
     saveProgress: (t: Task, progress: number | null) => Promise<void>;
-    submitFieldChange: (t: Task, changes: Record<string, unknown>, reason?: string) => Promise<boolean>;
-    approveFieldChange: (t: Task, changeId: number) => void;
-    openFcReject: (t: Task, changeId: number) => void;
-    abandonFieldChange: (t: Task, changeId: number) => void;
+    editTaskFields: (t: Task, changes: Record<string, unknown>) => Promise<boolean>;
+    approveCancelRequest: (t: Task, requestId: number) => void;
+    openFcReject: (t: Task, requestId: number) => void;
+    abandonCancelRequest: (t: Task, requestId: number) => void;
     openSubmitCompletion: (t: Task) => void;
     approveCompletion: (t: Task, reviewId: number, intermediate?: boolean) => void;
     openCrReject: (t: Task, reviewId: number) => void;
@@ -88,38 +88,26 @@ export default function TaskDrawer({
     else if (ids.length === 0) actions.saveReceivers(task, "none", []);
     else actions.saveReceivers(task, "members", ids);
   };
-  // #138 就地编辑（裁决 E1）：字段点击进入编辑态；保存按 fieldEditMode 路由——
-  // exempt 直接提交，approval 先弹一行「修改原因」（必填）；
-  // 已有待审变更单时全部字段锁定（后端 ErrChangePendingExists 同口径），逐字段标「审批中」。
+  // #138 就地编辑（裁决 E1）；#172 裁决：有编辑权限即直接保存生效，无「修改原因」弹窗、
+  // 无「审批中」标签；关闭申请审批期间后端拒绝修改（canEditFields=false 时不进入编辑态）。
   const [editingField, setEditingField] = useState<
     "name" | "description" | "completionCriteria" | "ownerId" | "endDate" | null
   >(null);
   const [editDraft, setEditDraft] = useState("");
-  const [reasonFor, setReasonFor] = useState<{ field: string; value: string } | null>(null);
-  const [editReason, setEditReason] = useState("");
-  const pendingChange = task?.fieldChange?.state === "pending" ? task.fieldChange : null;
-  const pendingFields = new Set((pendingChange?.changes ?? []).map((c) => c.field));
-  const canInlineEdit = !!task?.canProposeFieldChange && !pendingChange;
-  const submitField = async (field: string, value: string, reason?: string) => {
+  const canInlineEdit = !!task?.canEditFields;
+  const submitField = async (field: string, value: string) => {
     if (!task) return;
     const changes: Record<string, unknown> = {
       [field]: field === "ownerId" ? Number(value) : value,
     };
-    const ok = await actions.submitFieldChange(task, changes, reason);
+    const ok = await actions.editTaskFields(task, changes);
     if (ok) {
       setEditingField(null);
-      setReasonFor(null);
-      setEditReason("");
       setRefreshTick((n) => n + 1);
     }
   };
   const saveField = (field: string, value: string) => {
-    if (task?.fieldEditMode === "approval") {
-      setReasonFor({ field, value });
-      setEditReason("");
-    } else {
-      void submitField(field, value);
-    }
+    void submitField(field, value);
   };
   const beginEditField = (f: string) => {
     if (!canInlineEdit || !task) return;
@@ -135,16 +123,6 @@ export default function TaskDrawer({
       setEditDraft(current[f]);
     }
   };
-  const pendingTag = (field: string) =>
-    pendingFields.has(field) ? (
-      <span
-        className="status-pill warning"
-        style={{ marginLeft: 6 }}
-        title={`拟议值：${pendingChange?.changes.find((c) => c.field === field)?.newValue ?? ""}`}
-      >
-        审批中
-      </span>
-    ) : null;
   // 文本类字段（说明／量化标准）的就地编辑行体。
   const editableTextRow = (field: "description" | "completionCriteria", label: string, value: string) => (
     <div className="task-info-row">
@@ -167,12 +145,11 @@ export default function TaskDrawer({
         </div>
       ) : (
         <strong
-          className={`${value ? "" : "muted"}${canInlineEdit && !pendingFields.has(field) ? " inline-editable" : ""}`}
-          onClick={() => !pendingFields.has(field) && beginEditField(field)}
-          title={canInlineEdit && !pendingFields.has(field) ? "点击编辑" : undefined}
+          className={`${value ? "" : "muted"}${canInlineEdit ? " inline-editable" : ""}`}
+          onClick={() => beginEditField(field)}
+          title={canInlineEdit ? "点击编辑" : undefined}
         >
           {value || "未填写"}
-          {pendingTag(field)}
         </strong>
       )}
     </div>
@@ -606,12 +583,11 @@ export default function TaskDrawer({
               />
             ) : (
               <strong
-                className={canInlineEdit && !pendingFields.has("ownerId") ? "inline-editable" : ""}
-                onClick={() => !pendingFields.has("ownerId") && beginEditField("ownerId")}
-                title={canInlineEdit && !pendingFields.has("ownerId") ? "点击编辑" : undefined}
+                className={canInlineEdit ? "inline-editable" : ""}
+                onClick={() => beginEditField("ownerId")}
+                title={canInlineEdit ? "点击编辑" : undefined}
               >
                 {task.ownerName}
-                {pendingTag("ownerId")}
               </strong>
             )}
           </div>
@@ -702,12 +678,11 @@ export default function TaskDrawer({
               </div>
             ) : (
               <strong
-                className={canInlineEdit && !pendingFields.has("endDate") ? "inline-editable" : ""}
-                onClick={() => !pendingFields.has("endDate") && beginEditField("endDate")}
-                title={canInlineEdit && !pendingFields.has("endDate") ? "点击编辑截止时间" : undefined}
+                className={canInlineEdit ? "inline-editable" : ""}
+                onClick={() => beginEditField("endDate")}
+                title={canInlineEdit ? "点击编辑截止时间" : undefined}
               >
                 {task.startDate} — {task.endDate}
-                {pendingTag("endDate")}
               </strong>
             )}
           </div>
@@ -752,9 +727,9 @@ export default function TaskDrawer({
             </div>
           )}
           {/* #138：说明与量化标准可就地编辑；可编辑时空值也保留行，否则首次填写没有入口。 */}
-          {(task.description || canInlineEdit || pendingFields.has("description")) &&
+          {(task.description || canInlineEdit) &&
             editableTextRow("description", "任务说明", task.description ?? "")}
-          {(task.completionCriteria || canInlineEdit || pendingFields.has("completionCriteria")) &&
+          {(task.completionCriteria || canInlineEdit) &&
             editableTextRow("completionCriteria", "量化标准", task.completionCriteria ?? "")}
         </div>
       </section>
@@ -1217,8 +1192,9 @@ export default function TaskDrawer({
 
   const audit = (
     <div style={{ paddingTop: 4 }}>
-      {/* #135：成果审核人配置移入基础信息栏，审核 Tab 只保留审核记录。 */}
-      {(detail?.fieldChanges ?? []).length === 0 &&
+      {/* #135：成果审核人配置移入基础信息栏，审核 Tab 只保留审核记录。
+          #172 裁决：变更类记录只剩关闭申请。 */}
+      {(detail?.cancelRequests ?? []).length === 0 &&
         (detail?.completionReviews ?? []).length === 0 && (
           <div className="empty compact-empty">暂无审核记录</div>
         )}
@@ -1310,11 +1286,11 @@ export default function TaskDrawer({
           )}
         </article>
       ))}
-      {(detail?.fieldChanges ?? []).map((fc) => (
+      {(detail?.cancelRequests ?? []).map((fc) => (
         <article key={`fc-${fc.id}`} className={`audit-card ${fc.state === "pending" ? "pending" : ""}`}>
           <div className="audit-card-head">
             <div>
-              <b>{fc.changeType === "cancel" ? "任务关闭申请" : "关键字段修改"}</b>{" "}
+              <b>任务关闭申请</b>{" "}
               <span
                 className={`status-pill ${
                   fc.state === "pending" ? "warning" : fc.state === "approved" ? "completed" : "danger"
@@ -1328,19 +1304,9 @@ export default function TaskDrawer({
             </span>
           </div>
           <div style={{ marginTop: 8, fontSize: 14 }}>
-            {fc.changes.map((c) => (
-              <div key={c.field}>
-                <span className="muted">{c.label}：</span>
-                {c.oldValue || "—"} → <b>{c.newValue}</b>
-              </div>
-            ))}
-            {fc.reason && (
-              <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                {fc.changeType === "cancel"
-                  ? `关闭原因:${fc.reason}；审批通过前任务照常执行。`
-                  : `修改原因:${fc.reason}；审批完成前旧值继续生效。`}
-              </div>
-            )}
+            <div className="muted" style={{ fontSize: 12 }}>
+              关闭原因:{fc.reason}；审批通过前任务照常执行。
+            </div>
           </div>
           {(fc.decidedByName || fc.opinion) && (
             <div className="handled-fact">
@@ -1358,26 +1324,15 @@ export default function TaskDrawer({
               <Button size="small" danger onClick={() => actions.openFcReject(task, fc.id)}>
                 退回
               </Button>
-              <Button size="small" type="primary" onClick={() => actions.approveFieldChange(task, fc.id)}>
+              <Button size="small" type="primary" onClick={() => actions.approveCancelRequest(task, fc.id)}>
                 通过
               </Button>
             </div>
           )}
           {fc.state === "rejected" && !fc.resolved && fc.canAbandon && (
             <div className="audit-actions">
-              <Button size="small" onClick={() => actions.abandonFieldChange(task, fc.id)}>
-                放弃本次变更
-              </Button>
-              <Button
-                size="small"
-                type="primary"
-                onClick={() => {
-                  // #138：退回后引导就地编辑——切回概况并进入第一处被退回字段的编辑态。
-                  onTabChange("overview");
-                  beginEditField(fc.changes[0]?.field ?? "name");
-                }}
-              >
-                修改并重提
+              <Button size="small" onClick={() => actions.abandonCancelRequest(task, fc.id)}>
+                放弃本次关闭申请
               </Button>
             </div>
           )}
@@ -1429,12 +1384,11 @@ export default function TaskDrawer({
             </span>
           ) : (
             <span
-              className={canInlineEdit && !pendingFields.has("name") ? "inline-editable" : ""}
-              onClick={() => !pendingFields.has("name") && beginEditField("name")}
-              title={canInlineEdit && !pendingFields.has("name") ? "点击编辑任务名称" : undefined}
+              className={canInlineEdit ? "inline-editable" : ""}
+              onClick={() => beginEditField("name")}
+              title={canInlineEdit ? "点击编辑任务名称" : undefined}
             >
               {code} · {task.name}
-              {pendingTag("name")}
             </span>
           )}
           {/* 所属 O／KR 只显编号：展开标题会把页头挤满，更新时间是任务的、
@@ -1534,29 +1488,7 @@ export default function TaskDrawer({
             : "过程文件不进入完成审批，也不作为下游任务的正式输入；在成果归档页按文件类型可见。"}
         </div>
       </Modal>
-      {/* #138：approval 路由的就地保存——弹一行修改原因（必填）后生成关键字段变更单。 */}
-      <Modal
-        title="修改原因"
-        open={!!reasonFor}
-        okText="提交变更审批"
-        cancelText="取消"
-        okButtonProps={{ disabled: !editReason.trim() }}
-        onCancel={() => setReasonFor(null)}
-        onOk={() => {
-          if (reasonFor) void submitField(reasonFor.field, reasonFor.value, editReason.trim());
-        }}
-      >
-        <p className="muted" style={{ marginTop: 0 }}>
-          提交后由所属 KR 负责人审批；审批期间旧值继续生效，字段旁标「审批中」并锁定。
-        </p>
-        <Input.TextArea
-          rows={2}
-          maxLength={500}
-          placeholder="修改原因（必填）"
-          value={editReason}
-          onChange={(e) => setEditReason(e.target.value)}
-        />
-      </Modal>
+      {/* #172 裁决：直接修改立即生效，不再有「修改原因」弹窗。 */}
     </Drawer>
   );
 }

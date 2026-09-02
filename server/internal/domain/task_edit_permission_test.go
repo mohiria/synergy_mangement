@@ -46,15 +46,15 @@ func TestTaskEditPermissionConvergence(t *testing.T) {
 	}
 }
 
-// 裁决 D2：关键字段修改同口径——创建人（非负责人）无权提交变更；
-// KR 负责人免审即时生效路径不变。
-func TestFieldChangeRouteCreatorNoEdit(t *testing.T) {
+// 裁决 D2（#172 修订）：关键字段直接修改同口径——创建人（非负责人）无权修改；
+// KR 负责人与负责人可直接修改。
+func TestTaskEditRuleCreatorNoEdit(t *testing.T) {
 	kr := int64(7)
 	pooled := TaskFacts{Status: TaskInProgress, CreatorID: 3, OwnerID: 5, KrOwnerID: &kr}
-	if _, err := FieldChangeRoute(Actor{Role: RoleMember}, 3, pooled, false); !errors.Is(err, ErrChangeForbidden) {
-		t.Fatalf("创建人提交变更应被拒: %v", err)
+	if err := TaskEditRule(Actor{Role: RoleMember}, 3, pooled, false); !errors.Is(err, ErrChangeForbidden) {
+		t.Fatalf("创建人修改字段应被拒: %v", err)
 	}
-	if out, err := FieldChangeRoute(Actor{Role: RoleMember}, 7, pooled, false); err != nil || out != FieldChangeExempt {
-		t.Fatalf("KR 负责人免审路径应不变: %v %v", out, err)
+	if err := TaskEditRule(Actor{Role: RoleMember}, 7, pooled, false); err != nil {
+		t.Fatalf("KR 负责人应可直接修改: %v", err)
 	}
 }

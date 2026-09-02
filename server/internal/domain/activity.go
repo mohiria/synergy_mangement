@@ -4,7 +4,10 @@ import "time"
 
 // 任务动态类型（词汇表「任务动态」；ADR 0002）。
 const (
-	ActivityPoolEntered          = "pool_entered"
+	ActivityPoolEntered = "pool_entered"
+	// ActivityFieldEdited #172 裁决：关键字段（含结构字段）直接修改生效的动态。
+	ActivityFieldEdited = "field_edited"
+	// field_change_* 为 #172 前的变更单动态类型：不再产生新记录，仅供历史回显。
 	ActivityFieldChangeSubmitted = "field_change_submitted"
 	ActivityFieldChangeApproved  = "field_change_approved"
 	ActivityFieldChangeRejected  = "field_change_rejected"
@@ -23,6 +26,7 @@ const (
 
 var activityKindLabels = map[string]string{
 	ActivityPoolEntered:          "任务入池",
+	ActivityFieldEdited:          "任务字段修改",
 	ActivityFieldChangeSubmitted: "提交关键字段修改",
 	ActivityFieldChangeApproved:  "关键字段修改生效",
 	ActivityFieldChangeRejected:  "关键字段修改退回",

@@ -34,7 +34,7 @@ type RemindTarget struct {
 
 // RemindWaitFact 一条「等待他人」事项作为提醒目标的事实。
 type RemindWaitFact struct {
-	Kind             string // field_change／intermediate_review／final_review／input_request／upstream
+	Kind             string // cancel_request／intermediate_review／final_review／input_request／upstream
 	RefID            int64
 	TaskID           int64
 	TaskName         string
@@ -68,7 +68,7 @@ func RemindWaitKey(kind string, refID int64) string {
 	return fmt.Sprintf("wait:%s:%d", kind, refID)
 }
 
-// ApprovalWaitFact 审批环节（入池、关键字段变更、中间或签、KR 终审）的提醒目标事实。
+// ApprovalWaitFact 审批环节（关闭申请、中间或签、KR 终审）的提醒目标事实。
 func ApprovalWaitFact(kind string, refID, taskID int64, approverIDs []int64, approverNames []string, days *int) RemindWaitFact {
 	missing := approvalStageLabels[kind]
 	if missing == "" {

@@ -52,10 +52,9 @@ func (s *Server) CreateMemberInput(w http.ResponseWriter, r *http.Request, proje
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_member_input", Message: err.Error()})
 		return
 	}
-	// 输入源是关键字段（§5.2.B、§5.5）：指定对接人要经所属 KR 负责人审批，
-	// 审批通过后才建边、生成输入请求并发通知。
-	outcome, ok := s.routeStructureChange(w, r, taskId, actor, uid, facts)
-	if !ok {
+	// 输入源是关键字段（§5.2.B；#172 裁决改直接生效）：有编辑权限者立即建边、
+	// 生成输入请求并逐人通知，动作进任务动态并通知所属 KR 负责人。
+	if !s.routeStructureChange(w, r, taskId, actor, uid, facts) {
 		return
 	}
 	providerNames := make([]string, 0, len(input.ProviderIDs))
@@ -79,7 +78,7 @@ func (s *Server) CreateMemberInput(w http.ResponseWriter, r *http.Request, proje
 			domain.EdgeDisplayName("", "", input.ContentNote), strings.Join(providerNames, "、")),
 		Request:  raw,
 	}
-	if !s.commitStructureChange(w, r, projectId, taskId, uid, outcome, payload, payload.NewValue) {
+	if !s.commitStructureChange(w, r, projectId, taskId, uid, payload) {
 		return
 	}
 	s.writeTask(w, r, projectId, taskId, uid, actor)

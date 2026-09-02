@@ -96,14 +96,14 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 	for _, t := range taskRows {
 		krOwnerNameByTask[t.ID] = t.KrOwnerName.String
 	}
+	// #172 裁决：变更类审批件只剩关闭申请（表中仅存 cancel 类型）。
 	for _, fc := range changeRows {
 		name := taskNameByID[fc.TaskID]
 		switch fc.State {
-		case domain.FieldChangePendingState:
+		case domain.CancelRequestPendingState:
 			fact := domain.WorkApprovalFact{
 				ID: fc.ID, TaskID: fc.TaskID, TaskName: name, SubmittedBy: fc.SubmittedBy,
 				KrOwnerID: krOwnerOf(fc.TaskID), KrOwnerName: krOwnerNameByTask[fc.TaskID],
-				ChangeType: fc.ChangeType,
 			}
 			if fc.SubmittedAt.Valid {
 				fact.SubmittedAt = fc.SubmittedAt.Time
@@ -111,12 +111,12 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 			if tf, ok := taskFactByID[fc.TaskID]; ok {
 				fact.TaskEnd = tf.EndDate
 			}
-			facts.FieldChanges = append(facts.FieldChanges, fact)
-		case domain.FieldChangeRejectedState:
+			facts.CancelRequests = append(facts.CancelRequests, fact)
+		case domain.CancelRequestRejectedState:
 			if !fc.Resolved && fc.SubmittedBy == uid {
 				if tf, ok := taskFactByID[fc.TaskID]; ok && fc.Opinion != "" {
-					op := "变更已退回：" + fc.Opinion
-					tf.FieldChangeRejected = &op
+					op := "关闭申请已退回：" + fc.Opinion
+					tf.CancelRejected = &op
 				}
 			}
 		}

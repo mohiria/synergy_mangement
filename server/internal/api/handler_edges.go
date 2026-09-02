@@ -104,9 +104,8 @@ func (s *Server) CreateTaskInput(w http.ResponseWriter, r *http.Request, project
 			return
 		}
 	}
-	// 输入与输入源是关键字段（§5.2.B）：新增要经所属 KR 负责人审批。
-	outcome, ok := s.routeStructureChange(w, r, taskId, actor, uid, facts)
-	if !ok {
+	// 输入与输入源是关键字段（§5.2.B；#172 裁决改直接生效）。
+	if !s.routeStructureChange(w, r, taskId, actor, uid, facts) {
 		return
 	}
 	sourceNames := make([]string, 0, len(inputs.SourceTaskIDs))
@@ -127,7 +126,7 @@ func (s *Server) CreateTaskInput(w http.ResponseWriter, r *http.Request, project
 		NewValue: fmt.Sprintf("新增输入源，来源任务：%s", strings.Join(sourceNames, "、")),
 		Request:  raw,
 	}
-	if !s.commitStructureChange(w, r, projectId, taskId, uid, outcome, payload, payload.NewValue) {
+	if !s.commitStructureChange(w, r, projectId, taskId, uid, payload) {
 		return
 	}
 	s.writeTask(w, r, projectId, taskId, uid, actor)
@@ -153,9 +152,8 @@ func (s *Server) RemoveEdge(w http.ResponseWriter, r *http.Request, projectId in
 		Status: edge.TargetStatus, CreatorID: edge.TargetCreatedBy, OwnerID: edge.TargetOwnerID,
 		KrOwnerID: fromPgInt8(edge.TargetKrOwnerID),
 	}
-	// 解除输入源同样是关键字段变更（§5.5：已入池任务更换来源任务或对接人仍执行审批）。
-	outcome, ok := s.routeStructureChange(w, r, edge.TargetTaskID, actor, uid, facts)
-	if !ok {
+	// 解除输入源同样是关键字段变更（§5.5；#172 裁决改直接生效）。
+	if !s.routeStructureChange(w, r, edge.TargetTaskID, actor, uid, facts) {
 		return
 	}
 	raw, err := json.Marshal(struct {
@@ -172,8 +170,7 @@ func (s *Server) RemoveEdge(w http.ResponseWriter, r *http.Request, projectId in
 		NewValue: "解除该输入关系",
 		Request:  raw,
 	}
-	if !s.commitStructureChange(w, r, projectId, edge.TargetTaskID, uid, outcome, payload,
-		fmt.Sprintf("解除输入「%s」", edge.Name)) {
+	if !s.commitStructureChange(w, r, projectId, edge.TargetTaskID, uid, payload) {
 		return
 	}
 	s.writeTask(w, r, projectId, edge.TargetTaskID, uid, actor)

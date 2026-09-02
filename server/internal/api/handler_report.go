@@ -169,12 +169,12 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 		return Report{}, false
 	}
 	pending := struct {
-		Completions  int `json:"completions"`
-		FieldChanges int `json:"fieldChanges"`
+		CancelRequests int `json:"cancelRequests"`
+		Completions    int `json:"completions"`
 	}{}
 	for _, fc := range changeRows {
-		if fc.State == domain.FieldChangePendingState {
-			pending.FieldChanges++
+		if fc.State == domain.CancelRequestPendingState {
+			pending.CancelRequests++
 		}
 	}
 	for _, cr := range completionRows {

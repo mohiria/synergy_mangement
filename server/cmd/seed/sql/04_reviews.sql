@@ -1,4 +1,4 @@
--- 完成申请（含中间或签快照）、关键字段变更单、任务创建邀请、成果包与提醒留痕。
+-- 完成申请（含中间或签快照）、关闭申请、任务创建邀请与提醒留痕。
 
 INSERT INTO completion_reviews (id, task_id, submitted_by, note, state, opinion, submitted_at, decided_by, decided_at,
                                 intermediate_by, intermediate_at, intermediate_opinion)
@@ -102,42 +102,22 @@ INSERT INTO completion_review_reviewers (review_id, user_id) VALUES
     (25, 11), (25, 6),
     (26, 12);
 
--- ── 关键字段变更单 ────────────────────────────────────────────────────────────
+-- ── 关闭申请（裁决 #172：变更类审批只剩关闭申请，表沿用 field_change_requests）──
 INSERT INTO field_change_requests (id, task_id, submitted_by, reason, state, exempt, opinion, resolved,
-                                   old_name, new_name, old_description, new_description,
-                                   old_completion_criteria, new_completion_criteria,
-                                   old_owner_id, new_owner_id, old_end_date, new_end_date,
+                                   change_type, old_status, new_status,
                                    submitted_at, decided_by, decided_at)
 OVERRIDING SYSTEM VALUE VALUES
-(1, 12, 6, '第一轮演练暴露的索引重建耗时超预期，压缩窗口的工作量比原估多两周', 'approved', FALSE,
-    '同意延期，但结论必须在割接方案评审前拿到', FALSE,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, current_date - 5, current_date + 10,
-    now() - interval '14 days', 9, now() - interval '12 days'),
-(2, 22, 9, '慢查询与锁等待告警依赖新版本监控插件，插件下周才到货', 'approved', FALSE, '', FALSE,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, current_date - 20, current_date - 1,
-    now() - interval '22 days', 11, now() - interval '21 days'),
-(3, 27, 4, '归档能力拆到联调之后再补，先保受理与流转两条主链路', 'approved', TRUE,
-    'KR 负责人本人修改，免审即时生效', FALSE,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, current_date - 10, current_date + 3,
-    now() - interval '11 days', 4, now() - interval '11 days'),
-(4, 34, 10, '可用性测试要等前端组件联调完，建议整体后移一周', 'rejected', FALSE,
-    '先按原计划准备招募和测试脚本，组件那边我来盯', TRUE,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, current_date + 25, current_date + 32,
-    now() - interval '6 days', 5, now() - interval '5 days'),
 -- 退回且未处理：会出现在提交人的「我的工作 · 待我处理」
-(5, 8, 6, '回归范围要加上国产化差异场景，名称和完成标准都得跟着改', 'rejected', FALSE,
-    '差异场景本来就在范围内，不用改名；通过率不能从 99% 降到 95%', FALSE,
-    '补齐适配后的回归用例并跑通两轮', '补齐国产化差异场景回归用例并跑通两轮',
-    NULL, NULL,
-    '回归用例通过率 ≥ 99%，失败项全部有结论。', '回归用例通过率 ≥ 95%，差异场景用例全部有结论。',
-    NULL, NULL, NULL, NULL,
+(5, 8, 6, '回归范围并入国产化差异专项统一验证，本任务不再单独执行', 'rejected', FALSE,
+    '差异场景专项只覆盖用例梳理，回归执行仍要本任务收口，继续执行', FALSE,
+    'cancel', 'in_progress', 'cancelled',
     now() - interval '6 days', 4, now() - interval '4 days'),
 -- 停了 4 天没人审：审批超时卡点
-(6, 7, 3, '对账脚本改写量比预估大，函数替换要逐条验证结果一致', 'pending', FALSE, '', FALSE,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, current_date + 6, current_date + 25,
+(6, 7, 3, '对账比对改用采购的专用工具完成，脚本改写不再需要', 'pending', FALSE, '', FALSE,
+    'cancel', 'in_progress', 'cancelled',
     now() - interval '4 days', NULL, NULL),
-(7, 52, 5, '投诉线要等工作台联调，先把售后线跑起来，截止顺延两周', 'pending', FALSE, '', FALSE,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, current_date + 16, current_date + 30,
+(7, 52, 5, '投诉线并入工作台联调整体验证，本任务关闭', 'pending', FALSE, '', FALSE,
+    'cancel', 'not_started', 'cancelled',
     now() - interval '1 day', NULL, NULL);
 
 -- ── 任务创建邀请 ──────────────────────────────────────────────────────────────

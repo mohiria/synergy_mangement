@@ -45,16 +45,16 @@ func StatusLabel(status, krOwnerName string, reviewerNames []string) string {
 	return status
 }
 
-// FieldChangeStateLabel 关键字段变更单显示文案：待审批显示所属 KR 负责人，免审为“免审生效”。
-func FieldChangeStateLabel(state string, exempt bool, krOwnerName string) string {
+// CancelRequestStateLabel 关闭申请显示文案（#172）：待审批显示所属 KR 负责人，免审为“免审生效”。
+func CancelRequestStateLabel(state string, exempt bool, krOwnerName string) string {
 	switch {
-	case state == FieldChangePendingState:
+	case state == CancelRequestPendingState:
 		return ApprovalWaitingLabel([]string{krOwnerName})
 	case exempt:
 		return "免审生效"
-	case state == FieldChangeApprovedState:
+	case state == CancelRequestApprovedState:
 		return "已通过"
-	case state == FieldChangeRejectedState:
+	case state == CancelRequestRejectedState:
 		return "已退回"
 	}
 	return state

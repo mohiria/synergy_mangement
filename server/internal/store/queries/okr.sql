@@ -69,7 +69,8 @@ WHERE o.project_id = $1
 GROUP BY kr.id;
 
 -- name: CountPendingApprovalsByKeyResult :one
--- 该 KR 下未决审批单条数：待处理变更单、待终审完成申请（AC-61 交接确认；裁决 #162 无入池审批）。
+-- 该 KR 下未决审批单条数：待审批关闭申请、待终审完成申请
+-- （AC-61 交接确认；裁决 #162 无入池审批，裁决 #172 转交范围缩小为完成审批与关闭申请）。
 SELECT (
     (SELECT COUNT(*) FROM field_change_requests fc
         JOIN tasks t ON t.id = fc.task_id

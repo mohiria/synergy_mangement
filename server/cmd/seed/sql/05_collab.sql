@@ -145,22 +145,19 @@ INSERT INTO task_activities (task_id, kind, actor_id, summary, occurred_at)
 SELECT task_id, 'completion_rejected', decided_by, '完成审核退回：' || opinion, decided_at
 FROM completion_reviews WHERE state = 'rejected' AND decided_at IS NOT NULL;
 
--- 关键字段变更：免审即时生效只记生效，其余记提交 + 处理。
-INSERT INTO task_activities (task_id, kind, actor_id, summary, occurred_at)
-SELECT task_id, 'field_change_approved', submitted_by, '关键字段修改生效：' || opinion, submitted_at
-FROM field_change_requests WHERE exempt;
+-- 任务字段直接修改留痕（裁决 #172：立即生效、动态记「任务字段修改」）。
+INSERT INTO task_activities (task_id, kind, actor_id, summary, occurred_at) VALUES
+(12, 'field_edited', 6, '任务字段修改：截止时间', now() - interval '14 days'),
+(22, 'field_edited', 9, '任务字段修改：截止时间', now() - interval '22 days'),
+(27, 'field_edited', 4, '任务字段修改：完成标准', now() - interval '11 days');
 
+-- 关闭申请：记提交 + 处理。
 INSERT INTO task_activities (task_id, kind, actor_id, summary, occurred_at)
-SELECT task_id, 'field_change_submitted', submitted_by, '提交关键字段修改：' || reason, submitted_at
+SELECT task_id, 'cancel_requested', submitted_by, '发起任务关闭申请：' || reason, submitted_at
 FROM field_change_requests WHERE NOT exempt;
 
 INSERT INTO task_activities (task_id, kind, actor_id, summary, occurred_at)
-SELECT task_id, 'field_change_approved', decided_by,
-       '关键字段修改生效' || CASE WHEN opinion <> '' THEN '：' || opinion ELSE '' END, decided_at
-FROM field_change_requests WHERE NOT exempt AND state = 'approved' AND decided_at IS NOT NULL;
-
-INSERT INTO task_activities (task_id, kind, actor_id, summary, occurred_at)
-SELECT task_id, 'field_change_rejected', decided_by, '关键字段修改退回：' || opinion, decided_at
+SELECT task_id, 'cancel_rejected', decided_by, '任务关闭退回：' || opinion, decided_at
 FROM field_change_requests WHERE state = 'rejected' AND decided_at IS NOT NULL;
 
 -- 接收确认

@@ -12,7 +12,7 @@ import (
 	"synergy/server/internal/store"
 )
 
-// 任务关闭申请（AC-57）：复用关键字段变更单的一种变更类型，规则在 domain，handler 仅编排。
+// 任务关闭申请（AC-57、#172 裁决：从变更单机制独立，审批保留）。规则在 domain，handler 仅编排。
 
 // RequestTaskCancellation 发起关闭申请：KR 负责人在本人负责 KR 下免审即时生效，其余进入其待我审批。
 func (s *Server) RequestTaskCancellation(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64) {
@@ -65,9 +65,9 @@ func (s *Server) RequestTaskCancellation(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	switch outcome {
-	case domain.FieldChangeExempt:
+	case domain.CancelExempt:
 		if _, err := qtx.CreateFieldChange(r.Context(), cancelChangeParams(taskId, facts.Status, uid, reason,
-			domain.FieldChangeApprovedState, true, domain.CancelExemptOpinion,
+			domain.CancelRequestApprovedState, true, domain.CancelExemptOpinion,
 			pgtype.Int8{Int64: uid, Valid: true}, pgtype.Timestamptz{Time: s.now(), Valid: true})); err != nil {
 			writeInternalError(w, r, err)
 			return
@@ -80,7 +80,7 @@ func (s *Server) RequestTaskCancellation(w http.ResponseWriter, r *http.Request,
 		}
 	default:
 		if _, err := qtx.CreateFieldChange(r.Context(), cancelChangeParams(taskId, facts.Status, uid, reason,
-			domain.FieldChangePendingState, false, "", pgtype.Int8{}, pgtype.Timestamptz{})); err != nil {
+			domain.CancelRequestPendingState, false, "", pgtype.Int8{}, pgtype.Timestamptz{})); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
@@ -89,7 +89,7 @@ func (s *Server) RequestTaskCancellation(w http.ResponseWriter, r *http.Request,
 		writeInternalError(w, r, err)
 		return
 	}
-	if outcome == domain.FieldChangeExempt {
+	if outcome == domain.CancelExempt {
 		s.actionActivity(r.Context(), taskId, domain.ActivityCancelApproved, uid, domain.CancelExemptOpinion)
 	} else {
 		s.actionActivity(r.Context(), taskId, domain.ActivityCancelRequested, uid, reason)

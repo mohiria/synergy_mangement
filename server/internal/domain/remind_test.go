@@ -178,7 +178,7 @@ func TestMyWorkWaitingRemindNotSelf(t *testing.T) {
 		Tasks: []WorkTaskFact{
 			{ID: 1, Name: "我的任务", DisplayStatus: TaskInProgress, OwnerID: me, CreatorID: me, KrOwnerID: krMe},
 		},
-		FieldChanges: []WorkApprovalFact{
+		CancelRequests: []WorkApprovalFact{
 			{ID: 21, TaskID: 1, TaskName: "我的任务", SubmittedBy: 9, KrOwnerID: krMe, KrOwnerName: "张三", SubmittedAt: recent},
 		},
 	})

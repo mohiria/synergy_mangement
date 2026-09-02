@@ -333,10 +333,10 @@ func wantStatus(t *testing.T, resp *http.Response, want int) {
 	}
 }
 
-// 结构变更（输入、输入源、输出、接收方）改走关键字段修改审批后（AC-23），
-// 写入接口统一返回 200 Task；下面三个 helper 承担「受理成功」与「按名字找边」两件事。
+// 结构变更（输入、输入源、接收方）#172 裁决后直接生效，
+// 写入接口统一返回 200 Task；下面的 helper 承担「受理成功」与「按名字找边」两件事。
 
-// wantStructureAccepted 断言结构变更已受理并回传任务最新状态。
+// wantStructureAccepted 断言结构变更已生效并回传任务最新状态。
 func wantStructureAccepted(t *testing.T, resp *http.Response) api.Task {
 	t.Helper()
 	wantStatus(t, resp, http.StatusOK)
@@ -363,19 +363,6 @@ func edgeOf(t *testing.T, c *http.Client, base string, projectID, targetTaskID i
 	}
 	t.Fatalf("未找到任务 %d 上名为 %q 的交付物边", targetTaskID, name)
 	return api.DeliverableEdge{}
-}
-
-// approveStructureChange 所属 KR 负责人通过任务上那张待审批的变更单。
-func approveStructureChange(t *testing.T, approver *http.Client, base string, projectID, taskID int64, task api.Task) {
-	t.Helper()
-	if task.FieldChange == nil || task.FieldChange.State != api.FieldChangeStatePending {
-		t.Fatalf("任务 %d 上没有待审批变更单: %+v", taskID, task.FieldChange)
-	}
-	resp := doJSON(t, approver, http.MethodPost,
-		fmt.Sprintf("%s/projects/%d/tasks/%d/field-changes/%d/decision", base, projectID, taskID, task.FieldChange.Id),
-		api.FieldChangeDecisionRequest{Decision: api.FieldChangeDecisionRequestDecisionApproved})
-	wantStatus(t, resp, http.StatusOK)
-	resp.Body.Close()
 }
 
 // deliverableOf 在任务详情里按名字定位交付物项。
@@ -1402,26 +1389,22 @@ func TestTaskStatusAndProgress(t *testing.T) {
 	if requested.Status == api.TaskStatusCancelled {
 		t.Fatalf("关闭申请不应即时生效: %+v", requested)
 	}
-	if requested.FieldChange == nil || requested.FieldChange.ChangeType != api.Cancel ||
-		requested.FieldChange.State != api.FieldChangeStatePending {
-		t.Fatalf("未生成待审批关闭单: %+v", requested.FieldChange)
+	if requested.CancelRequest == nil || requested.CancelRequest.State != api.CancelRequestStatePending ||
+		requested.CancelRequest.Reason != reason {
+		t.Fatalf("未生成待审批关闭申请: %+v", requested.CancelRequest)
 	}
-	if len(requested.FieldChange.Changes) != 1 || requested.FieldChange.Changes[0].Field != "status" ||
-		requested.FieldChange.Changes[0].NewValue != "已关闭" {
-		t.Fatalf("关闭单差异行异常: %+v", requested.FieldChange.Changes)
-	}
-	// 互斥：待审批关闭单在时，编辑与再次发起关闭的入口都关闭
-	if requested.CanProposeFieldChange || requested.CanCancel {
-		t.Fatalf("未决关闭单期间不应保留其他审批入口: %+v", requested)
+	// 互斥：待审批关闭申请在时，编辑与再次发起关闭的入口都关闭（#172）
+	if requested.CanEditFields || requested.CanCancel {
+		t.Fatalf("未决关闭申请期间不应保留编辑与关闭入口: %+v", requested)
 	}
 	resp = doJSON(t, carol, http.MethodPost, cancelURL(carolTask.Id), api.TaskCancellationRequest{Reason: reason})
 	wantStatus(t, resp, http.StatusConflict)
 	resp.Body.Close()
 
-	// KR 负责人 bob 通过关闭单：任务进入已关闭并保留原因
+	// KR 负责人 bob 通过关闭申请：任务进入已关闭并保留原因
 	resp = doJSON(t, bob, http.MethodPost,
-		fmt.Sprintf("%s/%d/field-changes/%d/decision", tasksURL, carolTask.Id, requested.FieldChange.Id),
-		api.FieldChangeDecisionRequest{Decision: api.FieldChangeDecisionRequestDecisionApproved})
+		fmt.Sprintf("%s/%d/cancel-requests/%d/decision", tasksURL, carolTask.Id, requested.CancelRequest.Id),
+		api.CancelRequestDecisionRequest{Decision: api.CancelRequestDecisionRequestDecisionApproved})
 	wantStatus(t, resp, http.StatusOK)
 	cancelled := decodeBody[api.Task](t, resp)
 	if cancelled.Status != api.TaskStatusCancelled || cancelled.CancelReason == nil || *cancelled.CancelReason != reason {
@@ -1534,9 +1517,9 @@ func TestTaskDetail(t *testing.T) {
 	resp.Body.Close()
 }
 
-// 关键字段修改审批（#12，AC-23）：审批期间旧值生效，通过后新值生效，退回后拟议值作废并
-// 派生退回待处理事项；KR 负责人本人免审即时生效。
-func TestFieldChangeApproval(t *testing.T) {
+// 关键字段直接修改（AC-23、#172 裁决）：有编辑权限者修改立即生效、无修改原因，
+// 动作写入任务动态并站内通知所属 KR 负责人（本人修改不另发）。
+func TestTaskFieldEditDirect(t *testing.T) {
 	q, pool := setupDB(t)
 	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
 	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
@@ -1588,107 +1571,81 @@ func TestFieldChangeApproval(t *testing.T) {
 	wantStatus(t, resp, http.StatusCreated)
 	tasks := decodeBody[[]api.Task](t, resp)
 	taskID := tasks[0].Id
-	changeURL := func(id int64) string { return fmt.Sprintf("%s/%d/field-changes", tasksURL, id) }
+	editURL := func(id int64) string { return fmt.Sprintf("%s/%d/edits", tasksURL, id) }
 
-	// carol 提交关键字段修改（改截止时间）：原因必填 422
-	newEnd := openapiDate(t, "2026-10-15")
-	noReason := api.SubmitFieldChangeRequest{}
-	noReason.Changes.EndDate = &newEnd
-	resp = doJSON(t, carol, http.MethodPost, changeURL(taskID), noReason)
+	// 空修改 422
+	resp = doJSON(t, carol, http.MethodPost, editURL(taskID), api.EditTaskFieldsRequest{})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 
-	// 带原因提交 → 待审批，旧值继续生效（AC-23）
-	withReason := api.SubmitFieldChangeRequest{Reason: sp("联调窗口顺延")}
-	withReason.Changes.EndDate = &newEnd
-	resp = doJSON(t, carol, http.MethodPost, changeURL(taskID), withReason)
+	// 任务负责人 carol 改截止时间 → 立即生效、无修改原因（#172 裁决）
+	newEnd := openapiDate(t, "2026-10-15")
+	resp = doJSON(t, carol, http.MethodPost, editURL(taskID), api.EditTaskFieldsRequest{EndDate: &newEnd})
 	wantStatus(t, resp, http.StatusOK)
-	pendingTask := decodeBody[api.Task](t, resp)
-	if pendingTask.EndDate.Time.Format("2006-01-02") != "2026-09-30" {
-		t.Fatalf("审批期间旧值应继续生效: %+v", pendingTask.EndDate)
+	edited := decodeBody[api.Task](t, resp)
+	if edited.EndDate.Time.Format("2006-01-02") != "2026-10-15" {
+		t.Fatalf("直接修改应立即生效: %+v", edited.EndDate)
 	}
-	if pendingTask.FieldChange == nil || pendingTask.FieldChange.State != api.FieldChangeStatePending {
-		t.Fatalf("拟议值标示缺失: %+v", pendingTask.FieldChange)
+	if edited.CancelRequest != nil {
+		t.Fatalf("直接修改不应产生审批单: %+v", edited.CancelRequest)
 	}
-	if len(pendingTask.FieldChange.Changes) != 1 || pendingTask.FieldChange.Changes[0].NewValue != "2026-10-15" {
-		t.Fatalf("差异快照异常: %+v", pendingTask.FieldChange.Changes)
-	}
-	changeID := pendingTask.FieldChange.Id
-
-	// 重复提交 409
-	resp = doJSON(t, carol, http.MethodPost, changeURL(taskID), withReason)
-	wantStatus(t, resp, http.StatusConflict)
-	resp.Body.Close()
-
-	// 管理员 alice 不能替代 KR 负责人审批 403
-	decisionURL := fmt.Sprintf("%s/%d/decision", changeURL(taskID), changeID)
-	resp = doJSON(t, alice, http.MethodPost, decisionURL, api.FieldChangeDecisionRequest{Decision: api.FieldChangeDecisionRequestDecisionApproved})
-	wantStatus(t, resp, http.StatusForbidden)
-	resp.Body.Close()
-
-	// KR 负责人退回 → 拟议值作废、旧值不变、退回待处理事项出现（AC-23）
-	op := "顺延理由不充分"
-	resp = doJSON(t, bob, http.MethodPost, decisionURL, api.FieldChangeDecisionRequest{Decision: api.FieldChangeDecisionRequestDecisionRejected, Opinion: &op})
-	wantStatus(t, resp, http.StatusOK)
-	rejected := decodeBody[api.Task](t, resp)
-	if rejected.EndDate.Time.Format("2006-01-02") != "2026-09-30" {
-		t.Fatalf("退回后旧值应保持不变: %+v", rejected.EndDate)
-	}
-	if rejected.FieldChange == nil || rejected.FieldChange.State != api.FieldChangeStateRejected || rejected.FieldChange.Resolved {
-		t.Fatalf("退回待处理事项缺失: %+v", rejected.FieldChange)
-	}
-	if rejected.FieldChange.CanAbandon == nil || *rejected.FieldChange.CanAbandon {
-		t.Fatalf("非提交人视角不应可放弃: %+v", rejected.FieldChange)
+	if !edited.CanEditFields {
+		t.Fatalf("负责人应保有编辑权限: %+v", edited)
 	}
 
-	// carol 重新提交 → 旧退回单 resolved，新单待审批；KR 负责人通过 → 新值生效
-	resp = doJSON(t, carol, http.MethodPost, changeURL(taskID), withReason)
-	wantStatus(t, resp, http.StatusOK)
-	pendingTask = decodeBody[api.Task](t, resp)
-	if pendingTask.FieldChange == nil || pendingTask.FieldChange.State != api.FieldChangeStatePending {
-		t.Fatalf("重新提交后应有新待审批单: %+v", pendingTask.FieldChange)
-	}
-	newChangeID := pendingTask.FieldChange.Id
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/decision", changeURL(taskID), newChangeID),
-		api.FieldChangeDecisionRequest{Decision: api.FieldChangeDecisionRequestDecisionApproved})
-	wantStatus(t, resp, http.StatusOK)
-	approved := decodeBody[api.Task](t, resp)
-	if approved.EndDate.Time.Format("2006-01-02") != "2026-10-15" {
-		t.Fatalf("通过后新值应生效: %+v", approved.EndDate)
-	}
-	if approved.FieldChange != nil {
-		t.Fatalf("已通过后不应再有需要关注的变更单: %+v", approved.FieldChange)
-	}
-
-	// 详情含全部变更历史（含旧退回单已 resolved）
+	// 动作写入任务动态，站内通知所属 KR 负责人 bob
 	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
 	wantStatus(t, resp, http.StatusOK)
 	detail := decodeBody[api.TaskDetail](t, resp)
-	if len(detail.FieldChanges) != 2 {
-		t.Fatalf("变更历史数量异常: %+v", detail.FieldChanges)
+	if len(detail.CancelRequests) != 0 {
+		t.Fatalf("直接修改不应留下关闭申请记录: %+v", detail.CancelRequests)
 	}
-	if detail.FieldChanges[1].State != api.FieldChangeStateRejected || !detail.FieldChanges[1].Resolved {
-		t.Fatalf("旧退回单应已随重新提交处理: %+v", detail.FieldChanges[1])
+	foundActivity := false
+	for _, a := range detail.Activities {
+		if a.Kind == api.FieldEdited && strings.Contains(a.Summary, "截止时间") {
+			foundActivity = true
+		}
+	}
+	if !foundActivity {
+		t.Fatalf("字段修改应写入任务动态: %+v", detail.Activities)
+	}
+	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
+	wantStatus(t, resp, http.StatusOK)
+	notes := decodeBody[[]api.Notification](t, resp)
+	foundNote := false
+	for _, n := range notes {
+		if n.Kind == "task_field_edited" && n.TaskId != nil && *n.TaskId == taskID &&
+			strings.Contains(n.Content, "截止时间") && strings.Contains(n.Content, "王五") {
+			foundNote = true
+		}
+	}
+	if !foundNote {
+		t.Fatalf("字段修改应站内通知所属 KR 负责人: %+v", notes)
+	}
+	noteCount := len(notes)
+
+	// KR 负责人本人修改（改负责人）：立即生效且不另发通知
+	resp = doJSON(t, bob, http.MethodPost, editURL(taskID), api.EditTaskFieldsRequest{OwnerId: &bobUser.ID})
+	wantStatus(t, resp, http.StatusOK)
+	if got := decodeBody[api.Task](t, resp); got.OwnerId != bobUser.ID {
+		t.Fatalf("KR 负责人修改应即时生效: %+v", got)
+	}
+	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
+	wantStatus(t, resp, http.StatusOK)
+	if after := decodeBody[[]api.Notification](t, resp); len(after) != noteCount {
+		t.Fatalf("KR 负责人本人修改不应另发通知: %d → %d", noteCount, len(after))
 	}
 
-	// KR 负责人 bob 免审即时生效并留一张已通过免审变更单
-	exemptEdit := api.SubmitFieldChangeRequest{Reason: sp("负责人调整")}
-	exemptEdit.Changes.OwnerId = &bobUser.ID
-	resp = doJSON(t, bob, http.MethodPost, changeURL(taskID), exemptEdit)
-	wantStatus(t, resp, http.StatusOK)
-	exempted := decodeBody[api.Task](t, resp)
-	if exempted.OwnerId != bobUser.ID {
-		t.Fatalf("免审修改应即时生效: %+v", exempted)
-	}
-	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
-	wantStatus(t, resp, http.StatusOK)
-	detail = decodeBody[api.TaskDetail](t, resp)
-	if detail.FieldChanges[0].State != api.FieldChangeStateApproved || !detail.FieldChanges[0].Exempt {
-		t.Fatalf("免审变更单异常: %+v", detail.FieldChanges[0])
-	}
-	if detail.FieldChanges[0].Changes[0].OldValue != "王五" || detail.FieldChanges[0].Changes[0].NewValue != "李四" {
-		t.Fatalf("负责人差异应显示姓名: %+v", detail.FieldChanges[0].Changes)
-	}
+	// 校验仍然生效：负责人须为项目成员（非成员被拒）；
+	// carol 已不是负责人，直接修改被拒 403（编辑权限口径不变）
+	stranger := int64(999999)
+	resp = doJSON(t, bob, http.MethodPost, editURL(taskID), api.EditTaskFieldsRequest{OwnerId: &stranger})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodPost, editURL(taskID), api.EditTaskFieldsRequest{EndDate: &newEnd})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	_ = sp
 }
 
 // 交付物模型与文件存取（#8，AC-32/AC-33）：交付物项、候选登记与预签名地址、
@@ -2258,17 +2215,13 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 	dA := createDeliverable(t, bob, tasksURL, taskA.Id, "现场数据包.zip")
 
 	// AC-28：B 的负责人 carol 选择 A 建立必要输入边（裁决 #163：不再选对应交付物）；
-	// 输入与输入源是关键字段（AC-23），先进所属 KR 负责人审批，通过后边才建立
+	// 输入与输入源是关键字段（#172 裁决：直接生效，边立即建立）
 	inputsURL := func(id int64) string { return fmt.Sprintf("%s/%d/inputs", tasksURL, id) }
 	resp = doJSON(t, carol, http.MethodPost, inputsURL(taskB.Id), api.CreateTaskInputRequest{
 		Necessity: api.Required, EdgeType: api.HardPrerequisite,
 		SourceTaskIds: []int64{taskA.Id},
 	})
-	pendingEdge := wantStructureAccepted(t, resp)
-	if len(projectEdges(t, carol, base, created.Id)) != 0 {
-		t.Fatal("待审批期间不应先建边")
-	}
-	approveStructureChange(t, bob, base, created.Id, taskB.Id, pendingEdge)
+	wantStructureAccepted(t, resp)
 	edge := edgeOf(t, carol, base, created.Id, taskB.Id, "采集现场数据")
 	if edge.Ready || edge.SourceTaskName == nil || *edge.SourceTaskName != "采集现场数据" {
 		t.Fatalf("新建边应未就绪且含来源信息: %+v", edge)
@@ -2383,17 +2336,13 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 		t.Fatalf("任务更新时间应随状态推进: %v → %v", taskA.UpdatedAt, detailA.Task.UpdatedAt)
 	}
 
-	// 解除边：目标任务 A 已完成（终态）不再接受任何变更单 → 409
+	// 解除边：目标任务 A 已完成（终态）不允许修改 → 409
 	resp = doJSON(t, bob, http.MethodDelete, fmt.Sprintf("%s/projects/%d/edges/%d", base, created.Id, detailB.Outputs[0].Id), nil)
 	wantStatus(t, resp, http.StatusConflict)
 	resp.Body.Close()
-	// 解除输入源同样是关键字段变更：carol 提交，待审批期间边仍在，bob 通过后才真的解除
+	// 解除输入源同样是关键字段变更（#172 裁决：直接生效）
 	resp = doJSON(t, carol, http.MethodDelete, fmt.Sprintf("%s/projects/%d/edges/%d", base, created.Id, detailB.Inputs[0].Id), nil)
-	pendingRemove := wantStructureAccepted(t, resp)
-	if len(projectEdges(t, carol, base, created.Id)) != 2 {
-		t.Fatal("待审批期间不应先解除边")
-	}
-	approveStructureChange(t, bob, base, created.Id, taskB.Id, pendingRemove)
+	wantStructureAccepted(t, resp)
 	if edges := projectEdges(t, carol, base, created.Id); len(edges) != 1 {
 		t.Fatalf("解除后边数量异常: %+v", edges)
 	}
@@ -2624,9 +2573,8 @@ func TestMemberInputRequests(t *testing.T) {
 			Necessity: api.Required, ProviderIds: []int64{daveUser.ID},
 			ContentNote: "请提供最新接口字段口径说明", ExpectedDate: expected,
 		})
-	// 输入源属关键字段（AC-23）：负责人提交进 KR 负责人审批，通过后边才建立、通知才发出。
-	pendingInput := wantStructureAccepted(t, resp)
-	approveStructureChange(t, bob, base, created.Id, taskID, pendingInput)
+	// 输入源属关键字段（#172 裁决：直接生效，边立即建立、通知立即发出）。
+	wantStructureAccepted(t, resp)
 	edge := edgeOf(t, carol, base, created.Id, taskID, "接口字段口径")
 	if edge.InputRequest == nil || edge.InputRequest.State != api.InputRequestStatePending || edge.Ready {
 		t.Fatalf("成员输入边异常: %+v", edge)
@@ -2797,8 +2745,7 @@ func TestMultiSourceInputs(t *testing.T) {
 			Necessity: api.Required, EdgeType: api.HardPrerequisite,
 			SourceTaskIds: []int64{taskA, taskB2},
 		})
-	pendingMulti := wantStructureAccepted(t, resp)
-	approveStructureChange(t, bob, base, created.Id, taskC, pendingMulti)
+	wantStructureAccepted(t, resp)
 	multi := []api.DeliverableEdge{}
 	for _, e := range projectEdges(t, carol, base, created.Id) {
 		if e.TargetTaskId == taskC {
@@ -2842,8 +2789,7 @@ func TestMultiSourceInputs(t *testing.T) {
 			Necessity: api.Required, ProviderIds: []int64{daveUser.ID, erinUser.ID},
 			ContentNote: "请各自提供本方口径说明", ExpectedDate: expected,
 		})
-	pendingMembers := wantStructureAccepted(t, resp)
-	approveStructureChange(t, bob, base, created.Id, taskD, pendingMembers)
+	wantStructureAccepted(t, resp)
 	memberEdges := []api.DeliverableEdge{}
 	for _, e := range projectEdges(t, carol, base, created.Id) {
 		// 成员来源没有来源任务，标识取「所需内容」摘要（#112）。
@@ -3003,8 +2949,7 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 			Necessity: api.Required, EdgeType: api.HardPrerequisite,
 			SourceTaskIds: []int64{upstream.Id},
 		})
-	pendingInput := wantStructureAccepted(t, resp)
-	approveStructureChange(t, bob, base, created.Id, downstream.Id, pendingInput)
+	wantStructureAccepted(t, resp)
 	edge := edgeOf(t, carol, base, created.Id, downstream.Id, "现场数据采集")
 
 	byKind := func(c *http.Client) map[string]api.Blocker {
@@ -3097,8 +3042,14 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 	resp.Body.Close()
 	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
 	wantStatus(t, resp, http.StatusOK)
-	notes := dropOkrAssigned(decodeBody[[]api.Notification](t, resp))
-	if len(notes) != 1 || notes[0].Kind != "blocker_remind" || *notes[0].TaskId != downstream.Id {
+	// #172 后 bob 还会收到 task_field_edited（carol 配置输入），只看提醒类。
+	notes := []api.Notification{}
+	for _, n := range dropOkrAssigned(decodeBody[[]api.Notification](t, resp)) {
+		if n.Kind == "blocker_remind" {
+			notes = append(notes, n)
+		}
+	}
+	if len(notes) != 1 || *notes[0].TaskId != downstream.Id {
 		t.Fatalf("提醒通知异常: %+v", notes)
 	}
 
@@ -4123,7 +4074,7 @@ func TestUnifiedPermissionsAcrossIdentities(t *testing.T) {
 	if ft := flagsOf(bob); ft.CanStart {
 		t.Fatalf("非负责人（KR 负责人）不应可开始执行: %+v", ft)
 	}
-	if ft := flagsOf(dave); ft.CanStart || ft.CanProposeFieldChange {
+	if ft := flagsOf(dave); ft.CanStart || ft.CanEditFields {
 		t.Fatalf("访客不应有业务动作标志: %+v", ft)
 	}
 
@@ -4297,24 +4248,16 @@ func TestTaskActivity(t *testing.T) {
 		t.Fatalf("卡点动态文案异常: %+v", opened.Summary)
 	}
 
-	// 关键字段修改把截止时间挪到未来 → 通过后超期条件消失，diff 补记「卡点解除」
+	// 直接修改把截止时间挪到未来（#172）→ 超期条件消失，diff 补记「卡点解除」
 	future := openapiDate(t, "2026-12-31")
-	back := api.SubmitFieldChangeRequest{Reason: sp("窗口顺延")}
-	back.Changes.EndDate = &future
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/field-changes", tasksURL, taskID), back)
-	wantStatus(t, resp, http.StatusOK)
-	backID := decodeBody[api.Task](t, resp).FieldChange.Id
-	if has(activitiesOf(taskID), api.FieldChangeSubmitted) == nil {
-		t.Fatalf("提交关键字段修改应留痕: %+v", kinds(activitiesOf(taskID)))
-	}
-	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/field-changes/%d/decision", tasksURL, taskID, backID),
-		api.FieldChangeDecisionRequest{Decision: api.FieldChangeDecisionRequestDecisionApproved})
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/edits", tasksURL, taskID),
+		api.EditTaskFieldsRequest{EndDate: &future})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
 
 	acts = activitiesOf(taskID)
-	if has(acts, api.FieldChangeApproved) == nil {
-		t.Fatalf("关键字段修改生效应留痕: %+v", kinds(acts))
+	if has(acts, api.FieldEdited) == nil {
+		t.Fatalf("字段修改生效应留痕: %+v", kinds(acts))
 	}
 	if has(acts, api.BlockerResolved) == nil {
 		t.Fatalf("卡点条件消失后应补记卡点解除: %+v", kinds(acts))
@@ -4392,24 +4335,16 @@ func TestReceiversAndReceipts(t *testing.T) {
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 
-	// 任务 A 指定 dave 为接收方；任务 B 取「所有项目成员」。
-	// 接收方是关键字段（AC-23）：任务已入池，carol 提交后待 KR 负责人 bob 审批，通过后才生效。
+	// 任务 A 指定 dave 为接收方；任务 B 取「项目全体成员」。
+	// 接收方是关键字段（#172 裁决：直接生效）。
 	resp = doJSON(t, carol, http.MethodPut, receiversA, api.SetReceiversRequest{Scope: api.ReceiverScopeMembers, UserIds: &[]int64{daveUser.ID}})
-	pendingReceivers := wantStructureAccepted(t, resp)
-	if pendingReceivers.ReceiverScope != api.ReceiverScopeNone {
-		t.Fatalf("待审批期间接收方不应变更: %+v", pendingReceivers.ReceiverScope)
-	}
-	approveStructureChange(t, bob, base, created.Id, taskA, pendingReceivers)
-	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskA), nil)
-	wantStatus(t, resp, http.StatusOK)
-	configured := decodeBody[api.TaskDetail](t, resp).Task
+	configured := wantStructureAccepted(t, resp)
 	if configured.ReceiverScope != api.ReceiverScopeMembers || configured.Receivers == nil || len(*configured.Receivers) != 1 {
-		t.Fatalf("接收方配置未生效: %+v", configured)
+		t.Fatalf("接收方配置未即时生效: %+v", configured)
 	}
 	resp = doJSON(t, carol, http.MethodPut, fmt.Sprintf("%s/%d/receivers", tasksURL, taskB),
 		api.SetReceiversRequest{Scope: api.ReceiverScopeAll})
-	pendingReceiversB := wantStructureAccepted(t, resp)
-	approveStructureChange(t, bob, base, created.Id, taskB, pendingReceiversB)
+	wantStructureAccepted(t, resp)
 
 	// 终审通过前没有待接收项
 	myWorkURL := fmt.Sprintf("%s/projects/%d/my-work", base, created.Id)
@@ -4554,7 +4489,8 @@ func TestRemindWaitingTargets(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
-	// carol 建任务后提交关键字段修改：刚提交，未达审批超时阈值，因此没有任何派生卡点
+	// carol 建任务后发起关闭申请（#172 裁决：变更类审批只剩关闭申请）：
+	// 刚提交，未达审批超时阈值，因此没有任何派生卡点
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "等审批的任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
@@ -4562,12 +4498,10 @@ func TestRemindWaitingTargets(t *testing.T) {
 	})
 	wantStatus(t, resp, http.StatusCreated)
 	task := decodeBody[[]api.Task](t, resp)[0]
-	newEnd := openapiDate(t, "2026-10-15")
-	fcReq := api.SubmitFieldChangeRequest{Reason: sp("联调窗口顺延")}
-	fcReq.Changes.EndDate = &newEnd
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/field-changes", tasksURL, task.Id), fcReq)
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/cancellation", tasksURL, task.Id),
+		api.TaskCancellationRequest{Reason: "需求合并，等待关闭"})
 	wantStatus(t, resp, http.StatusOK)
-	changeID := decodeBody[api.Task](t, resp).FieldChange.Id
+	requestID := decodeBody[api.Task](t, resp).CancelRequest.Id
 
 	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/projects/%d/blockers", base, created.Id), nil)
 	wantStatus(t, resp, http.StatusOK)
@@ -4582,14 +4516,14 @@ func TestRemindWaitingTargets(t *testing.T) {
 	work := decodeBody[api.MyWork](t, resp)
 	var waiting *api.WorkItem
 	for i := range work.Waiting {
-		if work.Waiting[i].Kind == "waiting_field_change" {
+		if work.Waiting[i].Kind == "waiting_cancel_request" {
 			waiting = &work.Waiting[i]
 		}
 	}
 	if waiting == nil {
-		t.Fatalf("等待他人应有关键字段变更卡片: %+v", work.Waiting)
+		t.Fatalf("等待他人应有关闭申请卡片: %+v", work.Waiting)
 	}
-	if !waiting.CanRemind || waiting.RefKey == nil || !strings.HasPrefix(*waiting.RefKey, "wait:field_change:") {
+	if !waiting.CanRemind || waiting.RefKey == nil || !strings.HasPrefix(*waiting.RefKey, "wait:cancel_request:") {
 		t.Fatalf("尚未成卡点的等待事项也应可提醒并按自身键寻址: %+v", waiting)
 	}
 
@@ -4614,7 +4548,7 @@ func TestRemindWaitingTargets(t *testing.T) {
 	if len(notes) != 1 || notes[0].TaskId == nil || *notes[0].TaskId != task.Id {
 		t.Fatalf("提醒通知异常: %+v", notes)
 	}
-	for _, want := range []string{"等审批的任务", "关键字段变更审批处理", "2026-09-30"} {
+	for _, want := range []string{"等审批的任务", "关闭申请审批处理", "2026-09-30"} {
 		if !strings.Contains(notes[0].Content, want) {
 			t.Fatalf("提醒正文缺「%s」: %s", want, notes[0].Content)
 		}
@@ -4625,9 +4559,9 @@ func TestRemindWaitingTargets(t *testing.T) {
 	wantStatus(t, resp, http.StatusConflict)
 	resp.Body.Close()
 
-	// 目标已处理后按不存在处理：bob 通过变更单，等待事项消失
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/field-changes/%d/decision", tasksURL, task.Id, changeID),
-		api.FieldChangeDecisionRequest{Decision: api.FieldChangeDecisionRequestDecisionApproved})
+	// 目标已处理后按不存在处理：bob 通过关闭申请，等待事项消失
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/cancel-requests/%d/decision", tasksURL, task.Id, requestID),
+		api.CancelRequestDecisionRequest{Decision: api.CancelRequestDecisionRequestDecisionApproved})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
 	resp = doJSON(t, alice, http.MethodPost, remindURL, api.RemindRequest{TargetKey: *waiting.RefKey})
@@ -4895,7 +4829,8 @@ func TestOkrEditHandoverAndMemberRemoval(t *testing.T) {
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 
-	// 造一件未决审批：carol 建任务（直接入池）后提交关键字段修改，待 KR 负责人 bob 处理
+	// 造一件未决审批（#172 裁决：转交范围为完成审批与关闭申请）：
+	// carol 建任务（直接入池）后发起关闭申请，待 KR 负责人 bob 处理
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
@@ -4903,14 +4838,12 @@ func TestOkrEditHandoverAndMemberRemoval(t *testing.T) {
 	})
 	wantStatus(t, resp, http.StatusCreated)
 	taskID := decodeBody[[]api.Task](t, resp)[0].Id
-	newEnd := openapiDate(t, "2026-10-15")
-	fcReq := api.SubmitFieldChangeRequest{Reason: sp("联调窗口顺延")}
-	fcReq.Changes.EndDate = &newEnd
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/field-changes", tasksURL, taskID), fcReq)
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/cancellation", tasksURL, taskID),
+		api.TaskCancellationRequest{Reason: "需求合并，不再单独执行"})
 	wantStatus(t, resp, http.StatusOK)
-	pendingChange := decodeBody[api.Task](t, resp).FieldChange
-	if pendingChange == nil || pendingChange.State != api.FieldChangeStatePending {
-		t.Fatalf("变更单未进入待审批: %+v", pendingChange)
+	pendingChange := decodeBody[api.Task](t, resp).CancelRequest
+	if pendingChange == nil || pendingChange.State != api.CancelRequestStatePending {
+		t.Fatalf("关闭申请未进入待审批: %+v", pendingChange)
 	}
 
 	// AC-61：交接确认信息给出未决审批条数
@@ -4932,8 +4865,8 @@ func TestOkrEditHandoverAndMemberRemoval(t *testing.T) {
 		api.UpdateProjectMemberRoleRequest{Role: api.Viewer})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/field-changes/%d/decision", tasksURL, taskID, pendingChange.Id),
-		api.FieldChangeDecisionRequest{Decision: api.FieldChangeDecisionRequestDecisionApproved})
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/cancel-requests/%d/decision", tasksURL, taskID, pendingChange.Id),
+		api.CancelRequestDecisionRequest{Decision: api.CancelRequestDecisionRequestDecisionApproved})
 	wantStatus(t, resp, http.StatusForbidden)
 	resp.Body.Close()
 	resp = doJSON(t, bob, http.MethodPatch, krURL, api.UpdateKeyResultRequest{Description: sp("只读也想改")})
@@ -5031,11 +4964,9 @@ func TestOkrEditHandoverAndMemberRemoval(t *testing.T) {
 	resp.Body.Close()
 }
 
-// 结构变更被退回后不生效（AC-23、§5.2.B，回归 R1）：接收方属关键字段，
-// 已入池任务由任务负责人提交后进所属 KR 负责人审批，退回则配置不生效，
-// 且退回未处理期间不接受新的变更单。
-// 原以「输出」为例；裁决 H1（#141）后交付物项增删不走审批，改以接收方覆盖同一条路由。
-func TestStructureChangeRejected(t *testing.T) {
+// 结构变更直接生效（#172 裁决、§5.2.B）：接收方属关键字段，任务负责人修改立即生效，
+// 无变更单；动作写入任务动态并站内通知所属 KR 负责人（本人修改不另发）。
+func TestStructureEditDirect(t *testing.T) {
 	q, pool := setupDB(t)
 	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
 	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
@@ -5079,44 +5010,52 @@ func TestStructureChangeRejected(t *testing.T) {
 	wantStatus(t, resp, http.StatusCreated)
 	taskID := decodeBody[[]api.Task](t, resp)[0].Id
 
-	// 任务负责人 carol 配置接收方 → 待审批，配置尚未生效
+	// 任务负责人 carol 配置接收方 → 直接生效（#172 裁决）
 	receiversURL := fmt.Sprintf("%s/%d/receivers", tasksURL, taskID)
 	resp = doJSON(t, carol, http.MethodPut, receiversURL, api.SetReceiversRequest{Scope: api.ReceiverScopeAll})
-	pending := wantStructureAccepted(t, resp)
-	if pending.FieldChange == nil || pending.FieldChange.ChangeType != api.Structure {
-		t.Fatalf("未生成结构变更单: %+v", pending.FieldChange)
+	applied := wantStructureAccepted(t, resp)
+	if applied.ReceiverScope != api.ReceiverScopeAll {
+		t.Fatalf("接收方配置应立即生效: %+v", applied.ReceiverScope)
 	}
-	if len(pending.FieldChange.Changes) != 1 || pending.FieldChange.Changes[0].Label != "接收方" {
-		t.Fatalf("结构变更差异行异常: %+v", pending.FieldChange.Changes)
-	}
-	if pending.ReceiverScope != api.ReceiverScopeNone {
-		t.Fatalf("待审批期间接收方不应变更: %+v", pending.ReceiverScope)
-	}
-	// 互斥：待审批期间不接受第二张单
-	resp = doJSON(t, carol, http.MethodPut, receiversURL, api.SetReceiversRequest{Scope: api.ReceiverScopeAll})
-	wantStatus(t, resp, http.StatusConflict)
-	resp.Body.Close()
-
-	// KR 负责人退回：配置仍不生效
-	resp = doJSON(t, bob, http.MethodPost,
-		fmt.Sprintf("%s/%d/field-changes/%d/decision", tasksURL, taskID, pending.FieldChange.Id),
-		api.FieldChangeDecisionRequest{Decision: api.FieldChangeDecisionRequestDecisionRejected, Opinion: sp("接收范围未定")})
-	wantStatus(t, resp, http.StatusOK)
-	resp.Body.Close()
-	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
-	wantStatus(t, resp, http.StatusOK)
-	if got := decodeBody[api.TaskDetail](t, resp).Task.ReceiverScope; got != api.ReceiverScopeNone {
-		t.Fatalf("退回后配置不应生效: %+v", got)
+	if applied.CancelRequest != nil {
+		t.Fatalf("直接修改不应产生审批单: %+v", applied.CancelRequest)
 	}
 
-	// 重新提交并通过：这次才真的生效
-	resp = doJSON(t, carol, http.MethodPut, receiversURL, api.SetReceiversRequest{Scope: api.ReceiverScopeAll})
-	again := wantStructureAccepted(t, resp)
-	approveStructureChange(t, bob, base, created.Id, taskID, again)
+	// 动作写入任务动态（任务字段修改），并站内通知所属 KR 负责人 bob
 	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
 	wantStatus(t, resp, http.StatusOK)
-	if got := decodeBody[api.TaskDetail](t, resp).Task.ReceiverScope; got != api.ReceiverScopeAll {
-		t.Fatalf("通过后配置应生效: %+v", got)
+	detail := decodeBody[api.TaskDetail](t, resp)
+	foundActivity := false
+	for _, a := range detail.Activities {
+		if a.Kind == api.FieldEdited && strings.Contains(a.Summary, "接收方") {
+			foundActivity = true
+		}
+	}
+	if !foundActivity {
+		t.Fatalf("字段修改应写入任务动态: %+v", detail.Activities)
+	}
+	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
+	wantStatus(t, resp, http.StatusOK)
+	notes := decodeBody[[]api.Notification](t, resp)
+	foundNote := false
+	for _, n := range notes {
+		if n.Kind == "task_field_edited" && n.TaskId != nil && *n.TaskId == taskID &&
+			strings.Contains(n.Content, "接收方") && strings.Contains(n.Content, "王五") {
+			foundNote = true
+		}
+	}
+	if !foundNote {
+		t.Fatalf("字段修改应站内通知所属 KR 负责人: %+v", notes)
+	}
+
+	// KR 负责人本人修改不另发通知
+	before := len(notes)
+	resp = doJSON(t, bob, http.MethodPut, receiversURL, api.SetReceiversRequest{Scope: api.ReceiverScopeMembers, UserIds: &[]int64{carolUser.ID}})
+	wantStructureAccepted(t, resp)
+	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
+	wantStatus(t, resp, http.StatusOK)
+	if after := decodeBody[[]api.Notification](t, resp); len(after) != before {
+		t.Fatalf("KR 负责人本人修改不应另发通知: %d → %d", before, len(after))
 	}
 }
 
@@ -5175,8 +5114,8 @@ func TestDeliverableStructureFree(t *testing.T) {
 	// 已入池任务新增交付物项即时生效，无变更单
 	resp = doJSON(t, carol, http.MethodPost, deliverablesURL, api.CreateDeliverableRequest{FileName: "联调报告.docx"})
 	wantStatus(t, resp, http.StatusOK)
-	if task := decodeBody[api.Task](t, resp); task.FieldChange != nil {
-		t.Fatalf("新增交付物项不应生成变更单: %+v", task.FieldChange)
+	if task := decodeBody[api.Task](t, resp); task.CancelRequest != nil {
+		t.Fatalf("新增交付物项不应生成审批单: %+v", task.CancelRequest)
 	}
 	first := deliverableOf(t, carol, base, created.Id, taskID, "联调报告")
 	if !first.CanDelete {
@@ -5239,9 +5178,9 @@ func TestDeliverableStructureFree(t *testing.T) {
 	}
 }
 
-// 变更单与取消的双向互斥（AC-57，回归 R3）：未决变更单在时不能发起关闭，
-// 取消生效后任务进入终态，既有变更单不得再被处理、也不接受新的审批单。
-func TestFieldChangeOnTerminalTask(t *testing.T) {
+// 关闭申请与字段修改的互斥（AC-57、#172 裁决，回归 R3）：关闭申请审批期间不能修改字段
+// 也不能重复发起关闭；退回后恢复可用；关闭生效后任务进入终态，既有申请不得再被处理。
+func TestCancelRequestOnTerminalTask(t *testing.T) {
 	q, pool := setupDB(t)
 	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
 	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
@@ -5287,27 +5226,31 @@ func TestFieldChangeOnTerminalTask(t *testing.T) {
 	wantStatus(t, resp, http.StatusCreated)
 	taskID := decodeBody[[]api.Task](t, resp)[0].Id
 
-	// carol 提交关键字段变更 → 待 KR 负责人审批
-	newEnd := openapiDate(t, "2026-10-15")
-	change := api.SubmitFieldChangeRequest{Reason: sp("联调窗口顺延")}
-	change.Changes.EndDate = &newEnd
-	change.Changes.Name = sp("被改写的名称")
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/field-changes", tasksURL, taskID), change)
+	// carol 发起关闭申请 → 待 KR 负责人审批
+	cancelURL := fmt.Sprintf("%s/%d/cancellation", tasksURL, taskID)
+	resp = doJSON(t, carol, http.MethodPost, cancelURL, api.TaskCancellationRequest{Reason: "需求取消"})
 	wantStatus(t, resp, http.StatusOK)
 	pending := decodeBody[api.Task](t, resp)
-	changeID := pending.FieldChange.Id
+	requestID := pending.CancelRequest.Id
 
-	// 变更单未决期间不能发起关闭，KR 负责人的免审通道同样受互斥约束（AC-57）
-	cancelURL := fmt.Sprintf("%s/%d/cancellation", tasksURL, taskID)
+	// 关闭申请未决期间不能修改字段（KR 负责人同样受互斥约束）、不能重复发起关闭
+	newEnd := openapiDate(t, "2026-10-15")
+	editURL := fmt.Sprintf("%s/%d/edits", tasksURL, taskID)
 	for _, c := range []*http.Client{carol, bob} {
-		resp = doJSON(t, c, http.MethodPost, cancelURL, api.TaskCancellationRequest{Reason: "需求取消"})
+		resp = doJSON(t, c, http.MethodPost, editURL, api.EditTaskFieldsRequest{EndDate: &newEnd})
+		wantStatus(t, resp, http.StatusConflict)
+		resp.Body.Close()
+		resp = doJSON(t, c, http.MethodPost, cancelURL, api.TaskCancellationRequest{Reason: "再次取消"})
 		wantStatus(t, resp, http.StatusConflict)
 		resp.Body.Close()
 	}
 
-	// 变更单退回后取消恢复可用；KR 负责人本人负责 KR 下免审即时生效
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/field-changes/%d/decision", tasksURL, taskID, changeID),
-		api.FieldChangeDecisionRequest{Decision: api.FieldChangeDecisionRequestDecisionRejected, Opinion: sp("窗口不顺延")})
+	// 关闭申请退回后修改恢复可用；随后 KR 负责人本人免审关闭即时生效
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/cancel-requests/%d/decision", tasksURL, taskID, requestID),
+		api.CancelRequestDecisionRequest{Decision: api.CancelRequestDecisionRequestDecisionRejected, Opinion: sp("仍需执行")})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodPost, editURL, api.EditTaskFieldsRequest{EndDate: &newEnd})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
 	resp = doJSON(t, bob, http.MethodPost, cancelURL, api.TaskCancellationRequest{Reason: "需求取消"})
@@ -5317,24 +5260,24 @@ func TestFieldChangeOnTerminalTask(t *testing.T) {
 		t.Fatalf("任务应为已关闭: %+v", cancelled.Status)
 	}
 
-	// 终态任务不再接受任何审批单：既有变更单不可再处理，也不能提交新的关键字段修改
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/field-changes/%d/decision", tasksURL, taskID, changeID),
-		api.FieldChangeDecisionRequest{Decision: api.FieldChangeDecisionRequestDecisionApproved})
+	// 终态任务：退回的旧申请不可再处理，也不能修改字段或再次发起关闭
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/cancel-requests/%d/decision", tasksURL, taskID, requestID),
+		api.CancelRequestDecisionRequest{Decision: api.CancelRequestDecisionRequestDecisionApproved})
 	wantStatus(t, resp, http.StatusConflict)
 	resp.Body.Close()
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/field-changes", tasksURL, taskID), change)
+	resp = doJSON(t, carol, http.MethodPost, editURL, api.EditTaskFieldsRequest{EndDate: &newEnd})
+	wantStatus(t, resp, http.StatusConflict)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodPost, cancelURL, api.TaskCancellationRequest{Reason: "再次取消"})
 	wantStatus(t, resp, http.StatusConflict)
 	resp.Body.Close()
 
 	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
 	wantStatus(t, resp, http.StatusOK)
 	after := decodeBody[api.TaskDetail](t, resp)
-	if after.Task.Name != "联调验证" || after.Task.EndDate.Time.Format("2006-01-02") != "2026-09-30" {
-		t.Fatalf("终态任务字段被变更单改写: name=%q end=%v", after.Task.Name, after.Task.EndDate)
-	}
-	// 详情侧也不应再下发可决策标志
-	if after.Task.FieldChange != nil && after.Task.FieldChange.CanDecide != nil && *after.Task.FieldChange.CanDecide {
-		t.Fatalf("终态任务仍下发 canDecide=true: %+v", after.Task.FieldChange)
+	// 详情侧不应再下发可决策标志
+	if after.Task.CancelRequest != nil && after.Task.CancelRequest.CanDecide != nil && *after.Task.CancelRequest.CanDecide {
+		t.Fatalf("终态任务仍下发 canDecide=true: %+v", after.Task.CancelRequest)
 	}
 }
 
@@ -5862,7 +5805,7 @@ func TestProjectSettingsThresholds(t *testing.T) {
 		t.Fatalf("code = %q, want invalid_request", e.Code)
 	}
 
-	// 建一个停在关键字段变更审批的任务，并把提交时间往前拨 2 天
+	// 建一个停在关闭申请审批的任务（#172 裁决：变更类审批只剩关闭申请），提交时间往前拨 2 天
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id),
 		api.CreateOkrBatchRequest{Items: []api.CreateOkrBatchItem{
 			{Title: sp("按时推进"), KeyResults: &[]api.CreateKeyResultInput{{Description: "变更及时审批", OwnerId: &bobUser.ID}}},
@@ -5878,10 +5821,8 @@ func TestProjectSettingsThresholds(t *testing.T) {
 		})
 	wantStatus(t, resp, http.StatusCreated)
 	task := decodeBody[[]api.Task](t, resp)[0]
-	fcTimeout := api.SubmitFieldChangeRequest{Reason: sp("联调窗口顺延")}
-	newEnd := openapiDate(t, "2026-10-15")
-	fcTimeout.Changes.EndDate = &newEnd
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/projects/%d/tasks/%d/field-changes", base, created.Id, task.Id), fcTimeout)
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/projects/%d/tasks/%d/cancellation", base, created.Id, task.Id),
+		api.TaskCancellationRequest{Reason: "需求合并，等待关闭"})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
 	if _, err := pool.Exec(context.Background(),
@@ -6034,8 +5975,8 @@ func TestTaskParticipants(t *testing.T) {
 	if saved.Participants == nil || len(*saved.Participants) != 2 {
 		t.Fatalf("参与人应直接生效并去重: %+v", saved.Participants)
 	}
-	if saved.FieldChange != nil {
-		t.Fatalf("参与人不属关键字段，不应产生变更单: %+v", saved.FieldChange)
+	if saved.CancelRequest != nil {
+		t.Fatalf("参与人不属关键字段，不应产生审批单: %+v", saved.CancelRequest)
 	}
 	if saved.PendingReviewCount != nil && *saved.PendingReviewCount != 0 {
 		t.Fatalf("参与人不应进审批链: %+v", saved.PendingReviewCount)
@@ -6052,7 +5993,7 @@ func TestTaskParticipants(t *testing.T) {
 	resp = doJSON(t, dave, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
 	wantStatus(t, resp, http.StatusOK)
 	seen := decodeBody[api.TaskDetail](t, resp).Task
-	if seen.CanUpdateProgress || seen.CanProposeFieldChange || seen.CanStart {
+	if seen.CanUpdateProgress || seen.CanEditFields || seen.CanStart {
 		t.Fatalf("参与人不应获得任何写权限: %+v", seen)
 	}
 	if seen.CanManageParticipants != nil && *seen.CanManageParticipants {

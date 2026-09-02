@@ -48,8 +48,8 @@ const STATUS_FILTER_LABEL: Record<TaskStatus, string> = {
 };
 
 
-// 全部任务列表的状态备注（#91）：退回理由、关闭原因、卡点与变更审批合成一行文本，
-// alert 决定用红色还是弱化色；没有备注时返回 null，状态列只剩状态胶囊。
+// 全部任务列表的状态备注（#91；#172 裁决：变更类审批只剩关闭申请）：退回理由、关闭原因、
+// 卡点与关闭申请合成一行文本，alert 决定用红色还是弱化色；没有备注时返回 null。
 function statusNote(t: Task): { text: string; alert: boolean } | null {
   const parts: string[] = [];
   let alert = false;
@@ -58,16 +58,12 @@ function statusNote(t: Task): { text: string; alert: boolean } | null {
     parts.push(`⚠ ${t.openBlockerCount} 个卡点`);
     alert = true;
   }
-  if (t.fieldChange?.state === "pending") {
-    const detail = t.fieldChange.changes
-      .map((c) => `${c.label} ${c.oldValue || "—"}→${c.newValue}`)
-      .join("；");
-    parts.push((t.fieldChange.changeType === "cancel" ? "关闭审批中：" : "变更审批中：") + detail);
+  if (t.cancelRequest?.state === "pending") {
+    parts.push(`关闭审批中：${t.cancelRequest.reason}`);
   }
-  if (t.fieldChange?.state === "rejected" && !t.fieldChange.resolved) {
+  if (t.cancelRequest?.state === "rejected" && !t.cancelRequest.resolved) {
     parts.push(
-      (t.fieldChange.changeType === "cancel" ? "关闭申请已退回" : "变更已退回") +
-        (t.fieldChange.opinion ? `：${t.fieldChange.opinion}` : ""),
+      "关闭申请已退回" + (t.cancelRequest.opinion ? `：${t.cancelRequest.opinion}` : ""),
     );
     alert = true;
   }

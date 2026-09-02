@@ -252,13 +252,13 @@ func (s *Server) projectBlockerFacts(ctx context.Context, projectID int64) (doma
 		}
 	}
 
-	// 停在当前环节的审批件：关键字段变更、中间或签、KR 终审。
+	// 停在当前环节的审批件（#172 裁决：只剩关闭申请、中间或签、KR 终审）。
 	for _, fc := range changeRows {
-		if fc.State != domain.FieldChangePendingState {
+		if fc.State != domain.CancelRequestPendingState {
 			continue
 		}
 		facts.Approvals = append(facts.Approvals, domain.BlockerApprovalFact{
-			Kind: "field_change", RefID: fc.ID, TaskID: fc.TaskID,
+			Kind: "cancel_request", RefID: fc.ID, TaskID: fc.TaskID,
 			StageSince:  fc.SubmittedAt.Time,
 			ApproverIDs: approverIDs(taskRows, fc.TaskID), ApproverNames: []string{krOwnerNameByTask[fc.TaskID]},
 		})
@@ -295,7 +295,7 @@ func (s *Server) projectBlockerFacts(ctx context.Context, projectID int64) (doma
 	return facts, nil
 }
 
-// approverIDs 取任务所属 KR 负责人（入池、关键字段变更与终审的审批人）。
+// approverIDs 取任务所属 KR 负责人（关闭申请与终审的审批人）。
 func approverIDs(tasks []store.ListProjectTasksRow, taskID int64) []int64 {
 	for _, t := range tasks {
 		if t.ID == taskID && t.KrOwnerID.Valid {

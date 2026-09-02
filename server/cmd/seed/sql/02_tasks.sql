@@ -2,9 +2,9 @@
 --
 -- 状态分布是刻意安排的：
 --   · 6、22 已过截止仍在执行  → 任务超期卡点
---   · 14（终审，5 天）、7（关键字段变更，4 天）停在审批环节 → 审批超时卡点（N=3）
+--   · 14（终审，5 天）、7（关闭申请，4 天）停在审批环节 → 审批超时卡点（N=3，裁决 #172）
 --   · 9、13、29、37、45 的必要输入未就绪         → 显示「等待输入」＋上游未就绪卡点
---   · 8 有一张退回未处理的变更单 → 我的工作「待我处理」
+--   · 8 有一张退回未处理的关闭申请 → 我的工作「待我处理」
 
 INSERT INTO tasks (id, key_result_id, name, owner_id, start_date, end_date, status, created_by,
                    progress, cancel_reason, description, completion_criteria, receiver_scope, created_at, updated_at)
@@ -23,7 +23,7 @@ OVERRIDING SYSTEM VALUE VALUES
  '评估结论对齐业务与运维，确认后作为改造排期基线。', '评审通过并形成会议纪要，结论纳入项目基线。', 'all',
  now() - interval '147 days', now() - interval '134 days'),
 
--- KR2 应用侧适配（进行中，含超期与变更单）
+-- KR2 应用侧适配（进行中，含超期与关闭申请）
 (5, 2, '改造订单模块 SQL 与分页写法', 4, current_date - 140, current_date - 110, 'completed', 4, 100, '',
  '订单模块共 214 处 SQL，重点是分页语法和隐式类型转换。', '改造后订单主流程回归用例全部通过。', 'none',
  now() - interval '142 days', now() - interval '109 days'),

@@ -59,7 +59,7 @@ type BlockerInputFact struct {
 
 // BlockerApprovalFact 停在当前环节等待处理的审批件事实。
 type BlockerApprovalFact struct {
-	Kind          string // field_change／intermediate_review／final_review
+	Kind          string // cancel_request／intermediate_review／final_review
 	RefID         int64
 	TaskID        int64
 	StageSince    time.Time // 进入当前环节的时间（换环节重新计时）
@@ -104,8 +104,9 @@ type Blocker struct {
 	SourceOwnerName string
 }
 
+// #172 裁决：审批超时只对保留的环节计时——成果审核、KR 终审、关闭申请。
 var approvalStageLabels = map[string]string{
-	"field_change":        "关键字段变更审批",
+	"cancel_request":      "关闭申请审批",
 	"intermediate_review": "成果审核",
 	"final_review":        "KR 终审",
 }

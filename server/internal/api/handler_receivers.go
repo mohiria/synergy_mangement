@@ -16,7 +16,7 @@ import (
 // 接收方与接收记录（词汇表「接收方」「接收记录」；模块 PRD §8.6；MW-09）。
 // 业务规则在 domain.receiver，handler 仅编排。
 
-// SetTaskReceivers 配置接收方：接收方属关键字段（§5.2.B），与输入／输出同口径走变更审批。
+// SetTaskReceivers 配置接收方：接收方属关键字段（§5.2.B；#172 裁决改直接生效）。
 func (s *Server) SetTaskReceivers(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64) {
 	var req SetReceiversRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -69,9 +69,8 @@ func (s *Server) SetTaskReceivers(w http.ResponseWriter, r *http.Request, projec
 	if scope != domain.ReceiverScopeMembers {
 		ids = nil
 	}
-	// 接收方是关键字段（§5.2.B）：已入池任务改名单要经所属 KR 负责人审批。
-	outcome, ok := s.routeStructureChange(w, r, taskId, actor, uid, facts)
-	if !ok {
+	// 接收方是关键字段（§5.2.B；#172 裁决改直接生效）。
+	if !s.routeStructureChange(w, r, taskId, actor, uid, facts) {
 		return
 	}
 	nameByID := make(map[int64]string, len(members))
@@ -94,14 +93,13 @@ func (s *Server) SetTaskReceivers(w http.ResponseWriter, r *http.Request, projec
 		NewValue: receiverScopeSummary(scope, names),
 		Request:  raw,
 	}
-	if !s.commitStructureChange(w, r, projectId, taskId, uid, outcome, payload,
-		"接收方改为"+receiverScopeSummary(scope, names)) {
+	if !s.commitStructureChange(w, r, projectId, taskId, uid, payload) {
 		return
 	}
 	s.writeTask(w, r, projectId, taskId, uid, actor)
 }
 
-// receiverScopeSummary 接收方配置的展示文案（变更单差异行用）。
+// receiverScopeSummary 接收方配置的展示文案（动态差异行用）。
 func receiverScopeSummary(scope string, names []string) string {
 	if scope == domain.ReceiverScopeMembers {
 		return domain.ReceiverScopeLabel(scope) + "：" + strings.Join(names, "、")

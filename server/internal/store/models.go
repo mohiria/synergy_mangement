@@ -96,6 +96,7 @@ type DiscussionMention struct {
 	UserID       int64
 }
 
+// 关闭申请（裁决 #172 后仅存 change_type=cancel；历史表名保留）
 type FieldChangeRequest struct {
 	ID                    int64
 	TaskID                int64

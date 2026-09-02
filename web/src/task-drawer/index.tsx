@@ -104,34 +104,35 @@ export default function TaskDrawerHost({
   const saveProgress = (task: Task, progress: number | null) =>
     apiSaveProgress(projectId, task, progress, refresh);
 
-  const decideFieldChange = async (
+  // #172 裁决：变更类审批只剩关闭申请。
+  const decideCancelRequest = async (
     task: Task,
-    changeId: number,
+    requestId: number,
     decision: "approved" | "rejected",
     opinion?: string,
   ) => {
     const res = await client.POST(
-      "/projects/{projectId}/tasks/{taskId}/field-changes/{changeId}/decision",
+      "/projects/{projectId}/tasks/{taskId}/cancel-requests/{requestId}/decision",
       {
-        params: { path: { projectId, taskId: task.id, changeId } },
+        params: { path: { projectId, taskId: task.id, requestId } },
         body: { decision, opinion },
       },
     );
     if (res.data) {
-      message.success(decision === "approved" ? "已通过，新值生效" : "已退回，拟议值作废");
+      message.success(decision === "approved" ? "已通过，任务进入已关闭" : "已退回，任务继续执行");
       refresh();
     } else {
       message.error(res.error?.message ?? "处理失败");
     }
   };
 
-  const abandonFieldChange = async (task: Task, changeId: number) => {
+  const abandonCancelRequest = async (task: Task, requestId: number) => {
     const res = await client.POST(
-      "/projects/{projectId}/tasks/{taskId}/field-changes/{changeId}/abandon",
-      { params: { path: { projectId, taskId: task.id, changeId } } },
+      "/projects/{projectId}/tasks/{taskId}/cancel-requests/{requestId}/abandon",
+      { params: { path: { projectId, taskId: task.id, requestId } } },
     );
     if (res.data) {
-      message.success("已放弃本次变更");
+      message.success("已放弃本次关闭申请");
       refresh();
     } else {
       message.error(res.error?.message ?? "操作失败");
@@ -323,30 +324,26 @@ export default function TaskDrawerHost({
             setCancelReason("");
           },
           saveProgress,
-          // #138：字段就地编辑——路由与文案由后端派生（fieldEditMode / fieldChange.state）。
-          submitFieldChange: async (t, changes, reason) => {
-            const res = await client.POST("/projects/{projectId}/tasks/{taskId}/field-changes", {
+          // #138 就地编辑；#172 裁决：直接修改立即生效，无修改原因。
+          editTaskFields: async (t, changes) => {
+            const res = await client.POST("/projects/{projectId}/tasks/{taskId}/edits", {
               params: { path: { projectId, taskId: t.id } },
-              body: { changes, reason },
+              body: changes,
             });
             if (res.data) {
-              message.success(
-                res.data.fieldChange?.state === "pending"
-                  ? "已提交所属 KR 负责人审批，审批期间旧值继续生效"
-                  : "修改已生效",
-              );
+              message.success("修改已生效");
               refresh();
               return true;
             }
             message.error(res.error?.message ?? "保存失败");
             return false;
           },
-          approveFieldChange: (t, id) => decideFieldChange(t, id, "approved"),
+          approveCancelRequest: (t, id) => decideCancelRequest(t, id, "approved"),
           openFcReject: (t, id) => {
             setFcReject({ task: t, changeId: id });
             setFcRejectOpinion("");
           },
-          abandonFieldChange,
+          abandonCancelRequest,
           openSubmitCompletion: (t) => {
             setCompletionTask(t);
             setCompletionNote("");
@@ -510,7 +507,7 @@ export default function TaskDrawerHost({
         />
       </Modal>
       <Modal
-        title="退回关键字段修改"
+        title="退回关闭申请"
         open={!!fcReject}
         okText="确认退回"
         cancelText="取消"
@@ -518,13 +515,13 @@ export default function TaskDrawerHost({
         okButtonProps={{ danger: true, disabled: !fcRejectOpinion.trim() }}
         onOk={async () => {
           if (fcReject) {
-            await decideFieldChange(fcReject.task, fcReject.changeId, "rejected", fcRejectOpinion.trim());
+            await decideCancelRequest(fcReject.task, fcReject.changeId, "rejected", fcRejectOpinion.trim());
           }
           setFcReject(null);
         }}
       >
         <p className="muted" style={{ marginTop: 0 }}>
-          退回后拟议值作废，旧值保持不变；提交人会看到退回待处理事项。退回意见必填。
+          退回后任务继续执行；提交人会看到退回待处理事项。退回意见必填。
         </p>
         <Input.TextArea
           rows={3}

@@ -104,14 +104,14 @@ func TestImplicitViewerReadsAllButWritesNothing(t *testing.T) {
 		}
 	}
 
-	if _, err := FieldChangeRoute(implicit, me, facts, false); !errors.Is(err, ErrChangeForbidden) {
-		t.Fatalf("隐式访客不应可提交关键字段修改: %v", err)
+	if err := TaskEditRule(implicit, me, facts, false); !errors.Is(err, ErrChangeForbidden) {
+		t.Fatalf("隐式访客不应可修改关键字段: %v", err)
 	}
 	if _, err := CancelRoute(implicit, me, facts, false); !errors.Is(err, ErrCancelForbidden) {
 		t.Fatalf("隐式访客不应可发起关闭申请: %v", err)
 	}
-	if err := DecideFieldChangeRule(implicit, FieldChangePendingState, facts, me, true, ""); !errors.Is(err, ErrNotKrOwner) {
-		t.Fatalf("隐式访客不应可处理变更单: %v", err)
+	if err := DecideCancelRequestRule(implicit, CancelRequestPendingState, facts, me, true, ""); !errors.Is(err, ErrNotKrOwner) {
+		t.Fatalf("隐式访客不应可处理关闭申请: %v", err)
 	}
 	if _, err := DecideCompletionRule(implicit, finalPending, me, true, ""); !errors.Is(err, ErrNotKrOwner) {
 		t.Fatalf("隐式访客不应可终审: %v", err)

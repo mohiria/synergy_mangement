@@ -1,12 +1,8 @@
 package domain
 
-// 结构变更：PRD §5.2.B 把「输入、输入源、输出、接收方」列为关键字段，§5.5 明写已入池任务
-// 更换来源任务或对接人仍执行关键字段修改审批。这类变更改的是关系与名单而不是标量字段，
-// 因此复用同一张变更单（变更类型 structure），差异与待执行动作存 payload，
-// 路由沿用 FieldChangeRoute 的三条：草稿直改、KR 负责人本人免审、其余进审批。
-
-// FieldChangeTypeStructure 变更类型：结构变更。
-const FieldChangeTypeStructure = "structure"
+// 结构变更（输入、输入源、接收方）：#172 裁决后不再走变更单审批——
+// 有编辑权限者直接修改生效（TaskEditRule 同口径），动作写入任务动态并通知所属 KR 负责人。
+// 本文件保留动作枚举与中文字段名，供动态摘要与通知文案使用。
 
 // 结构变更动作。
 // 裁决 H1（#141）：「输出（交付物项）」已从关键字段清单移除，增删不再走结构变更审批
@@ -41,9 +37,3 @@ func ValidStructureOp(op string) bool {
 	return ok
 }
 
-// StructureChangeRoute 路由结构变更（AC-23、§5.2.B）：与关键字段修改完全同源——
-// 草稿由创建人／负责人／可编辑项目者直接生效，已入池任务的 KR 负责人本人免审即时生效，
-// 其余进入审批（同一任务最多一张待审批变更单，与关闭单互斥）。
-func StructureChangeRoute(a Actor, userID int64, t TaskFacts, hasPending bool) (FieldChangeOutcome, error) {
-	return FieldChangeRoute(a, userID, t, hasPending)
-}

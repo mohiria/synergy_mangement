@@ -43,13 +43,8 @@ export const EDGE_TYPE_LABEL: Record<EdgeType, string> = {
 // 「动态与讨论」Tab 上段默认只展示最近 5 条动态，其余折在「展开全部」后面。
 export const ACTIVITY_PREVIEW = 5;
 
-// 结构变更（输入、输入源、输出、接收方）属关键字段：要经所属 KR 负责人审批（AC-23）。
-// 回包里带着待审批的结构变更单，就说明这次没有立即生效。
-export function pendingStructureChange(task: Task | undefined): boolean {
-  const fc = task?.fieldChange;
-  return !!fc && fc.state === "pending" && fc.changeType === "structure";
-}
-
-export function structureMessage(task: Task | undefined, applied: string): string {
-  return pendingStructureChange(task) ? "已提交，待所属 KR 负责人审批后生效" : applied;
+// 结构变更（输入、输入源、接收方）属关键字段：#172 裁决后直接生效，
+// 提示文案不再区分「待审批」分支。
+export function structureMessage(_task: Task | undefined, applied: string): string {
+  return applied;
 }
