@@ -174,7 +174,11 @@ export default function ProjectOverviewPage({
               {o.keyResults.map((k) => {
                 const code = k.code;
                 const isOpen = expanded.has(k.id);
-                const krTasks = tasks.filter((t) => t.keyResultId === k.id);
+                // #170（#8 反馈）：总览 KR 展开的任务列表默认不显示已关闭任务；
+                // 全部任务等其他页面口径不受影响。
+                const krTasks = tasks.filter(
+                  (t) => t.keyResultId === k.id && t.status !== "cancelled",
+                );
                 return (
                   <div key={k.id} className="kr-row">
                     <button type="button" className="kr-main" onClick={() => toggle(k.id)}>
