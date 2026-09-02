@@ -163,6 +163,10 @@ OVERRIDING SYSTEM VALUE VALUES
 (45, 60, 59,   NULL,   '日志审计接入清单',           'required',  current_date - 173, 9,  now() - interval '198 days'),
 (46, 62, 61,   NULL,   '季度安全自查清单',           'required',  current_date - 148, 11, now() - interval '152 days');
 
+-- 裁决 #174：任务来源边不再维护期望时间（展示与超期判断取上游任务截止日期），
+-- 上面按历史留下的取值统一作废；成员来源边保留。
+UPDATE deliverable_edges SET expected_date = NULL WHERE source_task_id IS NOT NULL;
+
 -- ── 输入请求（成员 → 任务 的那几条边）─────────────────────────────────────────
 INSERT INTO input_requests (id, edge_id, provider_id, content_note, state, notified_at, accepted_at, provided_at, provided_text, file_name, object_key, created_at)
 OVERRIDING SYSTEM VALUE VALUES

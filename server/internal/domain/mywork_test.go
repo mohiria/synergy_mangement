@@ -17,6 +17,7 @@ func TestMyWorkGrouping(t *testing.T) {
 	krOwnerOther := i64(7)
 	old := now.AddDate(0, 0, -5)
 	recent := now.AddDate(0, 0, -1)
+	upstreamEnd := now.AddDate(0, 0, -5)
 
 	facts := MyWorkFacts{
 		UserID: me,
@@ -72,8 +73,8 @@ func TestMyWorkGrouping(t *testing.T) {
 			{Key: "task_overdue:44", TaskID: 44, TaskName: "他人任务", ActionOwnerIDs: []int64{9}, TaskOwnerID: 9, KrOwnerID: krOwnerOther, Kind: BlockerTaskOverdue, Missing: "按期完成任务"},
 		},
 		Upstreams: []WorkUpstreamFact{
-			// 我任务的未就绪必要上游 → 等待他人
-			{EdgeID: 71, TargetTaskID: 2, TargetOwnerID: me, SourceTaskID: i64(40), SourceName: "上游任务", InputName: "现场数据包", Ready: false, Necessity: NecessityRequired},
+			// 我任务的未就绪必要上游 → 等待他人（#174：带上游任务截止）
+			{EdgeID: 71, TargetTaskID: 2, TargetOwnerID: me, SourceTaskID: i64(40), SourceName: "上游任务", InputName: "现场数据包", Ready: false, Necessity: NecessityRequired, SourceEndDate: &upstreamEnd},
 			// 参考输入不进等待他人
 			{EdgeID: 72, TargetTaskID: 2, TargetOwnerID: me, SourceTaskID: i64(42), SourceName: "参考上游", InputName: "行业报告", Ready: false, Necessity: NecessityReference},
 			// 已就绪不出现
@@ -128,6 +129,17 @@ func TestMyWorkGrouping(t *testing.T) {
 	// 等待他人：上游 71、我发起的输入请求 43、关闭申请 21、完成申请 33 = 4 条
 	if len(g.Waiting) != 4 {
 		t.Fatalf("等待他人数量 = %d, want 4: %+v", len(g.Waiting), kinds(g.Waiting))
+	}
+	// #174 裁决：上游等待条目按上游任务截止日期展示并判定超期（任务 40 截止 5 天前）。
+	for _, it := range g.Waiting {
+		if it.Kind == "upstream" {
+			if it.Due == nil || !it.Due.Equal(upstreamEnd) {
+				t.Fatalf("上游等待条目应带上游任务截止 %v: %+v", upstreamEnd, it)
+			}
+			if !it.Overdue {
+				t.Fatalf("上游任务已超期，等待条目应标超期: %+v", it)
+			}
+		}
 	}
 
 	// 与我相关的卡点：61、62（63 同源去重、64 已解除）= 2 条

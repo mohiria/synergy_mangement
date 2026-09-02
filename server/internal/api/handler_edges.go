@@ -326,7 +326,12 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 				item.SourceCurrentFiles = &files
 			}
 		}
-		item.ExpectedDate = fromPgDate(e.ExpectedDate)
+		// #174 裁决：任务来源边的「期望时间」取上游任务截止日期（派生）；成员来源取录入值。
+		if e.SourceTaskID.Valid {
+			item.ExpectedDate = fromPgDate(e.SourceEndDate)
+		} else {
+			item.ExpectedDate = fromPgDate(e.ExpectedDate)
+		}
 		if e.Necessity == domain.NecessityRequired {
 			interlock := analysis.Interlocked[e.ID]
 			item.InterlockRisk = &interlock

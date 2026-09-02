@@ -86,6 +86,8 @@ type WorkUpstreamFact struct {
 	InputName       string
 	Ready           bool
 	Necessity       string
+	// SourceEndDate #174 裁决：上游等待条目按上游任务截止日期展示与判定超期。
+	SourceEndDate *time.Time
 }
 
 type MyWorkFacts struct {
@@ -308,9 +310,11 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 			continue // MW-14：下游任务进终态后本人不再等待任何上游
 		}
 		if up.TargetOwnerID == me && !up.Ready && up.Necessity == NecessityRequired && up.SourceTaskID != nil {
+			// #174 裁决：期望时间取消，上游等待条目按上游任务截止日期展示并判定超期。
 			item := WorkItem{
 				Kind: "upstream", Title: "[上游任务] " + up.SourceName + " → " + up.InputName,
 				TaskID: up.SourceTaskID, TaskName: up.SourceName,
+				Due: up.SourceEndDate, Overdue: Overdue(up.SourceEndDate, f.Now),
 				RefID: tid(up.EdgeID), Stage: WorkStageUpstreamWaiting, DrawerTab: "overview",
 			}
 			if src, ok := taskByID[*up.SourceTaskID]; ok && src.DisplayStatus == TaskCancelled {

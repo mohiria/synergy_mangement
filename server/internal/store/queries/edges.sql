@@ -20,6 +20,7 @@ DELETE FROM deliverable_edges WHERE id = $1;
 -- 成员来源由输入请求状态判定，均在 domain/handler 计算）。
 SELECT e.*,
     st.name AS source_task_name, st.status AS source_task_status,
+    st.end_date AS source_end_date,
     st.owner_id AS source_owner_id, su.display_name AS source_owner_name,
     mu.display_name AS source_user_name,
     tt.name AS target_task_name, tt.owner_id AS target_owner_id, tt.created_by AS target_created_by

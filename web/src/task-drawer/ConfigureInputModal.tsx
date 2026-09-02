@@ -151,12 +151,12 @@ export default function ConfigureInputModal({
     }
     setSaving(true);
     setError(null);
+    // #174 裁决：任务来源不再单独填期望时间，展示与超期判断统一取上游任务截止日期。
     const res = await client.POST("/projects/{projectId}/tasks/{taskId}/inputs", {
       params: { path: { projectId, taskId: task.id } },
       body: {
         necessity,
         sourceTaskIds,
-        expectedDate: expectedDate ? expectedDate.format("YYYY-MM-DD") : undefined,
       },
     });
     setSaving(false);
@@ -242,7 +242,8 @@ export default function ConfigureInputModal({
           />
         </div>
         )}
-        {/* #173 裁决：关系类型删除，只填必要性。 */}
+        {/* #173 裁决：关系类型删除，只填必要性。
+            #174 裁决：任务来源无期望时间（统一取上游任务截止日期）；成员来源保留必填期望时间。 */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <div>
             <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>必要性</div>
@@ -256,10 +257,12 @@ export default function ConfigureInputModal({
               ]}
             />
           </div>
-          <div>
-            <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>期望时间（选填）</div>
-            <DatePicker style={{ width: "100%" }} value={expectedDate} onChange={setExpectedDate} />
-          </div>
+          {mode === "member" && (
+            <div>
+              <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>期望时间</div>
+              <DatePicker style={{ width: "100%" }} value={expectedDate} onChange={setExpectedDate} />
+            </div>
+          )}
         </div>
         <div className="notice">
           缺了它下游就做不了时选「必要」，仅供参考时选「参考」；必要输入未就绪的未开始任务显示“等待输入”，

@@ -152,12 +152,12 @@ func applyAddTaskInput(ctx context.Context, qtx *store.Queries, projectID, taskI
 		if src, err := qtx.GetTaskInProject(ctx, store.GetTaskInProjectParams{ID: sourceID, ProjectID: projectID}); err == nil {
 			display = domain.EdgeDisplayName("", src.Name, "")
 		}
+		// #174 裁决：任务来源边不再维护期望时间，展示与超期判断取上游任务截止日期。
 		if _, err := qtx.CreateEdge(ctx, store.CreateEdgeParams{
 			TargetTaskID: taskID,
 			SourceTaskID: pgtype.Int8{Int64: sourceID, Valid: true},
 			Name:         display,
 			Necessity:    string(req.Necessity),
-			ExpectedDate: toPgDate(req.ExpectedDate),
 			CreatedBy:    uid,
 		}); err != nil {
 			return err

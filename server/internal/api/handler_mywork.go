@@ -191,6 +191,11 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 				SourceOwnerID: e.SourceOwnerID.Int64, SourceOwnerName: e.SourceOwnerName.String,
 				InputName: e.Name, Ready: ready, Necessity: e.Necessity,
 			}
+			// #174 裁决：上游等待条目按上游任务截止日期展示与判定超期。
+			if e.SourceEndDate.Valid {
+				end := e.SourceEndDate.Time
+				fact.SourceEndDate = &end
+			}
 			if tf, ok := taskFactByID[e.TargetTaskID]; ok {
 				fact.TargetOwnerID = tf.OwnerID
 			}

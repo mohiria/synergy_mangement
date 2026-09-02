@@ -1960,7 +1960,7 @@ export interface components {
             ready: boolean;
             /**
              * Format: date
-             * @description 期望时间
+             * @description 期望时间（#174 裁决：任务来源边为派生字段＝上游任务截止日期；成员来源边为录入的期望时间）
              */
             expectedDate?: string;
             /** @description 当前用户能否解除该边（派生字段；目标任务负责人／可编辑项目者） */
@@ -1978,10 +1978,8 @@ export interface components {
          */
         CreateTaskInputRequest: {
             necessity: components["schemas"]["Necessity"];
-            /** @description 来源任务（AC-53 多选）；确认后按选择顺序分别建立「来源任务 → 目标任务」交付物边，不可重复 */
+            /** @description 来源任务（AC-53 多选）；确认后按选择顺序分别建立「来源任务 → 目标任务」交付物边，不可重复。#174 裁决：任务来源不再单独填期望时间，统一取上游任务截止日期 */
             sourceTaskIds: number[];
-            /** Format: date */
-            expectedDate?: string;
         };
         ImportTaskItem: {
             name: string;
