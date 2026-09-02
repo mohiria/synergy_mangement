@@ -2218,7 +2218,7 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 	// 输入与输入源是关键字段（#172 裁决：直接生效，边立即建立）
 	inputsURL := func(id int64) string { return fmt.Sprintf("%s/%d/inputs", tasksURL, id) }
 	resp = doJSON(t, carol, http.MethodPost, inputsURL(taskB.Id), api.CreateTaskInputRequest{
-		Necessity: api.Required, EdgeType: api.HardPrerequisite,
+		Necessity: api.Required,
 		SourceTaskIds: []int64{taskA.Id},
 	})
 	wantStructureAccepted(t, resp)
@@ -2229,7 +2229,7 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 
 	// AC-07：反向再建一条反馈边（双向/循环关系保留真实连线）；bob 是 KR 负责人，免审即时生效
 	resp = doJSON(t, bob, http.MethodPost, inputsURL(taskA.Id), api.CreateTaskInputRequest{
-		Necessity: api.Reference, EdgeType: api.Feedback, SourceTaskIds: []int64{taskB.Id},
+		Necessity: api.Reference, SourceTaskIds: []int64{taskB.Id},
 	})
 	wantStructureAccepted(t, resp)
 	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/projects/%d/edges", base, created.Id), nil)
@@ -2253,7 +2253,7 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 
 	// 自环 422；无关成员建边 403
 	resp = doJSON(t, carol, http.MethodPost, inputsURL(taskB.Id), api.CreateTaskInputRequest{
-		Necessity: api.Required, EdgeType: api.Information, SourceTaskIds: []int64{taskB.Id},
+		Necessity: api.Required, SourceTaskIds: []int64{taskB.Id},
 	})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
@@ -2304,24 +2304,24 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 	if detailB.Task.Status != api.TaskStatusNotStarted {
 		t.Fatalf("输入就绪后应回未开始显示: %+v", detailB.Task.Status)
 	}
-	if len(detailB.Outputs) != 1 || detailB.Outputs[0].EdgeType != api.Feedback {
-		t.Fatalf("B 的下游反馈边异常: %+v", detailB.Outputs)
+	if len(detailB.Outputs) != 1 || detailB.Outputs[0].Necessity != api.Reference {
+		t.Fatalf("B 的下游参考边异常: %+v", detailB.Outputs)
 	}
-	// AC-50：协作关系摘要按直接上游／下游分组派生，条目自带对方任务的展示事实
+	// AC-50：协作关系摘要按直接上游／下游分组派生，条目自带对方任务的展示事实（#173：按必要性）
 	if len(detailB.Upstream) != 1 {
 		t.Fatalf("B 的直接上游分组异常: %+v", detailB.Upstream)
 	}
 	up := detailB.Upstream[0]
-	if up.TaskId != taskA.Id || up.TaskName != "采集现场数据" || up.EdgeType != api.HardPrerequisite ||
+	if up.TaskId != taskA.Id || up.TaskName != "采集现场数据" || up.Necessity != api.Required ||
 		!up.Ready || up.OwnerName != bobUser.DisplayName || up.KrDescription == "" || up.TaskStatusLabel == "" {
 		t.Fatalf("直接上游摘要事实异常: %+v", up)
 	}
 	if len(detailB.Downstream) != 1 || detailB.Downstream[0].TaskId != taskA.Id ||
-		detailB.Downstream[0].EdgeType != api.Feedback {
+		detailB.Downstream[0].Necessity != api.Reference {
 		t.Fatalf("B 的直接下游分组异常: %+v", detailB.Downstream)
 	}
-	// CR PRD §8.1：受影响 O／KR 只沿下游硬前置边推导——
-	// A 硬前置指向 B，所以 A 的详情里有 B 所属 KR；B 只有一条指向 A 的反馈边，不产生受影响目标。
+	// CR PRD §8.1（#173 修订）：受影响 O／KR 只沿下游必要边推导——
+	// A 的必要边指向 B，所以 A 的详情里有 B 所属 KR；B 只有一条指向 A 的参考边，不产生受影响目标。
 	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskA.Id), nil)
 	wantStatus(t, resp, http.StatusOK)
 	detailA2 := decodeBody[api.TaskDetail](t, resp)
@@ -2742,7 +2742,7 @@ func TestMultiSourceInputs(t *testing.T) {
 	// AC-53：一次选择两个来源任务 → 分别建立两条边，各自独立未就绪
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, taskC),
 		api.CreateTaskInputRequest{
-			Necessity: api.Required, EdgeType: api.HardPrerequisite,
+			Necessity: api.Required,
 			SourceTaskIds: []int64{taskA, taskB2},
 		})
 	wantStructureAccepted(t, resp)
@@ -2766,9 +2766,9 @@ func TestMultiSourceInputs(t *testing.T) {
 
 	// 同一次选择不可重复、不能选自身、不能空选
 	for _, bad := range []api.CreateTaskInputRequest{
-		{Necessity: api.Required, EdgeType: api.Information, SourceTaskIds: []int64{taskA, taskA}},
-		{Necessity: api.Required, EdgeType: api.Information, SourceTaskIds: []int64{taskA, taskC}},
-		{Necessity: api.Required, EdgeType: api.Information, SourceTaskIds: []int64{}},
+		{Necessity: api.Required, SourceTaskIds: []int64{taskA, taskA}},
+		{Necessity: api.Required, SourceTaskIds: []int64{taskA, taskC}},
+		{Necessity: api.Required, SourceTaskIds: []int64{}},
 	} {
 		resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, taskC), bad)
 		wantStatus(t, resp, http.StatusUnprocessableEntity)
@@ -2946,7 +2946,7 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 	// 下游挂一条来自上游任务的必要输入：上游未完成 ⇒ 上游未就绪卡点，待行动人为上游负责人 bob。
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, downstream.Id),
 		api.CreateTaskInputRequest{
-			Necessity: api.Required, EdgeType: api.HardPrerequisite,
+			Necessity: api.Required,
 			SourceTaskIds: []int64{upstream.Id},
 		})
 	wantStructureAccepted(t, resp)
@@ -3281,17 +3281,18 @@ func TestInterlockAndCriticalPath(t *testing.T) {
 	for _, task := range tasks {
 		byName[task.Name] = task.Id
 	}
-	mkEdge := func(srcName string, dst int64, et api.EdgeType) api.DeliverableEdge {
+	// #173 裁决：互锁与关键路径沿「必要」边分析，参考边不参与。
+	mkEdge := func(srcName string, dst int64, necessity api.Necessity) api.DeliverableEdge {
 		t.Helper()
 		resp := doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, dst), api.CreateTaskInputRequest{
-			Necessity: api.Required, EdgeType: et, SourceTaskIds: []int64{byName[srcName]},
+			Necessity: necessity, SourceTaskIds: []int64{byName[srcName]},
 		})
 		wantStructureAccepted(t, resp)
 		// 输入源标识由来源任务派生（#112）：按来源任务名定位这条边。
 		return edgeOf(t, bob, base, created.Id, dst, srcName)
 	}
-	eAB := mkEdge("任务A", byName["任务B"], api.HardPrerequisite)
-	eBC := mkEdge("任务B", byName["任务C"], api.HardPrerequisite)
+	eAB := mkEdge("任务A", byName["任务B"], api.Required)
+	eBC := mkEdge("任务B", byName["任务C"], api.Required)
 	_ = eAB
 	_ = eBC
 
@@ -3308,14 +3309,14 @@ func TestInterlockAndCriticalPath(t *testing.T) {
 		}
 	}
 
-	// 加 C→B 硬前置构成循环，再加 B→A 反馈边
-	mkEdge("任务C", byName["任务B"], api.HardPrerequisite)
-	mkEdge("任务B", byName["任务A"], api.Feedback)
+	// 加 C→B 必要边构成循环，再加 B→A 参考边
+	mkEdge("任务C", byName["任务B"], api.Required)
+	mkEdge("任务B", byName["任务A"], api.Reference)
 
 	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/projects/%d/edges", base, created.Id), nil)
 	wantStatus(t, resp, http.StatusOK)
 	edges = decodeBody[[]api.DeliverableEdge](t, resp)
-	var interlocked, feedbackOnPath, abOnPath int
+	var interlocked, referenceOnPath, abOnPath int
 	for _, e := range edges {
 		if e.InterlockRisk != nil && *e.InterlockRisk {
 			interlocked++
@@ -3323,18 +3324,18 @@ func TestInterlockAndCriticalPath(t *testing.T) {
 				t.Fatalf("互锁边不应进入关键路径: %+v", e)
 			}
 		}
-		if e.EdgeType == api.Feedback && e.OnCriticalPath != nil {
-			feedbackOnPath++
+		if e.Necessity == api.Reference && (e.OnCriticalPath != nil || e.InterlockRisk != nil) {
+			referenceOnPath++
 		}
 		if e.Id == eAB.Id && e.OnCriticalPath != nil && *e.OnCriticalPath {
 			abOnPath++
 		}
 	}
 	if interlocked != 2 {
-		t.Fatalf("B↔C 两条硬前置边应标互锁: %d", interlocked)
+		t.Fatalf("B↔C 两条必要边应标互锁: %d", interlocked)
 	}
-	if feedbackOnPath != 0 {
-		t.Fatalf("反馈边不应派生关键路径字段")
+	if referenceOnPath != 0 {
+		t.Fatalf("参考边不应派生互锁与关键路径字段")
 	}
 	if abOnPath != 1 {
 		t.Fatalf("循环外的 A→B 应保留在关键路径: %d", abOnPath)
@@ -3425,7 +3426,7 @@ func TestArtifacts(t *testing.T) {
 	}
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, downstreamID),
 		api.CreateTaskInputRequest{
-			Necessity: api.Required, EdgeType: api.HardPrerequisite,
+			Necessity: api.Required,
 			SourceTaskIds: []int64{taskID},
 		})
 	wantStatus(t, resp, http.StatusOK)
@@ -3477,7 +3478,7 @@ func TestArtifacts(t *testing.T) {
 		t.Fatalf("来源关系边异常: %+v", adl.Edges)
 	}
 	if e := adl.Edges[0]; e.TargetTaskId != downstreamID ||
-		e.EdgeTypeLabel != "硬前置交付" || e.TargetTaskName != "按方案执行验收" {
+		e.NecessityLabel != "必要" || e.TargetTaskName != "按方案执行验收" {
 		t.Fatalf("来源关系边字段异常: %+v", e)
 	}
 
@@ -3656,7 +3657,7 @@ func TestProjectReport(t *testing.T) {
 
 	// B 挂一条来自 C 的必要输入边：C 未交付 ⇒ B 的必要输入未就绪（§5.1 等待输入）。
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, taskB.Id),
-		api.CreateTaskInputRequest{Necessity: api.Required, EdgeType: api.HardPrerequisite, SourceTaskIds: []int64{taskC.Id}})
+		api.CreateTaskInputRequest{Necessity: api.Required, SourceTaskIds: []int64{taskC.Id}})
 	wantStructureAccepted(t, resp)
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, taskA.Id),
 		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
@@ -5570,7 +5571,7 @@ func TestWritePathAudit(t *testing.T) {
 		}
 	}
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, down),
-		api.CreateTaskInputRequest{Necessity: api.Required, EdgeType: api.HardPrerequisite, SourceTaskIds: []int64{up}})
+		api.CreateTaskInputRequest{Necessity: api.Required, SourceTaskIds: []int64{up}})
 	wantStructureAccepted(t, resp)
 	edge := edgeOf(t, alice, base, created.Id, down, "上游")
 	resp = doJSON(t, alice, http.MethodDelete, fmt.Sprintf("%s/projects/%d/edges/%d", base, created.Id, edge.Id), nil)
@@ -6468,7 +6469,7 @@ func TestPublicProjectImplicitViewer(t *testing.T) {
 			{KeyResultId: kr1, Name: "插进来的任务", OwnerId: daveUser.ID, StartDate: start, EndDate: end}}}},
 		{"发讨论", http.MethodPost, fmt.Sprintf("/tasks/%d/discussions", taskID), api.CreateDiscussionRequest{Content: "路过说一句"}},
 		{"配置输入", http.MethodPost, fmt.Sprintf("/tasks/%d/inputs", downstreamID), api.CreateTaskInputRequest{
-			Necessity: api.Required, EdgeType: api.HardPrerequisite, SourceTaskIds: []int64{taskID}}},
+			Necessity: api.Required, SourceTaskIds: []int64{taskID}}},
 		{"新增交付物项", http.MethodPost, fmt.Sprintf("/tasks/%d/deliverables", taskID), api.CreateDeliverableRequest{FileName: "插进来的成果.docx"}},
 		{"登记候选内容", http.MethodPost, fmt.Sprintf("/tasks/%d/deliverables/%d/candidate", taskID, deliverableID),
 			api.UploadCandidateRequest{FileName: "覆盖.docx"}},

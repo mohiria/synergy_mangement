@@ -118,7 +118,7 @@ func (s *Server) projectRemindTargets(ctx context.Context, projectID int64) ([]d
 	if err != nil {
 		return nil, err
 	}
-	impact := domain.HardDownstreamNotes(facts.HardEdges, facts.Tasks)
+	impact := domain.RequiredDownstreamNotes(facts.RequiredEdges, facts.Tasks)
 	tasks := make(map[int64]domain.RemindTaskFact, len(facts.Tasks))
 	for _, t := range facts.Tasks {
 		tasks[t.ID] = domain.RemindTaskFact{
@@ -245,8 +245,9 @@ func (s *Server) projectBlockerFacts(ctx context.Context, projectID int64) (doma
 			in.RequestID = ir.ID
 		}
 		facts.Inputs = append(facts.Inputs, in)
-		if e.EdgeType == domain.EdgeHardPrerequisite && e.SourceTaskID.Valid {
-			facts.HardEdges = append(facts.HardEdges, domain.HardEdge{
+		// #173 裁决：互锁与下游影响沿「必要」边。
+		if e.Necessity == domain.NecessityRequired && e.SourceTaskID.Valid {
+			facts.RequiredEdges = append(facts.RequiredEdges, domain.RequiredEdge{
 				ID: e.ID, Source: e.SourceTaskID.Int64, Target: e.TargetTaskID,
 			})
 		}

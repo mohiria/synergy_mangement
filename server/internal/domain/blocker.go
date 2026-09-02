@@ -74,7 +74,7 @@ type BlockerFacts struct {
 	Tasks               []BlockerTaskFact
 	Inputs              []BlockerInputFact
 	Approvals           []BlockerApprovalFact
-	HardEdges           []HardEdge
+	RequiredEdges           []RequiredEdge
 }
 
 // Blocker 一条派生卡点。Key 是合成键（卡点不落库），一键提醒按 Key 寻址。
@@ -124,7 +124,7 @@ func DeriveBlockers(f BlockerFacts) []Blocker {
 	for _, t := range f.Tasks {
 		taskByID[t.ID] = t
 	}
-	downstream := downstreamTaskNames(f.HardEdges, taskByID)
+	downstream := downstreamTaskNames(f.RequiredEdges, taskByID)
 
 	out := []Blocker{}
 	add := func(t BlockerTaskFact, b Blocker) {
@@ -227,8 +227,8 @@ func DeriveBlockers(f BlockerFacts) []Blocker {
 	}
 
 	// —— 硬依赖互锁 ——
-	analysis := AnalyzeHardEdges(f.HardEdges, nil)
-	for _, comp := range interlockComponents(f.HardEdges, analysis.Interlocked) {
+	analysis := AnalyzeRequiredEdges(f.RequiredEdges, nil)
+	for _, comp := range interlockComponents(f.RequiredEdges, analysis.Interlocked) {
 		ownerIDs, ownerNames := interlockActionOwners(comp, taskByID)
 		names := make([]string, 0, len(comp))
 		for _, id := range comp {
@@ -292,7 +292,7 @@ func blockerLevel(severe bool) string {
 }
 
 // interlockComponents 把互锁边聚成连通分量，每个分量是一个互锁环所涉及的任务集合。
-func interlockComponents(edges []HardEdge, interlocked map[int64]bool) [][]int64 {
+func interlockComponents(edges []RequiredEdge, interlocked map[int64]bool) [][]int64 {
 	parent := map[int64]int64{}
 	var find func(int64) int64
 	find = func(x int64) int64 {
@@ -349,9 +349,9 @@ func interlockActionOwners(comp []int64, taskByID map[int64]BlockerTaskFact) ([]
 	return ids, names
 }
 
-// HardDownstreamNotes 沿硬前置边汇总每个任务的下游影响说明（AC-11「定位影响」）；
+// RequiredDownstreamNotes 沿硬前置边汇总每个任务的下游影响说明（AC-11「定位影响」）；
 // 提醒目标与卡点共用同一口径。
-func HardDownstreamNotes(edges []HardEdge, tasks []BlockerTaskFact) map[int64]string {
+func RequiredDownstreamNotes(edges []RequiredEdge, tasks []BlockerTaskFact) map[int64]string {
 	taskByID := make(map[int64]BlockerTaskFact, len(tasks))
 	for _, t := range tasks {
 		taskByID[t.ID] = t
@@ -360,7 +360,7 @@ func HardDownstreamNotes(edges []HardEdge, tasks []BlockerTaskFact) map[int64]st
 }
 
 // downstreamTaskNames 沿硬前置边汇总每个任务的下游影响说明（AC-11「定位影响」）。
-func downstreamTaskNames(edges []HardEdge, taskByID map[int64]BlockerTaskFact) map[int64]string {
+func downstreamTaskNames(edges []RequiredEdge, taskByID map[int64]BlockerTaskFact) map[int64]string {
 	if len(edges) == 0 {
 		return map[int64]string{}
 	}

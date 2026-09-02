@@ -528,7 +528,7 @@ export default function TaskDrawer({
         </b>
         {rels.map((rel) => (
           <button
-            key={`${title}-${rel.taskId}-${rel.edgeType}`}
+            key={`${title}-${rel.taskId}-${rel.necessity}`}
             type="button"
             className="fact-card fact-card-link"
             onClick={() => actions.openTask(rel.taskId)}
@@ -538,9 +538,9 @@ export default function TaskDrawer({
                 {taskCode.get(rel.taskId) ?? ""} · {rel.taskName}
               </b>
               <small
-                title={`${rel.krDescription} · ${rel.edgeTypeLabel ?? ""} · 负责人 ${rel.ownerName} · ${rel.taskStatusLabel}`}
+                title={`${rel.krDescription} · ${rel.necessityLabel ?? ""} · 负责人 ${rel.ownerName} · ${rel.taskStatusLabel}`}
               >
-                {rel.krDescription} · {rel.edgeTypeLabel ?? ""} · 负责人 {rel.ownerName} ·{" "}
+                {rel.krDescription} · {rel.necessityLabel ?? ""} · 负责人 {rel.ownerName} ·{" "}
                 {rel.taskStatusLabel}
               </small>
             </span>
@@ -756,7 +756,6 @@ export default function TaskDrawer({
                   e.sourceTaskCode,
                   e.sourceTaskName,
                   e.sourceOwnerName ? `提供人 ${e.sourceOwnerName}` : "",
-                  e.edgeTypeLabel ?? "",
                 ]
                   .filter(Boolean)
                   .join(" · ");

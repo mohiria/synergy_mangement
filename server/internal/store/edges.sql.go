@@ -12,9 +12,9 @@ import (
 )
 
 const createEdge = `-- name: CreateEdge :one
-INSERT INTO deliverable_edges (target_task_id, source_task_id, source_user_id, name, edge_type, necessity, expected_date, created_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, target_task_id, source_task_id, source_user_id, name, edge_type, necessity, expected_date, created_by, created_at
+INSERT INTO deliverable_edges (target_task_id, source_task_id, source_user_id, name, necessity, expected_date, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, target_task_id, source_task_id, source_user_id, name, necessity, expected_date, created_by, created_at
 `
 
 type CreateEdgeParams struct {
@@ -22,7 +22,6 @@ type CreateEdgeParams struct {
 	SourceTaskID pgtype.Int8
 	SourceUserID pgtype.Int8
 	Name         string
-	EdgeType     string
 	Necessity    string
 	ExpectedDate pgtype.Date
 	CreatedBy    int64
@@ -34,7 +33,6 @@ func (q *Queries) CreateEdge(ctx context.Context, arg CreateEdgeParams) (Deliver
 		arg.SourceTaskID,
 		arg.SourceUserID,
 		arg.Name,
-		arg.EdgeType,
 		arg.Necessity,
 		arg.ExpectedDate,
 		arg.CreatedBy,
@@ -46,7 +44,6 @@ func (q *Queries) CreateEdge(ctx context.Context, arg CreateEdgeParams) (Deliver
 		&i.SourceTaskID,
 		&i.SourceUserID,
 		&i.Name,
-		&i.EdgeType,
 		&i.Necessity,
 		&i.ExpectedDate,
 		&i.CreatedBy,
@@ -68,7 +65,7 @@ func (q *Queries) DeleteEdge(ctx context.Context, id int64) (int64, error) {
 }
 
 const getEdgeInProject = `-- name: GetEdgeInProject :one
-SELECT e.id, e.target_task_id, e.source_task_id, e.source_user_id, e.name, e.edge_type, e.necessity, e.expected_date, e.created_by, e.created_at, tt.owner_id AS target_owner_id, tt.created_by AS target_created_by, tt.status AS target_status,
+SELECT e.id, e.target_task_id, e.source_task_id, e.source_user_id, e.name, e.necessity, e.expected_date, e.created_by, e.created_at, tt.owner_id AS target_owner_id, tt.created_by AS target_created_by, tt.status AS target_status,
     k.owner_id AS target_kr_owner_id
 FROM deliverable_edges e
 JOIN tasks tt ON tt.id = e.target_task_id
@@ -88,7 +85,6 @@ type GetEdgeInProjectRow struct {
 	SourceTaskID    pgtype.Int8
 	SourceUserID    pgtype.Int8
 	Name            string
-	EdgeType        string
 	Necessity       string
 	ExpectedDate    pgtype.Date
 	CreatedBy       int64
@@ -108,7 +104,6 @@ func (q *Queries) GetEdgeInProject(ctx context.Context, arg GetEdgeInProjectPara
 		&i.SourceTaskID,
 		&i.SourceUserID,
 		&i.Name,
-		&i.EdgeType,
 		&i.Necessity,
 		&i.ExpectedDate,
 		&i.CreatedBy,
@@ -167,7 +162,7 @@ func (q *Queries) ListCurrentFilesByProjectTask(ctx context.Context, projectID i
 }
 
 const listEdgeRefsByDeliverableTask = `-- name: ListEdgeRefsByDeliverableTask :many
-SELECT e.id, e.source_task_id, e.name, e.edge_type, e.target_task_id,
+SELECT e.id, e.source_task_id, e.name, e.necessity, e.target_task_id,
     tt.name AS target_task_name
 FROM deliverable_edges e
 JOIN tasks tt ON tt.id = e.target_task_id
@@ -179,7 +174,7 @@ type ListEdgeRefsByDeliverableTaskRow struct {
 	ID             int64
 	SourceTaskID   pgtype.Int8
 	Name           string
-	EdgeType       string
+	Necessity      string
 	TargetTaskID   int64
 	TargetTaskName string
 }
@@ -198,7 +193,7 @@ func (q *Queries) ListEdgeRefsByDeliverableTask(ctx context.Context, sourceTaskI
 			&i.ID,
 			&i.SourceTaskID,
 			&i.Name,
-			&i.EdgeType,
+			&i.Necessity,
 			&i.TargetTaskID,
 			&i.TargetTaskName,
 		); err != nil {
@@ -213,7 +208,7 @@ func (q *Queries) ListEdgeRefsByDeliverableTask(ctx context.Context, sourceTaskI
 }
 
 const listEdgeRefsByProject = `-- name: ListEdgeRefsByProject :many
-SELECT e.id, e.source_task_id, e.name, e.edge_type, e.target_task_id,
+SELECT e.id, e.source_task_id, e.name, e.necessity, e.target_task_id,
     tt.name AS target_task_name
 FROM deliverable_edges e
 JOIN tasks tt ON tt.id = e.target_task_id
@@ -227,7 +222,7 @@ type ListEdgeRefsByProjectRow struct {
 	ID             int64
 	SourceTaskID   pgtype.Int8
 	Name           string
-	EdgeType       string
+	Necessity      string
 	TargetTaskID   int64
 	TargetTaskName string
 }
@@ -246,7 +241,7 @@ func (q *Queries) ListEdgeRefsByProject(ctx context.Context, projectID int64) ([
 			&i.ID,
 			&i.SourceTaskID,
 			&i.Name,
-			&i.EdgeType,
+			&i.Necessity,
 			&i.TargetTaskID,
 			&i.TargetTaskName,
 		); err != nil {
@@ -261,7 +256,7 @@ func (q *Queries) ListEdgeRefsByProject(ctx context.Context, projectID int64) ([
 }
 
 const listEdgesByProject = `-- name: ListEdgesByProject :many
-SELECT e.id, e.target_task_id, e.source_task_id, e.source_user_id, e.name, e.edge_type, e.necessity, e.expected_date, e.created_by, e.created_at,
+SELECT e.id, e.target_task_id, e.source_task_id, e.source_user_id, e.name, e.necessity, e.expected_date, e.created_by, e.created_at,
     st.name AS source_task_name, st.status AS source_task_status,
     st.owner_id AS source_owner_id, su.display_name AS source_owner_name,
     mu.display_name AS source_user_name,
@@ -283,7 +278,6 @@ type ListEdgesByProjectRow struct {
 	SourceTaskID     pgtype.Int8
 	SourceUserID     pgtype.Int8
 	Name             string
-	EdgeType         string
 	Necessity        string
 	ExpectedDate     pgtype.Date
 	CreatedBy        int64
@@ -315,7 +309,6 @@ func (q *Queries) ListEdgesByProject(ctx context.Context, projectID int64) ([]Li
 			&i.SourceTaskID,
 			&i.SourceUserID,
 			&i.Name,
-			&i.EdgeType,
 			&i.Necessity,
 			&i.ExpectedDate,
 			&i.CreatedBy,

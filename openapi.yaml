@@ -3253,8 +3253,8 @@ components:
           format: date-time
     TaskRelation:
       type: object
-      description: 协作关系摘要中的一条直接协作关系（词汇表「协作关系摘要」；PRD §7.5）；不插入交付物中间节点，同一对方任务同一关系类型合并为一条
-      required: [taskId, taskName, krDescription, edgeType, ownerName, taskStatusLabel, ready]
+      description: 协作关系摘要中的一条直接协作关系（词汇表「协作关系摘要」；PRD §7.5；#173 裁决：关系类型删除）；不插入交付物中间节点，同一对方任务同一必要性合并为一条
+      required: [taskId, taskName, krDescription, necessity, ownerName, taskStatusLabel, ready]
       properties:
         taskId:
           type: integer
@@ -3265,11 +3265,11 @@ components:
         krDescription:
           type: string
           description: 对方任务所属 KR 描述（派生字段）
-        edgeType:
-          $ref: "#/components/schemas/EdgeType"
-        edgeTypeLabel:
+        necessity:
+          $ref: "#/components/schemas/Necessity"
+        necessityLabel:
           type: string
-          description: 关系类型显示文案（派生字段；前端不按枚举拼文案）
+          description: 必要性显示文案（派生字段；前端不按枚举拼文案）
         ownerName:
           type: string
           description: 对方任务负责人姓名（派生字段）
@@ -3384,17 +3384,17 @@ components:
           description: 文件大小（字节）
     DeliverableEdgeRef:
       type: object
-      description: 交付物承接的关系边引用（词汇表「交付物边」；裁决 #163：按来源任务归属——本交付物所属任务是这条边的来源）
-      required: [edgeId, edgeType, edgeTypeLabel, targetTaskId, targetTaskName]
+      description: 交付物承接的关系边引用（词汇表「交付物边」；裁决 #163：按来源任务归属——本交付物所属任务是这条边的来源；#173：关系类型删除）
+      required: [edgeId, necessity, necessityLabel, targetTaskId, targetTaskName]
       properties:
         edgeId:
           type: integer
           format: int64
-        edgeType:
-          $ref: "#/components/schemas/EdgeType"
-        edgeTypeLabel:
+        necessity:
+          $ref: "#/components/schemas/Necessity"
+        necessityLabel:
           type: string
-          description: 交付物边类型显示文案（派生字段）
+          description: 必要性显示文案（派生字段）
         targetTaskId:
           type: integer
           format: int64
@@ -3662,18 +3662,14 @@ components:
         readAt:
           type: string
           format: date-time
-    EdgeType:
-      type: string
-      description: 交付物边类型（PRD §4.3；词汇表「交付物边」）
-      enum: [hard_prerequisite, information, handover, feedback]
     Necessity:
       type: string
-      description: 输入必要性（必要／参考）
+      description: 输入必要性（必要／参考；#173 裁决：关系类型删除，只留必要性）
       enum: [required, reference]
     DeliverableEdge:
       type: object
-      description: 交付物边（词汇表；裁决 #163：边不再挂具体交付物项）；就绪状态派生（AC-48 修订）
-      required: [id, name, edgeType, necessity, targetTaskId, ready]
+      description: 交付物边（词汇表；裁决 #163：边不再挂具体交付物项；#173：关系类型删除）；就绪状态派生（AC-48 修订）
+      required: [id, name, necessity, necessityLabel, targetTaskId, ready]
       properties:
         id:
           type: integer
@@ -3683,13 +3679,11 @@ components:
           description: |
             输入源的可读标识（派生字段，裁决 F1）：来源是已有任务时为「编号 · 任务名」，
             来源是指定项目成员时为「所需内容」摘要。读时现算，不由客户端提供。
-        edgeType:
-          $ref: "#/components/schemas/EdgeType"
-        edgeTypeLabel:
-          type: string
-          description: 交付物边类型显示文案（派生字段；前端不按枚举拼文案）
         necessity:
           $ref: "#/components/schemas/Necessity"
+        necessityLabel:
+          type: string
+          description: 必要性显示文案（必要／参考；派生字段，前端不按枚举拼文案）
         sourceTaskId:
           type: integer
           format: int64
@@ -3734,21 +3728,19 @@ components:
           description: 来源为指定项目成员时的输入请求（AC-29／30）
         interlockRisk:
           type: boolean
-          description: 硬前置循环互锁风险（派生字段，AC-10）；循环部分暂停关键路径计算
+          description: 必要边循环互锁风险（派生字段，AC-10；#173 裁决改沿必要边）；循环部分暂停关键路径计算
         onCriticalPath:
           type: boolean
-          description: 位于硬前置关键路径上（派生字段，AC-10）；日期不足时不派生（此时仅硬依赖链）
+          description: 位于必要边关键路径上（派生字段，AC-10；#173 裁决改沿必要边）；日期不足时不派生（此时仅依赖链）
     CreateTaskInputRequest:
       type: object
       description: |
         新增输入要求（来源＝系统内已有任务，AC-28；可一次多选来源任务，AC-53）。
         不收输入名称：输入源的可读标识由来源任务派生（裁决 F1），见 DeliverableEdge.name。
-      required: [necessity, edgeType, sourceTaskIds]
+      required: [necessity, sourceTaskIds]
       properties:
         necessity:
           $ref: "#/components/schemas/Necessity"
-        edgeType:
-          $ref: "#/components/schemas/EdgeType"
         sourceTaskIds:
           type: array
           minItems: 1

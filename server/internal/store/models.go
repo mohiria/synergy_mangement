@@ -63,7 +63,6 @@ type DeliverableEdge struct {
 	SourceTaskID pgtype.Int8
 	SourceUserID pgtype.Int8
 	Name         string
-	EdgeType     string
 	Necessity    string
 	ExpectedDate pgtype.Date
 	CreatedBy    int64

@@ -6,12 +6,11 @@ import TreeTransfer from "../TreeTransfer";
 import type { TreeTransferItem } from "../TreeTransfer";
 import type { components } from "../api/schema";
 import PersonPicker from "../PersonPicker";
-import { EDGE_TYPE_LABEL, structureMessage, type KrOption } from "./shared";
+import { structureMessage, type KrOption } from "./shared";
 
 type Objective = components["schemas"]["Objective"];
 type Task = components["schemas"]["Task"];
 type ProjectMember = components["schemas"]["ProjectMember"];
-type EdgeType = components["schemas"]["EdgeType"];
 
 // 配置输入（AC-28）：默认搜索系统内已有任务，选择来源任务及其交付物建立交付物边。
 export default function ConfigureInputModal({
@@ -39,7 +38,6 @@ export default function ConfigureInputModal({
   const [providerIds, setProviderIds] = useState<number[]>([]);
   const [contentNote, setContentNote] = useState("");
   const [sourceTaskIds, setSourceTaskIds] = useState<number[]>([]);
-  const [edgeType, setEdgeType] = useState<EdgeType>("hard_prerequisite");
   const [necessity, setNecessity] = useState<"required" | "reference">("required");
   const [expectedDate, setExpectedDate] = useState<Dayjs | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -51,7 +49,6 @@ export default function ConfigureInputModal({
       setProviderIds([]);
       setContentNote("");
       setSourceTaskIds([]);
-      setEdgeType("hard_prerequisite");
       setNecessity("required");
       setExpectedDate(null);
       setError(null);
@@ -158,7 +155,6 @@ export default function ConfigureInputModal({
       params: { path: { projectId, taskId: task.id } },
       body: {
         necessity,
-        edgeType,
         sourceTaskIds,
         expectedDate: expectedDate ? expectedDate.format("YYYY-MM-DD") : undefined,
       },
@@ -246,23 +242,8 @@ export default function ConfigureInputModal({
           />
         </div>
         )}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-          <div>
-            <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>关系类型</div>
-            {mode === "member" ? (
-              <Input disabled value="信息输入（成员提供）" />
-            ) : (
-            <Select
-              style={{ width: "100%" }}
-              value={edgeType}
-              onChange={setEdgeType}
-              options={(Object.keys(EDGE_TYPE_LABEL) as EdgeType[]).map((k) => ({
-                value: k,
-                label: EDGE_TYPE_LABEL[k],
-              }))}
-            />
-            )}
-          </div>
+        {/* #173 裁决：关系类型删除，只填必要性。 */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <div>
             <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>必要性</div>
             <Select
@@ -281,7 +262,7 @@ export default function ConfigureInputModal({
           </div>
         </div>
         <div className="notice">
-          某项信息决定下游的交付口径时，请选择「硬前置交付」；必要输入未就绪的未开始任务显示“等待输入”，
+          缺了它下游就做不了时选「必要」，仅供参考时选「参考」；必要输入未就绪的未开始任务显示“等待输入”，
           但不阻断开始、上传文件或提交完成申请，任务开始后该状态与“上游未就绪”卡点自动消失。
           偶发的外部材料不产生外部账号：由内部协调人（项目成员）作为对接人收集后代为提交。
         </div>

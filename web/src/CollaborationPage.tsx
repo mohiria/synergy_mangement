@@ -661,12 +661,12 @@ export default function CollaborationPage({
     if (selectedTask == null) return null;
     const set = new Set<number>([selectedTask]);
     if (impactMode) {
-      // 影响路径（AC-42）：沿下游硬前置边可达的连续链路。
+      // 影响路径（AC-42；#173 裁决改沿必要边）：沿下游必要边可达的连续链路。
       const queue = [selectedTask];
       while (queue.length > 0) {
         const cur = queue.shift()!;
         for (const e of edges) {
-          if (e.edgeType === "hard_prerequisite" && e.sourceTaskId === cur && !set.has(e.targetTaskId)) {
+          if (e.necessity === "required" && e.sourceTaskId === cur && !set.has(e.targetTaskId)) {
             set.add(e.targetTaskId);
             queue.push(e.targetTaskId);
           }
@@ -779,7 +779,8 @@ export default function CollaborationPage({
     if (listSort === "ready") {
       rows.sort((a, b) => Number(a.ready) - Number(b.ready));
     } else if (listSort === "type") {
-      rows.sort((a, b) => a.edgeType.localeCompare(b.edgeType));
+      // #173：类型列改为必要性。
+      rows.sort((a, b) => a.necessity.localeCompare(b.necessity));
     } else {
       rows.sort((a, b) => a.id - b.id);
     }
@@ -834,16 +835,16 @@ export default function CollaborationPage({
     </defs>
   );
 
-  // #147 边默认灰色系（PRD §11）：普通／成果／硬前置灰实线、反馈灰虚线、互锁红虚线；
-  // 非互锁的未就绪关系用橙色异常提示（原型 anomaly）；关键路径只加粗不上色（§6.3），
-  // 普通硬前置不再默认加粗——「默认状态不使用多种蓝色、青色或线宽强调普通关系」。
+  // #147 边默认灰色系（PRD §11）；#173 裁决：样式只分三类——必要灰实线、参考灰虚线、
+  // 互锁红虚线常驻；非互锁的未就绪关系用橙色异常提示（原型 anomaly）；
+  // 关键路径只加粗不上色（§6.3）。
   const edgeStroke = (e: DeliverableEdge) => {
     if (e.interlockRisk) return { stroke: "#bd3e49", width: 2.5, dash: "6 4" };
-    const dash = e.edgeType === "feedback" ? "6 4" : undefined;
+    const dash = e.necessity === "reference" ? "6 4" : undefined;
     if (!e.ready) return { stroke: "#a86917", width: 2, dash };
     return {
       stroke: "#929dad",
-      width: e.onCriticalPath ? 2.4 : e.edgeType === "hard_prerequisite" ? 1.7 : 1.6,
+      width: e.onCriticalPath ? 2.4 : 1.6,
       dash,
     };
   };
@@ -1042,7 +1043,7 @@ export default function CollaborationPage({
     if (selectedTask == null) return false;
     if (impactMode) {
       return (
-        e.edgeType === "hard_prerequisite" &&
+        e.necessity === "required" &&
         e.sourceTaskId != null &&
         neighborIds != null &&
         neighborIds.has(e.sourceTaskId) &&
@@ -1065,7 +1066,7 @@ export default function CollaborationPage({
     const mx = (from.x + from.w / 2 + to.x + to.w / 2) / 2;
     const my = (from.y + from.h / 2 + to.y + to.h / 2) / 2;
     // 标签截断：交付物名可能是整句描述，常驻标签太长会横穿画布；全称看 <title>。
-    const label = `${e.interlockRisk ? "互锁" : e.edgeTypeLabel} · ${e.name}`;
+    const label = `${e.interlockRisk ? "互锁" : e.necessityLabel} · ${e.name}`;
     const shortLabel = label.length > 22 ? `${label.slice(0, 22)}…` : label;
     return (
       <g key={e.id} className={cls} opacity={dim ? 0.15 : 1}>
@@ -1219,14 +1220,11 @@ export default function CollaborationPage({
             <b>{selectedEdgeObj.targetTaskName ?? "—"}</b>
           </button>
         </div>
+        {/* #173 裁决：关系类型删除，边详情只显必要性。 */}
         <div className="gi-grid">
           <div className="gi-prop">
-            <span>关系类型</span>
-            <strong>{selectedEdgeObj.edgeTypeLabel}</strong>
-          </div>
-          <div className="gi-prop">
             <span>必要性</span>
-            <strong>{selectedEdgeObj.necessity === "required" ? "必要" : "参考"}</strong>
+            <strong>{selectedEdgeObj.necessityLabel}</strong>
           </div>
           <div className="gi-prop">
             <span>提供方</span>
@@ -1249,8 +1247,8 @@ export default function CollaborationPage({
                 ? "互锁，暂停计算"
                 : selectedEdgeObj.onCriticalPath
                   ? "关键路径"
-                  : selectedEdgeObj.edgeType === "hard_prerequisite"
-                    ? "硬依赖链"
+                  : selectedEdgeObj.necessity === "required"
+                    ? "依赖链"
                     : "不参与"}
             </strong>
           </div>
@@ -1259,18 +1257,18 @@ export default function CollaborationPage({
             这里把「为什么算互锁」和「为什么没有关键路径」讲清，否则用户只看到一条红虚线。 */}
         {selectedEdgeObj.interlockRisk && (
           <div className="gi-fact risk-high_risk">
-            <span>硬前置循环 · 互锁风险</span>
+            <span>必要输入循环 · 互锁风险</span>
             <small>
-              两端任务互相把对方的交付当作硬前置，谁都无法先开始；循环内的边暂停参与关键路径计算，
+              两端任务互相把对方的交付当作必要输入，谁都无法先开始；循环内的边暂停参与关键路径计算，
               需由环内各任务所属 KR 负责人协商拆环。
             </small>
           </div>
         )}
-        {selectedEdgeObj.edgeType === "hard_prerequisite" &&
+        {selectedEdgeObj.necessity === "required" &&
           !selectedEdgeObj.interlockRisk &&
           selectedEdgeObj.onCriticalPath == null && (
             <div className="muted gi-row" title="相关任务缺少完整的开始／截止时间">
-              关键路径未计算：系统只确认硬依赖链，不宣称关键路径。
+              关键路径未计算：系统只确认依赖链，不宣称关键路径。
             </div>
           )}
         <div className="gi-block">
@@ -1437,7 +1435,7 @@ export default function CollaborationPage({
                   <b>
                     {src} → {inspectorDetail.task.code}
                   </b>
-                  <small>{e.edgeTypeLabel}</small>
+                  <small>{e.necessityLabel}</small>
                 </span>
                 <span className={`gi-badge ${e.ready ? "ready" : "risk-warning"}`}>
                   {e.ready ? "已就绪" : "未就绪"}
@@ -1844,7 +1842,7 @@ export default function CollaborationPage({
                     options={[
                       { value: "id", label: "按创建顺序" },
                       { value: "ready", label: "按就绪状态" },
-                      { value: "type", label: "按关系类型" },
+                      { value: "type", label: "按必要性" },
                     ]}
                   />
                 </label>
@@ -1854,7 +1852,6 @@ export default function CollaborationPage({
                   <thead>
                     <tr>
                       <th>来源任务／成员</th>
-                      <th style={{ width: 110 }}>类型</th>
                       <th style={{ width: 70 }}>必要性</th>
                       <th style={{ width: 150 }}>当前交付物</th>
                       <th>目标任务</th>
@@ -1867,7 +1864,7 @@ export default function CollaborationPage({
                   <tbody>
                     {listRows.length === 0 && (
                       <tr>
-                        <td colSpan={9}>
+                        <td colSpan={8}>
                           <div className="empty">没有匹配的协作关系</div>
                         </td>
                       </tr>
@@ -1877,8 +1874,7 @@ export default function CollaborationPage({
                         <td title={e.sourceTaskName ?? e.inputRequest?.providerName ?? "—"}>
                           {e.sourceTaskName ?? e.inputRequest?.providerName ?? "—"}
                         </td>
-                        <td title={e.edgeTypeLabel}>{e.edgeTypeLabel}</td>
-                        <td>{e.necessity === "required" ? "必要" : "参考"}</td>
+                        <td>{e.necessityLabel}</td>
                         {/* 裁决 J1（#142）＋#163：「当前交付物」列显示来源任务当前文件的「类型 · 大小」
                             （类型由服务端派生），多项时显示「N 项」并悬停列出各项「文件名 · 大小」。 */}
                         <td title={edgeCurrentTitle(e)}>
@@ -2346,8 +2342,9 @@ export default function CollaborationPage({
                 <span><i className="lg-task" />任务</span>
                 <span><i className="lg-warning" />预警</span>
                 <span><i className="lg-risk" />高风险／卡点</span>
-                <span><i className="lg-line" />普通关系</span>
-                <span><i className="lg-feedback" />反馈</span>
+                {/* #173 裁决：边图例只留三类——必要（实线）、参考（虚线）、互锁异常（红虚线常驻）。 */}
+                <span><i className="lg-line" />必要</span>
+                <span><i className="lg-feedback" />参考</span>
                 <span><i className="lg-interlock" />互锁</span>
               </div>
               {/* 小地图（PRD §6.4，原型 cp-minimap）：内容全貌＋当前视口框。 */}

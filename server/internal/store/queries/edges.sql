@@ -1,6 +1,6 @@
 -- name: CreateEdge :one
-INSERT INTO deliverable_edges (target_task_id, source_task_id, source_user_id, name, edge_type, necessity, expected_date, created_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO deliverable_edges (target_task_id, source_task_id, source_user_id, name, necessity, expected_date, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 
 -- name: GetEdgeInProject :one
@@ -61,7 +61,7 @@ ORDER BY df.id;
 
 -- name: ListEdgeRefsByDeliverableTask :many
 -- 交付物承接的关系边（AC-17 归档视角「来源关系边」列；裁决 #163：按来源任务归属）。
-SELECT e.id, e.source_task_id, e.name, e.edge_type, e.target_task_id,
+SELECT e.id, e.source_task_id, e.name, e.necessity, e.target_task_id,
     tt.name AS target_task_name
 FROM deliverable_edges e
 JOIN tasks tt ON tt.id = e.target_task_id
@@ -70,7 +70,7 @@ ORDER BY e.id;
 
 -- name: ListEdgeRefsByProject :many
 -- 同上，项目全量：归档视角一次性取齐所有来源任务的输出边。
-SELECT e.id, e.source_task_id, e.name, e.edge_type, e.target_task_id,
+SELECT e.id, e.source_task_id, e.name, e.necessity, e.target_task_id,
     tt.name AS target_task_name
 FROM deliverable_edges e
 JOIN tasks tt ON tt.id = e.target_task_id

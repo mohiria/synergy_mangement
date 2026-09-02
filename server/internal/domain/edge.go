@@ -2,19 +2,15 @@ package domain
 
 import "errors"
 
-// 交付物边类型与必要性（词汇表「交付物边」；PRD §4.3）。
+// 交付物边必要性（词汇表「交付物边」；PRD §4.3）。
+// #173 裁决：关系类型（硬前置交付／信息输入／正式成果接收／迭代反馈）删除，只留必要性；
+// 互锁检测、关键路径、影响路径与受影响 O/KR 推导一律沿「必要」边。
 const (
-	EdgeHardPrerequisite = "hard_prerequisite"
-	EdgeInformation      = "information"
-	EdgeHandover         = "handover"
-	EdgeFeedback         = "feedback"
-
 	NecessityRequired  = "required"
 	NecessityReference = "reference"
 )
 
 var (
-	ErrEdgeTypeInvalid   = errors.New("交付物边类型不合法")
 	ErrNecessityInvalid  = errors.New("必要性不合法")
 	ErrEdgeSelfLoop      = errors.New("不能以任务自身作为输入来源")
 	ErrEdgeSourceMissing = errors.New("必须指定来源任务或对接成员")
@@ -22,7 +18,6 @@ var (
 
 // NewEdge 待建立的交付物边输入。名称不在这里——它由已有事实派生（EdgeDisplayName、#112）。
 type NewEdge struct {
-	EdgeType     string
 	Necessity    string
 	SourceTaskID *int64
 	SourceUserID *int64
@@ -31,11 +26,6 @@ type NewEdge struct {
 
 // ValidateNewEdge 校验交付物边输入（AC-28、§4.4）；循环关系经多任务表达，自环禁止。
 func ValidateNewEdge(e NewEdge) error {
-	switch e.EdgeType {
-	case EdgeHardPrerequisite, EdgeInformation, EdgeHandover, EdgeFeedback:
-	default:
-		return ErrEdgeTypeInvalid
-	}
 	switch e.Necessity {
 	case NecessityRequired, NecessityReference:
 	default:
@@ -79,7 +69,6 @@ var ErrEdgeSourceDuplicated = errors.New("来源任务不能重复选择")
 
 // NewTaskInputs 一次配置产生的多条「来源任务 → 目标任务」输入（AC-53：来源任务可多选）。
 type NewTaskInputs struct {
-	EdgeType      string
 	Necessity     string
 	SourceTaskIDs []int64
 	TargetTaskID  int64
@@ -98,7 +87,7 @@ func ValidateNewTaskInputs(in NewTaskInputs) error {
 		}
 		seen[id] = struct{}{}
 		if err := ValidateNewEdge(NewEdge{
-			EdgeType: in.EdgeType, Necessity: in.Necessity,
+			Necessity:    in.Necessity,
 			SourceTaskID: &id, TargetTaskID: in.TargetTaskID,
 		}); err != nil {
 			return err

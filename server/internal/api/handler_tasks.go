@@ -461,7 +461,7 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 	relFacts := make([]domain.RelationEdgeFact, 0, len(allEdges))
 	for _, e := range allEdges {
 		relFacts = append(relFacts, domain.RelationEdgeFact{
-			EdgeType: string(e.EdgeType), SourceTaskID: e.SourceTaskId,
+			Necessity: string(e.Necessity), SourceTaskID: e.SourceTaskId,
 			TargetTaskID: e.TargetTaskId, Ready: e.Ready,
 		})
 	}
@@ -487,8 +487,8 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 				TaskId:          other.Id,
 				TaskName:        other.Name,
 				KrDescription:   krDescByID[other.KeyResultId],
-				EdgeType:        EdgeType(ref.EdgeType),
-				EdgeTypeLabel:   optString(domain.EdgeTypeLabel(ref.EdgeType)),
+				Necessity:       Necessity(ref.Necessity),
+				NecessityLabel:  optString(domain.NecessityLabel(ref.Necessity)),
 				OwnerName:       other.OwnerName,
 				TaskStatusLabel: other.StatusLabel,
 				Ready:           ref.Ready,
@@ -496,7 +496,7 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		}
 		return out
 	}
-	// 受影响 O／KR（协作关系 PRD §8.1）：只沿下游硬前置边推导，规则在 domain。
+	// 受影响 O／KR（协作关系 PRD §8.1；#173 裁决）：只沿下游必要边推导，规则在 domain。
 	objectiveRows, err := s.q.ListObjectives(r.Context(), projectId)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -524,7 +524,7 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 	impactEdges := make([]domain.ImpactEdgeFact, 0, len(allEdges))
 	for _, e := range allEdges {
 		impactEdges = append(impactEdges, domain.ImpactEdgeFact{
-			SourceTaskID: e.SourceTaskId, TargetTaskID: e.TargetTaskId, EdgeType: string(e.EdgeType),
+			SourceTaskID: e.SourceTaskId, TargetTaskID: e.TargetTaskId, Necessity: string(e.Necessity),
 		})
 	}
 	impacted := make([]ImpactedTarget, 0)

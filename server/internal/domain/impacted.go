@@ -11,11 +11,11 @@ type ImpactTaskFact struct {
 	ObjectiveTitle string
 }
 
-// ImpactEdgeFact 推导用的交付物边事实。
+// ImpactEdgeFact 推导用的交付物边事实（#173 裁决：关系类型删除，只看必要性）。
 type ImpactEdgeFact struct {
 	SourceTaskID *int64
 	TargetTaskID int64
-	EdgeType     string
+	Necessity    string
 }
 
 // ImpactedTarget 一条受影响的 O／KR（系统推导）。
@@ -26,16 +26,16 @@ type ImpactedTarget struct {
 	ObjectiveTitle string
 }
 
-// ImpactedObjectives 派生受影响 O／KR（协作关系 PRD §8.1）：从当前任务出发沿
-// 下游硬前置交付物边做传递闭包，收集途经任务所属的 KR 及其 O。
-// 只认硬前置——反馈、信息同步与交接这类边表达的是协作而不是「我不交付你就做不了」，
-// 自动把它们算成受影响会让影响面失真；成员来源的边没有对方任务，同样不参与。
+// ImpactedObjectives 派生受影响 O／KR（协作关系 PRD §8.1；#173 裁决修订）：
+// 从当前任务出发沿下游「必要」交付物边做传递闭包，收集途经任务所属的 KR 及其 O。
+// 只认必要——参考输入表达的是协作参考而不是「我不交付你就做不了」，
+// 自动把它算成受影响会让影响面失真；成员来源的边没有对方任务，同样不参与。
 // 起点任务自己所属的 KR 是「所属」而非「受影响」，即便被环形关系绕回来也不收。
 // 同一 KR 去重，按广度优先首次到达的顺序稳定输出；无结果时返回空切片。
 func ImpactedObjectives(taskID int64, tasks map[int64]ImpactTaskFact, edges []ImpactEdgeFact) []ImpactedTarget {
 	downstream := make(map[int64][]int64, len(edges))
 	for _, e := range edges {
-		if e.SourceTaskID == nil || e.EdgeType != EdgeHardPrerequisite {
+		if e.SourceTaskID == nil || e.Necessity != NecessityRequired {
 			continue
 		}
 		downstream[*e.SourceTaskID] = append(downstream[*e.SourceTaskID], e.TargetTaskID)

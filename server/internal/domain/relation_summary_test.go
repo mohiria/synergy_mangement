@@ -2,9 +2,10 @@ package domain
 
 import "testing"
 
-// PRD §7.5、词汇表「协作关系摘要」：任务概况按直接上游／直接下游分组展示直接协作关系；
-// 只展示对方为系统内任务的关系（指定项目成员输入没有对方任务），不插入交付物中间节点，
-// 因此同一对方任务的同一关系类型合并为一条，全部边就绪才算就绪。
+// PRD §7.5、词汇表「协作关系摘要」（#173 裁决：关系类型删除，只留必要性）：
+// 任务概况按直接上游／直接下游分组展示直接协作关系；只展示对方为系统内任务的关系
+// （指定项目成员输入没有对方任务），不插入交付物中间节点，因此同一对方任务的
+// 同一必要性合并为一条，全部边就绪才算就绪。
 func TestRelationSummary(t *testing.T) {
 	cases := []struct {
 		name           string
@@ -24,7 +25,7 @@ func TestRelationSummary(t *testing.T) {
 			name:   "指定项目成员输入没有对方任务，不进入上游摘要",
 			taskID: 1,
 			edges: []RelationEdgeFact{
-				{EdgeType: EdgeHandover, SourceTaskID: nil, TargetTaskID: 1, Ready: false},
+				{Necessity: NecessityRequired, SourceTaskID: nil, TargetTaskID: 1, Ready: false},
 			},
 			wantUpstream:   []TaskRelationRef{},
 			wantDownstream: []TaskRelationRef{},
@@ -33,32 +34,32 @@ func TestRelationSummary(t *testing.T) {
 			name:   "来源任务进上游、本任务为来源的进下游",
 			taskID: 1,
 			edges: []RelationEdgeFact{
-				{EdgeType: EdgeHardPrerequisite, SourceTaskID: i64(2), TargetTaskID: 1, Ready: true},
-				{EdgeType: EdgeHandover, SourceTaskID: i64(1), TargetTaskID: 3, Ready: false},
+				{Necessity: NecessityRequired, SourceTaskID: i64(2), TargetTaskID: 1, Ready: true},
+				{Necessity: NecessityReference, SourceTaskID: i64(1), TargetTaskID: 3, Ready: false},
 			},
-			wantUpstream:   []TaskRelationRef{{TaskID: 2, EdgeType: EdgeHardPrerequisite, Ready: true}},
-			wantDownstream: []TaskRelationRef{{TaskID: 3, EdgeType: EdgeHandover, Ready: false}},
+			wantUpstream:   []TaskRelationRef{{TaskID: 2, Necessity: NecessityRequired, Ready: true}},
+			wantDownstream: []TaskRelationRef{{TaskID: 3, Necessity: NecessityReference, Ready: false}},
 		},
 		{
-			name:   "同一对方任务同一关系类型的多条边合并，任一未就绪即未就绪",
+			name:   "同一对方任务同一必要性的多条边合并，任一未就绪即未就绪",
 			taskID: 1,
 			edges: []RelationEdgeFact{
-				{EdgeType: EdgeHardPrerequisite, SourceTaskID: i64(2), TargetTaskID: 1, Ready: true},
-				{EdgeType: EdgeHardPrerequisite, SourceTaskID: i64(2), TargetTaskID: 1, Ready: false},
+				{Necessity: NecessityRequired, SourceTaskID: i64(2), TargetTaskID: 1, Ready: true},
+				{Necessity: NecessityRequired, SourceTaskID: i64(2), TargetTaskID: 1, Ready: false},
 			},
-			wantUpstream:   []TaskRelationRef{{TaskID: 2, EdgeType: EdgeHardPrerequisite, Ready: false}},
+			wantUpstream:   []TaskRelationRef{{TaskID: 2, Necessity: NecessityRequired, Ready: false}},
 			wantDownstream: []TaskRelationRef{},
 		},
 		{
-			name:   "同一对方任务的不同关系类型各成一条，按首次出现排序",
+			name:   "同一对方任务的必要与参考各成一条，按首次出现排序",
 			taskID: 1,
 			edges: []RelationEdgeFact{
-				{EdgeType: EdgeInformation, SourceTaskID: i64(2), TargetTaskID: 1, Ready: true},
-				{EdgeType: EdgeHardPrerequisite, SourceTaskID: i64(2), TargetTaskID: 1, Ready: true},
+				{Necessity: NecessityReference, SourceTaskID: i64(2), TargetTaskID: 1, Ready: true},
+				{Necessity: NecessityRequired, SourceTaskID: i64(2), TargetTaskID: 1, Ready: true},
 			},
 			wantUpstream: []TaskRelationRef{
-				{TaskID: 2, EdgeType: EdgeInformation, Ready: true},
-				{TaskID: 2, EdgeType: EdgeHardPrerequisite, Ready: true},
+				{TaskID: 2, Necessity: NecessityReference, Ready: true},
+				{TaskID: 2, Necessity: NecessityRequired, Ready: true},
 			},
 			wantDownstream: []TaskRelationRef{},
 		},
@@ -66,17 +67,17 @@ func TestRelationSummary(t *testing.T) {
 			name:   "双向关系同时出现在上游与下游",
 			taskID: 1,
 			edges: []RelationEdgeFact{
-				{EdgeType: EdgeHandover, SourceTaskID: i64(2), TargetTaskID: 1, Ready: true},
-				{EdgeType: EdgeFeedback, SourceTaskID: i64(1), TargetTaskID: 2, Ready: false},
+				{Necessity: NecessityRequired, SourceTaskID: i64(2), TargetTaskID: 1, Ready: true},
+				{Necessity: NecessityReference, SourceTaskID: i64(1), TargetTaskID: 2, Ready: false},
 			},
-			wantUpstream:   []TaskRelationRef{{TaskID: 2, EdgeType: EdgeHandover, Ready: true}},
-			wantDownstream: []TaskRelationRef{{TaskID: 2, EdgeType: EdgeFeedback, Ready: false}},
+			wantUpstream:   []TaskRelationRef{{TaskID: 2, Necessity: NecessityRequired, Ready: true}},
+			wantDownstream: []TaskRelationRef{{TaskID: 2, Necessity: NecessityReference, Ready: false}},
 		},
 		{
 			name:   "与本任务无关的边不进入任一分组",
 			taskID: 1,
 			edges: []RelationEdgeFact{
-				{EdgeType: EdgeHandover, SourceTaskID: i64(2), TargetTaskID: 3, Ready: true},
+				{Necessity: NecessityRequired, SourceTaskID: i64(2), TargetTaskID: 3, Ready: true},
 			},
 			wantUpstream:   []TaskRelationRef{},
 			wantDownstream: []TaskRelationRef{},

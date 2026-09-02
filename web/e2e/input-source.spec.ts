@@ -32,9 +32,9 @@ test.describe("输入源", () => {
       expect(f.nowrap).toBe("nowrap");
       expect(f.title).toBeTruthy();
     }
-    // 来源为已有任务的行读作「编号 · 标题 · 提供人 · 关系类型」，编号带 T 前缀（#102）
+    // 来源为已有任务的行读作「编号 · 标题 · 提供人」，编号带 T 前缀（#102；#173 去关系类型）
     const fromTask = facts.find((f) => /T\d+\.\d+\.\d+/.test(f.title ?? ""));
-    expect(fromTask?.title).toMatch(/^T\d+\.\d+\.\d+ · .+ · 提供人 .+ · .+$/);
+    expect(fromTask?.title).toMatch(/^T\d+\.\d+\.\d+ · .+ · 提供人 .+$/);
   });
 
   test("点输入源打开来源任务详情，关闭后逐级返回并回到原来的 Tab", async ({ page }) => {

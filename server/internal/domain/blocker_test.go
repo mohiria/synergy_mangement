@@ -160,14 +160,14 @@ func TestDeriveBlockersEntryAndExit(t *testing.T) {
 				ID: 2, Name: "地质勘察", Status: TaskInProgress, OwnerID: 6, OwnerName: "孙六",
 				KrID: 11, KrOwnerID: &kr8, KrOwnerName: "周八", StartDate: blockerDay(-3), EndDate: blockerDay(5),
 			})
-			f.HardEdges = []HardEdge{{ID: 200, Source: 1, Target: 2}, {ID: 201, Source: 2, Target: 1}}
+			f.RequiredEdges = []RequiredEdge{{ID: 200, Source: 1, Target: 2}, {ID: 201, Source: 2, Target: 1}}
 		}, "interlock:1"},
 		{"无环不算互锁", func(f *BlockerFacts) {
 			f.Tasks = append(f.Tasks, BlockerTaskFact{
 				ID: 2, Name: "地质勘察", Status: TaskInProgress, OwnerID: 6,
 				KrID: 11, KrOwnerID: &kr7, StartDate: blockerDay(-3), EndDate: blockerDay(5),
 			})
-			f.HardEdges = []HardEdge{{ID: 200, Source: 1, Target: 2}}
+			f.RequiredEdges = []RequiredEdge{{ID: 200, Source: 1, Target: 2}}
 		}, ""},
 	}
 
@@ -228,7 +228,7 @@ func TestDeriveBlockersActionOwners(t *testing.T) {
 				ID: 2, Name: "地质勘察", Status: TaskInProgress, OwnerID: 6, OwnerName: "孙六",
 				KrID: 11, KrOwnerID: &kr8, KrOwnerName: "周八", StartDate: blockerDay(-3), EndDate: blockerDay(5),
 			})
-			f.HardEdges = []HardEdge{{ID: 200, Source: 1, Target: 2}, {ID: 201, Source: 2, Target: 1}}
+			f.RequiredEdges = []RequiredEdge{{ID: 200, Source: 1, Target: 2}, {ID: 201, Source: 2, Target: 1}}
 		}, "interlock:1", []string{"赵七", "周八"}},
 	}
 	for _, tc := range cases {
@@ -312,7 +312,7 @@ func TestDeriveBlockersInterlockAndImpact(t *testing.T) {
 		ID: 2, Name: "地质勘察", Status: TaskInProgress, OwnerID: 6, OwnerName: "孙六",
 		KrID: 11, KrOwnerID: &kr8, KrOwnerName: "周八", StartDate: blockerDay(-3), EndDate: blockerDay(5),
 	})
-	f.HardEdges = []HardEdge{{ID: 200, Source: 1, Target: 2}, {ID: 201, Source: 2, Target: 1}}
+	f.RequiredEdges = []RequiredEdge{{ID: 200, Source: 1, Target: 2}, {ID: 201, Source: 2, Target: 1}}
 	got := DeriveBlockers(f)
 	if findBlocker(got, "interlock:1") == nil || findBlocker(got, "interlock:2") == nil {
 		t.Fatalf("互锁应为环内每个任务各派生一条，实际 %+v", got)
@@ -325,7 +325,7 @@ func TestDeriveBlockersInterlockAndImpact(t *testing.T) {
 		ID: 2, Name: "地质勘察", Status: TaskInProgress, OwnerID: 6,
 		KrID: 11, KrOwnerID: &kr8, StartDate: blockerDay(-3), EndDate: blockerDay(5),
 	})
-	f2.HardEdges = []HardEdge{{ID: 200, Source: 1, Target: 2}}
+	f2.RequiredEdges = []RequiredEdge{{ID: 200, Source: 1, Target: 2}}
 	b := findBlocker(DeriveBlockers(f2), "task_overdue:1")
 	if b == nil || b.ImpactNote == "" {
 		t.Fatalf("超期任务应给出下游影响说明，实际 %+v", b)

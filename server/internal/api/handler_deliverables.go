@@ -415,8 +415,8 @@ func (s *Server) deliverableList(ctx context.Context, taskID int64, actor domain
 	for _, e := range edgeRows {
 		taskEdges = append(taskEdges, DeliverableEdgeRef{
 			EdgeId:         e.ID,
-			EdgeType:       EdgeType(e.EdgeType),
-			EdgeTypeLabel:  domain.EdgeTypeLabel(e.EdgeType),
+			Necessity:      Necessity(e.Necessity),
+			NecessityLabel: domain.NecessityLabel(e.Necessity),
 			TargetTaskId:   e.TargetTaskID,
 			TargetTaskName: e.TargetTaskName,
 		})
@@ -471,7 +471,7 @@ func fillContentState(item *Deliverable, hasPendingReview bool) {
 type edgeRefRow struct {
 	ID             int64
 	SourceTaskID   pgtype.Int8
-	EdgeType       string
+	Necessity      string
 	TargetTaskID   int64
 	TargetTaskName string
 }
@@ -484,8 +484,8 @@ func edgeRefsBySourceTask(rows []edgeRefRow) map[int64][]DeliverableEdgeRef {
 		}
 		out[row.SourceTaskID.Int64] = append(out[row.SourceTaskID.Int64], DeliverableEdgeRef{
 			EdgeId:         row.ID,
-			EdgeType:       EdgeType(row.EdgeType),
-			EdgeTypeLabel:  domain.EdgeTypeLabel(row.EdgeType),
+			Necessity:      Necessity(row.Necessity),
+			NecessityLabel: domain.NecessityLabel(row.Necessity),
 			TargetTaskId:   row.TargetTaskID,
 			TargetTaskName: row.TargetTaskName,
 		})

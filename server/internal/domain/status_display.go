@@ -115,16 +115,14 @@ func RiskLevelLabel(level string) string {
 	return "正常"
 }
 
-var edgeTypeLabels = map[string]string{
-	EdgeHardPrerequisite: "硬前置交付",
-	EdgeInformation:      "信息输入",
-	EdgeHandover:         "正式成果接收",
-	EdgeFeedback:         "迭代／反馈",
+var necessityLabels = map[string]string{
+	NecessityRequired:  "必要",
+	NecessityReference: "参考",
 }
 
-// EdgeTypeLabel 交付物边类型显示文案。
-func EdgeTypeLabel(edgeType string) string {
-	if label, ok := edgeTypeLabels[edgeType]; ok {
+// NecessityLabel 输入必要性显示文案（#173 裁决：关系类型删除，只留必要性）。
+func NecessityLabel(necessity string) string {
+	if label, ok := necessityLabels[necessity]; ok {
 		return label
 	}
 	return "协作关系"

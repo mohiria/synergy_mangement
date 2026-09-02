@@ -84,7 +84,6 @@ func (s *Server) CreateTaskInput(w http.ResponseWriter, r *http.Request, project
 		return
 	}
 	inputs := domain.NewTaskInputs{
-		EdgeType:      string(req.EdgeType),
 		Necessity:     string(req.Necessity),
 		SourceTaskIDs: req.SourceTaskIds,
 		TargetTaskID:  taskId,
@@ -274,13 +273,14 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 			FileSize:      f.FileSize,
 		})
 	}
-	hardEdges := []domain.HardEdge{}
+	// #173 裁决：互锁与关键路径沿「必要」边分析。
+	requiredEdges := []domain.RequiredEdge{}
 	for _, e := range rows {
-		if e.EdgeType == domain.EdgeHardPrerequisite && e.SourceTaskID.Valid {
-			hardEdges = append(hardEdges, domain.HardEdge{ID: e.ID, Source: e.SourceTaskID.Int64, Target: e.TargetTaskID})
+		if e.Necessity == domain.NecessityRequired && e.SourceTaskID.Valid {
+			requiredEdges = append(requiredEdges, domain.RequiredEdge{ID: e.ID, Source: e.SourceTaskID.Int64, Target: e.TargetTaskID})
 		}
 	}
-	analysis := domain.AnalyzeHardEdges(hardEdges, durations)
+	analysis := domain.AnalyzeRequiredEdges(requiredEdges, durations)
 	out := make([]DeliverableEdge, 0, len(rows))
 	for _, e := range rows {
 		facts := domain.TaskFacts{Status: "", CreatorID: e.TargetCreatedBy, OwnerID: e.TargetOwnerID}
@@ -288,14 +288,13 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 		facts.Status = domain.TaskInProgress
 		canRemove := domain.CanConfigureInputs(actor, userID, facts)
 		item := DeliverableEdge{
-			Id:            e.ID,
-			Name:          e.Name,
-			EdgeType:      EdgeType(e.EdgeType),
-			EdgeTypeLabel: optString(domain.EdgeTypeLabel(e.EdgeType)),
-			Necessity:     Necessity(e.Necessity),
-			TargetTaskId:  e.TargetTaskID,
-			Ready:         domain.EdgeReady(e.SourceTaskStatus.String),
-			CanRemove:     &canRemove,
+			Id:             e.ID,
+			Name:           e.Name,
+			Necessity:      Necessity(e.Necessity),
+			NecessityLabel: domain.NecessityLabel(e.Necessity),
+			TargetTaskId:   e.TargetTaskID,
+			Ready:          domain.EdgeReady(e.SourceTaskStatus.String),
+			CanRemove:      &canRemove,
 		}
 		item.TargetTaskName = optString(e.TargetTaskName)
 		item.SourceTaskId = fromPgInt8(e.SourceTaskID)
@@ -328,7 +327,7 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 			}
 		}
 		item.ExpectedDate = fromPgDate(e.ExpectedDate)
-		if e.EdgeType == domain.EdgeHardPrerequisite {
+		if e.Necessity == domain.NecessityRequired {
 			interlock := analysis.Interlocked[e.ID]
 			item.InterlockRisk = &interlock
 			if analysis.CriticalPathAvailable {

@@ -1661,7 +1661,7 @@ export interface components {
             /** Format: date-time */
             occurredAt: string;
         };
-        /** @description 协作关系摘要中的一条直接协作关系（词汇表「协作关系摘要」；PRD §7.5）；不插入交付物中间节点，同一对方任务同一关系类型合并为一条 */
+        /** @description 协作关系摘要中的一条直接协作关系（词汇表「协作关系摘要」；PRD §7.5；#173 裁决：关系类型删除）；不插入交付物中间节点，同一对方任务同一必要性合并为一条 */
         TaskRelation: {
             /**
              * Format: int64
@@ -1671,9 +1671,9 @@ export interface components {
             taskName: string;
             /** @description 对方任务所属 KR 描述（派生字段） */
             krDescription: string;
-            edgeType: components["schemas"]["EdgeType"];
-            /** @description 关系类型显示文案（派生字段；前端不按枚举拼文案） */
-            edgeTypeLabel?: string;
+            necessity: components["schemas"]["Necessity"];
+            /** @description 必要性显示文案（派生字段；前端不按枚举拼文案） */
+            necessityLabel?: string;
             /** @description 对方任务负责人姓名（派生字段） */
             ownerName: string;
             /** @description 对方任务状态显示文案（AC-04；派生字段） */
@@ -1753,9 +1753,9 @@ export interface components {
         DeliverableEdgeRef: {
             /** Format: int64 */
             edgeId: number;
-            edgeType: components["schemas"]["EdgeType"];
-            /** @description 交付物边类型显示文案（派生字段） */
-            edgeTypeLabel: string;
+            necessity: components["schemas"]["Necessity"];
+            /** @description 必要性显示文案（派生字段） */
+            necessityLabel: string;
             /**
              * Format: int64
              * @description 下游（接收）任务
@@ -1922,12 +1922,7 @@ export interface components {
             readAt?: string;
         };
         /**
-         * @description 交付物边类型（PRD §4.3；词汇表「交付物边」）
-         * @enum {string}
-         */
-        EdgeType: "hard_prerequisite" | "information" | "handover" | "feedback";
-        /**
-         * @description 输入必要性（必要／参考）
+         * @description 输入必要性（必要／参考；#173 裁决：关系类型删除，只留必要性）
          * @enum {string}
          */
         Necessity: "required" | "reference";
@@ -1940,10 +1935,9 @@ export interface components {
              *     来源是指定项目成员时为「所需内容」摘要。读时现算，不由客户端提供。
              */
             name: string;
-            edgeType: components["schemas"]["EdgeType"];
-            /** @description 交付物边类型显示文案（派生字段；前端不按枚举拼文案） */
-            edgeTypeLabel?: string;
             necessity: components["schemas"]["Necessity"];
+            /** @description 必要性显示文案（必要／参考；派生字段，前端不按枚举拼文案） */
+            necessityLabel: string;
             /**
              * Format: int64
              * @description 来源任务（来源为指定项目成员时缺省，见
@@ -1973,9 +1967,9 @@ export interface components {
             canRemove?: boolean;
             /** @description 来源为指定项目成员时的输入请求（AC-29／30） */
             inputRequest?: components["schemas"]["InputRequest"];
-            /** @description 硬前置循环互锁风险（派生字段，AC-10）；循环部分暂停关键路径计算 */
+            /** @description 必要边循环互锁风险（派生字段，AC-10；#173 裁决改沿必要边）；循环部分暂停关键路径计算 */
             interlockRisk?: boolean;
-            /** @description 位于硬前置关键路径上（派生字段，AC-10）；日期不足时不派生（此时仅硬依赖链） */
+            /** @description 位于必要边关键路径上（派生字段，AC-10；#173 裁决改沿必要边）；日期不足时不派生（此时仅依赖链） */
             onCriticalPath?: boolean;
         };
         /**
@@ -1984,7 +1978,6 @@ export interface components {
          */
         CreateTaskInputRequest: {
             necessity: components["schemas"]["Necessity"];
-            edgeType: components["schemas"]["EdgeType"];
             /** @description 来源任务（AC-53 多选）；确认后按选择顺序分别建立「来源任务 → 目标任务」交付物边，不可重复 */
             sourceTaskIds: number[];
             /** Format: date */

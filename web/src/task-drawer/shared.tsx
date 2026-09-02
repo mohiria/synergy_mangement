@@ -6,7 +6,6 @@ import type { components } from "../api/schema";
 
 type Task = components["schemas"]["Task"];
 type TaskStatus = components["schemas"]["TaskStatus"];
-type EdgeType = components["schemas"]["EdgeType"];
 
 /** KR 下拉与成员／任务树共用的轻量 KR 视图。 */
 export type KrOption = {
@@ -31,14 +30,7 @@ export const STATUS_CLASS: Record<TaskStatus, string> = {
 export const fmtDate = (d?: string | null) => (d ? d.slice(5).replace("-", ".") : "—");
 export const fmtTime = (s?: string) => (s ? s.slice(0, 16).replace("T", " ") : "");
 
-// 候选项文案：新建输入时要列出全部关系类型，此时还没有边可取派生字段，只能在前端枚举。
-// 已存在边的显示文案一律取后端的 edgeTypeLabel（F1）。
-export const EDGE_TYPE_LABEL: Record<EdgeType, string> = {
-  hard_prerequisite: "硬前置交付",
-  information: "信息输入",
-  handover: "正式成果接收",
-  feedback: "迭代／反馈",
-};
+// #173 裁决：关系类型删除，只留必要性；已存在边的显示文案一律取后端的 necessityLabel。
 
 // 「动态与讨论」Tab 上段默认只展示最近 5 条动态，其余折在「展开全部」后面。
 export const ACTIVITY_PREVIEW = 5;
