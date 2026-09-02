@@ -84,15 +84,14 @@ func TaskFileKindLabel(kind string) string {
 }
 
 // CanManageTaskFiles 判定能否上传／删除任务文件：与配置输出同一批人
-// （负责人／创建人／可编辑项目者）。已关闭任务不再接受任何写入；
+// （裁决 10，#180：负责人／项目管理员）。已关闭任务不再接受任何写入；
 // 已完成任务仍可补录——这两类文件不进审批、不影响就绪与任何派生判定，
 // 补一份过程文件或外部材料不改变任何既成事实。
 func CanManageTaskFiles(a Actor, userID int64, t TaskFacts) bool {
 	if t.Status == TaskCancelled {
 		return false
 	}
-	// 裁决 D2（#137）：四角色口径，创建人仅草稿期。
-	return CanEditTaskConfig(a, userID, t)
+	return OwnerOrProjectAdmin(a, userID, t)
 }
 
 // ValidateTaskFileNote 校验背景说明：选填，上限 500 字。

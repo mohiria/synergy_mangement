@@ -162,21 +162,10 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 		blockers = append(blockers, item)
 	}
 
-	// 待决策：停留在审批队列中的事项数。
-	changeRows, err := s.q.LatestFieldChangesByProject(ctx, projectId)
-	if err != nil {
-		writeInternalError(w, r, err)
-		return Report{}, false
-	}
+	// 待决策：停留在审批队列中的事项数（裁决 10 后只剩完成审核）。
 	pending := struct {
-		CancelRequests int `json:"cancelRequests"`
-		Completions    int `json:"completions"`
+		Completions int `json:"completions"`
 	}{}
-	for _, fc := range changeRows {
-		if fc.State == domain.CancelRequestPendingState {
-			pending.CancelRequests++
-		}
-	}
 	for _, cr := range completionRows {
 		if cr.State == domain.CompletionIntermediate || cr.State == domain.CompletionPendingFinal {
 			pending.Completions++

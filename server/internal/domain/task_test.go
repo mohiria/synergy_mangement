@@ -46,7 +46,7 @@ func repeat(s string, n int) string {
 	return out
 }
 
-// 权限矩阵 §3.4：创建任务——管理员／负责人／项目成员可建，访客与非成员不可。
+// 裁决 10（#180）：创建任务收归项目管理员（含项目负责人）；项目成员、访客与非成员不可。
 func TestCanCreateTask(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -55,7 +55,7 @@ func TestCanCreateTask(t *testing.T) {
 	}{
 		{"项目管理员", Actor{Role: RoleAdmin}, true},
 		{"项目负责人非成员", Actor{IsOwner: true}, true},
-		{"项目成员", Actor{Role: RoleMember}, true},
+		{"项目成员", Actor{Role: RoleMember}, false},
 		{"访客", Actor{Role: RoleViewer}, false},
 		{"非成员", Actor{}, false},
 	}

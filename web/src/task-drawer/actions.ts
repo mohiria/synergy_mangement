@@ -30,10 +30,8 @@ export async function cancelTask(projectId: number, task: Task, reason: string, 
     body: { reason },
   });
   if (res.data) {
-    // AC-57：除 KR 负责人本人负责 KR 下免审外，关闭要经所属 KR 负责人审批。
-    message.success(
-      res.data.status === "cancelled" ? "任务已关闭" : "关闭申请已提交，待所属 KR 负责人审批",
-    );
+    // 裁决 10（#180）：项目管理员直接关闭，即时生效、无审批环节。
+    message.success("任务已关闭");
     done();
   } else {
     message.error(res.error?.message ?? "操作失败");

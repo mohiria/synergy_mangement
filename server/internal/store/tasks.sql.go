@@ -11,6 +11,60 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const applyTaskKeyFields = `-- name: ApplyTaskKeyFields :one
+UPDATE tasks
+SET name = COALESCE($1, name),
+    description = COALESCE($2, description),
+    completion_criteria = COALESCE($3, completion_criteria),
+    owner_id = COALESCE($4, owner_id),
+    end_date = COALESCE($5, end_date),
+    updated_at = now()
+WHERE id = $6
+RETURNING id, key_result_id, name, owner_id, start_date, end_date, status, created_by, created_at, progress, cancel_reason, description, completion_criteria, updated_at, receiver_scope, code_seq, result_update
+`
+
+type ApplyTaskKeyFieldsParams struct {
+	Name               pgtype.Text
+	Description        pgtype.Text
+	CompletionCriteria pgtype.Text
+	OwnerID            pgtype.Int8
+	EndDate            pgtype.Date
+	ID                 int64
+}
+
+// 关键字段直接修改生效（#172 裁决）：仅覆盖传入的字段（NULL 表示未修改）。
+func (q *Queries) ApplyTaskKeyFields(ctx context.Context, arg ApplyTaskKeyFieldsParams) (Task, error) {
+	row := q.db.QueryRow(ctx, applyTaskKeyFields,
+		arg.Name,
+		arg.Description,
+		arg.CompletionCriteria,
+		arg.OwnerID,
+		arg.EndDate,
+		arg.ID,
+	)
+	var i Task
+	err := row.Scan(
+		&i.ID,
+		&i.KeyResultID,
+		&i.Name,
+		&i.OwnerID,
+		&i.StartDate,
+		&i.EndDate,
+		&i.Status,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.Progress,
+		&i.CancelReason,
+		&i.Description,
+		&i.CompletionCriteria,
+		&i.UpdatedAt,
+		&i.ReceiverScope,
+		&i.CodeSeq,
+		&i.ResultUpdate,
+	)
+	return i, err
+}
+
 const createTask = `-- name: CreateTask :one
 INSERT INTO tasks (key_result_id, name, owner_id, start_date, end_date, status, created_by,
     description, completion_criteria, code_seq)

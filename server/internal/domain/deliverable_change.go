@@ -13,8 +13,8 @@ var (
 	ErrDeliverableHasCurrent      = errors.New("已发布的交付物项不可删除，请发起成果更新重传内容")
 )
 
-// DeliverableStructureRule 判定能否增删交付物项：执行类状态放行（权限沿裁决 D 口径，
-// 即 CanEditTaskConfig），完成申请在审冻结，终态一律不可。
+// DeliverableStructureRule 判定能否增删交付物项：执行类状态放行（裁决 10，#180：
+// 负责人／项目管理员——上传链路负责人保留），完成申请在审冻结，终态一律不可。
 func DeliverableStructureRule(a Actor, userID int64, t TaskFacts) error {
 	switch t.Status {
 	case TaskNotStarted, TaskWaitingInput, TaskInProgress:
@@ -23,7 +23,7 @@ func DeliverableStructureRule(a Actor, userID int64, t TaskFacts) error {
 	default:
 		return ErrDeliverableStateNotAllowed
 	}
-	if !CanEditTaskConfig(a, userID, t) {
+	if !OwnerOrProjectAdmin(a, userID, t) {
 		return ErrDeliverableChangeForbidden
 	}
 	return nil

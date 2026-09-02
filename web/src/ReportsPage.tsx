@@ -231,8 +231,7 @@ export default function ReportsPage({
           <section className="report-section">
             <h3>待决策</h3>
             <div className="notice">
-              关闭申请 {report.pendingApprovals.cancelRequests} 件 · 完成审核{" "}
-              {report.pendingApprovals.completions} 件仍停留在审批队列。
+              完成审核 {report.pendingApprovals.completions} 件仍停留在审批队列。
             </div>
           </section>
 

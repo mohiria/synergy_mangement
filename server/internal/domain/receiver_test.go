@@ -60,11 +60,11 @@ func TestValidateReceivers(t *testing.T) {
 	}
 }
 
-// 配置权限与输入配置同口径：负责人／创建人／可编辑项目者，终态不可。
+// 配置权限与输入配置同口径（裁决 10，#180）：仅项目管理员，终态不可。
 func TestCanConfigureReceivers(t *testing.T) {
 	facts := TaskFacts{Status: TaskInProgress, CreatorID: 3, OwnerID: 5}
-	if !CanConfigureReceivers(Actor{Role: RoleMember}, 5, facts) {
-		t.Fatal("负责人应可配置接收方")
+	if CanConfigureReceivers(Actor{Role: RoleMember}, 5, facts) {
+		t.Fatal("负责人不再可配置接收方（裁决 10）")
 	}
 	if !CanConfigureReceivers(Actor{Role: RoleAdmin}, 9, facts) {
 		t.Fatal("管理员应可配置接收方")
@@ -72,7 +72,7 @@ func TestCanConfigureReceivers(t *testing.T) {
 	if CanConfigureReceivers(Actor{Role: RoleMember}, 9, facts) {
 		t.Fatal("无关成员不应可配置接收方")
 	}
-	if CanConfigureReceivers(Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCompleted, OwnerID: 5}) {
+	if CanConfigureReceivers(Actor{Role: RoleAdmin}, 9, TaskFacts{Status: TaskCompleted, OwnerID: 5}) {
 		t.Fatal("已完成任务不应可配置接收方")
 	}
 }

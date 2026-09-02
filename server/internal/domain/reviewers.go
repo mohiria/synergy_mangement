@@ -21,15 +21,14 @@ func ValidateReviewers(userIDs []int64, roleOf func(int64) string) error {
 	return nil
 }
 
-// CanManageReviewers 判定能否调整成果审核人配置：负责人／创建人／可编辑项目者；
+// CanManageReviewers 判定能否调整成果审核人配置：负责人／项目管理员（裁决 10，#180）；
 // 审核期间与终态不可调整（配置随提交已快照进申请）。
 func CanManageReviewers(a Actor, userID int64, t TaskFacts) bool {
 	switch t.Status {
 	case TaskPendingIntermediateReview, TaskPendingFinalReview, TaskCompleted, TaskCancelled:
 		return false
 	}
-	// 裁决 D2（#137）：四角色口径，创建人仅草稿期。
-	return CanEditTaskConfig(a, userID, t)
+	return OwnerOrProjectAdmin(a, userID, t)
 }
 
 // SubmitCompletionOutcome 提交完成申请的路由（AC-13/14）：

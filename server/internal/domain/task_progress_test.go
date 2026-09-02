@@ -164,8 +164,8 @@ func TestProgressCoverage(t *testing.T) {
 	}
 }
 
-// 派生动作标志：开始（负责人/可编辑项目者）、取消（另含创建人）。
-func TestCanStartAndCancelFlags(t *testing.T) {
+// 派生动作标志：开始（负责人/可编辑项目者）、关闭（裁决 10：仅项目管理员）。
+func TestCanStartAndCloseFlags(t *testing.T) {
 	facts := TaskFacts{Status: TaskNotStarted, OwnerID: 5, CreatorID: 3, KrOwnerID: i64(7)}
 	if !CanStartTask(Actor{Role: RoleMember}, 5, facts) {
 		t.Fatal("负责人应可开始")
@@ -179,19 +179,16 @@ func TestCanStartAndCancelFlags(t *testing.T) {
 	if CanStartTask(Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskInProgress, OwnerID: 5}) {
 		t.Fatal("进行中不应再显示开始")
 	}
-	if !CanCancelTask(Actor{Role: RoleMember}, 5, facts, false) {
-		t.Fatal("负责人应可发起关闭")
+	if CanCloseTask(Actor{Role: RoleMember}, facts) {
+		t.Fatal("任务负责人不再可关闭（裁决 10）")
 	}
-	if CanCancelTask(Actor{Role: RoleMember}, 3, facts, false) {
-		t.Fatal("创建人不再是取消发起人（AC-57）")
+	if !CanCloseTask(Actor{Role: RoleAdmin}, facts) {
+		t.Fatal("项目管理员应可直接关闭")
 	}
-	if CanCancelTask(Actor{Role: RoleMember}, 9, facts, false) {
-		t.Fatal("无关成员不应可取消")
+	if CanCloseTask(Actor{Role: RoleAdmin}, TaskFacts{Status: TaskCompleted, OwnerID: 5, KrOwnerID: i64(7)}) {
+		t.Fatal("已完成不应可关闭")
 	}
-	if CanCancelTask(Actor{Role: RoleMember}, 5, facts, true) {
-		t.Fatal("有未决审批单时关闭入口应关闭")
-	}
-	if CanCancelTask(Actor{Role: RoleAdmin}, 9, TaskFacts{Status: TaskCompleted, OwnerID: 5, KrOwnerID: i64(7)}, false) {
-		t.Fatal("已完成不应可取消")
+	if CanCloseTask(Actor{Role: RoleAdmin}, TaskFacts{Status: TaskPendingFinalReview, OwnerID: 5}) {
+		t.Fatal("终审中不应可关闭（未决审批互斥）")
 	}
 }

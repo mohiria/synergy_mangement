@@ -27,24 +27,18 @@ func TestMyWorkGrouping(t *testing.T) {
 			{ID: 1, Name: "执行任务", DisplayStatus: TaskInProgress, OwnerID: me, CreatorID: 3, KrOwnerID: krOwnerOther},
 			// 本人负责等待输入 → 待我处理（带上游未就绪标记），上游进等待他人
 			{ID: 2, Name: "被卡任务", DisplayStatus: TaskWaitingInput, OwnerID: me, CreatorID: me, KrOwnerID: krOwnerOther, UnreadyNote: "上游未就绪：缺 现场数据包"},
-			// 本人负责、关闭申请退回 → 待我处理（带理由，#172 后退回注记只剩关闭申请）
-			{ID: 3, Name: "退回任务", DisplayStatus: TaskNotStarted, OwnerID: me, CreatorID: me, KrOwnerID: krOwnerOther, CancelRejected: sptr("口径不清")},
+			// 本人负责未开始 → 待我处理（裁决 10：关闭申请机制退场，无退回注记）
+			{ID: 3, Name: "未开始任务", DisplayStatus: TaskNotStarted, OwnerID: me, CreatorID: me, KrOwnerID: krOwnerOther},
 			// 本人负责、完成申请审批中 → 只在等待他人（状态排除出待我处理）
 			{ID: 4, Name: "终审中任务", DisplayStatus: TaskPendingFinalReview, OwnerID: me, CreatorID: me, KrOwnerID: krOwnerOther},
 			// 他人的任务 → 不出现
 			{ID: 6, Name: "别人的任务", DisplayStatus: TaskInProgress, OwnerID: 9, CreatorID: 9, KrOwnerID: krOwnerOther},
 		},
-		CancelRequests: []WorkApprovalFact{
-			// 我提交的关闭申请待审批 → 等待他人（任务本身仍在待我处理）
-			{ID: 21, TaskID: 1, TaskName: "执行任务", SubmittedBy: me, KrOwnerID: krOwnerOther, SubmittedAt: recent},
-			// 我是 KR 负责人 → 待我审批（5 天前提交，用于等待天数断言）
-			{ID: 22, TaskID: 21, TaskName: "改期任务", SubmittedBy: 9, KrOwnerID: krOwnerMe, SubmittedAt: old},
-		},
 		Completions: []WorkCompletionFact{
 			// 中间或签、我在组内 → 待我审批
 			{ID: 31, TaskID: 22, TaskName: "或签任务", SubmittedBy: 9, TaskOwnerID: 9, KrOwnerID: krOwnerOther, State: CompletionIntermediate, Reviewers: []int64{me, 8}, SubmittedAt: recent},
-			// KR 终审、我是 KR 负责人 → 待我审批（AC-16 明确）
-			{ID: 32, TaskID: 23, TaskName: "终审任务", SubmittedBy: 9, TaskOwnerID: 9, KrOwnerID: krOwnerMe, State: CompletionPendingFinal, SubmittedAt: recent},
+			// KR 终审、我是 KR 负责人 → 待我审批（AC-16 明确；5 天前提交，用于等待天数断言）
+			{ID: 32, TaskID: 23, TaskName: "终审任务", SubmittedBy: 9, TaskOwnerID: 9, KrOwnerID: krOwnerMe, State: CompletionPendingFinal, SubmittedAt: old},
 			// 我负责任务的完成申请在终审 → 等待他人
 			{ID: 33, TaskID: 4, TaskName: "终审中任务", SubmittedBy: me, TaskOwnerID: me, KrOwnerID: krOwnerOther, State: CompletionPendingFinal, SubmittedAt: recent},
 		},
@@ -86,25 +80,22 @@ func TestMyWorkGrouping(t *testing.T) {
 	if len(g.Pending) != 4 {
 		t.Fatalf("待我处理数量 = %d, want 4: %+v", len(g.Pending), kinds(g.Pending))
 	}
-	var foundUnready, foundRejected bool
+	var foundUnready bool
 	for _, it := range g.Pending {
 		if it.TaskID != nil && *it.TaskID == 2 && it.UnreadyNote == "上游未就绪：缺 现场数据包" {
 			foundUnready = true
-		}
-		if it.TaskID != nil && *it.TaskID == 3 && it.RejectedReason == "口径不清" {
-			foundRejected = true
 		}
 		if it.TaskID != nil && *it.TaskID == 4 {
 			t.Fatalf("完成审批中的任务不应在待我处理: %+v", it)
 		}
 	}
-	if !foundUnready || !foundRejected {
-		t.Fatalf("待我处理标记缺失: unready=%v rejected=%v", foundUnready, foundRejected)
+	if !foundUnready {
+		t.Fatalf("待我处理上游未就绪标记缺失")
 	}
 
-	// 待我审批：关闭申请 22、中间 31、KR 终审 32 = 3 条（AC-16：终审在本组）
-	if len(g.Approvals) != 3 {
-		t.Fatalf("待我审批数量 = %d, want 3: %+v", len(g.Approvals), kinds(g.Approvals))
+	// 待我审批：中间 31、KR 终审 32 = 2 条（AC-16：终审在本组；裁决 10 后无关闭申请）
+	if len(g.Approvals) != 2 {
+		t.Fatalf("待我审批数量 = %d, want 2: %+v", len(g.Approvals), kinds(g.Approvals))
 	}
 	var hasFinal bool
 	for _, it := range g.Approvals {
@@ -116,9 +107,9 @@ func TestMyWorkGrouping(t *testing.T) {
 		t.Fatal("KR 终审应归入待我审批")
 	}
 
-	// 等待他人：上游 71、关闭申请 21、完成申请 33 = 3 条（#178：无输入请求条目）
-	if len(g.Waiting) != 3 {
-		t.Fatalf("等待他人数量 = %d, want 3: %+v", len(g.Waiting), kinds(g.Waiting))
+	// 等待他人：上游 71、完成申请 33 = 2 条（#178 无输入请求；裁决 10 无关闭申请条目）
+	if len(g.Waiting) != 2 {
+		t.Fatalf("等待他人数量 = %d, want 2: %+v", len(g.Waiting), kinds(g.Waiting))
 	}
 	// #174 裁决：上游等待条目按上游任务截止日期展示并判定超期（任务 40 截止 5 天前）。
 	for _, it := range g.Waiting {
@@ -142,9 +133,9 @@ func TestMyWorkGrouping(t *testing.T) {
 		t.Fatalf("无待接收项事实时待我接收应为空数组: %+v", g.Receipts)
 	}
 
-	// 等待天数：关闭申请 22 提交于 5 天前 → waitingDays=5、超期（阈值 3×24h）
+	// 等待天数：终审 32 提交于 5 天前 → waitingDays=5、超期（阈值 3×24h）
 	for _, it := range g.Approvals {
-		if it.RefID != nil && *it.RefID == 22 {
+		if it.RefID != nil && *it.RefID == 32 {
 			if it.WaitingDays == nil || *it.WaitingDays != 5 || !it.Overdue {
 				t.Fatalf("等待天数/超期派生异常: %+v", it)
 			}
@@ -162,9 +153,6 @@ func TestMyWorkWaitingApprovalCopy(t *testing.T) {
 	facts := MyWorkFacts{
 		UserID: me,
 		Now:    now,
-		CancelRequests: []WorkApprovalFact{
-			{ID: 21, TaskID: 1, TaskName: "执行任务", SubmittedBy: me, KrOwnerID: krOwnerOther, KrOwnerName: "周宁", SubmittedAt: recent},
-		},
 		Completions: []WorkCompletionFact{
 			{ID: 33, TaskID: 4, TaskName: "终审中任务", SubmittedBy: me, TaskOwnerID: me, KrOwnerID: krOwnerOther, KrOwnerName: "周宁", State: CompletionPendingFinal, SubmittedAt: recent},
 			{ID: 34, TaskID: 5, TaskName: "或签中任务", SubmittedBy: me, TaskOwnerID: me, KrOwnerID: krOwnerOther, KrOwnerName: "周宁", State: CompletionIntermediate, Reviewers: []int64{8, 9}, ReviewerNames: []string{"张三", "李四"}, SubmittedAt: recent},
@@ -173,7 +161,6 @@ func TestMyWorkWaitingApprovalCopy(t *testing.T) {
 
 	g := MyWork(facts)
 	wantStage := map[int64]string{
-		21: "待周宁审批",
 		33: "待周宁审批",
 		34: "待张三等2人审批",
 	}

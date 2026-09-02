@@ -6,17 +6,16 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
 	"synergy/server/internal/domain"
 	"synergy/server/internal/store"
 )
 
-// 任务关闭申请（AC-57、#172 裁决：从变更单机制独立，审批保留）。规则在 domain，handler 仅编排。
+// 任务关闭（AC-57、裁决 10，#180）：项目管理员直接操作——原因必填、即时生效、
+// 写任务动态，无审批环节。规则在 domain，handler 仅编排。
 
-// RequestTaskCancellation 发起关闭申请：KR 负责人在本人负责 KR 下免审即时生效，其余进入其待我审批。
-func (s *Server) RequestTaskCancellation(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64) {
-	var req TaskCancellationRequest
+// CloseTask 项目管理员直接关闭任务。
+func (s *Server) CloseTask(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64) {
+	var req CloseTaskRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_request", Message: "请求内容无法解析"})
 		return
@@ -33,7 +32,7 @@ func (s *Server) RequestTaskCancellation(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	// 互斥判定与写入同事务：先锁任务行再读未决单，避免两个并发请求各自看到「没有未决单」（R2／R3）。
+	// 规则与写入同事务：先锁任务行再判定，避免与并发的审批提交互踩（R2／R3）。
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -45,67 +44,27 @@ func (s *Server) RequestTaskCancellation(w http.ResponseWriter, r *http.Request,
 	if !ok {
 		return
 	}
-	hasPending, err := qtx.HasPendingFieldChange(r.Context(), taskId)
-	if err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	outcome, err := domain.CancelRoute(actor, uid, facts, hasPending)
-	if err != nil {
+	if err := domain.CloseTaskRule(actor, facts); err != nil {
 		switch {
 		case errors.Is(err, domain.ErrCancelForbidden):
 			writeForbidden(w)
 		case errors.Is(err, domain.ErrCannotCancel), errors.Is(err, domain.ErrCancelPendingExists):
 			writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: err.Error()})
-		case errors.Is(err, domain.ErrKrOwnerMissing):
-			writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "kr_owner_missing", Message: err.Error()})
 		default:
 			writeInternalError(w, r, err)
 		}
 		return
 	}
-	switch outcome {
-	case domain.CancelExempt:
-		if _, err := qtx.CreateFieldChange(r.Context(), cancelChangeParams(taskId, facts.Status, uid, reason,
-			domain.CancelRequestApprovedState, true, domain.CancelExemptOpinion,
-			pgtype.Int8{Int64: uid, Valid: true}, pgtype.Timestamptz{Time: s.now(), Valid: true})); err != nil {
-			writeInternalError(w, r, err)
-			return
-		}
-		if _, err := qtx.UpdateTaskStatusWithReason(r.Context(), store.UpdateTaskStatusWithReasonParams{
-			ID: taskId, Status: domain.TaskCancelled, CancelReason: reason,
-		}); err != nil {
-			writeInternalError(w, r, err)
-			return
-		}
-	default:
-		if _, err := qtx.CreateFieldChange(r.Context(), cancelChangeParams(taskId, facts.Status, uid, reason,
-			domain.CancelRequestPendingState, false, "", pgtype.Int8{}, pgtype.Timestamptz{})); err != nil {
-			writeInternalError(w, r, err)
-			return
-		}
+	if _, err := qtx.UpdateTaskStatusWithReason(r.Context(), store.UpdateTaskStatusWithReasonParams{
+		ID: taskId, Status: domain.TaskCancelled, CancelReason: reason,
+	}); err != nil {
+		writeInternalError(w, r, err)
+		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
-	if outcome == domain.CancelExempt {
-		s.actionActivity(r.Context(), taskId, domain.ActivityCancelApproved, uid, domain.CancelExemptOpinion)
-	} else {
-		s.actionActivity(r.Context(), taskId, domain.ActivityCancelRequested, uid, reason)
-	}
+	s.actionActivity(r.Context(), taskId, domain.ActivityTaskClosed, uid, reason)
 	s.writeTask(w, r, projectId, taskId, uid, actor)
-}
-
-// cancelChangeParams 组装关闭单：变更字段＝任务状态，旧值＝当前状态，拟议值＝已关闭（PRD §5.2.B）。
-func cancelChangeParams(taskID int64, currentStatus string, uid int64, reason, state string,
-	exempt bool, opinion string, decidedBy pgtype.Int8, decidedAt pgtype.Timestamptz,
-) store.CreateFieldChangeParams {
-	return store.CreateFieldChangeParams{
-		TaskID: taskID, SubmittedBy: uid, Reason: reason, State: state,
-		Exempt: exempt, Opinion: opinion, DecidedBy: decidedBy, DecidedAt: decidedAt,
-		ChangeType: domain.FieldChangeTypeCancel,
-		OldStatus:  pgtype.Text{String: currentStatus, Valid: true},
-		NewStatus:  pgtype.Text{String: domain.TaskCancelled, Valid: true},
-	}
 }

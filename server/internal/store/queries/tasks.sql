@@ -7,6 +7,18 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
     (SELECT COALESCE(MAX(code_seq), 0) + 1 FROM tasks WHERE key_result_id = $1))
 RETURNING *;
 
+-- name: ApplyTaskKeyFields :one
+-- 关键字段直接修改生效（#172 裁决）：仅覆盖传入的字段（NULL 表示未修改）。
+UPDATE tasks
+SET name = COALESCE(sqlc.narg('name'), name),
+    description = COALESCE(sqlc.narg('description'), description),
+    completion_criteria = COALESCE(sqlc.narg('completion_criteria'), completion_criteria),
+    owner_id = COALESCE(sqlc.narg('owner_id'), owner_id),
+    end_date = COALESCE(sqlc.narg('end_date'), end_date),
+    updated_at = now()
+WHERE id = sqlc.arg('id')
+RETURNING *;
+
 -- name: GetTaskInProject :one
 -- 任务连同所属 KR 负责人与项目归属（用于权限判定与项目内寻址）。
 SELECT t.*, k.owner_id AS kr_owner_id, o.project_id

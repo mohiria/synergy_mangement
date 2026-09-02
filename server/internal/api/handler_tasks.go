@@ -57,7 +57,14 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 	}
 	uid := currentUser(r).ID
 	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
-	if !domain.CanCreateTask(actor) {
+	// 裁决 10（#180）：直接创建收归项目管理员；任务创建邀请（AC-03）是管理员授权的
+	// 间接创建路径，受邀的非只读成员仍可经邀请提交（身份与 KR 归属由 FulfillInvite 校验）。
+	if req.TaskInviteId != nil {
+		if !domain.CanWriteProject(actor) {
+			writeForbidden(w)
+			return
+		}
+	} else if !domain.CanCreateTask(actor) {
 		writeForbidden(w)
 		return
 	}
@@ -358,11 +365,6 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		writeInternalError(w, r, err)
 		return
 	}
-	changeRows, err := s.q.ListFieldChangesByTask(r.Context(), taskId)
-	if err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
 	deliverables, err := s.deliverableList(r.Context(), taskId, actor, uid, taskFacts)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -445,16 +447,6 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 	if item == nil {
 		writeInternalError(w, r, err)
 		return
-	}
-	facts := domain.TaskFacts{Status: string(item.Status), CreatorID: task.CreatedBy, OwnerID: task.OwnerID,
-		KrOwnerID: fromPgInt8(task.KrOwnerID), ResultUpdate: task.ResultUpdate}
-	fcs := make([]CancelRequest, 0, len(changeRows))
-	for _, fc := range changeRows {
-		fcs = append(fcs, s.cancelRequestView(r.Context(), store.FieldChangeRequest{
-			ID: fc.ID, TaskID: fc.TaskID, SubmittedBy: fc.SubmittedBy, Reason: fc.Reason,
-			State: fc.State, Exempt: fc.Exempt, Opinion: fc.Opinion, Resolved: fc.Resolved,
-			SubmittedAt: fc.SubmittedAt, DecidedBy: fc.DecidedBy, DecidedAt: fc.DecidedAt,
-		}, fc.SubmittedByName, fc.DecidedByName, facts, actor, uid))
 	}
 	// 协作关系摘要（AC-50、词汇表「协作关系摘要」）：分组与合并规则在 domain，
 	// 这里只把对方任务的展示事实（名称、所属 KR、负责人、状态文案）贴上去。
@@ -539,13 +531,8 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		writeInternalError(w, r, err)
 		return
 	}
-	// F1：未决审批计数由后端派生，前端不再把审批单各自过滤后相加。
+	// F1：未决审批计数由后端派生（裁决 10 后只剩完成申请一类）。
 	pendingCount := 0
-	for _, fc := range fcs {
-		if fc.State == CancelRequestStatePending {
-			pendingCount++
-		}
-	}
 	for _, cr := range completions {
 		if cr.State == CompletionReviewStateIntermediateReview || cr.State == CompletionReviewStatePendingFinal {
 			pendingCount++
@@ -556,7 +543,6 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		Task:              *item,
 		ObjectiveTitle:    obj.Title,
 		KrDescription:     kr.Description,
-		CancelRequests:    fcs,
 		Deliverables:      deliverables,
 		Files:             &taskFiles,
 		Discussions:       discussions,
@@ -621,15 +607,6 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 	rows, err := s.q.ListProjectTasks(ctx, projectID)
 	if err != nil {
 		return nil, err
-	}
-	// 每个任务最近一张需要关注的关闭申请（待审批，或退回未处理＝退回待处理事项，#172）。
-	changeRows, err := s.q.LatestFieldChangesByProject(ctx, projectID)
-	if err != nil {
-		return nil, err
-	}
-	changeByTask := make(map[int64]store.LatestFieldChangesByProjectRow, len(changeRows))
-	for _, fc := range changeRows {
-		changeByTask[fc.TaskID] = fc
 	}
 	// 必要输入未就绪的任务显示「等待输入」（AC-48、§5.1）；成员来源按输入请求状态判定就绪。
 	unreadyNoteByTask, err := s.unreadyRequiredInputsByProject(ctx, projectID)
@@ -704,9 +681,6 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 	for _, t := range rows {
 		facts := domain.TaskFacts{Status: t.Status, CreatorID: t.CreatedBy, OwnerID: t.OwnerID,
 			KrOwnerID: fromPgInt8(t.KrOwnerID), ResultUpdate: t.ResultUpdate}
-		// 待审批关闭申请决定编辑与关闭入口是否可用（AC-57 互斥；#172 裁决）。
-		fc, hasChange := changeByTask[t.ID]
-		hasPending := hasChange && fc.State == domain.CancelRequestPendingState
 		item := Task{
 			Id:                 t.ID,
 			KeyResultId:        t.KeyResultID,
@@ -724,7 +698,7 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 			CancelReason:       optString(t.CancelReason),
 			CanStart:           domain.CanStartTask(actor, userID, facts),
 			CanUpdateProgress:  domain.CanUpdateProgress(actor, userID, facts),
-			CanCancel:          domain.CanCancelTask(actor, userID, facts, hasPending),
+			CanCancel:          domain.CanCloseTask(actor, facts),
 		}
 		// 页面主状态汇总：必要输入未到显示「等待输入」（存储态保持真实执行状态）。
 		displayFacts := facts
@@ -747,21 +721,8 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 				item.PendingActorName = fromPgText(t.KrOwnerName)
 			}
 		}
-		// 需要关注的关闭申请（待审批，或退回未处理＝退回待处理事项，#172 裁决）。
-		if hasChange {
-			// 任务终止后退回待处理事项随之结束（词汇表）。
-			terminal := t.Status == domain.TaskCompleted || t.Status == domain.TaskCancelled
-			if hasPending || !terminal {
-				view := s.cancelRequestView(ctx, store.FieldChangeRequest{
-					ID: fc.ID, TaskID: fc.TaskID, SubmittedBy: fc.SubmittedBy, Reason: fc.Reason,
-					State: fc.State, Exempt: fc.Exempt, Opinion: fc.Opinion, Resolved: fc.Resolved,
-					SubmittedAt: fc.SubmittedAt, DecidedBy: fc.DecidedBy, DecidedAt: fc.DecidedAt,
-				}, fc.SubmittedByName, fc.DecidedByName, facts, actor, userID)
-				item.CancelRequest = &view
-			}
-		}
-		// #172 裁决：关键字段直接修改，前端只消费编辑权限标志。
-		item.CanEditFields = domain.TaskEditRule(actor, userID, facts, hasPending) == nil
+		// 裁决 10：关键字段直接修改收归项目管理员，前端只消费编辑权限标志。
+		item.CanEditFields = domain.TaskEditRule(actor, userID, facts) == nil
 		canDiscuss := domain.CanDiscuss(actor)
 		item.CanDiscuss = &canDiscuss
 		canManageDeliverables := domain.CanManageDeliverables(actor, userID, facts)
@@ -794,7 +755,7 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 		// 成果更新（AC-66）：进程与发起入口都由后端派生，前端不复算生命周期规则。
 		ru := resultUpdateState(t.ResultUpdate)
 		item.ResultUpdate = &ru
-		canStartResultUpdate := domain.CanStartResultUpdate(actor, userID, facts, hasPending)
+		canStartResultUpdate := domain.CanStartResultUpdate(actor, userID, facts)
 		item.CanStartResultUpdate = &canStartResultUpdate
 		if n := openBlockersByTask[t.ID]; n > 0 {
 			item.OpenBlockerCount = &n

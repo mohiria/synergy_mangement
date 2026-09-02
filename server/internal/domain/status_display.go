@@ -45,21 +45,6 @@ func StatusLabel(status, krOwnerName string, reviewerNames []string) string {
 	return status
 }
 
-// CancelRequestStateLabel 关闭申请显示文案（#172）：待审批显示所属 KR 负责人，免审为“免审生效”。
-func CancelRequestStateLabel(state string, exempt bool, krOwnerName string) string {
-	switch {
-	case state == CancelRequestPendingState:
-		return ApprovalWaitingLabel([]string{krOwnerName})
-	case exempt:
-		return "免审生效"
-	case state == CancelRequestApprovedState:
-		return "已通过"
-	case state == CancelRequestRejectedState:
-		return "已退回"
-	}
-	return state
-}
-
 // CompletionStateLabel 完成申请显示文案：中间或签取审核组姓名，待终审显示所属 KR 负责人。
 func CompletionStateLabel(state, krOwnerName string, reviewerNames []string) string {
 	switch state {

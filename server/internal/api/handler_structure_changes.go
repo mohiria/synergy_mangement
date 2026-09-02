@@ -32,16 +32,11 @@ var errStructureUnknownOp = errors.New("未知的结构变更动作")
 func (s *Server) routeStructureChange(w http.ResponseWriter, r *http.Request, taskID int64,
 	actor domain.Actor, uid int64, facts domain.TaskFacts,
 ) bool {
-	hasPendingCancel, err := s.q.HasPendingFieldChange(r.Context(), taskID)
-	if err != nil {
-		writeInternalError(w, r, err)
-		return false
-	}
-	if err := domain.TaskEditRule(actor, uid, facts, hasPendingCancel); err != nil {
+	if err := domain.TaskEditRule(actor, uid, facts); err != nil {
 		switch {
 		case errors.Is(err, domain.ErrChangeForbidden):
 			writeForbidden(w)
-		case errors.Is(err, domain.ErrChangeNotAllowed), errors.Is(err, domain.ErrCancelBlocked):
+		case errors.Is(err, domain.ErrChangeNotAllowed):
 			writeJSON(w, http.StatusConflict, Error{Code: "task_state_conflict", Message: err.Error()})
 		default:
 			writeInternalError(w, r, err)

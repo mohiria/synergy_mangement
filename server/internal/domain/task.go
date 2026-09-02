@@ -45,16 +45,21 @@ type TaskFacts struct {
 	ResultUpdate string
 }
 
-// CanEditTaskConfig 任务编辑权限的统一口径（裁决 D2，#137；裁决 #162 后无草稿期）：
-// 负责人／所属 KR 负责人／可编辑项目者。各配置判定在此之上叠加各自的状态守卫。
+// CanEditTaskConfig 任务编辑权限的统一口径（裁决 10，#180：任务配置收归项目管理员，
+// 裁决 D2 #137 四角色口径作废）：仅可编辑项目者（项目负责人与项目管理员）。
+// 各配置判定在此之上叠加各自的状态守卫。
 func CanEditTaskConfig(a Actor, userID int64, t TaskFacts) bool {
+	_ = userID
+	return CanEditProject(a)
+}
+
+// OwnerOrProjectAdmin 任务负责人保留动作的口径（裁决 10，#180）：负责人本人或项目管理员。
+// 覆盖上传链路——交付物项、过程文件／外部材料、成果审核人配置。
+func OwnerOrProjectAdmin(a Actor, userID int64, t TaskFacts) bool {
 	if !CanWriteProject(a) {
 		return false
 	}
-	if userID == t.OwnerID || CanEditProject(a) {
-		return true
-	}
-	return t.KrOwnerID != nil && userID == *t.KrOwnerID
+	return userID == t.OwnerID || CanEditProject(a)
 }
 
 // ValidateNewTask 校验任务草稿最小骨架（PRD §9.1：名称、负责人、开始／截止时间）。
@@ -75,8 +80,9 @@ func ValidateNewTask(n NewTask, roleOf func(int64) string) error {
 	return nil
 }
 
-// CanCreateTask 判定能否创建任务：管理员、项目负责人与项目成员可建，访客不可（PRD §3.4）。
+// CanCreateTask 判定能否创建任务（裁决 10，#180）：收归项目管理员与项目负责人；
+// 项目成员经任务创建邀请（AC-03）间接创建的路径不在此判定内。
 func CanCreateTask(a Actor) bool {
-	return CanWriteProject(a)
+	return CanEditProject(a)
 }
 

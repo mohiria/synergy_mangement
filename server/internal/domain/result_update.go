@@ -14,16 +14,16 @@ const (
 )
 
 var (
-	ErrResultUpdateNotCompleted  = errors.New("只有已完成任务可以发起成果更新")
-	ErrResultUpdateExists        = errors.New("任务上已有未决成果更新")
-	ErrResultUpdateForbidden     = errors.New("只有任务负责人与项目管理员可以发起成果更新")
-	ErrResultUpdatePendingExists = errors.New("任务上存在未决审批单，暂不能发起成果更新")
+	ErrResultUpdateNotCompleted = errors.New("只有已完成任务可以发起成果更新")
+	ErrResultUpdateExists       = errors.New("任务上已有未决成果更新")
+	ErrResultUpdateForbidden    = errors.New("只有任务负责人与项目管理员可以发起成果更新")
 )
 
-// StartResultUpdateRule 校验发起成果更新（AC-66）：仅已完成任务；同一任务至多一件在途；
-// 与其他未决审批单互斥（与 AC-57 关闭申请同口径）；KR 必须已指定负责人，否则无人终审；
+// StartResultUpdateRule 校验发起成果更新（AC-66）：仅已完成任务；同一任务至多一件在途
+// （裁决 10 后关闭申请退场，已完成任务上不再有其他未决审批单可互斥）；
+// KR 必须已指定负责人，否则无人终审；
 // 发起人限任务负责人与可编辑项目者（创建人不在其列——成果由负责人交付）。
-func StartResultUpdateRule(a Actor, userID int64, t TaskFacts, hasPendingChange bool) error {
+func StartResultUpdateRule(a Actor, userID int64, t TaskFacts) error {
 	if t.Status != TaskCompleted {
 		return ErrResultUpdateNotCompleted
 	}
@@ -32,9 +32,6 @@ func StartResultUpdateRule(a Actor, userID int64, t TaskFacts, hasPendingChange 
 	}
 	if t.ResultUpdate != ResultUpdateNone {
 		return ErrResultUpdateExists
-	}
-	if hasPendingChange {
-		return ErrResultUpdatePendingExists
 	}
 	if t.KrOwnerID == nil {
 		return ErrKrOwnerMissing
@@ -46,8 +43,8 @@ func StartResultUpdateRule(a Actor, userID int64, t TaskFacts, hasPendingChange 
 }
 
 // CanStartResultUpdate 判定当前用户能否对本任务发起成果更新（派生字段）。
-func CanStartResultUpdate(a Actor, userID int64, t TaskFacts, hasPendingChange bool) bool {
-	return StartResultUpdateRule(a, userID, t, hasPendingChange) == nil
+func CanStartResultUpdate(a Actor, userID int64, t TaskFacts) bool {
+	return StartResultUpdateRule(a, userID, t) == nil
 }
 
 // InResultUpdate 报告任务是否有成果更新在途（已发起或在审）。

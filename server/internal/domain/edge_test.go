@@ -28,11 +28,11 @@ func TestValidateNewEdge(t *testing.T) {
 	}
 }
 
-// 配置输入权限：目标任务负责人／创建人／可编辑项目者（§3.4 配置输入、输出、依赖）。
+// 配置输入权限（裁决 10，#180）：仅项目管理员（含项目负责人），终态不可。
 func TestCanConfigureInputs(t *testing.T) {
 	facts := TaskFacts{Status: TaskInProgress, CreatorID: 3, OwnerID: 5}
-	if !CanConfigureInputs(Actor{Role: RoleMember}, 5, facts) {
-		t.Fatal("负责人应可配置输入")
+	if CanConfigureInputs(Actor{Role: RoleMember}, 5, facts) {
+		t.Fatal("负责人不再可配置输入（裁决 10）")
 	}
 	if !CanConfigureInputs(Actor{Role: RoleAdmin}, 9, facts) {
 		t.Fatal("管理员应可配置输入")
@@ -40,7 +40,7 @@ func TestCanConfigureInputs(t *testing.T) {
 	if CanConfigureInputs(Actor{Role: RoleMember}, 9, facts) {
 		t.Fatal("无关成员不应可配置")
 	}
-	if CanConfigureInputs(Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCompleted, OwnerID: 5}) {
+	if CanConfigureInputs(Actor{Role: RoleAdmin}, 9, TaskFacts{Status: TaskCompleted, OwnerID: 5}) {
 		t.Fatal("已完成任务不应可配置")
 	}
 }

@@ -190,7 +190,7 @@ func (s *Server) UpdateKeyResult(w http.ResponseWriter, r *http.Request, project
 		writeInternalError(w, r, err)
 		return
 	}
-	pending := int32(0)
+	pending := int64(0)
 	if handover {
 		// 未决审批单跟着 KR 负责人走：审批人本就是「所属 KR 负责人」这一职责，
 		// 不转交就得让离任者继续处理，转交与否由发起人在确认框里定（AC-61）。

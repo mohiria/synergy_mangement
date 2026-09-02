@@ -83,8 +83,6 @@ export default function TaskDrawerHost({
     setStack([]);
   }, [taskId, initialTab]);
 
-  const [fcReject, setFcReject] = useState<{ task: Task; changeId: number } | null>(null);
-  const [fcRejectOpinion, setFcRejectOpinion] = useState("");
   const [inputTask, setInputTask] = useState<Task | null>(null);
   const [completionTask, setCompletionTask] = useState<Task | null>(null);
   const [completionNote, setCompletionNote] = useState("");
@@ -98,41 +96,6 @@ export default function TaskDrawerHost({
   const doCancelTask = (task: Task, reason: string) => apiCancelTask(projectId, task, reason, refresh);
   const saveProgress = (task: Task, progress: number | null) =>
     apiSaveProgress(projectId, task, progress, refresh);
-
-  // #172 裁决：变更类审批只剩关闭申请。
-  const decideCancelRequest = async (
-    task: Task,
-    requestId: number,
-    decision: "approved" | "rejected",
-    opinion?: string,
-  ) => {
-    const res = await client.POST(
-      "/projects/{projectId}/tasks/{taskId}/cancel-requests/{requestId}/decision",
-      {
-        params: { path: { projectId, taskId: task.id, requestId } },
-        body: { decision, opinion },
-      },
-    );
-    if (res.data) {
-      message.success(decision === "approved" ? "已通过，任务进入已关闭" : "已退回，任务继续执行");
-      refresh();
-    } else {
-      message.error(res.error?.message ?? "处理失败");
-    }
-  };
-
-  const abandonCancelRequest = async (task: Task, requestId: number) => {
-    const res = await client.POST(
-      "/projects/{projectId}/tasks/{taskId}/cancel-requests/{requestId}/abandon",
-      { params: { path: { projectId, taskId: task.id, requestId } } },
-    );
-    if (res.data) {
-      message.success("已放弃本次关闭申请");
-      refresh();
-    } else {
-      message.error(res.error?.message ?? "操作失败");
-    }
-  };
 
   const remindBlocker = async (targetKey: string) => {
     const res = await client.POST("/projects/{projectId}/reminders", {
@@ -271,12 +234,6 @@ export default function TaskDrawerHost({
             message.error(res.error?.message ?? "保存失败");
             return false;
           },
-          approveCancelRequest: (t, id) => decideCancelRequest(t, id, "approved"),
-          openFcReject: (t, id) => {
-            setFcReject({ task: t, changeId: id });
-            setFcRejectOpinion("");
-          },
-          abandonCancelRequest,
           openSubmitCompletion: (t) => {
             setCompletionTask(t);
             setCompletionNote("");
@@ -403,31 +360,6 @@ export default function TaskDrawerHost({
           placeholder="退回意见（必填）"
           value={crRejectOpinion}
           onChange={(e) => setCrRejectOpinion(e.target.value)}
-        />
-      </Modal>
-      <Modal
-        title="退回关闭申请"
-        open={!!fcReject}
-        okText="确认退回"
-        cancelText="取消"
-        onCancel={() => setFcReject(null)}
-        okButtonProps={{ danger: true, disabled: !fcRejectOpinion.trim() }}
-        onOk={async () => {
-          if (fcReject) {
-            await decideCancelRequest(fcReject.task, fcReject.changeId, "rejected", fcRejectOpinion.trim());
-          }
-          setFcReject(null);
-        }}
-      >
-        <p className="muted" style={{ marginTop: 0 }}>
-          退回后任务继续执行；提交人会看到退回待处理事项。退回意见必填。
-        </p>
-        <Input.TextArea
-          rows={3}
-          maxLength={500}
-          placeholder="退回意见（必填）"
-          value={fcRejectOpinion}
-          onChange={(e) => setFcRejectOpinion(e.target.value)}
         />
       </Modal>
       <CancelTaskModal

@@ -855,9 +855,13 @@ func TestTaskCreateDirectPoolEntry(t *testing.T) {
 	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "任务试点", OwnerId: aliceUser.ID})
 	wantStatus(t, resp, http.StatusCreated)
 	created := decodeBody[api.Project](t, resp)
-	for _, uid := range []int64{bobUser.ID, carolUser.ID} {
+	// 裁决 10：创建任务收归项目管理员——bob 任管理员（兼 KR 负责人），carol 普通成员。
+	for _, m := range []struct {
+		id   int64
+		role api.MemberRole
+	}{{bobUser.ID, api.Admin}, {carolUser.ID, api.Member}} {
 		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, created.Id),
-			api.AddProjectMembersRequest{UserIds: []int64{uid}, Role: api.Member})
+			api.AddProjectMembersRequest{UserIds: []int64{m.id}, Role: m.role})
 		wantStatus(t, resp, http.StatusCreated)
 		resp.Body.Close()
 	}
@@ -875,8 +879,8 @@ func TestTaskCreateDirectPoolEntry(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-12"), openapiDate(t, "2026-09-21")
 
-	// 裁决 #162：项目成员 carol 创建 → 直接入池、未开始
-	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	// 裁决 #162＋裁决 10：项目负责人 alice 创建 → 直接入池、未开始
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: krWithOwner, Name: "验证现场联动异常回退", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
@@ -898,7 +902,7 @@ func TestTaskCreateDirectPoolEntry(t *testing.T) {
 	if len(bobNotes) != 1 || bobNotes[0].Kind != "task_pool_entered" {
 		t.Fatalf("KR 负责人应收到入池通知: %+v", bobNotes)
 	}
-	if !strings.Contains(bobNotes[0].Content, "验证现场联动异常回退") || !strings.Contains(bobNotes[0].Content, "王五") {
+	if !strings.Contains(bobNotes[0].Content, "验证现场联动异常回退") || !strings.Contains(bobNotes[0].Content, "张三") {
 		t.Fatalf("入池通知应带任务名与创建人: %q", bobNotes[0].Content)
 	}
 	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
@@ -939,7 +943,7 @@ func TestTaskCreateDirectPoolEntry(t *testing.T) {
 	}
 
 	// KR 未指定负责人：创建照常入池，无人可通知
-	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: krNoOwner, Name: "无负责人 KR 下的任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
@@ -958,7 +962,7 @@ func TestTaskCreateDirectPoolEntry(t *testing.T) {
 
 	// 裁决 #164：五个选填字段随创建落库，任务概况可见。
 	scope := api.ReceiverScopeMembers
-	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{{
 			KeyResultId: krWithOwner, Name: "带选填字段的任务", OwnerId: carolUser.ID,
 			StartDate: start, EndDate: end,
@@ -997,7 +1001,7 @@ func TestTaskCreateDirectPoolEntry(t *testing.T) {
 		t.Fatalf("成果审核人未落库: %+v", d.Reviewers)
 	}
 	// 参与人不能选负责人本人 422
-	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{{
 			KeyResultId: krWithOwner, Name: "非法参与人", OwnerId: carolUser.ID,
 			StartDate: start, EndDate: end, ParticipantIds: &[]int64{carolUser.ID},
@@ -1007,7 +1011,7 @@ func TestTaskCreateDirectPoolEntry(t *testing.T) {
 	resp.Body.Close()
 
 	// 校验失败整批不落库：截止早于开始 422
-	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: krWithOwner, Name: "倒置周期", OwnerId: carolUser.ID, StartDate: end, EndDate: start},
 		},
@@ -1028,6 +1032,15 @@ func TestTaskCreateDirectPoolEntry(t *testing.T) {
 	resp = doJSON(t, dave, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: krWithOwner, Name: "越权任务", OwnerId: daveUser.ID, StartDate: start, EndDate: end},
+		},
+	})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+
+	// 裁决 10：普通项目成员也不能直接创建任务 → 403
+	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		Items: []api.CreateTaskItem{
+			{KeyResultId: krWithOwner, Name: "成员越权任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
 	})
 	wantStatus(t, resp, http.StatusForbidden)
@@ -1131,8 +1144,8 @@ func TestTaskInviteLifecycle(t *testing.T) {
 		t.Fatalf("受邀人视角异常: %+v", got[0])
 	}
 
-	// carol 在无关 KR 提交任务，邀请不结束（词汇表）
-	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	// 无关 KR 下另建任务（alice 直建），邀请不结束（词汇表）
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr2, Name: "与邀请无关的任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
@@ -1300,8 +1313,8 @@ func TestTaskStatusAndProgress(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
-	// bob（KR 负责人）免审建两个任务：一个自己负责、一个 carol 负责
-	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	// 裁决 10：创建任务收归项目管理员——alice（项目负责人）建两个任务：bob 负责、carol 负责
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "验收脚本编写", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 			{KeyResultId: kr1, Name: "联调环境准备", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
@@ -1375,40 +1388,27 @@ func TestTaskStatusAndProgress(t *testing.T) {
 		t.Fatalf("进度未清除: %+v", got)
 	}
 
-	// 取消改走所属 KR 负责人审批（AC-57）：原因必填 422
+	// 裁决 10（#180）：关闭收归项目管理员直接操作——原因必填 422
 	cancelURL := func(id int64) string { return fmt.Sprintf("%s/%d/cancellation", tasksURL, id) }
-	resp = doJSON(t, carol, http.MethodPost, cancelURL(carolTask.Id), api.TaskCancellationRequest{Reason: "   "})
+	resp = doJSON(t, alice, http.MethodPost, cancelURL(carolTask.Id), api.CloseTaskRequest{Reason: "   "})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 
-	// 任务负责人发起：任务状态不变，生成待 KR 负责人审批的关闭单
+	// 任务负责人与 KR 负责人都不再能关闭 403
 	reason := "需求合并，不再单独执行"
-	resp = doJSON(t, carol, http.MethodPost, cancelURL(carolTask.Id), api.TaskCancellationRequest{Reason: reason})
-	wantStatus(t, resp, http.StatusOK)
-	requested := decodeBody[api.Task](t, resp)
-	if requested.Status == api.TaskStatusCancelled {
-		t.Fatalf("关闭申请不应即时生效: %+v", requested)
-	}
-	if requested.CancelRequest == nil || requested.CancelRequest.State != api.CancelRequestStatePending ||
-		requested.CancelRequest.Reason != reason {
-		t.Fatalf("未生成待审批关闭申请: %+v", requested.CancelRequest)
-	}
-	// 互斥：待审批关闭申请在时，编辑与再次发起关闭的入口都关闭（#172）
-	if requested.CanEditFields || requested.CanCancel {
-		t.Fatalf("未决关闭申请期间不应保留编辑与关闭入口: %+v", requested)
-	}
-	resp = doJSON(t, carol, http.MethodPost, cancelURL(carolTask.Id), api.TaskCancellationRequest{Reason: reason})
-	wantStatus(t, resp, http.StatusConflict)
+	resp = doJSON(t, carol, http.MethodPost, cancelURL(carolTask.Id), api.CloseTaskRequest{Reason: reason})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodPost, cancelURL(carolTask.Id), api.CloseTaskRequest{Reason: reason})
+	wantStatus(t, resp, http.StatusForbidden)
 	resp.Body.Close()
 
-	// KR 负责人 bob 通过关闭申请：任务进入已关闭并保留原因
-	resp = doJSON(t, bob, http.MethodPost,
-		fmt.Sprintf("%s/%d/cancel-requests/%d/decision", tasksURL, carolTask.Id, requested.CancelRequest.Id),
-		api.CancelRequestDecisionRequest{Decision: api.CancelRequestDecisionRequestDecisionApproved})
+	// 项目负责人直接关闭：即时生效、保留原因、无审批环节
+	resp = doJSON(t, alice, http.MethodPost, cancelURL(carolTask.Id), api.CloseTaskRequest{Reason: reason})
 	wantStatus(t, resp, http.StatusOK)
 	cancelled := decodeBody[api.Task](t, resp)
 	if cancelled.Status != api.TaskStatusCancelled || cancelled.CancelReason == nil || *cancelled.CancelReason != reason {
-		t.Fatalf("取消后状态异常: %+v", cancelled)
+		t.Fatalf("关闭后状态异常: %+v", cancelled)
 	}
 	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id), nil)
 	wantStatus(t, resp, http.StatusOK)
@@ -1416,21 +1416,13 @@ func TestTaskStatusAndProgress(t *testing.T) {
 	// AC-63：已关闭整体剔除，剩下的一个任务未填进度按 0 计入
 	if s2 := okr[0].KeyResults[0].ProgressSummary; s2 == nil || s2.TotalTasks != 1 || s2.FilledTasks != 0 ||
 		s2.AverageProgress == nil || *s2.AverageProgress != 0 {
-		t.Fatalf("取消后覆盖度异常: %+v", okr[0].KeyResults[0].ProgressSummary)
+		t.Fatalf("关闭后覆盖度异常: %+v", okr[0].KeyResults[0].ProgressSummary)
 	}
 
-	// 已关闭任务不可再发起关闭 409
-	resp = doJSON(t, carol, http.MethodPost, cancelURL(carolTask.Id), api.TaskCancellationRequest{Reason: reason})
+	// 已关闭任务不可再关闭 409
+	resp = doJSON(t, alice, http.MethodPost, cancelURL(carolTask.Id), api.CloseTaskRequest{Reason: reason})
 	wantStatus(t, resp, http.StatusConflict)
 	resp.Body.Close()
-
-	// KR 负责人在本人负责 KR 下关闭免审即时生效，且仍留一张已通过的单
-	resp = doJSON(t, bob, http.MethodPost, cancelURL(bobTask.Id), api.TaskCancellationRequest{Reason: "并入其他任务"})
-	wantStatus(t, resp, http.StatusOK)
-	exempt := decodeBody[api.Task](t, resp)
-	if exempt.Status != api.TaskStatusCancelled {
-		t.Fatalf("KR 负责人取消应免审即时生效: %+v", exempt)
-	}
 }
 
 // 任务详情（#7，AC-31/AC-34）：全体成员（含只读）可查看基础信息与审核记录，
@@ -1562,8 +1554,8 @@ func TestTaskFieldEditDirect(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
-	// carol 创建任务 → 直接入池、未开始（裁决 #162）
-	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	// alice（项目负责人）创建任务 → 直接入池、未开始（裁决 #162；裁决 10：创建收归管理员）
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "验证现场联动异常回退", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
@@ -1574,32 +1566,31 @@ func TestTaskFieldEditDirect(t *testing.T) {
 	editURL := func(id int64) string { return fmt.Sprintf("%s/%d/edits", tasksURL, id) }
 
 	// 空修改 422
-	resp = doJSON(t, carol, http.MethodPost, editURL(taskID), api.EditTaskFieldsRequest{})
+	resp = doJSON(t, alice, http.MethodPost, editURL(taskID), api.EditTaskFieldsRequest{})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 
-	// 任务负责人 carol 改截止时间 → 立即生效、无修改原因（#172 裁决）
+	// 裁决 10：任务负责人 carol 不再可改 403
 	newEnd := openapiDate(t, "2026-10-15")
 	resp = doJSON(t, carol, http.MethodPost, editURL(taskID), api.EditTaskFieldsRequest{EndDate: &newEnd})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+
+	// 项目负责人 alice 改截止时间 → 立即生效、无修改原因（#172 裁决）
+	resp = doJSON(t, alice, http.MethodPost, editURL(taskID), api.EditTaskFieldsRequest{EndDate: &newEnd})
 	wantStatus(t, resp, http.StatusOK)
 	edited := decodeBody[api.Task](t, resp)
 	if edited.EndDate.Time.Format("2006-01-02") != "2026-10-15" {
 		t.Fatalf("直接修改应立即生效: %+v", edited.EndDate)
 	}
-	if edited.CancelRequest != nil {
-		t.Fatalf("直接修改不应产生审批单: %+v", edited.CancelRequest)
-	}
 	if !edited.CanEditFields {
-		t.Fatalf("负责人应保有编辑权限: %+v", edited)
+		t.Fatalf("项目负责人应保有编辑权限: %+v", edited)
 	}
 
 	// 动作写入任务动态，站内通知所属 KR 负责人 bob
 	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
 	wantStatus(t, resp, http.StatusOK)
 	detail := decodeBody[api.TaskDetail](t, resp)
-	if len(detail.CancelRequests) != 0 {
-		t.Fatalf("直接修改不应留下关闭申请记录: %+v", detail.CancelRequests)
-	}
 	foundActivity := false
 	for _, a := range detail.Activities {
 		if a.Kind == api.FieldEdited && strings.Contains(a.Summary, "截止时间") {
@@ -1615,7 +1606,7 @@ func TestTaskFieldEditDirect(t *testing.T) {
 	foundNote := false
 	for _, n := range notes {
 		if n.Kind == "task_field_edited" && n.TaskId != nil && *n.TaskId == taskID &&
-			strings.Contains(n.Content, "截止时间") && strings.Contains(n.Content, "王五") {
+			strings.Contains(n.Content, "截止时间") && strings.Contains(n.Content, "张三") {
 			foundNote = true
 		}
 	}
@@ -1624,7 +1615,11 @@ func TestTaskFieldEditDirect(t *testing.T) {
 	}
 	noteCount := len(notes)
 
-	// KR 负责人本人修改（改负责人）：立即生效且不另发通知
+	// KR 负责人本人（升为管理员后）修改：立即生效且不另发通知
+	resp = doJSON(t, alice, http.MethodPut, fmt.Sprintf("%s/projects/%d/members/%d", base, created.Id, bobUser.ID),
+		api.UpdateProjectMemberRoleRequest{Role: api.Admin})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
 	resp = doJSON(t, bob, http.MethodPost, editURL(taskID), api.EditTaskFieldsRequest{OwnerId: &bobUser.ID})
 	wantStatus(t, resp, http.StatusOK)
 	if got := decodeBody[api.Task](t, resp); got.OwnerId != bobUser.ID {
@@ -1637,7 +1632,7 @@ func TestTaskFieldEditDirect(t *testing.T) {
 	}
 
 	// 校验仍然生效：负责人须为项目成员（非成员被拒）；
-	// carol 已不是负责人，直接修改被拒 403（编辑权限口径不变）
+	// carol（任务负责人）直接修改被拒 403（裁决 10 编辑收归管理员）
 	stranger := int64(999999)
 	resp = doJSON(t, bob, http.MethodPost, editURL(taskID), api.EditTaskFieldsRequest{OwnerId: &stranger})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
@@ -1690,7 +1685,7 @@ func TestDeliverablesAndFiles(t *testing.T) {
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
 	// 裁决 #164：创建任务不再带预期交付物，交付物项建立后才出现在列表列
-	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 		},
@@ -1856,7 +1851,7 @@ func TestDiscussionsAndNotifications(t *testing.T) {
 	kr1 := okr[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
-	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 		},
@@ -1889,10 +1884,16 @@ func TestDiscussionsAndNotifications(t *testing.T) {
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 
-	// AC-36：通知只发任务负责人 bob 与被 @ 的 alice，携带 taskId 可直达讨论 Tab
+	// AC-36：讨论通知只发任务负责人 bob 与被 @ 的 alice，携带 taskId 可直达讨论 Tab
+	// （bob 另有 alice 建任务的入池通知，这里只看讨论类）
 	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
 	wantStatus(t, resp, http.StatusOK)
-	bobNotes := dropOkrAssigned(decodeBody[[]api.Notification](t, resp))
+	bobNotes := []api.Notification{}
+	for _, n := range dropOkrAssigned(decodeBody[[]api.Notification](t, resp)) {
+		if strings.HasPrefix(n.Kind, "discussion") {
+			bobNotes = append(bobNotes, n)
+		}
+	}
 	if len(bobNotes) != 1 || bobNotes[0].Kind != "discussion_owner" || bobNotes[0].TaskId == nil || *bobNotes[0].TaskId != taskID {
 		t.Fatalf("负责人通知异常: %+v", bobNotes)
 	}
@@ -1975,7 +1976,7 @@ func TestCompletionReviewFlow(t *testing.T) {
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
 	// carol 建任务（带两个交付物项，直接入池）→ carol 开始执行
-	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
@@ -1983,9 +1984,9 @@ func TestCompletionReviewFlow(t *testing.T) {
 	wantStatus(t, resp, http.StatusCreated)
 	tasks := decodeBody[[]api.Task](t, resp)
 	taskID := tasks[0].Id
-	// 裁决 H1（#141）：已入池任务加交付物项即时生效，不走审批
+	// 裁决 H1（#141）：已入池任务加交付物项即时生效，不走审批（裁决 10：负责人／管理员）
 	createDeliverable(t, carol, tasksURL, taskID, "验收方案.docx")
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/deliverables", tasksURL, taskID),
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/deliverables", tasksURL, taskID),
 		api.CreateDeliverableRequest{FileName: "验收记录.docx"})
 	wantStructureAccepted(t, resp)
 	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, taskID),
@@ -2194,7 +2195,7 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
 	// bob 免审建上游任务 A（带交付物）与跨 KR 下游任务 B（carol 负责）
-	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "采集现场数据", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 			{KeyResultId: kr2, Name: "回归验证分析", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
@@ -2214,10 +2215,10 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 	// 为 A 建交付物项（裁决 #164：创建任务不再带预期交付物）
 	dA := createDeliverable(t, bob, tasksURL, taskA.Id, "现场数据包.zip")
 
-	// AC-28：B 的负责人 carol 选择 A 建立必要输入边（裁决 #163：不再选对应交付物）；
-	// 输入与输入源是关键字段（#172 裁决：直接生效，边立即建立）
+	// AC-28：项目管理员为 B 选择 A 建立必要输入边（裁决 #163 不选对应交付物；
+	// 裁决 10：配置输入源收归项目管理员，直接生效、边立即建立）
 	inputsURL := func(id int64) string { return fmt.Sprintf("%s/%d/inputs", tasksURL, id) }
-	resp = doJSON(t, carol, http.MethodPost, inputsURL(taskB.Id), api.CreateTaskInputRequest{
+	resp = doJSON(t, alice, http.MethodPost, inputsURL(taskB.Id), api.CreateTaskInputRequest{
 		Necessity: api.Required,
 		SourceTaskIds: []int64{taskA.Id},
 	})
@@ -2227,8 +2228,8 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 		t.Fatalf("新建边应未就绪且含来源信息: %+v", edge)
 	}
 
-	// AC-07：反向再建一条反馈边（双向/循环关系保留真实连线）；bob 是 KR 负责人，免审即时生效
-	resp = doJSON(t, bob, http.MethodPost, inputsURL(taskA.Id), api.CreateTaskInputRequest{
+	// AC-07：反向再建一条反馈边（双向/循环关系保留真实连线）
+	resp = doJSON(t, alice, http.MethodPost, inputsURL(taskA.Id), api.CreateTaskInputRequest{
 		Necessity: api.Reference, SourceTaskIds: []int64{taskB.Id},
 	})
 	wantStructureAccepted(t, resp)
@@ -2251,11 +2252,16 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 		}
 	}
 
-	// 自环 422；无关成员建边 403
-	resp = doJSON(t, carol, http.MethodPost, inputsURL(taskB.Id), api.CreateTaskInputRequest{
+	// 自环 422；成员建边 403（裁决 10：配置输入源仅项目管理员）
+	resp = doJSON(t, alice, http.MethodPost, inputsURL(taskB.Id), api.CreateTaskInputRequest{
 		Necessity: api.Required, SourceTaskIds: []int64{taskB.Id},
 	})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodPost, inputsURL(taskB.Id), api.CreateTaskInputRequest{
+		Necessity: api.Required, SourceTaskIds: []int64{taskA.Id},
+	})
+	wantStatus(t, resp, http.StatusForbidden)
 	resp.Body.Close()
 
 	// AC-48：A 走完成终审后当前内容生效 → 边自动就绪、B 不再等待输入
@@ -2337,11 +2343,11 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 	}
 
 	// 解除边：目标任务 A 已完成（终态）不允许修改 → 409
-	resp = doJSON(t, bob, http.MethodDelete, fmt.Sprintf("%s/projects/%d/edges/%d", base, created.Id, detailB.Outputs[0].Id), nil)
+	resp = doJSON(t, alice, http.MethodDelete, fmt.Sprintf("%s/projects/%d/edges/%d", base, created.Id, detailB.Outputs[0].Id), nil)
 	wantStatus(t, resp, http.StatusConflict)
 	resp.Body.Close()
-	// 解除输入源同样是关键字段变更（#172 裁决：直接生效）
-	resp = doJSON(t, carol, http.MethodDelete, fmt.Sprintf("%s/projects/%d/edges/%d", base, created.Id, detailB.Inputs[0].Id), nil)
+	// 解除输入源同样是关键字段变更（#172 直接生效；裁决 10：仅项目管理员）
+	resp = doJSON(t, alice, http.MethodDelete, fmt.Sprintf("%s/projects/%d/edges/%d", base, created.Id, detailB.Inputs[0].Id), nil)
 	wantStructureAccepted(t, resp)
 	if edges := projectEdges(t, carol, base, created.Id); len(edges) != 1 {
 		t.Fatalf("解除后边数量异常: %+v", edges)
@@ -2397,7 +2403,7 @@ func TestIntermediateReviewOrSign(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
-	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
@@ -2558,8 +2564,8 @@ func TestCreateUpstreamTask(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
-	// carol 建任务（直接入池）→ 替 dave 创建上游任务
-	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	// alice 建任务（直接入池）→ 替 dave 创建上游任务（裁决 10：两步都收归管理员）
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "回归验证分析", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
@@ -2569,12 +2575,12 @@ func TestCreateUpstreamTask(t *testing.T) {
 	upstreamURL := fmt.Sprintf("%s/%d/upstream-tasks", tasksURL, taskID)
 
 	// 校验仍然生效：所属 KR 必须存在、负责人须为非只读成员
-	resp = doJSON(t, carol, http.MethodPost, upstreamURL, api.CreateUpstreamTaskRequest{
+	resp = doJSON(t, alice, http.MethodPost, upstreamURL, api.CreateUpstreamTaskRequest{
 		KeyResultId: 999999, Name: "无效 KR", OwnerId: daveUser.ID, StartDate: start, EndDate: end,
 	})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
-	resp = doJSON(t, carol, http.MethodPost, upstreamURL, api.CreateUpstreamTaskRequest{
+	resp = doJSON(t, alice, http.MethodPost, upstreamURL, api.CreateUpstreamTaskRequest{
 		KeyResultId: kr1, Name: "无效负责人", OwnerId: 999999, StartDate: start, EndDate: end,
 	})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
@@ -2582,7 +2588,7 @@ func TestCreateUpstreamTask(t *testing.T) {
 
 	// 正常创建：新任务直接入池、边立即建立
 	upstreamEnd := openapiDate(t, "2026-09-20")
-	resp = doJSON(t, carol, http.MethodPost, upstreamURL, api.CreateUpstreamTaskRequest{
+	resp = doJSON(t, alice, http.MethodPost, upstreamURL, api.CreateUpstreamTaskRequest{
 		KeyResultId: kr1, Name: "补充现场口径说明", OwnerId: daveUser.ID,
 		StartDate: start, EndDate: upstreamEnd,
 	})
@@ -2625,7 +2631,7 @@ func TestCreateUpstreamTask(t *testing.T) {
 	foundAssigned := false
 	for _, n := range decodeBody[[]api.Notification](t, resp) {
 		if n.Kind == "upstream_task_assigned" && n.TaskId != nil && *n.TaskId == upstream.Id &&
-			strings.Contains(n.Content, "王五") && strings.Contains(n.Content, "补充现场口径说明") {
+			strings.Contains(n.Content, "张三") && strings.Contains(n.Content, "补充现场口径说明") {
 			foundAssigned = true
 		}
 	}
@@ -2696,7 +2702,7 @@ func TestMultiSourceInputs(t *testing.T) {
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
 	// KR 负责人 bob 免审建两条上游任务与两条下游任务（C 用于多来源任务，D 用于多对接人）
-	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "采集现场数据", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 			{KeyResultId: kr1, Name: "整理历史台账", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
@@ -2712,7 +2718,7 @@ func TestMultiSourceInputs(t *testing.T) {
 	taskA, taskB2, taskC, taskD := byName["采集现场数据"], byName["整理历史台账"], byName["回归验证分析"], byName["外部口径汇总"]
 
 	// AC-53：一次选择两个来源任务 → 分别建立两条边，各自独立未就绪
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, taskC),
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, taskC),
 		api.CreateTaskInputRequest{
 			Necessity: api.Required,
 			SourceTaskIds: []int64{taskA, taskB2},
@@ -2742,7 +2748,7 @@ func TestMultiSourceInputs(t *testing.T) {
 		{Necessity: api.Required, SourceTaskIds: []int64{taskA, taskC}},
 		{Necessity: api.Required, SourceTaskIds: []int64{}},
 	} {
-		resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, taskC), bad)
+		resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, taskC), bad)
 		wantStatus(t, resp, http.StatusUnprocessableEntity)
 		resp.Body.Close()
 	}
@@ -2758,7 +2764,7 @@ func TestMultiSourceInputs(t *testing.T) {
 	// 各自建立必要输入边并独立参与就绪判定。
 	upstreamURL := fmt.Sprintf("%s/%d/upstream-tasks", tasksURL, taskD)
 	for i, ownerID := range []int64{daveUser.ID, erinUser.ID} {
-		resp = doJSON(t, carol, http.MethodPost, upstreamURL, api.CreateUpstreamTaskRequest{
+		resp = doJSON(t, alice, http.MethodPost, upstreamURL, api.CreateUpstreamTaskRequest{
 			KeyResultId: kr1, Name: fmt.Sprintf("本方口径说明整理 %d", i+1), OwnerId: ownerID,
 			StartDate: start, EndDate: end,
 		})
@@ -2853,7 +2859,7 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 	start, end := openapiDate(t, "2020-01-01"), openapiDate(t, "2020-02-01")
 
 	// bob 免审建两个任务：下游由 carol 负责，上游由 bob 负责。
-	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "回归验证分析", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 			{KeyResultId: kr1, Name: "现场数据采集", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
@@ -2871,7 +2877,7 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 	}
 
 	// 下游挂一条来自上游任务的必要输入：上游未完成 ⇒ 上游未就绪卡点，待行动人为上游负责人 bob。
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, downstream.Id),
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, downstream.Id),
 		api.CreateTaskInputRequest{
 			Necessity: api.Required,
 			SourceTaskIds: []int64{upstream.Id},
@@ -3059,7 +3065,7 @@ func TestMyWorkFiveGroups(t *testing.T) {
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
 	// carol 创建任务（直接入池）→ carol 待我处理出现任务卡；bob（KR 负责人）暂无审批件
-	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
@@ -3128,7 +3134,7 @@ func TestMyWorkFiveGroups(t *testing.T) {
 
 	// 卡点：alice 名下一个已超期任务派生任务超期卡点 → alice 与我相关的卡点（AC-11）
 	pastStart, pastEnd := openapiDate(t, "2020-01-01"), openapiDate(t, "2020-02-01")
-	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "验收环境准备", OwnerId: aliceUser.ID, StartDate: pastStart, EndDate: pastEnd},
 		},
@@ -3195,7 +3201,7 @@ func TestInterlockAndCriticalPath(t *testing.T) {
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-10")
 
 	// 三个任务：A→B→C 硬前置链；再加 C→B 硬前置构成循环；B→A 反馈边不影响。
-	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "任务A", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 			{KeyResultId: kr1, Name: "任务B", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
@@ -3211,7 +3217,7 @@ func TestInterlockAndCriticalPath(t *testing.T) {
 	// #173 裁决：互锁与关键路径沿「必要」边分析，参考边不参与。
 	mkEdge := func(srcName string, dst int64, necessity api.Necessity) api.DeliverableEdge {
 		t.Helper()
-		resp := doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, dst), api.CreateTaskInputRequest{
+		resp := doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, dst), api.CreateTaskInputRequest{
 			Necessity: necessity, SourceTaskIds: []int64{byName[srcName]},
 		})
 		wantStructureAccepted(t, resp)
@@ -3310,7 +3316,7 @@ func TestArtifacts(t *testing.T) {
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
 	// 走完整链路生成一份当前内容：建任务→开始→候选→终审通过
-	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 		},
@@ -3339,7 +3345,7 @@ func TestArtifacts(t *testing.T) {
 	resp.Body.Close()
 
 	// 下游任务以这份成果为必要输入，边上绑定交付物项：归档列表的「来源关系边」列由此而来。
-	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "按方案执行验收", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 		},
@@ -3351,7 +3357,7 @@ func TestArtifacts(t *testing.T) {
 			downstreamID = task.Id
 		}
 	}
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, downstreamID),
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, downstreamID),
 		api.CreateTaskInputRequest{
 			Necessity: api.Required,
 			SourceTaskIds: []int64{taskID},
@@ -3561,7 +3567,7 @@ func TestProjectReport(t *testing.T) {
 	// 任务 A：走完整链路到完成（产生完成成果与 completedInRange）；任务 B：临近截止（下一步）；
 	// 任务 C：B 的上游，始终不完成，用于让 B 的必要输入未就绪。
 	far := openapiDate(t, "2026-12-31")
-	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: bobUser.ID, StartDate: start, EndDate: soon},
 			{KeyResultId: kr1, Name: "临近截止任务", OwnerId: bobUser.ID, StartDate: start, EndDate: soon},
@@ -3583,7 +3589,7 @@ func TestProjectReport(t *testing.T) {
 	}
 
 	// B 挂一条来自 C 的必要输入边：C 未交付 ⇒ B 的必要输入未就绪（§5.1 等待输入）。
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, taskB.Id),
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, taskB.Id),
 		api.CreateTaskInputRequest{Necessity: api.Required, SourceTaskIds: []int64{taskC.Id}})
 	wantStructureAccepted(t, resp)
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, taskA.Id),
@@ -3950,7 +3956,7 @@ func TestUnifiedPermissionsAcrossIdentities(t *testing.T) {
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
 	// carol 创建任务（直接入池，裁决 #162）
-	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
@@ -4045,12 +4051,12 @@ func TestUnifiedPermissionsAcrossIdentities(t *testing.T) {
 	// AC-22（#178 修订）：外部传递不产生外部账号——替他人创建上游任务时，
 	// 新任务负责人必须是项目内非访客成员。
 	start2, end2 := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/upstream-tasks", tasksURL, taskID),
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/upstream-tasks", tasksURL, taskID),
 		api.CreateUpstreamTaskRequest{KeyResultId: kr1, Name: "外部材料代录",
 			OwnerId: daveUser.ID, StartDate: start2, EndDate: end2})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/upstream-tasks", tasksURL, taskID),
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/upstream-tasks", tasksURL, taskID),
 		api.CreateUpstreamTaskRequest{KeyResultId: kr1, Name: "外部材料由协调人李四收集后代录",
 			OwnerId: bobUser.ID, StartDate: start2, EndDate: end2})
 	wantStructureAccepted(t, resp)
@@ -4146,8 +4152,8 @@ func TestTaskActivity(t *testing.T) {
 		return nil
 	}
 
-	// bob 建任务 → 入池留痕（裁决 #162）
-	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	// alice 建任务（裁决 10）→ 入池留痕（裁决 #162）
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "端到端联调", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 		},
@@ -4157,7 +4163,7 @@ func TestTaskActivity(t *testing.T) {
 
 	acts := activitiesOf(taskID)
 	entered := has(acts, api.PoolEntered)
-	if entered == nil || entered.ActorName == nil || *entered.ActorName != "李四" {
+	if entered == nil || entered.ActorName == nil || *entered.ActorName != "张三" {
 		t.Fatalf("任务入池应留痕并带行动人: %+v", acts)
 	}
 	if entered.KindLabel != "任务入池" {
@@ -4176,9 +4182,9 @@ func TestTaskActivity(t *testing.T) {
 		t.Fatalf("卡点动态文案异常: %+v", opened.Summary)
 	}
 
-	// 直接修改把截止时间挪到未来（#172）→ 超期条件消失，diff 补记「卡点解除」
+	// 直接修改把截止时间挪到未来（#172；裁决 10：管理员）→ 超期条件消失，diff 补记「卡点解除」
 	future := openapiDate(t, "2026-12-31")
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/edits", tasksURL, taskID),
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/edits", tasksURL, taskID),
 		api.EditTaskFieldsRequest{EndDate: &future})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
@@ -4238,7 +4244,7 @@ func TestReceiversAndReceipts(t *testing.T) {
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
 	// carol 建两个任务并入池通过、开始执行
-	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "指定接收方的任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 			{KeyResultId: kr1, Name: "全员接收的任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
@@ -4264,13 +4270,13 @@ func TestReceiversAndReceipts(t *testing.T) {
 	resp.Body.Close()
 
 	// 任务 A 指定 dave 为接收方；任务 B 取「项目全体成员」。
-	// 接收方是关键字段（#172 裁决：直接生效）。
-	resp = doJSON(t, carol, http.MethodPut, receiversA, api.SetReceiversRequest{Scope: api.ReceiverScopeMembers, UserIds: &[]int64{daveUser.ID}})
+	// 接收方是关键字段（#172 直接生效；裁决 10：仅项目管理员）。
+	resp = doJSON(t, alice, http.MethodPut, receiversA, api.SetReceiversRequest{Scope: api.ReceiverScopeMembers, UserIds: &[]int64{daveUser.ID}})
 	configured := wantStructureAccepted(t, resp)
 	if configured.ReceiverScope != api.ReceiverScopeMembers || configured.Receivers == nil || len(*configured.Receivers) != 1 {
 		t.Fatalf("接收方配置未即时生效: %+v", configured)
 	}
-	resp = doJSON(t, carol, http.MethodPut, fmt.Sprintf("%s/%d/receivers", tasksURL, taskB),
+	resp = doJSON(t, alice, http.MethodPut, fmt.Sprintf("%s/%d/receivers", tasksURL, taskB),
 		api.SetReceiversRequest{Scope: api.ReceiverScopeAll})
 	wantStructureAccepted(t, resp)
 
@@ -4417,19 +4423,25 @@ func TestRemindWaitingTargets(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
-	// carol 建任务后发起关闭申请（#172 裁决：变更类审批只剩关闭申请）：
+	// carol 的任务提交完成申请进入 KR 终审（裁决 10 后关闭申请退场，等待事项用完成申请）：
 	// 刚提交，未达审批超时阈值，因此没有任何派生卡点
-	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "等审批的任务", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
 	})
 	wantStatus(t, resp, http.StatusCreated)
 	task := decodeBody[[]api.Task](t, resp)[0]
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/cancellation", tasksURL, task.Id),
-		api.TaskCancellationRequest{Reason: "需求合并，等待关闭"})
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, task.Id),
+		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
 	wantStatus(t, resp, http.StatusOK)
-	requestID := decodeBody[api.Task](t, resp).CancelRequest.Id
+	resp.Body.Close()
+	d1 := createDeliverable(t, carol, tasksURL, task.Id, "验收结论.docx")
+	uploadCandidate(t, carol, tasksURL, task.Id, d1, api.UploadCandidateRequest{FileName: "验收结论.docx"}, "candidate-bytes")
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, task.Id),
+		api.SubmitCompletionRequest{Note: "已完成"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
 
 	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/projects/%d/blockers", base, created.Id), nil)
 	wantStatus(t, resp, http.StatusOK)
@@ -4444,14 +4456,14 @@ func TestRemindWaitingTargets(t *testing.T) {
 	work := decodeBody[api.MyWork](t, resp)
 	var waiting *api.WorkItem
 	for i := range work.Waiting {
-		if work.Waiting[i].Kind == "waiting_cancel_request" {
+		if work.Waiting[i].Kind == "waiting_completion" {
 			waiting = &work.Waiting[i]
 		}
 	}
 	if waiting == nil {
-		t.Fatalf("等待他人应有关闭申请卡片: %+v", work.Waiting)
+		t.Fatalf("等待他人应有完成申请卡片: %+v", work.Waiting)
 	}
-	if !waiting.CanRemind || waiting.RefKey == nil || !strings.HasPrefix(*waiting.RefKey, "wait:cancel_request:") {
+	if !waiting.CanRemind || waiting.RefKey == nil || !strings.HasPrefix(*waiting.RefKey, "wait:final_review:") {
 		t.Fatalf("尚未成卡点的等待事项也应可提醒并按自身键寻址: %+v", waiting)
 	}
 
@@ -4476,7 +4488,7 @@ func TestRemindWaitingTargets(t *testing.T) {
 	if len(notes) != 1 || notes[0].TaskId == nil || *notes[0].TaskId != task.Id {
 		t.Fatalf("提醒通知异常: %+v", notes)
 	}
-	for _, want := range []string{"等审批的任务", "关闭申请审批处理", "2026-09-30"} {
+	for _, want := range []string{"等审批的任务", "KR 终审处理", "2026-09-30"} {
 		if !strings.Contains(notes[0].Content, want) {
 			t.Fatalf("提醒正文缺「%s」: %s", want, notes[0].Content)
 		}
@@ -4487,9 +4499,12 @@ func TestRemindWaitingTargets(t *testing.T) {
 	wantStatus(t, resp, http.StatusConflict)
 	resp.Body.Close()
 
-	// 目标已处理后按不存在处理：bob 通过关闭申请，等待事项消失
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/cancel-requests/%d/decision", tasksURL, task.Id, requestID),
-		api.CancelRequestDecisionRequest{Decision: api.CancelRequestDecisionRequestDecisionApproved})
+	// 目标已处理后按不存在处理：bob 通过终审，等待事项消失
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, task.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	reviewID := decodeBody[api.TaskDetail](t, resp).CompletionReviews[0].Id
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, task.Id, reviewID),
+		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
 	resp = doJSON(t, alice, http.MethodPost, remindURL, api.RemindRequest{TargetKey: *waiting.RefKey})
@@ -4757,22 +4772,28 @@ func TestOkrEditHandoverAndMemberRemoval(t *testing.T) {
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 
-	// 造一件未决审批（#172 裁决：转交范围为完成审批与关闭申请）：
-	// carol 建任务（直接入池）后发起关闭申请，待 KR 负责人 bob 处理
+	// 造一件未决审批（裁决 10 后只剩完成审批）：
+	// alice 建任务（负责人 carol），carol 提交完成申请进入待 KR 负责人 bob 终审
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
-	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{{KeyResultId: kr1, Name: "联调验证", OwnerId: carolUser.ID, StartDate: start, EndDate: end}},
 	})
 	wantStatus(t, resp, http.StatusCreated)
 	taskID := decodeBody[[]api.Task](t, resp)[0].Id
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/cancellation", tasksURL, taskID),
-		api.TaskCancellationRequest{Reason: "需求合并，不再单独执行"})
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, taskID),
+		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
 	wantStatus(t, resp, http.StatusOK)
-	pendingChange := decodeBody[api.Task](t, resp).CancelRequest
-	if pendingChange == nil || pendingChange.State != api.CancelRequestStatePending {
-		t.Fatalf("关闭申请未进入待审批: %+v", pendingChange)
-	}
+	resp.Body.Close()
+	dHandover := createDeliverable(t, carol, tasksURL, taskID, "联调记录.docx")
+	uploadCandidate(t, carol, tasksURL, taskID, dHandover, api.UploadCandidateRequest{FileName: "联调记录.docx"}, "candidate-bytes")
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskID),
+		api.SubmitCompletionRequest{Note: "联调完成"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	pendingReviewID := decodeBody[api.TaskDetail](t, resp).CompletionReviews[0].Id
 
 	// AC-61：交接确认信息给出未决审批条数
 	resp = doJSON(t, alice, http.MethodGet, krURL, nil)
@@ -4793,8 +4814,8 @@ func TestOkrEditHandoverAndMemberRemoval(t *testing.T) {
 		api.UpdateProjectMemberRoleRequest{Role: api.Viewer})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/cancel-requests/%d/decision", tasksURL, taskID, pendingChange.Id),
-		api.CancelRequestDecisionRequest{Decision: api.CancelRequestDecisionRequestDecisionApproved})
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, taskID, pendingReviewID),
+		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
 	wantStatus(t, resp, http.StatusForbidden)
 	resp.Body.Close()
 	resp = doJSON(t, bob, http.MethodPatch, krURL, api.UpdateKeyResultRequest{Description: sp("只读也想改")})
@@ -4932,23 +4953,22 @@ func TestStructureEditDirect(t *testing.T) {
 	kr1 := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
-	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items:           []api.CreateTaskItem{{KeyResultId: kr1, Name: "联调验证", OwnerId: carolUser.ID, StartDate: start, EndDate: end}},
 	})
 	wantStatus(t, resp, http.StatusCreated)
 	taskID := decodeBody[[]api.Task](t, resp)[0].Id
 
-	// 任务负责人 carol 配置接收方 → 直接生效（#172 裁决）
+	// 裁决 10：接收方配置收归项目管理员——负责人 carol 403，项目负责人 alice 直接生效
 	receiversURL := fmt.Sprintf("%s/%d/receivers", tasksURL, taskID)
 	resp = doJSON(t, carol, http.MethodPut, receiversURL, api.SetReceiversRequest{Scope: api.ReceiverScopeAll})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPut, receiversURL, api.SetReceiversRequest{Scope: api.ReceiverScopeAll})
 	applied := wantStructureAccepted(t, resp)
 	if applied.ReceiverScope != api.ReceiverScopeAll {
 		t.Fatalf("接收方配置应立即生效: %+v", applied.ReceiverScope)
 	}
-	if applied.CancelRequest != nil {
-		t.Fatalf("直接修改不应产生审批单: %+v", applied.CancelRequest)
-	}
-
 	// 动作写入任务动态（任务字段修改），并站内通知所属 KR 负责人 bob
 	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
 	wantStatus(t, resp, http.StatusOK)
@@ -4968,7 +4988,7 @@ func TestStructureEditDirect(t *testing.T) {
 	foundNote := false
 	for _, n := range notes {
 		if n.Kind == "task_field_edited" && n.TaskId != nil && *n.TaskId == taskID &&
-			strings.Contains(n.Content, "接收方") && strings.Contains(n.Content, "王五") {
+			strings.Contains(n.Content, "接收方") && strings.Contains(n.Content, "张三") {
 			foundNote = true
 		}
 	}
@@ -4976,8 +4996,12 @@ func TestStructureEditDirect(t *testing.T) {
 		t.Fatalf("字段修改应站内通知所属 KR 负责人: %+v", notes)
 	}
 
-	// KR 负责人本人修改不另发通知
+	// KR 负责人本人（升为管理员后）修改不另发通知
 	before := len(notes)
+	resp = doJSON(t, alice, http.MethodPut, fmt.Sprintf("%s/projects/%d/members/%d", base, created.Id, bobUser.ID),
+		api.UpdateProjectMemberRoleRequest{Role: api.Admin})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
 	resp = doJSON(t, bob, http.MethodPut, receiversURL, api.SetReceiversRequest{Scope: api.ReceiverScopeMembers, UserIds: &[]int64{carolUser.ID}})
 	wantStructureAccepted(t, resp)
 	resp = doJSON(t, bob, http.MethodGet, base+"/notifications", nil)
@@ -5027,7 +5051,7 @@ func TestDeliverableStructureFree(t *testing.T) {
 	kr1 := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
-	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items:           []api.CreateTaskItem{{KeyResultId: kr1, Name: "联调验证", OwnerId: carolUser.ID, StartDate: start, EndDate: end}},
 	})
 	wantStatus(t, resp, http.StatusCreated)
@@ -5042,9 +5066,7 @@ func TestDeliverableStructureFree(t *testing.T) {
 	// 已入池任务新增交付物项即时生效，无变更单
 	resp = doJSON(t, carol, http.MethodPost, deliverablesURL, api.CreateDeliverableRequest{FileName: "联调报告.docx"})
 	wantStatus(t, resp, http.StatusOK)
-	if task := decodeBody[api.Task](t, resp); task.CancelRequest != nil {
-		t.Fatalf("新增交付物项不应生成审批单: %+v", task.CancelRequest)
-	}
+	resp.Body.Close()
 	first := deliverableOf(t, carol, base, created.Id, taskID, "联调报告")
 	if !first.CanDelete {
 		t.Fatalf("未发布的项应可删除: %+v", first)
@@ -5106,9 +5128,9 @@ func TestDeliverableStructureFree(t *testing.T) {
 	}
 }
 
-// 关闭申请与字段修改的互斥（AC-57、#172 裁决，回归 R3）：关闭申请审批期间不能修改字段
-// 也不能重复发起关闭；退回后恢复可用；关闭生效后任务进入终态，既有申请不得再被处理。
-func TestCancelRequestOnTerminalTask(t *testing.T) {
+// 关闭与终态收口（AC-57、裁决 10，#180，回归 R3）：项目管理员直接关闭即时生效；
+// 关闭后任务进入终态，不能修改字段、不能再次关闭。
+func TestCloseTaskOnTerminalTask(t *testing.T) {
 	q, pool := setupDB(t)
 	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
 	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
@@ -5148,65 +5170,55 @@ func TestCancelRequestOnTerminalTask(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
-	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		Items:           []api.CreateTaskItem{{KeyResultId: kr1, Name: "联调验证", OwnerId: carolUser.ID, StartDate: start, EndDate: end}},
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		Items: []api.CreateTaskItem{{KeyResultId: kr1, Name: "联调验证", OwnerId: carolUser.ID, StartDate: start, EndDate: end}},
 	})
 	wantStatus(t, resp, http.StatusCreated)
 	taskID := decodeBody[[]api.Task](t, resp)[0].Id
 
-	// carol 发起关闭申请 → 待 KR 负责人审批
+	// 裁决 10：任务负责人与 KR 负责人都不能关闭；管理员修改字段照常可用
 	cancelURL := fmt.Sprintf("%s/%d/cancellation", tasksURL, taskID)
-	resp = doJSON(t, carol, http.MethodPost, cancelURL, api.TaskCancellationRequest{Reason: "需求取消"})
-	wantStatus(t, resp, http.StatusOK)
-	pending := decodeBody[api.Task](t, resp)
-	requestID := pending.CancelRequest.Id
-
-	// 关闭申请未决期间不能修改字段（KR 负责人同样受互斥约束）、不能重复发起关闭
 	newEnd := openapiDate(t, "2026-10-15")
 	editURL := fmt.Sprintf("%s/%d/edits", tasksURL, taskID)
 	for _, c := range []*http.Client{carol, bob} {
-		resp = doJSON(t, c, http.MethodPost, editURL, api.EditTaskFieldsRequest{EndDate: &newEnd})
-		wantStatus(t, resp, http.StatusConflict)
-		resp.Body.Close()
-		resp = doJSON(t, c, http.MethodPost, cancelURL, api.TaskCancellationRequest{Reason: "再次取消"})
-		wantStatus(t, resp, http.StatusConflict)
+		resp = doJSON(t, c, http.MethodPost, cancelURL, api.CloseTaskRequest{Reason: "需求取消"})
+		wantStatus(t, resp, http.StatusForbidden)
 		resp.Body.Close()
 	}
+	resp = doJSON(t, alice, http.MethodPost, editURL, api.EditTaskFieldsRequest{EndDate: &newEnd})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
 
-	// 关闭申请退回后修改恢复可用；随后 KR 负责人本人免审关闭即时生效
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/cancel-requests/%d/decision", tasksURL, taskID, requestID),
-		api.CancelRequestDecisionRequest{Decision: api.CancelRequestDecisionRequestDecisionRejected, Opinion: sp("仍需执行")})
-	wantStatus(t, resp, http.StatusOK)
-	resp.Body.Close()
-	resp = doJSON(t, carol, http.MethodPost, editURL, api.EditTaskFieldsRequest{EndDate: &newEnd})
-	wantStatus(t, resp, http.StatusOK)
-	resp.Body.Close()
-	resp = doJSON(t, bob, http.MethodPost, cancelURL, api.TaskCancellationRequest{Reason: "需求取消"})
+	// 项目负责人直接关闭：即时生效
+	resp = doJSON(t, alice, http.MethodPost, cancelURL, api.CloseTaskRequest{Reason: "需求取消"})
 	wantStatus(t, resp, http.StatusOK)
 	cancelled := decodeBody[api.Task](t, resp)
 	if cancelled.Status != api.TaskStatusCancelled {
 		t.Fatalf("任务应为已关闭: %+v", cancelled.Status)
 	}
 
-	// 终态任务：退回的旧申请不可再处理，也不能修改字段或再次发起关闭
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/cancel-requests/%d/decision", tasksURL, taskID, requestID),
-		api.CancelRequestDecisionRequest{Decision: api.CancelRequestDecisionRequestDecisionApproved})
+	// 终态任务：不能修改字段、不能再次关闭
+	resp = doJSON(t, alice, http.MethodPost, editURL, api.EditTaskFieldsRequest{EndDate: &newEnd})
 	wantStatus(t, resp, http.StatusConflict)
 	resp.Body.Close()
-	resp = doJSON(t, carol, http.MethodPost, editURL, api.EditTaskFieldsRequest{EndDate: &newEnd})
-	wantStatus(t, resp, http.StatusConflict)
-	resp.Body.Close()
-	resp = doJSON(t, carol, http.MethodPost, cancelURL, api.TaskCancellationRequest{Reason: "再次取消"})
+	resp = doJSON(t, alice, http.MethodPost, cancelURL, api.CloseTaskRequest{Reason: "再次关闭"})
 	wantStatus(t, resp, http.StatusConflict)
 	resp.Body.Close()
 
+	// 关闭动作写入任务动态（裁决 10：无审批环节，动态即留痕）
 	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskID), nil)
 	wantStatus(t, resp, http.StatusOK)
 	after := decodeBody[api.TaskDetail](t, resp)
-	// 详情侧不应再下发可决策标志
-	if after.Task.CancelRequest != nil && after.Task.CancelRequest.CanDecide != nil && *after.Task.CancelRequest.CanDecide {
-		t.Fatalf("终态任务仍下发 canDecide=true: %+v", after.Task.CancelRequest)
+	foundClosed := false
+	for _, a := range after.Activities {
+		if a.Kind == "task_closed" && strings.Contains(a.Summary, "需求取消") {
+			foundClosed = true
+		}
 	}
+	if !foundClosed {
+		t.Fatalf("关闭应写入任务动态: %+v", after.Activities)
+	}
+	_ = sp
 }
 
 // 交付物内容同态唯一（回归 D1）：库层偏唯一索引兜底，应用层删旧建新失败也不会留下两行同态记录。
@@ -5740,7 +5752,7 @@ func TestProjectSettingsThresholds(t *testing.T) {
 		}})
 	wantStatus(t, resp, http.StatusCreated)
 	kr1 := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/projects/%d/tasks", base, created.Id),
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/tasks", base, created.Id),
 		api.CreateTaskBatchRequest{
 			Items: []api.CreateTaskItem{{
 				KeyResultId: kr1, Name: "等审批的任务", OwnerId: carolUser.ID,
@@ -5749,12 +5761,19 @@ func TestProjectSettingsThresholds(t *testing.T) {
 		})
 	wantStatus(t, resp, http.StatusCreated)
 	task := decodeBody[[]api.Task](t, resp)[0]
-	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/projects/%d/tasks/%d/cancellation", base, created.Id, task.Id),
-		api.TaskCancellationRequest{Reason: "需求合并，等待关闭"})
+	tasksURLSettings := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURLSettings, task.Id),
+		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	dTimeout := createDeliverable(t, carol, tasksURLSettings, task.Id, "等审批材料.docx")
+	uploadCandidate(t, carol, tasksURLSettings, task.Id, dTimeout, api.UploadCandidateRequest{FileName: "等审批材料.docx"}, "candidate-bytes")
+	resp = doJSON(t, carol, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURLSettings, task.Id),
+		api.SubmitCompletionRequest{Note: "请终审"})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
 	if _, err := pool.Exec(context.Background(),
-		"UPDATE field_change_requests SET submitted_at = now() - interval '2 days' WHERE task_id = $1", task.Id); err != nil {
+		"UPDATE completion_reviews SET submitted_at = now() - interval '2 days' WHERE task_id = $1", task.Id); err != nil {
 		t.Fatalf("回拨提交时间失败: %v", err)
 	}
 
@@ -5873,7 +5892,7 @@ func TestTaskParticipants(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
-	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "编写评审材料", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
@@ -5886,25 +5905,27 @@ func TestTaskParticipants(t *testing.T) {
 	resp = doJSON(t, dave, http.MethodPut, participantsURL, api.SetParticipantsRequest{UserIds: []int64{aliceUser.ID}})
 	wantStatus(t, resp, http.StatusForbidden)
 	resp.Body.Close()
+	// 裁决 10：参与人配置收归项目管理员——任务负责人 carol 403
+	resp = doJSON(t, carol, http.MethodPut, participantsURL,
+		api.SetParticipantsRequest{UserIds: []int64{daveUser.ID}})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
 	// 非项目成员进不了名单
-	resp = doJSON(t, carol, http.MethodPut, participantsURL, api.SetParticipantsRequest{UserIds: []int64{9999}})
+	resp = doJSON(t, alice, http.MethodPut, participantsURL, api.SetParticipantsRequest{UserIds: []int64{9999}})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 	// 负责人已单列，不重复出现在参与人里
-	resp = doJSON(t, carol, http.MethodPut, participantsURL, api.SetParticipantsRequest{UserIds: []int64{carolUser.ID}})
+	resp = doJSON(t, alice, http.MethodPut, participantsURL, api.SetParticipantsRequest{UserIds: []int64{carolUser.ID}})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 
-	// 负责人配置生效：不属关键字段，直接落库，任务上不留任何待审批变更单
-	resp = doJSON(t, carol, http.MethodPut, participantsURL,
+	// 管理员配置生效：不属关键字段，直接落库，任务上不留任何待审批变更单
+	resp = doJSON(t, alice, http.MethodPut, participantsURL,
 		api.SetParticipantsRequest{UserIds: []int64{daveUser.ID, aliceUser.ID, daveUser.ID}})
 	wantStatus(t, resp, http.StatusOK)
 	saved := decodeBody[api.Task](t, resp)
 	if saved.Participants == nil || len(*saved.Participants) != 2 {
 		t.Fatalf("参与人应直接生效并去重: %+v", saved.Participants)
-	}
-	if saved.CancelRequest != nil {
-		t.Fatalf("参与人不属关键字段，不应产生审批单: %+v", saved.CancelRequest)
 	}
 	if saved.PendingReviewCount != nil && *saved.PendingReviewCount != 0 {
 		t.Fatalf("参与人不应进审批链: %+v", saved.PendingReviewCount)
@@ -5998,8 +6019,8 @@ func TestResultUpdateFlow(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 
-	// carol 建任务 → bob 入池通过 → carol 执行 → 首次定稿走完完成审批
-	resp = doJSON(t, carol, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	// alice 建任务（裁决 10：创建收归管理员）→ carol 执行 → 首次定稿走完完成审批
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "输出接口说明", OwnerId: carolUser.ID, StartDate: start, EndDate: end},
 		},
@@ -6209,8 +6230,8 @@ func TestResultUpdateFlow(t *testing.T) {
 	}
 
 	// 已关闭任务永不可发起成果更新
-	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		Items:           []api.CreateTaskItem{{KeyResultId: kr1, Name: "待取消任务", OwnerId: bobUser.ID, StartDate: start, EndDate: end}},
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		Items: []api.CreateTaskItem{{KeyResultId: kr1, Name: "待取消任务", OwnerId: bobUser.ID, StartDate: start, EndDate: end}},
 	})
 	wantStatus(t, resp, http.StatusCreated)
 	var cancelledID int64
@@ -6222,8 +6243,8 @@ func TestResultUpdateFlow(t *testing.T) {
 	if cancelledID == 0 {
 		t.Fatal("未找到待取消任务")
 	}
-	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/cancellation", tasksURL, cancelledID),
-		api.TaskCancellationRequest{Reason: "需求取消"})
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/cancellation", tasksURL, cancelledID),
+		api.CloseTaskRequest{Reason: "需求取消"})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
 	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/result-update", tasksURL, cancelledID), nil)
@@ -6274,7 +6295,7 @@ func TestPublicProjectImplicitViewer(t *testing.T) {
 	kr1 := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
 	tasksURL := projectURL + "/tasks"
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
-	resp = doJSON(t, bob, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
 		Items: []api.CreateTaskItem{
 			{KeyResultId: kr1, Name: "输出验收方案", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
 			{KeyResultId: kr1, Name: "承接验收方案", OwnerId: bobUser.ID, StartDate: start, EndDate: end},

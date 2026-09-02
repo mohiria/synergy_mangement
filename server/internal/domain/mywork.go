@@ -18,21 +18,8 @@ type WorkTaskFact struct {
 	KrOwnerID     *int64
 	EndDate       *time.Time
 	UnreadyNote   string
-	// CancelRejected #172 裁决：退回注记只剩关闭申请（关键字段修改不再有退回）。
-	CancelRejected     *string
+	// CompletionRejected 完成申请退回注记（裁决 10 后关闭申请退场，退回注记只剩这一类）。
 	CompletionRejected *string
-}
-
-type WorkApprovalFact struct {
-	ID          int64
-	TaskID      int64
-	TaskName    string
-	SubmittedBy int64
-	KrOwnerID   *int64
-	KrOwnerName string
-	SubmittedAt time.Time
-	TaskEnd     *time.Time
-	Summary     string
 }
 
 type WorkCompletionFact struct {
@@ -86,11 +73,9 @@ type MyWorkFacts struct {
 	// RemindSentToday 返回（当前用户、被提醒人、任务）三元组今日已发次数；nil 按不限处理。
 	RemindDailyLimit int
 	RemindSentToday  func(recipientID, taskID int64) int
-	Tasks []WorkTaskFact
-	// CancelRequests #172 裁决：审批件里的变更单只剩关闭申请。
-	CancelRequests []WorkApprovalFact
-	Completions    []WorkCompletionFact
-	Invites        []WorkInviteFact
+	Tasks       []WorkTaskFact
+	Completions []WorkCompletionFact
+	Invites     []WorkInviteFact
 	Blockers      []Blocker
 	Upstreams     []WorkUpstreamFact
 	Receipts      []ReceiptFact
@@ -183,20 +168,7 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 	tid := func(v int64) *int64 { return &v }
 
 	// —— 待我审批（判定顺序 Q1）——
-	// #172 裁决：关键字段修改直接生效不再进审批，本组变更类只剩关闭申请。
-	for _, fc := range f.CancelRequests {
-		if terminal[fc.TaskID] {
-			continue
-		}
-		if fc.KrOwnerID != nil && *fc.KrOwnerID == me {
-			days, overdue := waitingDays(fc.SubmittedAt)
-			g.Approvals = append(g.Approvals, WorkItem{
-				Kind: "cancel_request", Title: "[关闭申请] " + fc.TaskName,
-				TaskID: tid(fc.TaskID), TaskName: fc.TaskName, RefID: tid(fc.ID),
-				Due: fc.TaskEnd, WaitingDays: days, Overdue: overdue, DrawerTab: "audit",
-			})
-		}
-	}
+	// 裁决 10：关闭申请审批退场，本组只剩完成申请（或签与终审）。
 	for _, cr := range f.Completions {
 		if terminal[cr.TaskID] {
 			continue
@@ -247,11 +219,8 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 				Overdue: Overdue(tk.EndDate, f.Now),
 			}
 			// 被退回事项回到提交人的待我处理，卡片带「已退回：理由」（补充规则 3）。
-			switch {
-			case tk.CompletionRejected != nil:
+			if tk.CompletionRejected != nil {
 				item.RejectedReason = *tk.CompletionRejected
-			case tk.CancelRejected != nil:
-				item.RejectedReason = *tk.CancelRejected
 			}
 			g.Pending = append(g.Pending, item)
 		}
@@ -293,22 +262,6 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 				setWaitRemind(&item, UpstreamWaitFact(up.EdgeID, up.TargetTaskID, up.InputName,
 					up.SourceName, up.SourceOwnerID, up.SourceOwnerName))
 			}
-			g.Waiting = append(g.Waiting, item)
-		}
-	}
-	for _, fc := range f.CancelRequests {
-		if terminal[fc.TaskID] {
-			continue
-		}
-		if fc.SubmittedBy == me && !(fc.KrOwnerID != nil && *fc.KrOwnerID == me) {
-			days, overdue := waitingDays(fc.SubmittedAt)
-			item := WorkItem{
-				Kind: "waiting_cancel_request", Title: "[关闭申请] " + fc.TaskName,
-				TaskID: tid(fc.TaskID), TaskName: fc.TaskName, RefID: tid(fc.ID),
-				WaitingDays: days, Overdue: overdue,
-				Stage: ApprovalWaitingLabel([]string{fc.KrOwnerName}), DrawerTab: "audit",
-			}
-			setWaitRemind(&item, ApprovalWaitFact("cancel_request", fc.ID, fc.TaskID, singleApprover(fc.KrOwnerID), []string{fc.KrOwnerName}, days))
 			g.Waiting = append(g.Waiting, item)
 		}
 	}

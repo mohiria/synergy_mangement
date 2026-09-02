@@ -305,7 +305,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 手工流转任务状态：开始执行（AC-12；完成走三道审批、取消走取消申请，均不在此端点） */
+        /** 手工流转任务状态：开始执行（AC-12；完成走审批、关闭走 /cancellation，均不在此端点） */
         post: operations["updateTaskStatus"];
         delete?: never;
         options?: never;
@@ -345,8 +345,8 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 发起任务取消申请（AC-57；复用关键字段变更单，进所属 KR 负责人待我审批，KR 负责人本人免审即时生效） */
-        post: operations["requestTaskCancellation"];
+        /** 项目管理员直接关闭任务（AC-57、裁决 10，#180：原因必填、即时生效、写任务动态，无审批环节） */
+        post: operations["closeTask"];
         delete?: never;
         options?: never;
         head?: never;
@@ -387,48 +387,6 @@ export interface paths {
         put?: never;
         /** 直接修改任务关键字段（AC-23、#172 裁决：有编辑权限者立即生效、无修改原因；动态留痕并站内通知所属 KR 负责人） */
         post: operations["editTaskFields"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/projects/{projectId}/tasks/{taskId}/cancel-requests/{requestId}/decision": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-                taskId: number;
-                requestId: number;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 所属 KR 负责人通过或退回关闭申请（AC-57、#172 裁决：通过后任务进入已关闭并保留原因） */
-        post: operations["decideCancelRequest"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/projects/{projectId}/tasks/{taskId}/cancel-requests/{requestId}/abandon": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-                taskId: number;
-                requestId: number;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 放弃已退回的关闭申请（清除退回待处理事项） */
-        post: operations["abandonCancelRequest"];
         delete?: never;
         options?: never;
         head?: never;
@@ -632,7 +590,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** 配置接收方（AC-23；接收方属关键字段，进所属 KR 负责人审批；模块 PRD §8.6、MW-09） */
+        /** 配置接收方（AC-23；接收方属关键字段，裁决 10：仅项目管理员、直接生效；模块 PRD §8.6、MW-09） */
         put: operations["setTaskReceivers"];
         post?: never;
         delete?: never;
@@ -754,7 +712,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 新增输入要求并自动建立「来源任务 → 目标任务」交付物边（AC-28；可一次多选来源任务，AC-53）；输入与输入源属关键字段，进所属 KR 负责人审批（AC-23） */
+        /** 新增输入要求并自动建立「来源任务 → 目标任务」交付物边（AC-28；可一次多选来源任务，AC-53）；输入与输入源属关键字段，裁决 10：仅项目管理员、直接生效（AC-23） */
         post: operations["createTaskInput"];
         delete?: never;
         options?: never;
@@ -795,7 +753,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** 解除交付物边（AC-23；输入源属关键字段，进所属 KR 负责人审批） */
+        /** 解除交付物边（AC-23；输入源属关键字段，裁决 10：仅项目管理员、直接生效） */
         delete: operations["removeEdge"];
         options?: never;
         head?: never;
@@ -1303,13 +1261,13 @@ export interface components {
         };
         UpdateTaskStatusRequest: {
             /**
-             * @description 手工流转目标：开始执行（未开始／等待输入 → 进行中）；取消走 /cancellation（AC-57）
+             * @description 手工流转目标：开始执行（未开始／等待输入 → 进行中）；关闭走 /cancellation（AC-57、裁决 10）
              * @enum {string}
              */
             status: "in_progress";
         };
-        TaskCancellationRequest: {
-            /** @description 取消原因，必填（AC-57） */
+        CloseTaskRequest: {
+            /** @description 关闭原因，必填（AC-57、裁决 10） */
             reason: string;
         };
         UpdateTaskProgressRequest: {
@@ -1449,29 +1407,27 @@ export interface components {
             pendingActorName?: string;
             /** @description 可选进度百分比（词汇表「任务进度」）；已完成任务一律 100 且不可编辑，未填写时不返回、前端只展示状态（AC-63） */
             progress?: number;
-            /** @description 取消原因（已取消任务保留，PRD §5.1） */
+            /** @description 关闭原因（已关闭任务保留，PRD §5.1） */
             cancelReason?: string;
             /** @description 当前用户能否开始执行本任务（派生字段；负责人／可编辑项目者，未开始或等待输入时） */
             canStart: boolean;
             /** @description 当前用户能否更新本任务进度（派生字段；负责人／可编辑项目者，仅进行中；完成后锁定为 100，AC-63） */
             canUpdateProgress: boolean;
-            /** @description 当前用户能否发起取消申请（派生字段；任务负责人／项目管理员，非终态且任务上没有未决审批单，AC-57） */
+            /** @description 当前用户能否直接关闭本任务（派生字段；仅项目管理员，非终态且任务上没有未决审批单，AC-57、裁决 10） */
             canCancel: boolean;
-            /** @description 最近一张需要关注的关闭申请（待审批，或退回未处理＝退回待处理事项，#172 裁决）；无则不返回 */
-            cancelRequest?: components["schemas"]["CancelRequest"];
             /** @description 交付物项名称列表（列表「预期交付物」列展示用，派生字段） */
             deliverableNames?: string[];
-            /** @description 当前用户能否直接修改任务关键字段（派生字段，#172 裁决：负责人／KR 负责人／可编辑项目者，未开始／等待输入／进行中；关闭申请审批期间不可） */
+            /** @description 当前用户能否直接修改任务关键字段（派生字段，裁决 10：仅项目管理员，未开始／等待输入／进行中） */
             canEditFields: boolean;
-            /** @description 本任务上未决审批单条数（派生字段；关闭申请、完成申请合计，前端不再自行相加） */
+            /** @description 本任务上未决审批单条数（派生字段；裁决 10 后只剩完成申请一类，前端不再自行相加） */
             pendingReviewCount?: number;
             /** @description 当前用户能否提交任务讨论（派生字段；全体项目内成员含访客，公开项目的隐式访客不可，见词汇表「隐式访客」） */
             canDiscuss?: boolean;
-            /** @description 当前用户能否配置任务交付物项（派生字段；负责人／创建人／可编辑项目者，非终态） */
+            /** @description 当前用户能否配置任务交付物项（派生字段；裁决 10：负责人／项目管理员，非终态——交付物项是上传交付物的入口，负责人保留） */
             canManageDeliverables?: boolean;
             /** @description 当前用户能否提交完成申请（派生字段；负责人，进行中且有候选内容） */
             canSubmitCompletion?: boolean;
-            /** @description 当前用户能否调整成果审核人配置（派生字段；负责人／创建人／可编辑项目者，审核中与终态不可） */
+            /** @description 当前用户能否调整成果审核人配置（派生字段；裁决 10：负责人／项目管理员，审核中与终态不可） */
             canManageReviewers?: boolean;
             /** @description 当前派生卡点数量（派生字段） */
             openBlockerCount?: number;
@@ -1480,13 +1436,13 @@ export interface components {
             receiverScope: components["schemas"]["ReceiverScope"];
             /** @description 指定成员为接收方时的名单（receiverScope=members；其余取值为空数组） */
             receivers?: components["schemas"]["ReviewerInfo"][];
-            /** @description 当前用户能否配置接收方（派生字段；与输入／输出配置同口径：负责人／创建人／可编辑项目者，终态不可） */
+            /** @description 当前用户能否配置接收方（派生字段；裁决 10：与输入配置同口径、仅项目管理员，终态不可） */
             canManageReceivers?: boolean;
             /** @description 当前用户是否有本任务的待接收项待确认（派生字段；MW-09） */
             canConfirmReceipt?: boolean;
             /** @description 参与人名单（词汇表「参与人」；PRD §9.2 按需字段）：任务上除负责人以外的协作者， 只作展示与检索——不产生待办、不进审批链、不影响权限、不参与我的工作归组与排序。 未配置时为空数组 */
             participants?: components["schemas"]["ReviewerInfo"][];
-            /** @description 当前用户能否配置参与人（派生字段；负责人／创建人／可编辑项目者，终态不可） */
+            /** @description 当前用户能否配置参与人（派生字段；裁决 10：任务配置收归、仅项目管理员，终态不可） */
             canManageParticipants?: boolean;
             resultUpdate?: components["schemas"]["ResultUpdateState"];
             /** @description 当前用户能否对本任务发起成果更新（派生字段；AC-66：任务负责人／项目管理员， 任务已完成、无在途成果更新且没有其他未决审批单） */
@@ -1533,8 +1489,6 @@ export interface components {
             objectiveTitle: string;
             /** @description 所属 KR 描述（派生字段） */
             krDescription: string;
-            /** @description 关闭申请记录，最新在前（词汇表「关闭申请」，#172 裁决） */
-            cancelRequests: components["schemas"]["CancelRequest"][];
             /** @description 交付物项列表（含当前内容与候选审核提示，AC-32／AC-33） */
             deliverables: components["schemas"]["Deliverable"][];
             /** @description 任务下的过程文件与重要外部材料（§7.7）：不进入完成审批、不作为下游正式输入， 可按需选进成果包；未配置时为空数组 */
@@ -1566,7 +1520,7 @@ export interface components {
          * @description 任务动态类型（ADR 0002）；blocker_* 为系统派生，无行动人
          * @enum {string}
          */
-        TaskActivityKind: "pool_entered" | "field_edited" | "field_change_submitted" | "field_change_approved" | "field_change_rejected" | "field_change_abandoned" | "completion_submitted" | "completion_approved" | "completion_rejected" | "receipt_confirmed" | "blocker_opened" | "blocker_resolved";
+        TaskActivityKind: "pool_entered" | "field_edited" | "task_closed" | "field_change_submitted" | "field_change_approved" | "field_change_rejected" | "field_change_abandoned" | "completion_submitted" | "completion_approved" | "completion_rejected" | "receipt_confirmed" | "blocker_opened" | "blocker_resolved";
         /** @description 任务动态的一条事实（词汇表「任务动态」）：已经发生、不可撤销，只记录不派生，不可编辑或删除 */
         TaskActivity: {
             /** Format: int64 */
@@ -1601,36 +1555,6 @@ export interface components {
             /** @description 该关系是否就绪（AC-48；合并后全部边就绪才为真） */
             ready: boolean;
         };
-        /** @enum {string} */
-        CancelRequestState: "pending" | "approved" | "rejected";
-        /** @description 关闭申请（词汇表「关闭申请」，#172 裁决：任务关闭审批从变更单机制独立）；rejected 且 resolved=false 即「退回待处理事项」 */
-        CancelRequest: {
-            /** Format: int64 */
-            id: number;
-            state: components["schemas"]["CancelRequestState"];
-            /** @description 面向用户的显示文案（AC-04；派生字段）：待审批为“待{所属 KR 负责人姓名}审批”，免审为“免审生效”，其余为“已通过／已退回” */
-            stateLabel: string;
-            /** @description 关闭原因（必填） */
-            reason: string;
-            /** @description 审批意见 */
-            opinion?: string;
-            /** @description 退回后是否已处理（重新提交或放弃） */
-            resolved: boolean;
-            /** @description KR 负责人本人负责 KR 下关闭免审即时生效时由系统标记 */
-            exempt: boolean;
-            /** Format: int64 */
-            submittedById?: number;
-            submittedByName?: string;
-            decidedByName?: string;
-            /** Format: date-time */
-            submittedAt?: string;
-            /** Format: date-time */
-            decidedAt?: string;
-            /** @description 当前用户能否处理本关闭申请（派生字段；仅所属 KR 负责人且待审批） */
-            canDecide?: boolean;
-            /** @description 当前用户能否放弃本次关闭申请（派生字段；退回未处理且为提交人／可编辑项目者） */
-            canAbandon?: boolean;
-        };
         /** @description 直接修改任务关键字段（#172 裁决：立即生效、无修改原因）；至少一项 */
         EditTaskFieldsRequest: {
             name?: string;
@@ -1640,11 +1564,6 @@ export interface components {
             ownerId?: number;
             /** Format: date */
             endDate?: string;
-        };
-        CancelRequestDecisionRequest: {
-            /** @enum {string} */
-            decision: "approved" | "rejected";
-            opinion?: string;
         };
         CommitUploadRequest: {
             /**
@@ -2038,10 +1957,8 @@ export interface components {
             completedDeliverables: components["schemas"]["ReportDeliverable"][];
             /** @description 开放中的卡点 + 范围内解除的卡点 */
             blockers: components["schemas"]["ReportBlocker"][];
-            /** @description 待决策：停留在审批队列中的事项数 */
+            /** @description 待决策：停留在审批队列中的事项数（裁决 10 后只剩完成审核一类） */
             pendingApprovals: {
-                /** @description 待审批关闭申请条数（#172 裁决后变更类审批只剩关闭申请） */
-                cancelRequests: number;
                 completions: number;
             };
             /** @description 下一步：临近截止或已超期的未完成任务（按截止时间升序） */
@@ -2097,7 +2014,7 @@ export interface components {
         };
         /** @description 我的工作事项（词汇表「我的工作事项」）；卡片派生事实，动作在任务详情抽屉完成 */
         WorkItem: {
-            /** @description 事项类型（task/cancel_request/intermediate_review/final_review/invite/upstream/blocker 等；#178 后无 input_request） */
+            /** @description 事项类型（task/intermediate_review/final_review/invite/upstream/blocker 等；#178 后无 input_request，裁决 10 后无 cancel_request） */
             kind: string;
             title: string;
             /** Format: int64 */
@@ -3237,7 +3154,7 @@ export interface operations {
             422: components["responses"]["ValidationError"];
         };
     };
-    requestTaskCancellation: {
+    closeTask: {
         parameters: {
             query?: never;
             header?: never;
@@ -3249,11 +3166,11 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["TaskCancellationRequest"];
+                "application/json": components["schemas"]["CloseTaskRequest"];
             };
         };
         responses: {
-            /** @description 已受理，返回任务最新状态（免审时已为已取消，否则仍为原状态并带待审批取消单） */
+            /** @description 已关闭，返回任务最新状态（status=cancelled 并保留关闭原因） */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -3327,67 +3244,6 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["ValidationError"];
-        };
-    };
-    decideCancelRequest: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-                taskId: number;
-                requestId: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CancelRequestDecisionRequest"];
-            };
-        };
-        responses: {
-            /** @description 已处理，返回任务最新状态 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Task"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["ValidationError"];
-        };
-    };
-    abandonCancelRequest: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                projectId: number;
-                taskId: number;
-                requestId: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description 已放弃，返回任务最新状态 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Task"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
         };
     };
     createDeliverable: {

@@ -54,27 +54,8 @@ func TestStatusLabel(t *testing.T) {
 	}
 }
 
-// 审批单状态显示文案（AC-04）：等待状态按当前审批人姓名显示。
+// 审批单状态显示文案（AC-04）：等待状态按当前审批人姓名显示（裁决 10 后只剩完成申请一类）。
 func TestReviewStateLabels(t *testing.T) {
-	t.Run("关闭申请", func(t *testing.T) {
-		cases := []struct {
-			name    string
-			state   string
-			exempt  bool
-			krOwner string
-			want    string
-		}{
-			{"待审批显示 KR 负责人", CancelRequestPendingState, false, "周宁", "待周宁审批"},
-			{"免审即时生效", CancelRequestApprovedState, true, "周宁", "免审生效"},
-			{"已通过", CancelRequestApprovedState, false, "周宁", "已通过"},
-			{"已退回", CancelRequestRejectedState, false, "周宁", "已退回"},
-		}
-		for _, tc := range cases {
-			if got := CancelRequestStateLabel(tc.state, tc.exempt, tc.krOwner); got != tc.want {
-				t.Fatalf("%s: CancelRequestStateLabel = %q, want %q", tc.name, got, tc.want)
-			}
-		}
-	})
 	t.Run("完成申请", func(t *testing.T) {
 		cases := []struct {
 			name      string

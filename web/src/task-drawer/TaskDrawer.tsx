@@ -51,9 +51,6 @@ export default function TaskDrawer({
     openCancel: (t: Task) => void;
     saveProgress: (t: Task, progress: number | null) => Promise<void>;
     editTaskFields: (t: Task, changes: Record<string, unknown>) => Promise<boolean>;
-    approveCancelRequest: (t: Task, requestId: number) => void;
-    openFcReject: (t: Task, requestId: number) => void;
-    abandonCancelRequest: (t: Task, requestId: number) => void;
     openSubmitCompletion: (t: Task) => void;
     approveCompletion: (t: Task, reviewId: number, intermediate?: boolean) => void;
     openCrReject: (t: Task, reviewId: number) => void;
@@ -86,7 +83,7 @@ export default function TaskDrawer({
     else actions.saveReceivers(task, "members", ids);
   };
   // #138 就地编辑（裁决 E1）；#172 裁决：有编辑权限即直接保存生效，无「修改原因」弹窗、
-  // 无「审批中」标签；关闭申请审批期间后端拒绝修改（canEditFields=false 时不进入编辑态）。
+  // 无「审批中」标签；裁决 10（#180）：编辑权限仅项目管理员（canEditFields=false 时不进入编辑态）。
   const [editingField, setEditingField] = useState<
     "name" | "description" | "completionCriteria" | "ownerId" | "endDate" | null
   >(null);
@@ -1162,11 +1159,10 @@ export default function TaskDrawer({
   const audit = (
     <div style={{ paddingTop: 4 }}>
       {/* #135：成果审核人配置移入基础信息栏，审核 Tab 只保留审核记录。
-          #172 裁决：变更类记录只剩关闭申请。 */}
-      {(detail?.cancelRequests ?? []).length === 0 &&
-        (detail?.completionReviews ?? []).length === 0 && (
-          <div className="empty compact-empty">暂无审核记录</div>
-        )}
+          裁决 10（#180）：关闭申请退场，审核记录只剩完成申请。 */}
+      {(detail?.completionReviews ?? []).length === 0 && (
+        <div className="empty compact-empty">暂无审核记录</div>
+      )}
       {(detail?.completionReviews ?? []).map((cr) => (
         <article
           key={"cr-" + cr.id}
@@ -1250,58 +1246,6 @@ export default function TaskDrawer({
                 }
               >
                 {cr.state === "intermediate_review" ? "通过（进入 KR 终审）" : "通过 / 闭环"}
-              </Button>
-            </div>
-          )}
-        </article>
-      ))}
-      {(detail?.cancelRequests ?? []).map((fc) => (
-        <article key={`fc-${fc.id}`} className={`audit-card ${fc.state === "pending" ? "pending" : ""}`}>
-          <div className="audit-card-head">
-            <div>
-              <b>任务关闭申请</b>{" "}
-              <span
-                className={`status-pill ${
-                  fc.state === "pending" ? "warning" : fc.state === "approved" ? "completed" : "danger"
-                }`}
-              >
-                {fc.stateLabel}
-              </span>
-            </div>
-            <span className="meta muted" style={{ fontSize: 12 }}>
-              申请人 {fc.submittedByName} · {fmtTime(fc.submittedAt)}
-            </span>
-          </div>
-          <div style={{ marginTop: 8, fontSize: 14 }}>
-            <div className="muted" style={{ fontSize: 12 }}>
-              关闭原因:{fc.reason}；审批通过前任务照常执行。
-            </div>
-          </div>
-          {(fc.decidedByName || fc.opinion) && (
-            <div className="handled-fact">
-              {fc.decidedByName && (
-                <b>
-                  {fc.decidedByName}
-                  {fc.decidedAt ? ` · ${fmtTime(fc.decidedAt)}` : ""}
-                </b>
-              )}
-              <div>{fc.opinion || "未填写意见"}</div>
-            </div>
-          )}
-          {fc.state === "pending" && fc.canDecide && (
-            <div className="audit-actions">
-              <Button size="small" danger onClick={() => actions.openFcReject(task, fc.id)}>
-                退回
-              </Button>
-              <Button size="small" type="primary" onClick={() => actions.approveCancelRequest(task, fc.id)}>
-                通过
-              </Button>
-            </div>
-          )}
-          {fc.state === "rejected" && !fc.resolved && fc.canAbandon && (
-            <div className="audit-actions">
-              <Button size="small" onClick={() => actions.abandonCancelRequest(task, fc.id)}>
-                放弃本次关闭申请
               </Button>
             </div>
           )}

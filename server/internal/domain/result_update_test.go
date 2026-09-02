@@ -11,33 +11,31 @@ func TestStartResultUpdateRule(t *testing.T) {
 	krOwner := int64(7)
 	completed := TaskFacts{Status: TaskCompleted, CreatorID: 3, OwnerID: 5, KrOwnerID: &krOwner}
 	cases := []struct {
-		name             string
-		actor            Actor
-		user             int64
-		facts            TaskFacts
-		hasPendingChange bool
-		want             error
+		name  string
+		actor Actor
+		user  int64
+		facts TaskFacts
+		want  error
 	}{
-		{"负责人可发起", Actor{Role: RoleMember}, 5, completed, false, nil},
-		{"管理员可代发起", Actor{Role: RoleAdmin}, 9, completed, false, nil},
-		{"项目负责人可代发起", Actor{IsOwner: true}, 9, completed, false, nil},
-		{"无关成员不可发起", Actor{Role: RoleMember}, 9, completed, false, ErrResultUpdateForbidden},
-		{"访客不可发起", Actor{Role: RoleViewer}, 5, completed, false, ErrResultUpdateForbidden},
-		{"创建人不是负责人也不可发起", Actor{Role: RoleMember}, 3, completed, false, ErrResultUpdateForbidden},
-		{"进行中任务不可发起", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskInProgress, OwnerID: 5, KrOwnerID: &krOwner}, false, ErrResultUpdateNotCompleted},
-		{"已关闭任务不可发起", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCancelled, OwnerID: 5, KrOwnerID: &krOwner}, false, ErrResultUpdateNotCompleted},
-		{"已有未提交的成果更新不可再发起", Actor{Role: RoleMember}, 5, withResultUpdate(completed, ResultUpdateOpen), false, ErrResultUpdateExists},
-		{"审批中的成果更新不可再发起", Actor{Role: RoleMember}, 5, withResultUpdate(completed, ResultUpdateReviewing), false, ErrResultUpdateExists},
-		{"存在未决变更单时互斥", Actor{Role: RoleMember}, 5, completed, true, ErrResultUpdatePendingExists},
-		{"KR 无负责人时无人终审", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCompleted, OwnerID: 5}, false, ErrKrOwnerMissing},
+		{"负责人可发起", Actor{Role: RoleMember}, 5, completed, nil},
+		{"管理员可代发起", Actor{Role: RoleAdmin}, 9, completed, nil},
+		{"项目负责人可代发起", Actor{IsOwner: true}, 9, completed, nil},
+		{"无关成员不可发起", Actor{Role: RoleMember}, 9, completed, ErrResultUpdateForbidden},
+		{"访客不可发起", Actor{Role: RoleViewer}, 5, completed, ErrResultUpdateForbidden},
+		{"创建人不是负责人也不可发起", Actor{Role: RoleMember}, 3, completed, ErrResultUpdateForbidden},
+		{"进行中任务不可发起", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskInProgress, OwnerID: 5, KrOwnerID: &krOwner}, ErrResultUpdateNotCompleted},
+		{"已关闭任务不可发起", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCancelled, OwnerID: 5, KrOwnerID: &krOwner}, ErrResultUpdateNotCompleted},
+		{"已有未提交的成果更新不可再发起", Actor{Role: RoleMember}, 5, withResultUpdate(completed, ResultUpdateOpen), ErrResultUpdateExists},
+		{"审批中的成果更新不可再发起", Actor{Role: RoleMember}, 5, withResultUpdate(completed, ResultUpdateReviewing), ErrResultUpdateExists},
+		{"KR 无负责人时无人终审", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCompleted, OwnerID: 5}, ErrKrOwnerMissing},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := StartResultUpdateRule(tc.actor, tc.user, tc.facts, tc.hasPendingChange)
+			err := StartResultUpdateRule(tc.actor, tc.user, tc.facts)
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("StartResultUpdateRule = %v, want %v", err, tc.want)
 			}
-			if got := CanStartResultUpdate(tc.actor, tc.user, tc.facts, tc.hasPendingChange); got != (tc.want == nil) {
+			if got := CanStartResultUpdate(tc.actor, tc.user, tc.facts); got != (tc.want == nil) {
 				t.Fatalf("CanStartResultUpdate = %v, want %v", got, tc.want == nil)
 			}
 		})
@@ -142,10 +140,10 @@ func TestDecideCompletionUnderResultUpdate(t *testing.T) {
 // 审核中的成果更新属未决审批单：与其他审批单互斥（§5.1）。
 func TestPendingApprovalCountsResultUpdate(t *testing.T) {
 	completed := TaskFacts{Status: TaskCompleted, OwnerID: 5}
-	if PendingApprovalOnTask(completed, false) {
+	if PendingApprovalOnTask(completed) {
 		t.Fatal("已完成且无成果更新时不应算未决审批")
 	}
-	if !PendingApprovalOnTask(withResultUpdate(completed, ResultUpdateReviewing), false) {
+	if !PendingApprovalOnTask(withResultUpdate(completed, ResultUpdateReviewing)) {
 		t.Fatal("成果更新审核中应算未决审批")
 	}
 }

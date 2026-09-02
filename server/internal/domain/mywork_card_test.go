@@ -1,4 +1,4 @@
-package domain
+﻿package domain
 
 import (
 	"testing"
@@ -21,9 +21,9 @@ func TestMyWorkCardActionAndRemind(t *testing.T) {
 			Tasks: []WorkTaskFact{
 				{ID: 10, Name: "联调验证", DisplayStatus: TaskInProgress, OwnerID: me, CreatorID: me, EndDate: &end},
 			},
-			// #172 裁决：审批件里的变更类只剩关闭申请。
-			CancelRequests: []WorkApprovalFact{
-				{ID: 7, TaskID: 10, TaskName: "联调验证", SubmittedBy: me, KrOwnerID: &other, KrOwnerName: "周宁", SubmittedAt: now.AddDate(0, 0, -5), TaskEnd: &end},
+			// 裁决 10：关闭申请退场，等待他人用完成申请（终审中）事实。
+			Completions: []WorkCompletionFact{
+				{ID: 7, TaskID: 10, TaskName: "联调验证", SubmittedBy: me, TaskOwnerID: me, KrOwnerID: &other, KrOwnerName: "周宁", State: CompletionPendingFinal, SubmittedAt: now.AddDate(0, 0, -5), TaskEnd: &end},
 			},
 			Blockers: blockers,
 		}
@@ -110,7 +110,7 @@ func TestMyWorkCardActionAndRemind(t *testing.T) {
 		if len(g.Waiting) != 1 {
 			t.Fatalf("等待他人条数 = %d, want 1", len(g.Waiting))
 		}
-		if !g.Waiting[0].CanRemind || g.Waiting[0].RefKey != RemindWaitKey("cancel_request", 7) {
+		if !g.Waiting[0].CanRemind || g.Waiting[0].RefKey != RemindWaitKey("final_review", 7) {
 			t.Errorf("等待他人卡片应带自身 wait 键并可提醒: %+v", g.Waiting[0])
 		}
 	})
@@ -121,7 +121,7 @@ func TestMyWorkCardActionAndRemind(t *testing.T) {
 		if len(g.Waiting) != 1 {
 			t.Fatalf("等待他人条数 = %d, want 1", len(g.Waiting))
 		}
-		if !g.Waiting[0].CanRemind || g.Waiting[0].RefKey != RemindWaitKey("cancel_request", 7) {
+		if !g.Waiting[0].CanRemind || g.Waiting[0].RefKey != RemindWaitKey("final_review", 7) {
 			t.Errorf("尚未成卡点的等待事项也应可提醒: %+v", g.Waiting[0])
 		}
 	})

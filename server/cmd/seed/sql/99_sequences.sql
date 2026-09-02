@@ -7,7 +7,7 @@ BEGIN
         'users', 'projects', 'objectives', 'key_results', 'tasks',
         'task_receipts', 'task_invites', 'deliverables', 'deliverable_files',
         'deliverable_edges', 'completion_reviews',
-        'field_change_requests', 'remind_logs',
+        'remind_logs',
         'discussions', 'notifications', 'task_activities'
     ] LOOP
         EXECUTE format(

@@ -24,18 +24,15 @@ func (q *Queries) CountKeyResultsByObjective(ctx context.Context, objectiveID in
 
 const countPendingApprovalsByKeyResult = `-- name: CountPendingApprovalsByKeyResult :one
 SELECT (
-    (SELECT COUNT(*) FROM field_change_requests fc
-        JOIN tasks t ON t.id = fc.task_id
-        WHERE t.key_result_id = $1 AND fc.state = 'pending')
-  + (SELECT COUNT(*) FROM tasks t WHERE t.key_result_id = $1 AND t.status = 'pending_final_review')
+    SELECT COUNT(*) FROM tasks t WHERE t.key_result_id = $1 AND t.status = 'pending_final_review'
 ) AS n
 `
 
-// 该 KR 下未决审批单条数：待审批关闭申请、待终审完成申请
-// （AC-61 交接确认；裁决 #162 无入池审批，裁决 #172 转交范围缩小为完成审批与关闭申请）。
-func (q *Queries) CountPendingApprovalsByKeyResult(ctx context.Context, keyResultID int64) (int32, error) {
+// 该 KR 下未决审批单条数：待终审完成申请
+// （AC-61 交接确认；裁决 10（#180）关闭申请审批退场，只剩完成审批）。
+func (q *Queries) CountPendingApprovalsByKeyResult(ctx context.Context, keyResultID int64) (int64, error) {
 	row := q.db.QueryRow(ctx, countPendingApprovalsByKeyResult, keyResultID)
-	var n int32
+	var n int64
 	err := row.Scan(&n)
 	return n, err
 }

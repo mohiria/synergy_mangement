@@ -136,14 +136,10 @@ INSERT INTO task_activities (task_id, kind, actor_id, summary, occurred_at) VALU
 (22, 'field_edited', 9, '任务字段修改：截止时间', now() - interval '22 days'),
 (27, 'field_edited', 4, '任务字段修改：完成标准', now() - interval '11 days');
 
--- 关闭申请：记提交 + 处理。
+-- 任务关闭留痕（裁决 10，#180：项目管理员直接关闭、写任务动态）。
 INSERT INTO task_activities (task_id, kind, actor_id, summary, occurred_at)
-SELECT task_id, 'cancel_requested', submitted_by, '发起任务关闭申请：' || reason, submitted_at
-FROM field_change_requests WHERE NOT exempt;
-
-INSERT INTO task_activities (task_id, kind, actor_id, summary, occurred_at)
-SELECT task_id, 'cancel_rejected', decided_by, '任务关闭退回：' || opinion, decided_at
-FROM field_change_requests WHERE state = 'rejected' AND decided_at IS NOT NULL;
+SELECT id, 'task_closed', 7, '任务关闭：' || cancel_reason, updated_at
+FROM tasks WHERE status = 'cancelled';
 
 -- 接收确认
 INSERT INTO task_activities (task_id, kind, actor_id, summary, occurred_at)

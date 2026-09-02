@@ -26,15 +26,14 @@ const STATUS_CLASS: Record<TaskStatus, string> = {
 };
 
 // 事项类型的单字标记（原型 work-kind 徽标）；分组语义由 Tab 表达，卡片正文不再展开原因。
+// 裁决 10（#180）：关闭申请退场，无 cancel_request／waiting_cancel_request 条目。
 const KIND_BADGE: Record<string, string> = {
   task: "办",
   invite: "邀",
-  cancel_request: "审",
   intermediate_review: "审",
   final_review: "审",
   receipt: "收",
   upstream: "等",
-  waiting_cancel_request: "等",
   waiting_completion: "等",
   blocker: "卡",
 };

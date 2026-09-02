@@ -40,15 +40,9 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 		return
 	}
 	unreadyNoteByTask := unreadyRequiredInputs(edgeRows)
-	taskNameByID := map[int64]string{}
 
 	// 任务事实（含显示状态与退回注记）。
 	taskRows, err := s.q.ListProjectTasks(ctx, projectId)
-	if err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	changeRows, err := s.q.LatestFieldChangesByProject(ctx, projectId)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -59,7 +53,6 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 		return
 	}
 	for _, t := range taskRows {
-		taskNameByID[t.ID] = t.Name
 		tf := domain.WorkTaskFact{
 			ID:            t.ID,
 			Name:          t.Name,
@@ -80,42 +73,12 @@ func (s *Server) GetMyWork(w http.ResponseWriter, r *http.Request, projectId int
 	for i := range facts.Tasks {
 		taskFactByID[facts.Tasks[i].ID] = &facts.Tasks[i]
 	}
-	krOwnerOf := func(taskID int64) *int64 {
-		if tf, ok := taskFactByID[taskID]; ok {
-			return tf.KrOwnerID
-		}
-		return nil
-	}
 	// 审批显示文案需要 KR 负责人姓名（AC-04）。
 	krOwnerNameByTask := map[int64]string{}
 	for _, t := range taskRows {
 		krOwnerNameByTask[t.ID] = t.KrOwnerName.String
 	}
-	// #172 裁决：变更类审批件只剩关闭申请（表中仅存 cancel 类型）。
-	for _, fc := range changeRows {
-		name := taskNameByID[fc.TaskID]
-		switch fc.State {
-		case domain.CancelRequestPendingState:
-			fact := domain.WorkApprovalFact{
-				ID: fc.ID, TaskID: fc.TaskID, TaskName: name, SubmittedBy: fc.SubmittedBy,
-				KrOwnerID: krOwnerOf(fc.TaskID), KrOwnerName: krOwnerNameByTask[fc.TaskID],
-			}
-			if fc.SubmittedAt.Valid {
-				fact.SubmittedAt = fc.SubmittedAt.Time
-			}
-			if tf, ok := taskFactByID[fc.TaskID]; ok {
-				fact.TaskEnd = tf.EndDate
-			}
-			facts.CancelRequests = append(facts.CancelRequests, fact)
-		case domain.CancelRequestRejectedState:
-			if !fc.Resolved && fc.SubmittedBy == uid {
-				if tf, ok := taskFactByID[fc.TaskID]; ok && fc.Opinion != "" {
-					op := "关闭申请已退回：" + fc.Opinion
-					tf.CancelRejected = &op
-				}
-			}
-		}
-	}
+	// 裁决 10（#180）：关闭申请审批退场，审批件事实只剩完成申请。
 	for _, cr := range completionRows {
 		fact := domain.WorkCompletionFact{
 			ID: cr.ID, TaskID: cr.TaskID, TaskName: cr.TaskName, SubmittedBy: cr.SubmittedBy,

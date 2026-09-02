@@ -48,23 +48,14 @@ const STATUS_FILTER_LABEL: Record<TaskStatus, string> = {
 };
 
 
-// 全部任务列表的状态备注（#91；#172 裁决：变更类审批只剩关闭申请）：退回理由、关闭原因、
-// 卡点与关闭申请合成一行文本，alert 决定用红色还是弱化色；没有备注时返回 null。
+// 全部任务列表的状态备注（#91；裁决 10：关闭申请退场）：关闭原因与卡点合成一行文本，
+// alert 决定用红色还是弱化色；没有备注时返回 null。
 function statusNote(t: Task): { text: string; alert: boolean } | null {
   const parts: string[] = [];
   let alert = false;
   if (t.status === "cancelled" && t.cancelReason) parts.push(`原因：${t.cancelReason}`);
   if (t.openBlockerCount != null && t.openBlockerCount > 0) {
     parts.push(`⚠ ${t.openBlockerCount} 个卡点`);
-    alert = true;
-  }
-  if (t.cancelRequest?.state === "pending") {
-    parts.push(`关闭审批中：${t.cancelRequest.reason}`);
-  }
-  if (t.cancelRequest?.state === "rejected" && !t.cancelRequest.resolved) {
-    parts.push(
-      "关闭申请已退回" + (t.cancelRequest.opinion ? `：${t.cancelRequest.opinion}` : ""),
-    );
     alert = true;
   }
   return parts.length > 0 ? { text: parts.join("　·　"), alert } : null;

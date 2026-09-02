@@ -172,10 +172,10 @@ func TestMyWorkWaitingRemindNotSelf(t *testing.T) {
 		Actor:  Actor{Role: RoleMember},
 		Now:    now,
 		Tasks: []WorkTaskFact{
-			{ID: 1, Name: "我的任务", DisplayStatus: TaskInProgress, OwnerID: me, CreatorID: me, KrOwnerID: krMe},
+			{ID: 1, Name: "我的任务", DisplayStatus: TaskPendingFinalReview, OwnerID: me, CreatorID: me, KrOwnerID: krMe},
 		},
-		CancelRequests: []WorkApprovalFact{
-			{ID: 21, TaskID: 1, TaskName: "我的任务", SubmittedBy: 9, KrOwnerID: krMe, KrOwnerName: "张三", SubmittedAt: recent},
+		Completions: []WorkCompletionFact{
+			{ID: 21, TaskID: 1, TaskName: "我的任务", SubmittedBy: 9, TaskOwnerID: me, KrOwnerID: krMe, KrOwnerName: "张三", State: CompletionPendingFinal, SubmittedAt: recent},
 		},
 	})
 	for _, it := range g.Waiting {

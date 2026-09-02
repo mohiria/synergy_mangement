@@ -102,23 +102,8 @@ INSERT INTO completion_review_reviewers (review_id, user_id) VALUES
     (25, 11), (25, 6),
     (26, 12);
 
--- ── 关闭申请（裁决 #172：变更类审批只剩关闭申请，表沿用 field_change_requests）──
-INSERT INTO field_change_requests (id, task_id, submitted_by, reason, state, exempt, opinion, resolved,
-                                   change_type, old_status, new_status,
-                                   submitted_at, decided_by, decided_at)
-OVERRIDING SYSTEM VALUE VALUES
--- 退回且未处理：会出现在提交人的「我的工作 · 待我处理」
-(5, 8, 6, '回归范围并入国产化差异专项统一验证，本任务不再单独执行', 'rejected', FALSE,
-    '差异场景专项只覆盖用例梳理，回归执行仍要本任务收口，继续执行', FALSE,
-    'cancel', 'in_progress', 'cancelled',
-    now() - interval '6 days', 4, now() - interval '4 days'),
--- 停了 4 天没人审：审批超时卡点
-(6, 7, 3, '对账比对改用采购的专用工具完成，脚本改写不再需要', 'pending', FALSE, '', FALSE,
-    'cancel', 'in_progress', 'cancelled',
-    now() - interval '4 days', NULL, NULL),
-(7, 52, 5, '投诉线并入工作台联调整体验证，本任务关闭', 'pending', FALSE, '', FALSE,
-    'cancel', 'not_started', 'cancelled',
-    now() - interval '1 day', NULL, NULL);
+-- ── 关闭申请机制已退场（裁决 10，#180）：关闭为项目管理员直接操作，原因落在 tasks.cancel_reason，
+--    动态见 05_collab.sql 的 task_closed。
 
 -- ── 任务创建邀请 ──────────────────────────────────────────────────────────────
 INSERT INTO task_invites (id, key_result_id, inviter_id, invitee_id, note, state, created_at)

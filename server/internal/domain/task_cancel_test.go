@@ -3,86 +3,58 @@ package domain
 import (
 	"errors"
 	"testing"
-	"time"
 )
 
-// AC-57（#172 修订）：关闭申请从变更单机制独立——发起人限任务负责人与项目管理员，
-// KR 负责人在本人负责 KR 下免审即时生效，任务上有任一未决审批单时不能发起。
-func TestCancelRoute(t *testing.T) {
+// 裁决 10（#180）：关闭改为项目管理员直接操作——原因必填、即时生效、无审批环节；
+// 任务负责人与 KR 负责人不再能发起关闭；终态与未决审批互斥口径保持。
+func TestCloseTaskRule(t *testing.T) {
 	facts := func(status string) TaskFacts {
 		return TaskFacts{Status: status, CreatorID: 3, OwnerID: 5, KrOwnerID: i64(7)}
 	}
-	noKrOwner := func(status string) TaskFacts {
-		f := facts(status)
-		f.KrOwnerID = nil
-		return f
-	}
+	reviewing := facts(TaskCompleted)
+	reviewing.ResultUpdate = ResultUpdateReviewing
 	cases := []struct {
-		name       string
-		actor      Actor
-		user       int64
-		t          TaskFacts
-		hasPending bool
-		want       CancelOutcome
-		wantErr    error
+		name    string
+		actor   Actor
+		user    int64
+		t       TaskFacts
+		wantErr error
 	}{
-		{"负责人发起进审批", Actor{Role: RoleMember}, 5, facts(TaskInProgress), false, CancelPending, nil},
-		{"项目管理员发起进审批", Actor{Role: RoleAdmin}, 9, facts(TaskInProgress), false, CancelPending, nil},
-		{"KR 负责人本人免审", Actor{Role: RoleMember}, 7, facts(TaskInProgress), false, CancelExempt, nil},
-		{"未开始也可发起", Actor{Role: RoleMember}, 5, facts(TaskNotStarted), false, CancelPending, nil},
-		{"创建人不是发起人", Actor{Role: RoleMember}, 3, facts(TaskInProgress), false, 0, ErrCancelForbidden},
-		{"访客不可发起", Actor{Role: RoleViewer}, 9, facts(TaskInProgress), false, 0, ErrCancelForbidden},
-		{"已完成不可取消", Actor{Role: RoleMember}, 5, facts(TaskCompleted), false, 0, ErrCannotCancel},
-		{"已关闭不可再取消", Actor{Role: RoleMember}, 5, facts(TaskCancelled), false, 0, ErrCannotCancel},
-		{"成果审核中互斥", Actor{Role: RoleMember}, 5, facts(TaskPendingIntermediateReview), false, 0, ErrCancelPendingExists},
-		{"终审中互斥", Actor{Role: RoleMember}, 5, facts(TaskPendingFinalReview), false, 0, ErrCancelPendingExists},
-		{"已有待审批关闭申请互斥", Actor{Role: RoleMember}, 5, facts(TaskInProgress), true, 0, ErrCancelPendingExists},
-		{"未决审批优先于免审", Actor{Role: RoleMember}, 7, facts(TaskInProgress), true, 0, ErrCancelPendingExists},
-		{"KR 无负责人无人可审", Actor{Role: RoleMember}, 5, noKrOwner(TaskInProgress), false, 0, ErrKrOwnerMissing},
+		{"项目管理员直接关闭", Actor{Role: RoleAdmin}, 9, facts(TaskInProgress), nil},
+		{"项目负责人直接关闭", Actor{IsOwner: true}, 9, facts(TaskInProgress), nil},
+		{"未开始也可关闭", Actor{Role: RoleAdmin}, 9, facts(TaskNotStarted), nil},
+		{"任务负责人不可关闭", Actor{Role: RoleMember}, 5, facts(TaskInProgress), ErrCancelForbidden},
+		{"KR 负责人不可关闭", Actor{Role: RoleMember}, 7, facts(TaskInProgress), ErrCancelForbidden},
+		{"访客不可关闭", Actor{Role: RoleViewer}, 9, facts(TaskInProgress), ErrCancelForbidden},
+		{"已完成不可关闭", Actor{Role: RoleAdmin}, 9, facts(TaskCompleted), ErrCannotCancel},
+		{"已关闭不可再关闭", Actor{Role: RoleAdmin}, 9, facts(TaskCancelled), ErrCannotCancel},
+		{"成果审核中互斥", Actor{Role: RoleAdmin}, 9, facts(TaskPendingIntermediateReview), ErrCancelPendingExists},
+		{"终审中互斥", Actor{Role: RoleAdmin}, 9, facts(TaskPendingFinalReview), ErrCancelPendingExists},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := CancelRoute(tc.actor, tc.user, tc.t, tc.hasPending)
-			if !errors.Is(err, tc.wantErr) {
-				t.Fatalf("CancelRoute() err = %v, want %v", err, tc.wantErr)
-			}
-			if got != tc.want {
-				t.Fatalf("CancelRoute() = %v, want %v", got, tc.want)
+			if err := CloseTaskRule(tc.actor, tc.t); !errors.Is(err, tc.wantErr) {
+				t.Fatalf("CloseTaskRule() err = %v, want %v", err, tc.wantErr)
 			}
 		})
 	}
-}
-
-// AC-57 反向互斥（#172 修订）：待审批关闭申请存在时，任务字段修改不可进行。
-func TestPendingCancelBlocksEdits(t *testing.T) {
-	inProgress := TaskFacts{Status: TaskInProgress, CreatorID: 3, OwnerID: 5, KrOwnerID: i64(7)}
-	if err := TaskEditRule(Actor{Role: RoleMember}, 5, inProgress, true); !errors.Is(err, ErrCancelBlocked) {
-		t.Fatalf("有未决关闭申请时修改字段应被拒: %v", err)
-	}
-	// KR 负责人本人同样受未决关闭申请约束（否则会绕过互斥）。
-	if err := TaskEditRule(Actor{Role: RoleMember}, 7, inProgress, true); !errors.Is(err, ErrCancelBlocked) {
-		t.Fatalf("有未决关闭申请时 KR 负责人修改也应被拒: %v", err)
+	// KR 无负责人不再挡关闭（审批环节退场，无「无人可审」问题）。
+	noKr := facts(TaskInProgress)
+	noKr.KrOwnerID = nil
+	if err := CloseTaskRule(Actor{Role: RoleAdmin}, noKr); err != nil {
+		t.Fatalf("KR 无负责人不应挡管理员关闭: %v", err)
 	}
 }
 
-// AC-57／MW（#172 修订）：关闭申请进入所属 KR 负责人的「待我审批」，标题带类型前缀。
-func TestCancelRequestInMyWork(t *testing.T) {
-	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
-	me := int64(5)
-	g := MyWork(MyWorkFacts{
-		UserID: me,
-		Now:    now,
-		Tasks: []WorkTaskFact{
-			{ID: 22, Name: "待取消任务", DisplayStatus: TaskInProgress, OwnerID: 9, CreatorID: 9, KrOwnerID: i64(5)},
-		},
-		CancelRequests: []WorkApprovalFact{
-			{ID: 23, TaskID: 22, TaskName: "待取消任务", SubmittedBy: 9, KrOwnerID: i64(5), SubmittedAt: now},
-		},
-	})
-	if len(g.Approvals) != 1 || g.Approvals[0].Title != "[关闭申请] 待取消任务" {
-		t.Fatalf("关闭申请未进待我审批或标题异常: %+v", g.Approvals)
+// 裁决 10：未决审批单判定收敛为完成申请与成果更新两类（关闭申请退场，去布尔参数）。
+func TestPendingApprovalOnTaskNoCancel(t *testing.T) {
+	if PendingApprovalOnTask(TaskFacts{Status: TaskInProgress}) {
+		t.Fatal("进行中且无在途审批不应判定为有未决审批单")
 	}
-	if g.Approvals[0].Kind != "cancel_request" {
-		t.Fatalf("关闭申请卡片类型应为 cancel_request: %+v", g.Approvals[0])
+	if !PendingApprovalOnTask(TaskFacts{Status: TaskPendingIntermediateReview}) {
+		t.Fatal("成果审核中应判定为有未决审批单")
+	}
+	if !PendingApprovalOnTask(TaskFacts{Status: TaskCompleted, ResultUpdate: ResultUpdateReviewing}) {
+		t.Fatal("成果更新在审应判定为有未决审批单")
 	}
 }

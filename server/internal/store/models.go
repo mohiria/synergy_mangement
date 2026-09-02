@@ -93,35 +93,6 @@ type DiscussionMention struct {
 	UserID       int64
 }
 
-// 关闭申请（裁决 #172 后仅存 change_type=cancel；历史表名保留）
-type FieldChangeRequest struct {
-	ID                    int64
-	TaskID                int64
-	SubmittedBy           int64
-	Reason                string
-	State                 string
-	Exempt                bool
-	Opinion               string
-	Resolved              bool
-	OldName               pgtype.Text
-	NewName               pgtype.Text
-	OldDescription        pgtype.Text
-	NewDescription        pgtype.Text
-	OldCompletionCriteria pgtype.Text
-	NewCompletionCriteria pgtype.Text
-	OldOwnerID            pgtype.Int8
-	NewOwnerID            pgtype.Int8
-	OldEndDate            pgtype.Date
-	NewEndDate            pgtype.Date
-	SubmittedAt           pgtype.Timestamptz
-	DecidedBy             pgtype.Int8
-	DecidedAt             pgtype.Timestamptz
-	ChangeType            string
-	OldStatus             pgtype.Text
-	NewStatus             pgtype.Text
-	Payload               []byte
-}
-
 type ImportRecord struct {
 	ID             int64
 	ProjectID      int64

@@ -12,9 +12,12 @@ const (
 	ActivityFieldChangeApproved  = "field_change_approved"
 	ActivityFieldChangeRejected  = "field_change_rejected"
 	ActivityFieldChangeAbandoned = "field_change_abandoned"
-	ActivityCancelRequested      = "cancel_requested"
-	ActivityCancelApproved       = "cancel_approved"
-	ActivityCancelRejected       = "cancel_rejected"
+	// ActivityTaskClosed 裁决 10（#180）：项目管理员直接关闭任务的动态。
+	ActivityTaskClosed = "task_closed"
+	// cancel_* 为裁决 10 前关闭申请机制的动态类型：不再产生新记录，仅供历史回显。
+	ActivityCancelRequested = "cancel_requested"
+	ActivityCancelApproved  = "cancel_approved"
+	ActivityCancelRejected  = "cancel_rejected"
 	ActivityResultUpdateStarted  = "result_update_started"
 	ActivityCompletionSubmitted  = "completion_submitted"
 	ActivityCompletionApproved   = "completion_approved"
@@ -31,6 +34,7 @@ var activityKindLabels = map[string]string{
 	ActivityFieldChangeApproved:  "关键字段修改生效",
 	ActivityFieldChangeRejected:  "关键字段修改退回",
 	ActivityFieldChangeAbandoned: "放弃关键字段修改",
+	ActivityTaskClosed:           "任务关闭",
 	ActivityCancelRequested:      "发起任务关闭申请",
 	ActivityCancelApproved:       "任务关闭生效",
 	ActivityCancelRejected:       "任务关闭退回",

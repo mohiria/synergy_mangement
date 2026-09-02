@@ -34,7 +34,7 @@ type RemindTarget struct {
 
 // RemindWaitFact 一条「等待他人」事项作为提醒目标的事实。
 type RemindWaitFact struct {
-	Kind             string // cancel_request／intermediate_review／final_review／upstream
+	Kind             string // intermediate_review／final_review／upstream（裁决 10 后无 cancel_request）
 	RefID            int64
 	TaskID           int64
 	TaskName         string

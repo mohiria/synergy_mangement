@@ -47,7 +47,7 @@ func TestNormalizeParticipants(t *testing.T) {
 	}
 }
 
-// 配置权限与交付物项、成果审核人同口径：负责人／创建人／可编辑项目者，终态不可。
+// 配置权限（裁决 10，#180）：参与人属任务配置，收归仅项目管理员；终态不可。
 func TestCanManageParticipants(t *testing.T) {
 	facts := TaskFacts{Status: TaskInProgress, CreatorID: 3, OwnerID: 5}
 	cases := []struct {
@@ -57,15 +57,14 @@ func TestCanManageParticipants(t *testing.T) {
 		facts TaskFacts
 		want  bool
 	}{
-		{"负责人可配置", Actor{Role: RoleMember}, 5, facts, true},
-		// 裁决 D2（#137）＋裁决 #162：无草稿期，创建人不再有编辑权。
+		{"负责人不再可配置（裁决 10）", Actor{Role: RoleMember}, 5, facts, false},
 		{"创建人（非负责人）不可配置", Actor{Role: RoleMember}, 3, facts, false},
 		{"可编辑项目者可配置", Actor{Role: RoleAdmin}, 9, facts, true},
 		{"无关成员不可配置", Actor{Role: RoleMember}, 9, facts, false},
 		{"访客不可配置", Actor{Role: RoleViewer}, 5, facts, false},
-		{"已完成任务不可配置", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCompleted, CreatorID: 3, OwnerID: 5}, false},
-		{"已关闭任务不可配置", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskCancelled, CreatorID: 3, OwnerID: 5}, false},
-		{"审核中仍可配置（不属关键字段，不影响审批）", Actor{Role: RoleMember}, 5, TaskFacts{Status: TaskPendingFinalReview, CreatorID: 3, OwnerID: 5}, true},
+		{"已完成任务不可配置", Actor{Role: RoleAdmin}, 9, TaskFacts{Status: TaskCompleted, CreatorID: 3, OwnerID: 5}, false},
+		{"已关闭任务不可配置", Actor{Role: RoleAdmin}, 9, TaskFacts{Status: TaskCancelled, CreatorID: 3, OwnerID: 5}, false},
+		{"审核中仍可配置（不属关键字段，不影响审批）", Actor{Role: RoleAdmin}, 9, TaskFacts{Status: TaskPendingFinalReview, CreatorID: 3, OwnerID: 5}, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

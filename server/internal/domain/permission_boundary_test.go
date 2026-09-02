@@ -30,8 +30,8 @@ func TestWriteActionsRequireNonViewerMembership(t *testing.T) {
 			if CanUpdateProgress(actor, me, facts) {
 				t.Fatal("不应可更新进度")
 			}
-			if CanCancelTask(actor, me, facts, false) {
-				t.Fatal("不应可发起关闭")
+			if CanCloseTask(actor, facts) {
+				t.Fatal("不应可关闭任务")
 			}
 			if CanConfigureInputs(actor, me, facts) {
 				t.Fatal("不应可配置输入")
@@ -51,17 +51,11 @@ func TestWriteActionsRequireNonViewerMembership(t *testing.T) {
 			if CanManageReviewers(actor, me, facts) {
 				t.Fatal("不应可调整成果审核人")
 			}
-			if CanAbandonCancelRequest(actor, me, me, CancelRequestRejectedState, false) {
-				t.Fatal("不应可放弃关闭申请")
-			}
-			if err := TaskEditRule(actor, me, facts, false); !errors.Is(err, ErrChangeForbidden) {
+			if err := TaskEditRule(actor, me, facts); !errors.Is(err, ErrChangeForbidden) {
 				t.Fatalf("不应可修改关键字段: %v", err)
 			}
-			if _, err := CancelRoute(actor, me, facts, false); !errors.Is(err, ErrCancelForbidden) {
-				t.Fatalf("不应可发起关闭申请: %v", err)
-			}
-			if err := DecideCancelRequestRule(actor, CancelRequestPendingState, facts, me, true, ""); !errors.Is(err, ErrNotKrOwner) {
-				t.Fatalf("不应可处理关闭申请: %v", err)
+			if err := CloseTaskRule(actor, facts); !errors.Is(err, ErrCancelForbidden) {
+				t.Fatalf("不应可关闭任务: %v", err)
 			}
 			if _, err := DecideCompletionRule(actor, finalPending, me, true, ""); !errors.Is(err, ErrNotKrOwner) {
 				t.Fatalf("不应可终审: %v", err)
@@ -81,9 +75,6 @@ func TestWriteActionsRequireNonViewerMembership(t *testing.T) {
 	member := Actor{Role: RoleMember}
 	if !CanStartTask(member, me, notStarted) || !CanUpdateProgress(member, me, facts) {
 		t.Fatal("项目成员的任务负责人职责应照常生效")
-	}
-	if err := DecideCancelRequestRule(member, CancelRequestPendingState, facts, me, true, ""); err != nil {
-		t.Fatalf("项目成员任 KR 负责人应可处理关闭申请: %v", err)
 	}
 }
 

@@ -8,8 +8,8 @@ import (
 var (
 	ErrProgressOutOfRange   = errors.New("进度百分比必须在 0～100 之间")
 	ErrCannotStart          = errors.New("当前状态不能开始执行")
-	ErrCannotCancel         = errors.New("已完成或已关闭的任务不能取消")
-	ErrCancelReasonRequired = errors.New("取消任务需要填写原因")
+	ErrCannotCancel         = errors.New("已完成或已关闭的任务不能关闭")
+	ErrCancelReasonRequired = errors.New("关闭任务需要填写原因")
 )
 
 // TaskProgressFact 覆盖度计算所需的任务事实。
@@ -42,7 +42,7 @@ func StartTask(status string) (string, error) {
 }
 
 // ValidateCancelReason 关闭原因必填（PRD §5.1「任务不再执行并保留原因」；AC-57）。
-// 能否取消由 CancelRoute 判定，本函数只管原因。
+// 能否关闭由 CloseTaskRule 判定（裁决 10），本函数只管原因。
 func ValidateCancelReason(reason string) error {
 	if strings.TrimSpace(reason) == "" {
 		return ErrCancelReasonRequired
@@ -98,12 +98,6 @@ func CanStartTask(a Actor, userID int64, t TaskFacts) bool {
 		return false
 	}
 	return userID == t.OwnerID || CanEditProject(a)
-}
-
-// CanCancelTask 判定能否发起关闭申请（派生动作标志，AC-57）：口径与 CancelRoute 同源。
-func CanCancelTask(a Actor, userID int64, t TaskFacts, hasPendingChange bool) bool {
-	_, err := CancelRoute(a, userID, t, hasPendingChange)
-	return err == nil
 }
 
 // CompletedProgress 完成终审通过时写入并锁定的进度（AC-63：完成即 100%）。

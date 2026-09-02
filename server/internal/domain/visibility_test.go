@@ -85,7 +85,7 @@ func TestImplicitViewerReadsAllButWritesNothing(t *testing.T) {
 		{"创建任务", CanCreateTask(implicit)},
 		{"开始任务", CanStartTask(implicit, me, notStarted)},
 		{"更新进度", CanUpdateProgress(implicit, me, facts)},
-		{"发起关闭", CanCancelTask(implicit, me, facts, false)},
+		{"关闭任务", CanCloseTask(implicit, facts)},
 		{"配置输入", CanConfigureInputs(implicit, me, facts)},
 		{"配置接收方", CanConfigureReceivers(implicit, me, facts)},
 		{"配置交付物项", CanManageDeliverables(implicit, me, facts)},
@@ -104,14 +104,11 @@ func TestImplicitViewerReadsAllButWritesNothing(t *testing.T) {
 		}
 	}
 
-	if err := TaskEditRule(implicit, me, facts, false); !errors.Is(err, ErrChangeForbidden) {
+	if err := TaskEditRule(implicit, me, facts); !errors.Is(err, ErrChangeForbidden) {
 		t.Fatalf("隐式访客不应可修改关键字段: %v", err)
 	}
-	if _, err := CancelRoute(implicit, me, facts, false); !errors.Is(err, ErrCancelForbidden) {
-		t.Fatalf("隐式访客不应可发起关闭申请: %v", err)
-	}
-	if err := DecideCancelRequestRule(implicit, CancelRequestPendingState, facts, me, true, ""); !errors.Is(err, ErrNotKrOwner) {
-		t.Fatalf("隐式访客不应可处理关闭申请: %v", err)
+	if err := CloseTaskRule(implicit, facts); !errors.Is(err, ErrCancelForbidden) {
+		t.Fatalf("隐式访客不应可关闭任务: %v", err)
 	}
 	if _, err := DecideCompletionRule(implicit, finalPending, me, true, ""); !errors.Is(err, ErrNotKrOwner) {
 		t.Fatalf("隐式访客不应可终审: %v", err)

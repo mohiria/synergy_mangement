@@ -20,7 +20,7 @@ func (s *Server) StartResultUpdate(w http.ResponseWriter, r *http.Request, proje
 	uid := currentUser(r).ID
 	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
 
-	// 与关闭申请同一口径：先锁任务行再读未决单，避免两个并发请求各自看到「没有在途更新」（R2／R3）。
+	// 先锁任务行再判定，避免两个并发请求各自看到「没有在途更新」（R2／R3）。
 	tx, err := s.db.Begin(r.Context())
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -32,12 +32,7 @@ func (s *Server) StartResultUpdate(w http.ResponseWriter, r *http.Request, proje
 	if !ok {
 		return
 	}
-	hasPending, err := qtx.HasPendingFieldChange(r.Context(), taskId)
-	if err != nil {
-		writeInternalError(w, r, err)
-		return
-	}
-	if err := domain.StartResultUpdateRule(actor, uid, facts, hasPending); err != nil {
+	if err := domain.StartResultUpdateRule(actor, uid, facts); err != nil {
 		switch {
 		case errors.Is(err, domain.ErrResultUpdateForbidden):
 			writeForbidden(w)

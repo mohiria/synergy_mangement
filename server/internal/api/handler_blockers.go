@@ -177,10 +177,6 @@ func (s *Server) projectBlockerFacts(ctx context.Context, projectID int64) (doma
 	if err != nil {
 		return domain.BlockerFacts{}, err
 	}
-	changeRows, err := s.q.LatestFieldChangesByProject(ctx, projectID)
-	if err != nil {
-		return domain.BlockerFacts{}, err
-	}
 	completionRows, err := s.q.LatestCompletionReviewsByProject(ctx, projectID)
 	if err != nil {
 		return domain.BlockerFacts{}, err
@@ -233,17 +229,7 @@ func (s *Server) projectBlockerFacts(ctx context.Context, projectID int64) (doma
 		}
 	}
 
-	// 停在当前环节的审批件（#172 裁决：只剩关闭申请、中间或签、KR 终审）。
-	for _, fc := range changeRows {
-		if fc.State != domain.CancelRequestPendingState {
-			continue
-		}
-		facts.Approvals = append(facts.Approvals, domain.BlockerApprovalFact{
-			Kind: "cancel_request", RefID: fc.ID, TaskID: fc.TaskID,
-			StageSince:  fc.SubmittedAt.Time,
-			ApproverIDs: approverIDs(taskRows, fc.TaskID), ApproverNames: []string{krOwnerNameByTask[fc.TaskID]},
-		})
-	}
+	// 停在当前环节的审批件（裁决 10，#180：关闭申请退场，只剩中间或签、KR 终审）。
 	for _, cr := range completionRows {
 		switch cr.State {
 		case domain.CompletionIntermediate:

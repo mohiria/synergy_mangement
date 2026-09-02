@@ -119,9 +119,9 @@ func TestMyWorkApprovalTimeoutFromProjectSettings(t *testing.T) {
 				Tasks: []WorkTaskFact{
 					{ID: 1, Name: "待改任务", DisplayStatus: TaskInProgress, OwnerID: submitter, CreatorID: submitter, KrOwnerID: &me},
 				},
-				CancelRequests: []WorkApprovalFact{{
-					ID: 60, TaskID: 1, TaskName: "待改任务", SubmittedBy: submitter,
-					KrOwnerID: &me, KrOwnerName: "我", SubmittedAt: submitted,
+				Completions: []WorkCompletionFact{{
+					ID: 60, TaskID: 1, TaskName: "待改任务", SubmittedBy: submitter, TaskOwnerID: submitter,
+					KrOwnerID: &me, KrOwnerName: "我", State: CompletionPendingFinal, SubmittedAt: submitted,
 				}},
 			})
 			if len(g.Approvals) != 1 {

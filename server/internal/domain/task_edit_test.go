@@ -6,35 +6,33 @@ import (
 	"testing"
 )
 
-// #172 裁决（第二刀）：关键字段修改不再走变更单——有编辑权限者直接修改生效。
-// 编辑权限与原提交权限同口径：负责人／KR 负责人／可编辑项目者；
-// 可编辑状态：未开始／等待输入／进行中；关闭申请审批期间不能修改。
+// 裁决 10（#180）：关键字段直接修改收归项目管理员（含项目负责人）；
+// 可编辑状态：未开始／等待输入／进行中；关闭申请机制退场后无审批互斥。
 func TestTaskEditRule(t *testing.T) {
 	facts := func(status string) TaskFacts {
 		return TaskFacts{Status: status, CreatorID: 3, OwnerID: 5, KrOwnerID: i64(7)}
 	}
 	cases := []struct {
-		name             string
-		actor            Actor
-		user             int64
-		t                TaskFacts
-		hasPendingCancel bool
-		want             error
+		name  string
+		actor Actor
+		user  int64
+		t     TaskFacts
+		want  error
 	}{
-		{"负责人直接修改", Actor{Role: RoleMember}, 5, facts(TaskInProgress), false, nil},
-		{"KR 负责人直接修改", Actor{Role: RoleMember}, 7, facts(TaskInProgress), false, nil},
-		{"管理员直接修改", Actor{Role: RoleAdmin}, 9, facts(TaskNotStarted), false, nil},
-		{"等待输入可修改", Actor{Role: RoleMember}, 5, facts(TaskWaitingInput), false, nil},
-		{"无关成员禁止", Actor{Role: RoleMember}, 9, facts(TaskInProgress), false, ErrChangeForbidden},
-		{"访客禁止", Actor{Role: RoleViewer}, 5, facts(TaskInProgress), false, ErrChangeForbidden},
-		{"完成审核中不可修改", Actor{Role: RoleMember}, 5, facts(TaskPendingFinalReview), false, ErrChangeNotAllowed},
-		{"已完成不可修改", Actor{Role: RoleMember}, 5, facts(TaskCompleted), false, ErrChangeNotAllowed},
-		{"已关闭不可修改", Actor{Role: RoleAdmin}, 9, facts(TaskCancelled), false, ErrChangeNotAllowed},
-		{"关闭申请审批期间不可修改", Actor{Role: RoleMember}, 5, facts(TaskInProgress), true, ErrCancelBlocked},
+		{"管理员直接修改", Actor{Role: RoleAdmin}, 9, facts(TaskNotStarted), nil},
+		{"项目负责人直接修改", Actor{IsOwner: true}, 9, facts(TaskInProgress), nil},
+		{"等待输入可修改", Actor{Role: RoleAdmin}, 9, facts(TaskWaitingInput), nil},
+		{"任务负责人禁止", Actor{Role: RoleMember}, 5, facts(TaskInProgress), ErrChangeForbidden},
+		{"KR 负责人禁止", Actor{Role: RoleMember}, 7, facts(TaskInProgress), ErrChangeForbidden},
+		{"无关成员禁止", Actor{Role: RoleMember}, 9, facts(TaskInProgress), ErrChangeForbidden},
+		{"访客禁止", Actor{Role: RoleViewer}, 5, facts(TaskInProgress), ErrChangeForbidden},
+		{"完成审核中不可修改", Actor{Role: RoleAdmin}, 9, facts(TaskPendingFinalReview), ErrChangeNotAllowed},
+		{"已完成不可修改", Actor{Role: RoleAdmin}, 9, facts(TaskCompleted), ErrChangeNotAllowed},
+		{"已关闭不可修改", Actor{Role: RoleAdmin}, 9, facts(TaskCancelled), ErrChangeNotAllowed},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := TaskEditRule(tc.actor, tc.user, tc.t, tc.hasPendingCancel); !errors.Is(got, tc.want) {
+			if got := TaskEditRule(tc.actor, tc.user, tc.t); !errors.Is(got, tc.want) {
 				t.Fatalf("TaskEditRule() = %v, want %v", got, tc.want)
 			}
 		})
