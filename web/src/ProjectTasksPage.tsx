@@ -47,8 +47,9 @@ const STATUS_FILTER_LABEL: Record<TaskStatus, string> = {
 };
 
 
-// 全部任务列表的状态备注（#91；裁决 10：关闭申请退场）：关闭原因与卡点合成一行文本，
-// alert 决定用红色还是弱化色；没有备注时返回 null。
+// 全部任务列表的状态备注（#91；裁决 10：关闭申请退场；裁决 14 #184：补任务级风险原因）：
+// 关闭原因、卡点计数与风险原因合成一行文本，alert 决定用红色还是弱化色；没有备注时返回 null。
+// 风险原因消费 API 派生的 riskNote（卡点抬级时与卡点同源，临期时补上列表原本看不见的信号）。
 function statusNote(t: Task): { text: string; alert: boolean } | null {
   const parts: string[] = [];
   let alert = false;
@@ -56,6 +57,9 @@ function statusNote(t: Task): { text: string; alert: boolean } | null {
   if (t.openBlockerCount != null && t.openBlockerCount > 0) {
     parts.push(`⚠ ${t.openBlockerCount} 个卡点`);
     alert = true;
+  } else if (t.riskLevel !== "normal" && t.riskNote) {
+    parts.push(`⚠ ${t.riskNote}`);
+    alert = t.riskLevel === "high_risk";
   }
   return parts.length > 0 ? { text: parts.join("　·　"), alert } : null;
 }

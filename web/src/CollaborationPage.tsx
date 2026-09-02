@@ -1009,14 +1009,11 @@ export default function CollaborationPage({
     return () => ro.disconnect();
   }, [viewMode, loading, notFound]);
 
-  // 任务风险三态：卡点等级取最大值；小地图与节点样式共用一份口径。
+  // 任务风险三态（裁决 14，#184）：消费 API 派生的任务级 riskLevel，
+  // 不再按卡点在前端自行取最大值；小地图与节点样式共用一份口径。
   const taskRiskLevel = (taskId: number): "high_risk" | "warning" | "" => {
-    const taskBlockers = openBlockers.filter((b) => b.taskId === taskId);
-    return taskBlockers.some((b) => b.level === "high_risk")
-      ? "high_risk"
-      : taskBlockers.length > 0
-        ? "warning"
-        : "";
+    const level = tasks.find((t) => t.id === taskId)?.riskLevel;
+    return level === "high_risk" || level === "warning" ? level : "";
   };
 
   // #147：选中边，或选中任务的当前一层边（影响路径模式下为链路内的硬前置边），
@@ -1155,13 +1152,12 @@ export default function CollaborationPage({
     return !!ext && PREVIEWABLE.has(ext);
   };
 
-  // 任务风险徽章（§8.1）：等级与文案取抬到该等级的那条卡点（levelLabel 服务端派生），
+  // 任务风险徽章（§8.1；裁决 14 #184）：等级与文案消费任务派生字段 riskLevel／riskLevelLabel，
   // 与节点圆环三态同口径（taskRiskLevel）。
   const taskRiskBadge = (taskId: number): { level: string; label: string } | null => {
-    const level = taskRiskLevel(taskId);
-    if (!level) return null;
-    const b = openBlockers.find((x) => x.taskId === taskId && x.level === level);
-    return b?.levelLabel ? { level, label: b.levelLabel } : null;
+    const t = tasks.find((x) => x.id === taskId);
+    if (!t || t.riskLevel === "normal") return null;
+    return { level: t.riskLevel, label: t.riskLevelLabel };
   };
 
   const blockerDays = (since: string) =>

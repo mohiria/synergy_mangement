@@ -1361,6 +1361,11 @@ export interface components {
             status: components["schemas"]["TaskStatus"];
             /** @description 面向用户的状态显示文案（AC-04、决策 34；派生字段）；审批等待状态为“待{当前审批人姓名}审批”，或签多人为“待{首位姓名}等N人审批”，无审批人时退化为“待审批” */
             statusLabel: string;
+            riskLevel: components["schemas"]["RiskLevel"];
+            /** @description 任务风险等级显示文案（派生字段；裁决 14，#184） */
+            riskLevelLabel: string;
+            /** @description 任务风险原因一行（派生字段，与 riskLevel 同源——取抬高等级的那条卡点或临期／超期事实；正常态不返回。裁决 14，#184：任务风险 = max(未解除卡点最高等级, 超期→高风险, 临期→预警)，临期阈值取项目规则设置；临期不是卡点、不写任务动态、无待行动人） */
+            riskNote?: string;
             /** @description 任务说明，选填 */
             description?: string;
             /** @description 完成标准，选填 */

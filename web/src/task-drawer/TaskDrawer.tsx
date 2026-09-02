@@ -693,6 +693,16 @@ export default function TaskDrawer({
               <span className={`status-pill ${STATUS_CLASS[task.status]}`}>
                 {task.statusLabel}
               </span>
+              {/* 任务级风险（裁决 14，#184）：徽章与原因消费 API 派生字段，前端不按卡点自行取最大值。 */}
+              {task.riskLevel !== "normal" && (
+                <span
+                  className={`status-pill risk-${task.riskLevel}`}
+                  style={{ marginLeft: 8 }}
+                  title={task.riskNote}
+                >
+                  {task.riskLevelLabel}
+                </span>
+              )}
               {task.status === "cancelled" && task.cancelReason && (
                 <span className="muted" style={{ marginLeft: 8, fontSize: 12 }}>
                   原因：{task.cancelReason}

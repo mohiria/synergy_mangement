@@ -2766,6 +2766,7 @@ func TestMultiSourceInputs(t *testing.T) {
 	if detail := decodeBody[api.TaskDetail](t, resp); detail.Task.Status != api.TaskStatusWaitingInput || len(detail.Inputs) != 2 {
 		t.Fatalf("上游未完成时应等待输入: %+v", detail.Task.Status)
 	}
+
 	_ = sp
 	_ = edgesURL
 }
@@ -2925,6 +2926,13 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 		}
 		if tk.OpenBlockerCount == nil || *tk.OpenBlockerCount != 2 {
 			t.Fatalf("派生卡点计数异常: %+v", tk)
+		}
+		// 裁决 14（#184）：任务级 riskLevel/riskNote 派生字段——超期任务为高风险，原因行同源。
+		if tk.RiskLevel != api.HighRisk || tk.RiskLevelLabel != "高风险" {
+			t.Fatalf("超期任务应派生任务级高风险: %+v / %q", tk.RiskLevel, tk.RiskLevelLabel)
+		}
+		if tk.RiskNote == nil || !strings.Contains(*tk.RiskNote, "超期") {
+			t.Fatalf("任务风险原因行应来自抬高等级的事实: %+v", tk.RiskNote)
 		}
 	}
 

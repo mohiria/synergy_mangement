@@ -63,6 +63,38 @@ func DeriveKrRisk(now time.Time, dueSoonDays int, tasks []RiskTaskFact, blockers
 	return out
 }
 
+// DeriveTaskRisk 读时派生单个任务的风险等级与一行原因（裁决 14，#184；主 PRD §5.7）。
+//
+//	任务风险 = max(该任务未解除卡点的最高等级, 超期→高风险, 临期→预警)
+//
+// 临期阈值取项目规则设置（非正数回落默认值）；已完成、已关闭任务不参与判定、恒为正常。
+// 临期是风险信号而不是卡点：不写任务动态、无待行动人。原因行取抬高等级的那条事实，
+// 同等级下卡点原因比日期原因更具体（与 DeriveKrRisk 的 raise 口径一致）。
+// blockers 传该任务自己的卡点。
+func DeriveTaskRisk(now time.Time, dueSoonDays int, t RiskTaskFact, blockers []Blocker) KrRisk {
+	if dueSoonDays <= 0 {
+		dueSoonDays = DefaultDueSoonDays
+	}
+	out := KrRisk{Level: RiskNormal}
+	raise := func(level, note string) {
+		if riskRank(level) > riskRank(out.Level) {
+			out.Level, out.Note = level, note
+		}
+	}
+	for _, b := range blockers {
+		raise(b.Level, fmt.Sprintf("%s：%s", BlockerKindLabel(b.Kind), b.Reason))
+	}
+	if blockerTaskInExecution(t.Status) {
+		switch {
+		case Overdue(t.EndDate, now):
+			raise(RiskHighRisk, fmt.Sprintf("超期：截止 %s 已过", t.EndDate.Format("2006-01-02")))
+		case DueSoon(t.EndDate, now, dueSoonDays):
+			raise(RiskWarning, fmt.Sprintf("临期：截止 %s，不足 %d 天", t.EndDate.Format("2006-01-02"), dueSoonDays))
+		}
+	}
+	return out
+}
+
 // DeriveObjectiveRisk 读时派生一个 O 的风险等级与一行原因（AC-59、主 PRD §5.7）。
 //
 //	O 风险 = max(下级 KR 风险)

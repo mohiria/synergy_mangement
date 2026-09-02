@@ -613,14 +613,20 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 	if err != nil {
 		return nil, err
 	}
-	// 派生卡点数量（列表徽标用）。
+	// 派生卡点数量（列表徽标用）与任务级风险（裁决 14，#184）。
 	blockers, err := s.projectBlockers(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
 	openBlockersByTask := map[int64]int{}
+	blockersByTask := map[int64][]domain.Blocker{}
 	for _, b := range blockers {
 		openBlockersByTask[b.TaskID]++
+		blockersByTask[b.TaskID] = append(blockersByTask[b.TaskID], b)
+	}
+	settings, err := s.projectSettings(ctx, projectID)
+	if err != nil {
+		return nil, err
 	}
 	// 候选内容数量（提交完成申请的派生标志用）。
 	candidateRows, err := s.q.CandidateCountsByProject(ctx, projectID)
@@ -682,6 +688,10 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 		facts := domain.TaskFacts{Status: t.Status, CreatorID: t.CreatedBy, OwnerID: t.OwnerID,
 			ResultUpdate: t.ResultUpdate,
 			ReviewStage:  reviewStageByTask[t.ID]}
+		// 任务级风险（裁决 14，#184）：max(未解除卡点最高等级, 超期→高风险, 临期→预警)。
+		risk := domain.DeriveTaskRisk(s.now(), settings.DueSoonDays, domain.RiskTaskFact{
+			ID: t.ID, Name: t.Name, Status: t.Status, EndDate: pgDateAsTime(t.EndDate),
+		}, blockersByTask[t.ID])
 		item := Task{
 			Id:                 t.ID,
 			KeyResultId:        t.KeyResultID,
@@ -700,6 +710,9 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 			CanStart:           domain.CanStartTask(actor, userID, facts),
 			CanUpdateProgress:  domain.CanUpdateProgress(actor, userID, facts),
 			CanCancel:          domain.CanCloseTask(actor, facts),
+			RiskLevel:          RiskLevel(risk.Level),
+			RiskLevelLabel:     domain.RiskLevelLabel(risk.Level),
+			RiskNote:           optString(risk.Note),
 		}
 		// 页面主状态汇总：必要输入未到显示「等待输入」（存储态保持真实执行状态）。
 		displayFacts := facts
