@@ -788,6 +788,7 @@ func (s *Server) okrList(ctx context.Context, projectID int64, actor domain.Acto
 		inputFactsByKr[row.KeyResultID] = append(inputFactsByKr[row.KeyResultID], domain.KrInputFact{
 			TargetStatus: row.TargetStatus,
 			Ready:        domain.EdgeReady(row.SourceTaskStatus.String),
+			Necessity:    row.Necessity,
 		})
 	}
 	// KR 下任务数（含已完成与已关闭）：OKR 表「任务」列与删除守卫同源（AC-65）。
@@ -828,9 +829,17 @@ func (s *Server) okrList(ctx context.Context, projectID int64, actor domain.Acto
 				}
 				return &n
 			}(),
-			// 未就绪摘要（#150）：0 不返回（CR-22「不显示 0 未就绪」）。
+			// 未就绪摘要（#150；裁决 15 #185：只计必要边）：0 不返回（CR-22「不显示 0 未就绪」）。
 			NotReadyCount: func() *int {
 				n := domain.CountNotReadyInputs(inputFactsByKr[k.ID])
+				if n == 0 {
+					return nil
+				}
+				return &n
+			}(),
+			// 提醒计数（裁决 15，#185）：必要与参考的未就绪边都计，风险队列第二档由它派生。
+			ReminderCount: func() *int {
+				n := domain.CountUnreadyReminders(inputFactsByKr[k.ID])
 				if n == 0 {
 					return nil
 				}

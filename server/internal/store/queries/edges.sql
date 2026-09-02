@@ -34,9 +34,10 @@ ORDER BY e.id;
 
 -- name: ListInputReadinessByProject :many
 -- #150 风险队列「未就绪摘要」：项目全部输入边的就绪事实——目标任务所属 KR、
--- 目标任务状态、来源任务状态（与 AC-48 修订同源；#178 后来源恒为任务）；计数规则在 domain。
+-- 目标任务状态、来源任务状态与必要性（裁决 15，#185：未就绪计数只计必要边、
+-- 提醒计数含参考边，两种计数规则都在 domain；#178 后来源恒为任务）。
 SELECT tt.key_result_id, tt.status AS target_status,
-    st.status AS source_task_status
+    st.status AS source_task_status, e.necessity
 FROM deliverable_edges e
 JOIN tasks tt ON tt.id = e.target_task_id
 JOIN key_results k ON k.id = tt.key_result_id

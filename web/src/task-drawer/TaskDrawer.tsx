@@ -545,7 +545,12 @@ export default function TaskDrawer({
                 {rel.taskStatusLabel}
               </small>
             </span>
-            <span className={`status-pill ${rel.ready ? "completed" : "warning"}`}>
+            {/* 裁决 15（#185）：参考未就绪只是「提醒」，徽标改中性灰。 */}
+            <span
+              className={`status-pill ${
+                rel.ready ? "completed" : rel.necessityLabel === "参考" ? "" : "warning"
+              }`}
+            >
               {rel.ready ? "已就绪" : "未就绪"}
             </span>
           </button>
@@ -807,7 +812,10 @@ export default function TaskDrawer({
                   )}
                 </div>
                 <div className="fact-card-actions">
-                  <span className={`status-pill ${e.ready ? "completed" : "warning"}`}>
+                  {/* 裁决 15（#185）：参考未就绪只是「提醒」，徽标改中性灰。 */}
+                  <span
+                    className={`status-pill ${e.ready ? "completed" : required ? "warning" : ""}`}
+                  >
                     {e.ready ? "已就绪" : "未就绪"}
                   </span>
                   {e.canRemove && (

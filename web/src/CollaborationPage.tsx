@@ -818,13 +818,22 @@ export default function CollaborationPage({
     </defs>
   );
 
+  // 该必要边的「上游未就绪」卡点等级（裁决 15，#185）：构成卡点的未就绪边随卡点等级着色。
+  const upstreamBlockerLevel = (edgeId: number): string | null =>
+    openBlockers.find((b) => b.key === `upstream_unready:edge:${edgeId}`)?.level ?? null;
+
   // #147 边默认灰色系（PRD §11）；#173 裁决：样式只分三类——必要灰实线、参考灰虚线、
-  // 互锁红虚线常驻；非互锁的未就绪关系用橙色异常提示（原型 anomaly）；
+  // 互锁红虚线常驻；裁决 15（#185）：橙色异常提示只对必要边——必要未就绪构成卡点时
+  // 随卡点等级着色（预警橙／高风险红），未构成卡点为橙；参考未就绪改中性灰，只作「提醒」；
   // 关键路径只加粗不上色（§6.3）。
   const edgeStroke = (e: DeliverableEdge) => {
     if (e.interlockRisk) return { stroke: "#bd3e49", width: 2.5, dash: "6 4" };
     const dash = e.necessity === "reference" ? "6 4" : undefined;
-    if (!e.ready) return { stroke: "#a86917", width: 2, dash };
+    if (!e.ready && e.necessity === "required") {
+      const level = upstreamBlockerLevel(e.id);
+      if (level === "high_risk") return { stroke: "#bd3e49", width: 2, dash };
+      return { stroke: "#a86917", width: 2, dash };
+    }
     return {
       stroke: "#929dad",
       width: e.onCriticalPath ? 2.4 : 1.6,
@@ -1033,21 +1042,29 @@ export default function CollaborationPage({
     return e.sourceTaskId === selectedTask || e.targetTaskId === selectedTask;
   };
 
-  // #147：三个层级共用一份边渲染——可见线、透明命中层、默认隐藏的文字标签
-  // （悬停／高亮／异常时显示「关系类型 · 交付物名称」，互锁常驻，原型 labels-key）。
+  // #147：三个层级共用一份边渲染——可见线、透明命中层、默认隐藏的文字标签。
+  // 裁决 15（#185）标签契约「必要性 · 异常名」：互锁→「必要 · 互锁」（红，常驻）；
+  // 必要未就绪构成卡点→「必要 · 上游未就绪」（随卡点等级着色，常驻）；
+  // 必要未就绪未构成卡点→「必要 · 未就绪」（橙，常驻）；参考未就绪→「参考 · 上游未就绪」
+  // （中性灰，常驻）；就绪的边仅悬停显示必要性；来源任务全称保留在悬停 title。
   const renderEdge = (e: DeliverableEdge, from: NodePos, to: NodePos, dim = false) => {
     const st = edgeStroke(e);
     const d = edgePath(from, to);
     const highlighted = isEdgeHighlighted(e);
-    const unready = !e.interlockRisk && !e.ready;
+    const requiredUnready = !e.interlockRisk && !e.ready && e.necessity === "required";
+    const referenceUnready = !e.interlockRisk && !e.ready && e.necessity === "reference";
+    const blockerLevel = requiredUnready ? upstreamBlockerLevel(e.id) : null;
     const cls = `edge-g${highlighted ? " highlighted" : ""}${e.interlockRisk ? " interlock anomaly" : ""}${
-      unready ? " unready anomaly" : ""
-    }`;
+      requiredUnready ? " unready anomaly" : ""
+    }${blockerLevel === "high_risk" ? " blocker-high" : ""}${referenceUnready ? " reminder" : ""}`;
     const mx = (from.x + from.w / 2 + to.x + to.w / 2) / 2;
     const my = (from.y + from.h / 2 + to.y + to.h / 2) / 2;
-    // 标签截断：交付物名可能是整句描述，常驻标签太长会横穿画布；全称看 <title>。
-    const label = `${e.interlockRisk ? "互锁" : e.necessityLabel} · ${e.name}`;
-    const shortLabel = label.length > 22 ? `${label.slice(0, 22)}…` : label;
+    let anomaly: string | null = null;
+    if (e.interlockRisk) anomaly = "互锁";
+    else if (requiredUnready) anomaly = blockerLevel ? "上游未就绪" : "未就绪";
+    else if (referenceUnready) anomaly = "上游未就绪";
+    const shortLabel = anomaly ? `${e.necessityLabel} · ${anomaly}` : e.necessityLabel;
+    const label = `${e.necessityLabel} · ${e.sourceTaskName ?? e.name}`;
     return (
       <g key={e.id} className={cls} opacity={dim ? 0.15 : 1}>
         <path
@@ -1178,7 +1195,16 @@ export default function CollaborationPage({
         <div className="gi-title">
           <span className="gi-eyebrow">交付物边</span>
           <h2 title={selectedEdgeObj.name}>{selectedEdgeObj.name}</h2>
-          <span className={`gi-badge ${selectedEdgeObj.ready ? "ready" : "risk-warning"}`}>
+          {/* 裁决 15（#185）：参考未就绪只是「提醒」，徽标改中性灰。 */}
+          <span
+            className={`gi-badge ${
+              selectedEdgeObj.ready
+                ? "ready"
+                : selectedEdgeObj.necessity === "reference"
+                  ? ""
+                  : "risk-warning"
+            }`}
+          >
             {selectedEdgeObj.ready ? "已就绪" : "未就绪"}
           </span>
         </div>
@@ -1409,7 +1435,12 @@ export default function CollaborationPage({
                     </b>
                     <small>{e.necessityLabel}</small>
                   </span>
-                  <span className={`gi-badge ${e.ready ? "ready" : "risk-warning"}`}>
+                  {/* 裁决 15（#185）：参考未就绪改中性灰。 */}
+                  <span
+                    className={`gi-badge ${
+                      e.ready ? "ready" : e.necessity === "reference" ? "" : "risk-warning"
+                    }`}
+                  >
                     {e.ready ? "已就绪" : "未就绪"}
                   </span>
                 </button>
@@ -1877,7 +1908,12 @@ export default function CollaborationPage({
                         <td title={e.targetTaskName}>{e.targetTaskName}</td>
                         <td title={e.sourceOwnerName ?? "—"}>{e.sourceOwnerName ?? "—"}</td>
                         <td>
-                          <span className={`status-pill ${e.ready ? "completed" : "warning"}`}>
+                          {/* 裁决 15（#185）：参考未就绪改中性灰。 */}
+                          <span
+                            className={`status-pill ${
+                              e.ready ? "completed" : e.necessity === "reference" ? "" : "warning"
+                            }`}
+                          >
                             {e.ready ? "已就绪" : "未就绪"}
                           </span>
                         </td>
@@ -1908,9 +1944,11 @@ export default function CollaborationPage({
             {/* #144：风险队列在全局展开下同样保留（PRD §5.2 无隐藏规定，原型两种模式恒在）。 */}
             <aside className="risk-queue">
                 <div className="risk-queue-head">风险队列</div>
-                {/* #158（裁决，CR-22 修订）：条目只显示「KR 编号 + N 个卡点」——
-                    不显风险等级、任务标题、卡点内容与未就绪摘要（notReadyCount 仍参与
-                    排序权重与进入条件：卡点×3＋未就绪，风险／卡点／未就绪任一非零进入）。 */}
+                {/* #158（裁决；裁决 15 #185 修订）：进入条件与排序仍只认卡点、风险与必要未就绪
+                    （notReadyCount 已只计必要边，参考不作为进入条件；权重＝卡点×3＋必要未就绪）。
+                    条目三档显示——有卡点：「KR 编号 · 最高等级卡点」＋卡点数量；
+                    无卡点但有上游未就绪提醒（含参考，reminderCount）：「KR 编号 · 提醒」；
+                    均无（因风险等级进入）：仅「KR 编号」。 */}
                 {/* #154：条目列表区独立滚动，底部「回到 O／KR 层级树」不随列表滚走。 */}
                 <div className="risk-queue-list">
                 {(() => {
@@ -1940,6 +1978,11 @@ export default function CollaborationPage({
                     >
                       <span className="risk-queue-main">
                         <b>{k.code}</b>
+                        {(k.openBlockerCount ?? 0) > 0 && k.topBlocker ? (
+                          <span> · {k.topBlocker.kindLabel}</span>
+                        ) : (k.reminderCount ?? 0) > 0 ? (
+                          <span className="muted"> · 提醒</span>
+                        ) : null}
                       </span>
                       <span className="risk-queue-counts">
                         {(k.openBlockerCount ?? 0) > 0 && <i>{k.openBlockerCount} 个卡点</i>}
@@ -2344,10 +2387,12 @@ export default function CollaborationPage({
                 <span><i className="lg-task" />任务</span>
                 <span><i className="lg-warning" />预警</span>
                 <span><i className="lg-risk" />高风险／卡点</span>
-                {/* #173 裁决：边图例只留三类——必要（实线）、参考（虚线）、互锁异常（红虚线常驻）。 */}
+                {/* #173 裁决：边图例只留三类——必要（实线）、参考（虚线）、互锁异常（红虚线常驻）。
+                    裁决 15（#185）：补必要性语义解释。 */}
                 <span><i className="lg-line" />必要</span>
                 <span><i className="lg-feedback" />参考</span>
                 <span><i className="lg-interlock" />互锁</span>
+                <span className="muted">参考输入不参与风险识别，仅作提示</span>
               </div>
               {/* 小地图（PRD §6.4，原型 cp-minimap）：内容全貌＋当前视口框。 */}
               <div className="graph-minimap" aria-hidden>

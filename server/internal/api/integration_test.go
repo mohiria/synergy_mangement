@@ -2767,6 +2767,20 @@ func TestMultiSourceInputs(t *testing.T) {
 		t.Fatalf("上游未完成时应等待输入: %+v", detail.Task.Status)
 	}
 
+	// 裁决 15（#185）：参考边退出风险识别——KR 未就绪摘要只计必要边，提醒计数含参考边。
+	// 现状 4 条必要未就绪边；给 B 加一条参考输入后，notReadyCount 不变、reminderCount +1。
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, taskB2),
+		api.CreateTaskInputRequest{Necessity: api.Reference, SourceTaskIds: []int64{taskA}})
+	wantStructureAccepted(t, resp)
+	resp = doJSON(t, carol, http.MethodGet, fmt.Sprintf("%s/projects/%d/objectives", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	krView := decodeBody[[]api.Objective](t, resp)[0].KeyResults[0]
+	if krView.NotReadyCount == nil || *krView.NotReadyCount != 4 {
+		t.Fatalf("未就绪摘要应只计必要边（4 条）: %+v", krView.NotReadyCount)
+	}
+	if krView.ReminderCount == nil || *krView.ReminderCount != 5 {
+		t.Fatalf("提醒计数应含参考边（5 条）: %+v", krView.ReminderCount)
+	}
 	_ = sp
 	_ = edgesURL
 }

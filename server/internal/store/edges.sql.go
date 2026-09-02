@@ -317,7 +317,7 @@ func (q *Queries) ListEdgesByProject(ctx context.Context, projectID int64) ([]Li
 
 const listInputReadinessByProject = `-- name: ListInputReadinessByProject :many
 SELECT tt.key_result_id, tt.status AS target_status,
-    st.status AS source_task_status
+    st.status AS source_task_status, e.necessity
 FROM deliverable_edges e
 JOIN tasks tt ON tt.id = e.target_task_id
 JOIN key_results k ON k.id = tt.key_result_id
@@ -330,10 +330,12 @@ type ListInputReadinessByProjectRow struct {
 	KeyResultID      int64
 	TargetStatus     string
 	SourceTaskStatus pgtype.Text
+	Necessity        string
 }
 
 // #150 风险队列「未就绪摘要」：项目全部输入边的就绪事实——目标任务所属 KR、
-// 目标任务状态、来源任务状态（与 AC-48 修订同源；#178 后来源恒为任务）；计数规则在 domain。
+// 目标任务状态、来源任务状态与必要性（裁决 15，#185：未就绪计数只计必要边、
+// 提醒计数含参考边，两种计数规则都在 domain；#178 后来源恒为任务）。
 func (q *Queries) ListInputReadinessByProject(ctx context.Context, projectID int64) ([]ListInputReadinessByProjectRow, error) {
 	rows, err := q.db.Query(ctx, listInputReadinessByProject, projectID)
 	if err != nil {
@@ -343,7 +345,12 @@ func (q *Queries) ListInputReadinessByProject(ctx context.Context, projectID int
 	var items []ListInputReadinessByProjectRow
 	for rows.Next() {
 		var i ListInputReadinessByProjectRow
-		if err := rows.Scan(&i.KeyResultID, &i.TargetStatus, &i.SourceTaskStatus); err != nil {
+		if err := rows.Scan(
+			&i.KeyResultID,
+			&i.TargetStatus,
+			&i.SourceTaskStatus,
+			&i.Necessity,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

@@ -526,9 +526,13 @@ body {
   display: none; fill: #708095; font-size: var(--type-aux); font-weight: 600;
   paint-order: stroke; stroke: #f8f9fc; stroke-width: 4px; stroke-linejoin: round; pointer-events: none;
 }
-.edge-g:hover .edge-label, .edge-g.highlighted .edge-label, .edge-g.anomaly .edge-label { display: block; }
+.edge-g:hover .edge-label, .edge-g.highlighted .edge-label, .edge-g.anomaly .edge-label,
+.edge-g.reminder .edge-label { display: block; }
 .edge-g.interlock .edge-label { fill: var(--red); }
 .edge-g.unready .edge-label { fill: var(--amber); }
+/* 裁决 15（#185）：必要未就绪构成高风险卡点时标签随卡点等级转红；参考未就绪为中性灰「提醒」。 */
+.edge-g.blocker-high .edge-label { fill: var(--red); }
+.edge-g.reminder .edge-label { fill: #708095; }
 .edge-g.highlighted .edge-label { fill: #253fba; }
 /* 选中／路径高亮的蓝色光晕（原型 .cp-edge.selected）。 */
 .edge-g.highlighted .edge-line { filter: drop-shadow(0 0 5px rgba(82, 104, 223, 0.42)); }
