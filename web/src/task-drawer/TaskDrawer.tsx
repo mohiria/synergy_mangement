@@ -507,6 +507,38 @@ export default function TaskDrawer({
       .filter((b) => b.key.startsWith("upstream_unready:edge:"))
       .map((b) => [Number(b.key.slice("upstream_unready:edge:".length)), b] as const),
   );
+  // #187：必要输入未就绪时点「开始执行」先确认——不阻断（裁决 15 口径），
+  // 只提示开始后「上游未就绪」卡点将自动取消；正常任务直接开始。
+  const confirmStart = () => {
+    if (!task) return;
+    const unready = requiredInputs.filter((e) => !e.ready);
+    if (unready.length === 0) {
+      actions.start(task);
+      return;
+    }
+    const upstreamNames = unready.map((e) =>
+      [e.sourceTaskCode, e.sourceTaskName].filter(Boolean).join(" · "),
+    );
+    Modal.confirm({
+      title: "上游未就绪，仍要开始本任务？",
+      content: (
+        <div>
+          <p style={{ marginTop: 0 }}>
+            系统识别到以下上游任务是本任务的必要输入，目前上游未就绪：
+          </p>
+          <ul style={{ paddingLeft: 20, margin: "4px 0" }}>
+            {upstreamNames.map((n) => (
+              <li key={n}>{n}</li>
+            ))}
+          </ul>
+          <p style={{ marginBottom: 0 }}>开始本任务后，系统将取消「上游未就绪」卡点。</p>
+        </div>
+      ),
+      okText: "仍要开始",
+      cancelText: "取消",
+      onOk: () => actions.start(task),
+    });
+  };
   const deliverables = detail?.deliverables ?? [];
   const currentFiles = deliverables.filter((d) => d.current);
   // AC-67：「审核中」以内容状态为准——候选传了没提交时后端给 pending_submit，
@@ -1336,7 +1368,7 @@ export default function TaskDrawer({
           {task.canManageDeliverables && (
             <Button onClick={() => actions.openConfigureInput(task)}>选择输入源</Button>
           )}
-          {task.canStart && <Button onClick={() => actions.start(task)}>开始执行</Button>}
+          {task.canStart && <Button onClick={confirmStart}>开始执行</Button>}
           {task.canCancel && <Button onClick={() => actions.openCancel(task)}>关闭任务</Button>}
           {task.canStartResultUpdate && (
             <Button onClick={() => actions.startResultUpdate(task)}>发起成果更新</Button>
