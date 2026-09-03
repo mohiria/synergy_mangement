@@ -1944,8 +1944,9 @@ export default function CollaborationPage({
             {/* #144：风险队列在全局展开下同样保留（PRD §5.2 无隐藏规定，原型两种模式恒在）。 */}
             <aside className="risk-queue">
                 <div className="risk-queue-head">风险队列</div>
-                {/* #158（裁决；裁决 15 #185 修订）：进入条件与排序仍只认卡点、风险与必要未就绪
-                    （notReadyCount 已只计必要边，参考不作为进入条件；权重＝卡点×3＋必要未就绪）。
+                {/* #158（裁决；裁决 15 #185 修订，后经口头裁决放宽）：进入条件与排序认卡点、
+                    风险与提醒（reminderCount，必要与参考的未就绪都计；权重＝卡点×3＋提醒数），
+                    仅有参考提醒的 KR 也进队列。
                     条目三档显示——有卡点：「KR 编号 · 最高等级卡点」＋卡点数量；
                     无卡点但有上游未就绪提醒（含参考，reminderCount）：「KR 编号 · 上游未就绪」
                     （显示具体提醒名而非「提醒」二字，与边标签异常名同词）；
@@ -1954,13 +1955,13 @@ export default function CollaborationPage({
                 <div className="risk-queue-list">
                 {(() => {
                   const weight = (k: (typeof krList)[number]) =>
-                    (k.openBlockerCount ?? 0) * 3 + (k.notReadyCount ?? 0);
+                    (k.openBlockerCount ?? 0) * 3 + (k.reminderCount ?? 0);
                   const queue = krList
                     .filter(
                       (k) =>
                         k.riskLevel !== "normal" ||
                         (k.openBlockerCount ?? 0) > 0 ||
-                        (k.notReadyCount ?? 0) > 0,
+                        (k.reminderCount ?? 0) > 0,
                     )
                     .sort((a, b) => weight(b) - weight(a));
                   if (queue.length === 0) {
