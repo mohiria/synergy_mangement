@@ -932,6 +932,20 @@ export default function CollaborationPage({
   const fullKrNodes = full ? full.krNodes.map((n) => ({ ...n, pos: withOffset(`kr:${n.id}`, n.pos) })) : [];
   const fullOPosById = new Map(fullONodes.map((n) => [n.id, n.pos]));
   const fullKrPosById = new Map(fullKrNodes.map((n) => [n.id, n.pos]));
+  // #188：KR→任务 owns 线的终点截断到任务圆环边缘，不再画进环心——任务是空心
+  // 圆环，选中淡化时线穿环内很显眼；半径取 taskCircle 换算后的实际值（聚焦大圆
+  // 同样正确），两心过近时退回圆心避免除零。与协作边落在圆边同口径。
+  const lineToCircleEdge = (x1: number, y1: number, c: NodePos): string => {
+    const cx = c.x + c.w / 2;
+    const cy = c.y + c.h / 2;
+    const r = c.w / 2;
+    const dx = cx - x1;
+    const dy = cy - y1;
+    const len = Math.hypot(dx, dy);
+    if (len <= r) return `M ${x1} ${y1} L ${cx} ${cy}`;
+    return `M ${x1} ${y1} L ${cx - (dx / len) * r} ${cy - (dy / len) * r}`;
+  };
+
   const fullOwnsD = (l: { oId?: number; krId: number; taskId?: number; spineX?: number }): string | null => {
     const kr = fullKrPosById.get(l.krId);
     if (!kr) return null;
@@ -941,7 +955,7 @@ export default function CollaborationPage({
       const base = full?.positions.get(l.taskId);
       if (!base) return null;
       const p = taskCircle(l.taskId, base);
-      return `M ${krCx} ${krCy} L ${p.x + p.w / 2} ${p.y + p.h / 2}`;
+      return lineToCircleEdge(krCx, krCy, p);
     }
     const o = l.oId != null ? fullOPosById.get(l.oId) : undefined;
     if (!o || l.spineX == null) return null;
@@ -2158,7 +2172,7 @@ export default function CollaborationPage({
                   <svg className="graph-svg" width={krLayer.width} height={krLayer.height}>
                     {arrowDefs}
                     {/* KR→任务 owns 直线（#148）：灰、无箭头，绘于关系边之下；
-                        两端都跟随拖拽（#151：KR 中心节点同样可拖）。 */}
+                        两端都跟随拖拽（#151：KR 中心节点同样可拖）；终点止于圆环边缘（#188）。 */}
                     {krLayer.inKr.map((t) => {
                       const base = krLayer.positions.get(t.id);
                       if (!base) return null;
@@ -2166,9 +2180,11 @@ export default function CollaborationPage({
                       return (
                         <path
                           key={`owns-${t.id}`}
-                          d={`M ${krCenterPos.x + krCenterPos.w / 2} ${krCenterPos.y + krCenterPos.h / 2} L ${
-                            p.x + p.w / 2
-                          } ${p.y + p.h / 2}`}
+                          d={lineToCircleEdge(
+                            krCenterPos.x + krCenterPos.w / 2,
+                            krCenterPos.y + krCenterPos.h / 2,
+                            p,
+                          )}
                           fill="none"
                           stroke="#b2bdca"
                           strokeWidth={1.7}
