@@ -29,7 +29,7 @@ func CountNotReadyInputs(inputs []KrInputFact) int {
 
 // CountUnreadyReminders 统计 KR 的「提醒」计数（裁决 15，#185；词汇表「提醒」）：
 // 上游未就绪但不构成卡点的中性提示——必要与参考的未就绪边都计，
-// 风险队列第二档「KR 编号 · 提醒」由它派生（有卡点时第一档优先，规则在前端消费处按档取用）。
+// 风险队列第二档「KR 编号 · 上游未就绪」由它派生（有卡点时第一档优先，规则在前端消费处按档取用）。
 func CountUnreadyReminders(inputs []KrInputFact) int {
 	n := 0
 	for _, in := range inputs {

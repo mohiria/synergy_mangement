@@ -481,8 +481,9 @@ body {
 .risk-queue-item:hover { background: #f8f9fc; }
 /* #150 原型 cp-lens-list active：当前所在 KR 层对应项左缘高亮。 */
 .risk-queue-item.active { background: #f5f7ff; box-shadow: inset 3px 0 0 var(--accent); }
-.risk-queue-main { min-width: 0; }
-.risk-queue-item b { display: block; font-size: var(--type-aux); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 编号与「· 卡点／提醒」同行同字号（--type-aux），超长整体截断，不换行。 */
+.risk-queue-main { min-width: 0; font-size: var(--type-aux); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.risk-queue-item b { font-size: var(--type-aux); }
 .risk-queue-item small { display: block; color: var(--muted); font-size: 12px; }
 /* #150：右列「N 卡点／N 未就绪」双徽章（cp-lens-list i/em），0 不渲染（CR-22）。 */
 .risk-queue-counts { text-align: right; flex: none; }

@@ -1947,7 +1947,8 @@ export default function CollaborationPage({
                 {/* #158（裁决；裁决 15 #185 修订）：进入条件与排序仍只认卡点、风险与必要未就绪
                     （notReadyCount 已只计必要边，参考不作为进入条件；权重＝卡点×3＋必要未就绪）。
                     条目三档显示——有卡点：「KR 编号 · 最高等级卡点」＋卡点数量；
-                    无卡点但有上游未就绪提醒（含参考，reminderCount）：「KR 编号 · 提醒」；
+                    无卡点但有上游未就绪提醒（含参考，reminderCount）：「KR 编号 · 上游未就绪」
+                    （显示具体提醒名而非「提醒」二字，与边标签异常名同词）；
                     均无（因风险等级进入）：仅「KR 编号」。 */}
                 {/* #154：条目列表区独立滚动，底部「回到 O／KR 层级树」不随列表滚走。 */}
                 <div className="risk-queue-list">
@@ -1981,7 +1982,7 @@ export default function CollaborationPage({
                         {(k.openBlockerCount ?? 0) > 0 && k.topBlocker ? (
                           <span> · {k.topBlocker.kindLabel}</span>
                         ) : (k.reminderCount ?? 0) > 0 ? (
-                          <span className="muted"> · 提醒</span>
+                          <span className="muted"> · 上游未就绪</span>
                         ) : null}
                       </span>
                       <span className="risk-queue-counts">

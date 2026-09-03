@@ -1209,7 +1209,7 @@ export interface components {
             openBlockerCount?: number;
             /** @description KR 下未关闭任务作为接收方的未就绪**必要**交付物边数（派生字段；#150 风险队列未就绪摘要，模块 PRD §5.2；裁决 15 */
             notReadyCount?: number;
-            /** @description KR 下的「提醒」计数（派生字段；裁决 15，#185，词汇表「提醒」）——未就绪的必要与参考边都计（已完成／已取消的接收方不计）；风险队列在无卡点但本计数非零时显示「KR 编号 · 提醒」；为 0 时不返回 */
+            /** @description KR 下的「提醒」计数（派生字段；裁决 15，#185，词汇表「提醒」）——未就绪的必要与参考边都计（已完成／已取消的接收方不计）；风险队列在无卡点但本计数非零时显示「KR 编号 · 上游未就绪」（具体提醒名，不用「提醒」二字）；为 0 时不返回 */
             reminderCount?: number;
             /** @description KR 下任务数量（派生字段；OKR 表「任务」列，含已完成与已取消，AC-65） */
             taskCount?: number;

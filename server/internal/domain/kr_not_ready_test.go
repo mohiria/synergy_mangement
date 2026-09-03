@@ -72,7 +72,7 @@ func TestCountNotReadyInputs(t *testing.T) {
 }
 
 // 裁决 15（#185）词条「提醒」：上游未就绪但不构成卡点的中性提示。
-// KR 的提醒计数含参考边——风险队列第二档「KR 编号 · 提醒」由它派生；
+// KR 的提醒计数含参考边——风险队列第二档「KR 编号 · 上游未就绪」由它派生；
 // 终态接收方同样不计。
 func TestCountUnreadyReminders(t *testing.T) {
 	cases := []struct {
