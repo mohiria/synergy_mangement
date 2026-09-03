@@ -58,6 +58,20 @@ func (s *Server) projectFinalReviewers(ctx context.Context, projectID int64) ([]
 	return ids, names, nil
 }
 
+// intermediateReviewersByTask 或签中任务的当前审核组（AC-04 显示文案；
+// #186 含 user_id 供「待我审批」比对）。
+func (s *Server) intermediateReviewersByTask(ctx context.Context, projectID int64) (map[int64][]domain.Approver, error) {
+	rows, err := s.q.IntermediateReviewerNamesByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64][]domain.Approver)
+	for _, rv := range rows {
+		out[rv.TaskID] = append(out[rv.TaskID], domain.Approver{ID: rv.UserID, Name: rv.DisplayName})
+	}
+	return out, nil
+}
+
 // SubmitCompletion 提交完成申请：纳入任务全部候选内容，无成果审核直接进入待 KR 终审（AC-13）。
 func (s *Server) SubmitCompletion(w http.ResponseWriter, r *http.Request, projectId int64, taskId int64) {
 	var req SubmitCompletionRequest
@@ -474,8 +488,8 @@ func (s *Server) SetTaskReviewers(w http.ResponseWriter, r *http.Request, projec
 }
 
 // completionReviewList 组装完成申请记录（含项快照与派生动作标志）。
-// finalReviewerNames 为项目管理员集合姓名（裁决 11：待终审的显示文案来源）。
-func (s *Server) completionReviewList(ctx context.Context, taskID int64, facts domain.TaskFacts, actor domain.Actor, userID int64, finalReviewerNames []string) ([]CompletionReview, error) {
+// finalReviewers 为项目管理员集合（裁决 11：待终审的显示文案来源）。
+func (s *Server) completionReviewList(ctx context.Context, taskID int64, facts domain.TaskFacts, actor domain.Actor, userID int64, finalReviewers []domain.Approver) ([]CompletionReview, error) {
 	rows, err := s.q.ListCompletionReviewsByTask(ctx, taskID)
 	if err != nil {
 		return nil, err
@@ -514,15 +528,16 @@ func (s *Server) completionReviewList(ctx context.Context, taskID int64, facts d
 			_, err := domain.DecideCompletionRule(actor, facts, true, "")
 			canDecide = err == nil
 		}
-		// AC-04：等待状态按当前审批人姓名显示（裁决 11：终审取项目管理员集合）。
-		reviewerNames := make([]string, 0, len(reviewerRows))
+		// AC-04：等待状态按当前审批人姓名显示（裁决 11：终审取项目管理员集合；
+		// #186：查看者本人是审批人时显示「待我审批」）。
+		reviewers := make([]domain.Approver, 0, len(reviewerRows))
 		for _, rv := range reviewerRows {
-			reviewerNames = append(reviewerNames, rv.DisplayName)
+			reviewers = append(reviewers, domain.Approver{ID: rv.UserID, Name: rv.DisplayName})
 		}
 		item := CompletionReview{
 			Id:              cr.ID,
 			State:           CompletionReviewState(cr.State),
-			StateLabel:      domain.CompletionStateLabel(cr.State, finalReviewerNames, reviewerNames),
+			StateLabel:      domain.CompletionStateLabel(cr.State, userID, finalReviewers, reviewers),
 			Note:            cr.Note,
 			Opinion:         optString(cr.Opinion),
 			Items:           views,

@@ -288,9 +288,9 @@ func MyWork(f MyWorkFacts) MyWorkGroups {
 		if cr.State == CompletionPendingFinal && isFinalReviewer {
 			continue
 		}
-		stage := ApprovalWaitingLabel(f.FinalReviewerNames)
+		stage := ApprovalWaitingLabel(f.UserID, ZipApprovers(f.FinalReviewerIDs, f.FinalReviewerNames))
 		if cr.State == CompletionIntermediate {
-			stage = ApprovalWaitingLabel(cr.ReviewerNames)
+			stage = ApprovalWaitingLabel(f.UserID, ZipApprovers(cr.Reviewers, cr.ReviewerNames))
 		}
 		days, overdue := waitingDays(cr.SubmittedAt)
 		item := WorkItem{

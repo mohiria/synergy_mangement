@@ -247,7 +247,7 @@ func (q *Queries) HasPendingCompletionReview(ctx context.Context, taskID int64) 
 }
 
 const intermediateReviewerNamesByProject = `-- name: IntermediateReviewerNamesByProject :many
-SELECT cr.task_id, u.display_name
+SELECT cr.task_id, crr.user_id, u.display_name
 FROM completion_reviews cr
 JOIN completion_review_reviewers crr ON crr.review_id = cr.id
 JOIN users u ON u.id = crr.user_id
@@ -260,10 +260,11 @@ ORDER BY cr.task_id, crr.user_id
 
 type IntermediateReviewerNamesByProjectRow struct {
 	TaskID      int64
+	UserID      int64
 	DisplayName string
 }
 
-// 或签中任务的当前审核组姓名（AC-04 statusLabel 派生用）。
+// 或签中任务的当前审核组（AC-04 statusLabel 派生用；#186 带 user_id 供“待我审批”比对）。
 func (q *Queries) IntermediateReviewerNamesByProject(ctx context.Context, projectID int64) ([]IntermediateReviewerNamesByProjectRow, error) {
 	rows, err := q.db.Query(ctx, intermediateReviewerNamesByProject, projectID)
 	if err != nil {
@@ -273,7 +274,7 @@ func (q *Queries) IntermediateReviewerNamesByProject(ctx context.Context, projec
 	var items []IntermediateReviewerNamesByProjectRow
 	for rows.Next() {
 		var i IntermediateReviewerNamesByProjectRow
-		if err := rows.Scan(&i.TaskID, &i.DisplayName); err != nil {
+		if err := rows.Scan(&i.TaskID, &i.UserID, &i.DisplayName); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

@@ -5,27 +5,59 @@ import "fmt"
 // 审批等待显示文案（AC-04、决策 34）：面向用户统一显示“待{当前审批人姓名}审批”，
 // 内部状态名不变，仅显示层转换。
 
-// ApprovalWaitingLabel 组装“待{审批人姓名}审批”：单人显示姓名，或签多人显示
-// “待{首位姓名}等N人审批”，无审批人（或姓名缺失）退化为“待审批”。
-func ApprovalWaitingLabel(names []string) string {
-	valid := make([]string, 0, len(names))
-	for _, n := range names {
-		if n != "" {
-			valid = append(valid, n)
+// Approver 一名当前审批人（#186）：ID 用于与查看者比对，Name 用于显示。
+type Approver struct {
+	ID   int64
+	Name string
+}
+
+// ZipApprovers 把并行的 ID／姓名切片拼成审批人列表（handler 查询与 mywork 事实
+// 结构沿用并行切片，收口处转一次）。长度不齐时缺的 ID 补零值。
+func ZipApprovers(ids []int64, names []string) []Approver {
+	out := make([]Approver, 0, len(names))
+	for i, n := range names {
+		var id int64
+		if i < len(ids) {
+			id = ids[i]
 		}
+		out = append(out, Approver{ID: id, Name: n})
+	}
+	return out
+}
+
+// ApprovalWaitingLabel 组装“待{审批人姓名}审批”：单人显示姓名，或签多人显示
+// “待{首位姓名}等N人审批”，无审批人（或姓名缺失）退化为“待审批”；
+// 查看者本人在审批人名单中时显示“待我审批”（多人为“待我等N人审批”，#186）。
+func ApprovalWaitingLabel(viewerID int64, approvers []Approver) string {
+	// 本人在名单中时即使姓名缺失也算有效条目——“待我审批”不依赖姓名。
+	valid := make([]Approver, 0, len(approvers))
+	viewerIn := false
+	for _, a := range approvers {
+		isViewer := viewerID != 0 && a.ID == viewerID
+		if a.Name == "" && !isViewer {
+			continue
+		}
+		valid = append(valid, a)
+		viewerIn = viewerIn || isViewer
 	}
 	switch len(valid) {
 	case 0:
 		return "待审批"
 	case 1:
-		return "待" + valid[0] + "审批"
+		if viewerIn {
+			return "待我审批"
+		}
+		return "待" + valid[0].Name + "审批"
 	}
-	return fmt.Sprintf("待%s等%d人审批", valid[0], len(valid))
+	if viewerIn {
+		return fmt.Sprintf("待我等%d人审批", len(valid))
+	}
+	return fmt.Sprintf("待%s等%d人审批", valid[0].Name, len(valid))
 }
 
 // StatusLabel 派生任务主状态的面向用户显示文案：审核中按申请单环节取当前审批人姓名
 // （裁决 13，#182：中间或签取审核组，待终审取项目管理员集合），其余为固定中文标签。
-func StatusLabel(status, reviewStage string, finalReviewerNames, reviewerNames []string) string {
+func StatusLabel(status, reviewStage string, viewerID int64, finalReviewers, reviewers []Approver) string {
 	switch status {
 	case TaskNotStarted:
 		return "未开始"
@@ -35,9 +67,9 @@ func StatusLabel(status, reviewStage string, finalReviewerNames, reviewerNames [
 		return "进行中"
 	case TaskInReview:
 		if reviewStage == CompletionIntermediate {
-			return ApprovalWaitingLabel(reviewerNames)
+			return ApprovalWaitingLabel(viewerID, reviewers)
 		}
-		return ApprovalWaitingLabel(finalReviewerNames)
+		return ApprovalWaitingLabel(viewerID, finalReviewers)
 	case TaskCompleted:
 		return "已完成"
 	case TaskCancelled:
@@ -48,12 +80,12 @@ func StatusLabel(status, reviewStage string, finalReviewerNames, reviewerNames [
 
 // CompletionStateLabel 完成申请显示文案：中间或签取审核组姓名，
 // 待终审显示项目管理员集合（裁决 11）。
-func CompletionStateLabel(state string, finalReviewerNames, reviewerNames []string) string {
+func CompletionStateLabel(state string, viewerID int64, finalReviewers, reviewers []Approver) string {
 	switch state {
 	case CompletionIntermediate:
-		return ApprovalWaitingLabel(reviewerNames)
+		return ApprovalWaitingLabel(viewerID, reviewers)
 	case CompletionPendingFinal:
-		return ApprovalWaitingLabel(finalReviewerNames)
+		return ApprovalWaitingLabel(viewerID, finalReviewers)
 	case CompletionApproved:
 		return "已通过"
 	case CompletionRejected:
@@ -76,12 +108,12 @@ const (
 
 // StageLabel 当前环节的面向用户显示文案（AC-04）：审批等待环节按当前审批人姓名显示，
 // 其余环节沿用环节名。
-func StageLabel(stage string, finalReviewerNames, reviewerNames []string) string {
+func StageLabel(stage string, viewerID int64, finalReviewers, reviewers []Approver) string {
 	switch stage {
 	case StageFinalReview:
-		return ApprovalWaitingLabel(finalReviewerNames)
+		return ApprovalWaitingLabel(viewerID, finalReviewers)
 	case StageIntermediateReview:
-		return ApprovalWaitingLabel(reviewerNames)
+		return ApprovalWaitingLabel(viewerID, reviewers)
 	}
 	return stage
 }

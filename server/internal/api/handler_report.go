@@ -68,11 +68,12 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 		taskNameByID[t.ID] = t.Name
 	}
 	// 终审人集合（裁决 11，#181）：待终审的显示文案取项目管理员姓名。
-	_, finalNames, err := s.projectFinalReviewers(ctx, projectId)
+	finalIDs, finalNames, err := s.projectFinalReviewers(ctx, projectId)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return Report{}, false
 	}
+	finalReviewers := domain.ZipApprovers(finalIDs, finalNames)
 	// 审核中任务的当前环节从完成申请单读取（裁决 13，#182）。
 	reviewStageByTask, err := s.pendingReviewStageByTask(ctx, projectId)
 	if err != nil {
@@ -85,15 +86,11 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 		writeInternalError(w, r, err)
 		return Report{}, false
 	}
-	// 下一步的状态显示文案（AC-04）：或签中任务取审核组姓名。
-	reviewerRows, err := s.q.IntermediateReviewerNamesByProject(ctx, projectId)
+	// 下一步的状态显示文案（AC-04）：或签中任务取审核组。
+	reviewersByTask, err := s.intermediateReviewersByTask(ctx, projectId)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return Report{}, false
-	}
-	reviewerNamesByTask := map[int64][]string{}
-	for _, rv := range reviewerRows {
-		reviewerNamesByTask[rv.TaskID] = append(reviewerNamesByTask[rv.TaskID], rv.DisplayName)
 	}
 	completedByKr := map[int64]int{}
 	for _, cr := range completionRows {
@@ -198,7 +195,7 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 			TaskName:    t.Name,
 			OwnerName:   t.OwnerName,
 			Status:      TaskStatus(display),
-			StatusLabel: domain.StatusLabel(display, reviewStageByTask[t.ID], finalNames, reviewerNamesByTask[t.ID]),
+			StatusLabel: domain.StatusLabel(display, reviewStageByTask[t.ID], uid, finalReviewers, reviewersByTask[t.ID]),
 		}
 		d := openapi_types.Date{Time: t.EndDate.Time}
 		item.EndDate = &d

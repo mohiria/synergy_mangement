@@ -210,10 +210,11 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 	}
 	durations := make(map[int64]int, len(taskRows))
 	// 终审人集合（裁决 11，#181）：待终审的显示文案取项目管理员姓名。
-	_, finalNames, err := s.projectFinalReviewers(ctx, projectID)
+	finalIDs, finalNames, err := s.projectFinalReviewers(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
+	finalReviewers := domain.ZipApprovers(finalIDs, finalNames)
 	// 审核中任务的当前环节从完成申请单读取（裁决 13，#182）。
 	reviewStageByTask, err := s.pendingReviewStageByTask(ctx, projectID)
 	if err != nil {
@@ -231,14 +232,10 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 			durations[t.ID] = d
 		}
 	}
-	// 来源任务状态显示文案（AC-04）：或签中任务取审核组姓名。
-	reviewerRows, err := s.q.IntermediateReviewerNamesByProject(ctx, projectID)
+	// 来源任务状态显示文案（AC-04）：或签中任务取审核组。
+	reviewersByTask, err := s.intermediateReviewersByTask(ctx, projectID)
 	if err != nil {
 		return nil, err
-	}
-	reviewerNamesByTask := make(map[int64][]string)
-	for _, rv := range reviewerRows {
-		reviewerNamesByTask[rv.TaskID] = append(reviewerNamesByTask[rv.TaskID], rv.DisplayName)
 	}
 	// 裁决 J1（#142）＋裁决 #163：「当前交付物」列按来源任务列出全部已生效当前内容
 	// （一项显示「类型 · 大小」，多项显示「N 项」）。
@@ -293,7 +290,7 @@ func (s *Server) edgeViews(ctx context.Context, projectID, userID int64, actor d
 		if e.SourceTaskStatus.Valid {
 			st := TaskStatus(e.SourceTaskStatus.String)
 			item.SourceTaskStatus = &st
-			label := domain.StatusLabel(e.SourceTaskStatus.String, reviewStageByTask[sourceID], finalNames, reviewerNamesByTask[sourceID])
+			label := domain.StatusLabel(e.SourceTaskStatus.String, reviewStageByTask[sourceID], userID, finalReviewers, reviewersByTask[sourceID])
 			item.SourceTaskStatusLabel = &label
 		}
 		if e.SourceOwnerName.Valid {

@@ -375,12 +375,12 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 	}
 	factsForReviews := domain.TaskFacts{Status: task.Status, CreatorID: task.CreatedBy, OwnerID: task.OwnerID,
 		ResultUpdate: task.ResultUpdate}
-	_, finalNames, err := s.projectFinalReviewers(r.Context(), projectId)
+	finalIDs, finalNames, err := s.projectFinalReviewers(r.Context(), projectId)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
-	completions, err := s.completionReviewList(r.Context(), taskId, factsForReviews, actor, uid, finalNames)
+	completions, err := s.completionReviewList(r.Context(), taskId, factsForReviews, actor, uid, domain.ZipApprovers(finalIDs, finalNames))
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -599,10 +599,11 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 		return nil, err
 	}
 	// 终审人集合（裁决 11，#181）：待终审的显示文案取项目管理员姓名。
-	_, finalNames, err := s.projectFinalReviewers(ctx, projectID)
+	finalIDs, finalNames, err := s.projectFinalReviewers(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
+	finalReviewers := domain.ZipApprovers(finalIDs, finalNames)
 	// 审核中任务的当前环节从完成申请单读取（裁决 13，#182）。
 	reviewStageByTask, err := s.pendingReviewStageByTask(ctx, projectID)
 	if err != nil {
@@ -674,14 +675,10 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 			pendingReceiptByTask[rc.TaskID] = true
 		}
 	}
-	// 或签中任务的当前审核组姓名（AC-04 显示文案）。
-	reviewerRows, err := s.q.IntermediateReviewerNamesByProject(ctx, projectID)
+	// 或签中任务的当前审核组（AC-04 显示文案）。
+	reviewersByTask, err := s.intermediateReviewersByTask(ctx, projectID)
 	if err != nil {
 		return nil, err
-	}
-	reviewerNamesByTask := make(map[int64][]string)
-	for _, rv := range reviewerRows {
-		reviewerNamesByTask[rv.TaskID] = append(reviewerNamesByTask[rv.TaskID], rv.DisplayName)
 	}
 	resp := make([]Task, 0, len(rows))
 	for _, t := range rows {
@@ -718,12 +715,13 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 		displayFacts := facts
 		displayFacts.Status = domain.DeriveDisplayStatus(t.Status, unreadyNoteByTask[t.ID] != "")
 		item.Status = TaskStatus(displayFacts.Status)
-		// AC-04：审批等待状态面向用户显示「待{审批人姓名}审批」（裁决 11／13：按申请单环节取审批人）。
-		item.StatusLabel = domain.StatusLabel(displayFacts.Status, facts.ReviewStage, finalNames, reviewerNamesByTask[t.ID])
+		// AC-04：审批等待状态面向用户显示「待{审批人姓名}审批」（裁决 11／13：按申请单环节取审批人；
+		// #186：查看者本人是审批人时显示「待我审批」）。
+		item.StatusLabel = domain.StatusLabel(displayFacts.Status, facts.ReviewStage, userID, finalReviewers, reviewersByTask[t.ID])
 		// 当前环节与待行动人（AC-31 基础信息；名字按身份就近解析）。
 		// 环节文案同样按 AC-04 收口：审批等待环节显示当前审批人姓名。
 		stage, actorID := domain.CurrentStage(displayFacts)
-		item.CurrentStage = domain.StageLabel(stage, finalNames, reviewerNamesByTask[t.ID])
+		item.CurrentStage = domain.StageLabel(stage, userID, finalReviewers, reviewersByTask[t.ID])
 		if actorID != nil {
 			item.PendingActorId = actorID
 			switch {

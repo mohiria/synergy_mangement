@@ -84,8 +84,8 @@ WHERE o.project_id = $1
 ORDER BY cr.task_id, cr.id DESC;
 
 -- name: IntermediateReviewerNamesByProject :many
--- 或签中任务的当前审核组姓名（AC-04 statusLabel 派生用）。
-SELECT cr.task_id, u.display_name
+-- 或签中任务的当前审核组（AC-04 statusLabel 派生用；#186 带 user_id 供“待我审批”比对）。
+SELECT cr.task_id, crr.user_id, u.display_name
 FROM completion_reviews cr
 JOIN completion_review_reviewers crr ON crr.review_id = cr.id
 JOIN users u ON u.id = crr.user_id

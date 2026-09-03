@@ -72,11 +72,13 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 		writeInternalError(w, r, err)
 		return
 	}
-	_, finalNames, err := s.projectFinalReviewers(ctx, projectId)
+	finalIDs, finalNames, err := s.projectFinalReviewers(ctx, projectId)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
+	finalReviewers := domain.ZipApprovers(finalIDs, finalNames)
+	uid := currentUser(r).ID
 	// 审核中任务的当前环节从完成申请单读取（裁决 13，#182）。
 	reviewStageByTask, err := s.pendingReviewStageByTask(ctx, projectId)
 	if err != nil {
@@ -111,14 +113,10 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 		})
 	}
 	edgesByTask := edgeRefsBySourceTask(refs)
-	reviewerRows, err := s.q.IntermediateReviewerNamesByProject(ctx, projectId)
+	reviewersByTask, err := s.intermediateReviewersByTask(ctx, projectId)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
-	}
-	reviewerNamesByTask := map[int64][]string{}
-	for _, rv := range reviewerRows {
-		reviewerNamesByTask[rv.TaskID] = append(reviewerNamesByTask[rv.TaskID], rv.DisplayName)
 	}
 	filesByDeliverable := map[int64][]store.ListDeliverableFilesByProjectRow{}
 	for _, f := range files {
@@ -170,7 +168,7 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 					// #171：归档接收方列只显示成员信息——指定成员列名单、全员「项目全体成员」、未配置空。
 					ReceiverLabel: domain.ReceiverDisplay(facts.ReceiverScope, receiverNamesByTask[d.TaskID]),
 					Status:         TaskStatus(d.TaskStatus),
-					StatusLabel:    domain.StatusLabel(d.TaskStatus, reviewStageByTask[d.TaskID], finalNames, reviewerNamesByTask[d.TaskID]),
+					StatusLabel:    domain.StatusLabel(d.TaskStatus, reviewStageByTask[d.TaskID], uid, finalReviewers, reviewersByTask[d.TaskID]),
 					FileState:      &fs,
 					FileStateLabel: &fsLabel,
 					ReviewCount:    countByTask[d.TaskID],
@@ -231,7 +229,7 @@ func (s *Server) GetArtifacts(w http.ResponseWriter, r *http.Request, projectId 
 				OwnerName:      facts.OwnerName,
 				ReceiverLabel:  domain.ReceiverDisplay(facts.ReceiverScope, receiverNamesByTask[f.TaskID]),
 				Status:         TaskStatus(facts.Status),
-				StatusLabel:    domain.StatusLabel(facts.Status, reviewStageByTask[f.TaskID], finalNames, reviewerNamesByTask[f.TaskID]),
+				StatusLabel:    domain.StatusLabel(facts.Status, reviewStageByTask[f.TaskID], uid, finalReviewers, reviewersByTask[f.TaskID]),
 				FileState:      &fs,
 				FileStateLabel: &fsLabel,
 				ReviewCount:    countByTask[f.TaskID],
