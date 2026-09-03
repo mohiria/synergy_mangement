@@ -531,7 +531,8 @@ body {
 .edge-g.reminder .edge-label { display: block; }
 .edge-g.interlock .edge-label { fill: var(--red); }
 .edge-g.unready .edge-label { fill: var(--amber); }
-/* 裁决 15（#185）：必要未就绪构成高风险卡点时标签随卡点等级转红；参考未就绪为中性灰「提醒」。 */
+/* 裁决 15（#185，后经口头裁决修订）：unready 只在必要未就绪构成卡点时挂上（预警橙，
+   blocker-high 高风险红）；未构成卡点的必要未就绪与参考未就绪同为中性灰「提醒」（reminder）。 */
 .edge-g.blocker-high .edge-label { fill: var(--red); }
 .edge-g.reminder .edge-label { fill: #708095; }
 .edge-g.highlighted .edge-label { fill: #253fba; }

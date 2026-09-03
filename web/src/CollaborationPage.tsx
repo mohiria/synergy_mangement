@@ -822,17 +822,25 @@ export default function CollaborationPage({
   const upstreamBlockerLevel = (edgeId: number): string | null =>
     openBlockers.find((b) => b.key === `upstream_unready:edge:${edgeId}`)?.level ?? null;
 
+  // 未就绪徽标着色（口头裁决，与边着色同口径）：构成卡点随卡点等级（预警橙／高风险红）；
+  // 提醒（未构成卡点的必要未就绪、参考未就绪）中性灰（返回 null）。
+  const unreadyTone = (e: DeliverableEdge): "warning" | "high_risk" | null => {
+    if (e.ready || e.necessity !== "required") return null;
+    const level = upstreamBlockerLevel(e.id);
+    return level === "high_risk" ? "high_risk" : level ? "warning" : null;
+  };
+
   // #147 边默认灰色系（PRD §11）；#173 裁决：样式只分三类——必要灰实线、参考灰虚线、
-  // 互锁红虚线常驻；裁决 15（#185）：橙色异常提示只对必要边——必要未就绪构成卡点时
-  // 随卡点等级着色（预警橙／高风险红），未构成卡点为橙；参考未就绪改中性灰，只作「提醒」；
-  // 关键路径只加粗不上色（§6.3）。
+  // 互锁红虚线常驻；裁决 15（#185，后经口头裁决修订）：只有构成卡点的必要未就绪边
+  // 随卡点等级着色（预警橙／高风险红）；未构成卡点的未就绪（必要或参考）是「提醒」，
+  // 保持中性灰——颜色只表达严重度，必要性交给文字前缀与线型；关键路径只加粗不上色（§6.3）。
   const edgeStroke = (e: DeliverableEdge) => {
     if (e.interlockRisk) return { stroke: "#bd3e49", width: 2.5, dash: "6 4" };
     const dash = e.necessity === "reference" ? "6 4" : undefined;
     if (!e.ready && e.necessity === "required") {
       const level = upstreamBlockerLevel(e.id);
       if (level === "high_risk") return { stroke: "#bd3e49", width: 2, dash };
-      return { stroke: "#a86917", width: 2, dash };
+      if (level) return { stroke: "#a86917", width: 2, dash };
     }
     return {
       stroke: "#929dad",
@@ -1043,10 +1051,11 @@ export default function CollaborationPage({
   };
 
   // #147：三个层级共用一份边渲染——可见线、透明命中层、默认隐藏的文字标签。
-  // 裁决 15（#185）标签契约「必要性 · 异常名」：互锁→「必要 · 互锁」（红，常驻）；
-  // 必要未就绪构成卡点→「必要 · 上游未就绪」（随卡点等级着色，常驻）；
-  // 必要未就绪未构成卡点→「必要 · 未就绪」（橙，常驻）；参考未就绪→「参考 · 上游未就绪」
-  // （中性灰，常驻）；就绪的边仅悬停显示必要性；来源任务全称保留在悬停 title。
+  // 裁决 15（#185，后经口头裁决修订）标签契约「必要性 · 异常名」，异常名统一「上游未就绪」：
+  // 互锁→「必要 · 互锁」（红，常驻）；必要未就绪构成卡点→「必要 · 上游未就绪」
+  // （随卡点等级着色，常驻）；未构成卡点的必要未就绪与参考未就绪→同为「提醒」，
+  // 中性灰常驻（「必要／参考 · 上游未就绪」）；就绪的边仅悬停显示必要性；
+  // 来源任务全称保留在悬停 title。
   const renderEdge = (e: DeliverableEdge, from: NodePos, to: NodePos, dim = false) => {
     const st = edgeStroke(e);
     const d = edgePath(from, to);
@@ -1055,14 +1064,15 @@ export default function CollaborationPage({
     const referenceUnready = !e.interlockRisk && !e.ready && e.necessity === "reference";
     const blockerLevel = requiredUnready ? upstreamBlockerLevel(e.id) : null;
     const cls = `edge-g${highlighted ? " highlighted" : ""}${e.interlockRisk ? " interlock anomaly" : ""}${
-      requiredUnready ? " unready anomaly" : ""
-    }${blockerLevel === "high_risk" ? " blocker-high" : ""}${referenceUnready ? " reminder" : ""}`;
+      blockerLevel ? " unready anomaly" : ""
+    }${blockerLevel === "high_risk" ? " blocker-high" : ""}${
+      (requiredUnready && !blockerLevel) || referenceUnready ? " reminder" : ""
+    }`;
     const mx = (from.x + from.w / 2 + to.x + to.w / 2) / 2;
     const my = (from.y + from.h / 2 + to.y + to.h / 2) / 2;
     let anomaly: string | null = null;
     if (e.interlockRisk) anomaly = "互锁";
-    else if (requiredUnready) anomaly = blockerLevel ? "上游未就绪" : "未就绪";
-    else if (referenceUnready) anomaly = "上游未就绪";
+    else if (requiredUnready || referenceUnready) anomaly = "上游未就绪";
     const shortLabel = anomaly ? `${e.necessityLabel} · ${anomaly}` : e.necessityLabel;
     const label = `${e.necessityLabel} · ${e.sourceTaskName ?? e.name}`;
     return (
@@ -1195,14 +1205,14 @@ export default function CollaborationPage({
         <div className="gi-title">
           <span className="gi-eyebrow">交付物边</span>
           <h2 title={selectedEdgeObj.name}>{selectedEdgeObj.name}</h2>
-          {/* 裁决 15（#185）：参考未就绪只是「提醒」，徽标改中性灰。 */}
+          {/* 口头裁决：未就绪徽标只在构成卡点时随等级着色，提醒一律中性灰。 */}
           <span
             className={`gi-badge ${
               selectedEdgeObj.ready
                 ? "ready"
-                : selectedEdgeObj.necessity === "reference"
-                  ? ""
-                  : "risk-warning"
+                : unreadyTone(selectedEdgeObj)
+                  ? `risk-${unreadyTone(selectedEdgeObj)}`
+                  : ""
             }`}
           >
             {selectedEdgeObj.ready ? "已就绪" : "未就绪"}
@@ -1435,10 +1445,10 @@ export default function CollaborationPage({
                     </b>
                     <small>{e.necessityLabel}</small>
                   </span>
-                  {/* 裁决 15（#185）：参考未就绪改中性灰。 */}
+                  {/* 口头裁决：未就绪徽标只在构成卡点时随等级着色，提醒一律中性灰。 */}
                   <span
                     className={`gi-badge ${
-                      e.ready ? "ready" : e.necessity === "reference" ? "" : "risk-warning"
+                      e.ready ? "ready" : unreadyTone(e) ? `risk-${unreadyTone(e)}` : ""
                     }`}
                   >
                     {e.ready ? "已就绪" : "未就绪"}
@@ -1908,10 +1918,10 @@ export default function CollaborationPage({
                         <td title={e.targetTaskName}>{e.targetTaskName}</td>
                         <td title={e.sourceOwnerName ?? "—"}>{e.sourceOwnerName ?? "—"}</td>
                         <td>
-                          {/* 裁决 15（#185）：参考未就绪改中性灰。 */}
+                          {/* 口头裁决：未就绪只在构成卡点时随等级着色，提醒一律中性灰。 */}
                           <span
                             className={`status-pill ${
-                              e.ready ? "completed" : e.necessity === "reference" ? "" : "warning"
+                              e.ready ? "completed" : unreadyTone(e) ? `risk-${unreadyTone(e)}` : ""
                             }`}
                           >
                             {e.ready ? "已就绪" : "未就绪"}
