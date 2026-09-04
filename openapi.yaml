@@ -2225,9 +2225,9 @@ components:
         newPassword:
           type: string
           minLength: 8
-          maxLength: 128
+          maxLength: 32
           format: password
-          description: 新口令，至少 8 位且不能与当前口令相同
+          description: 新密码，8～32 位（按 Unicode 字符计）且不能与当前密码相同
     LoginRequest:
       type: object
       required: [username, password]

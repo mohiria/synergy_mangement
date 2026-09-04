@@ -280,13 +280,13 @@ function ChangePasswordModal({ open, onClose }: { open: boolean; onClose: () => 
       okText="确认修改"
       cancelText="取消"
       confirmLoading={saving}
-      okButtonProps={{ disabled: !current || next.length < 8 || !confirm }}
+      okButtonProps={{ disabled: !current || [...next].length < 8 || [...next].length > 32 || !confirm }}
       onCancel={onClose}
       onOk={submit}
     >
       {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
       <p className="muted" style={{ marginTop: 0 }}>
-        新口令至少 8 位；修改成功后除当前浏览器外，本人其余登录会话会立即失效。
+        新密码 8～32 位；修改成功后除当前浏览器外，本人其余登录会话会立即失效。
       </p>
       <Input.Password
         placeholder="当前口令"
@@ -295,16 +295,16 @@ function ChangePasswordModal({ open, onClose }: { open: boolean; onClose: () => 
         style={{ marginBottom: 8 }}
       />
       <Input.Password
-        placeholder="新口令（至少 8 位）"
+        placeholder="新密码（8～32 位）"
         value={next}
-        maxLength={128}
+        maxLength={32}
         onChange={(e) => setNext(e.target.value)}
         style={{ marginBottom: 8 }}
       />
       <Input.Password
-        placeholder="再次输入新口令"
+        placeholder="再次输入新密码"
         value={confirm}
-        maxLength={128}
+        maxLength={32}
         onChange={(e) => setConfirm(e.target.value)}
       />
     </Modal>

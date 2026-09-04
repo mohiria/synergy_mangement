@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"strings"
+	"unicode/utf8"
 	"sync"
 	"time"
 
@@ -114,17 +115,38 @@ func (t *LoginThrottle) Size() int {
 // MinPasswordLength 口令最小长度（S3：内网自用，只挡住明显过短的口令）。
 const MinPasswordLength = 8
 
+// MaxPasswordLength 密码最大长度（#193，按 Unicode 字符计）。
+const MaxPasswordLength = 32
+
 var (
+	ErrPasswordTooLong   = errors.New("新密码最多 32 位")
 	ErrPasswordTooShort  = errors.New("新口令至少 8 位")
 	ErrPasswordUnchanged = errors.New("新口令不能与当前口令相同")
 	ErrPasswordWrong     = errors.New("当前口令不正确")
 )
 
-// ValidatePasswordChange 校验一次改口令（S3）：新口令至少 8 位且不能与当前口令相同。
+// bcryptMaxBytes bcrypt 只取前 72 字节，更长的部分会被静默截断；
+// 32 个汉字按字符计不超上限但有 96 字节，必须一并挡下（模块 PRD §5.2）。
+const bcryptMaxBytes = 72
+
+// ValidatePasswordLength 密码长度规则（#193）：8～32 位按 Unicode 字符计，
+// 且 UTF-8 不超过 72 字节。所有密码入口（改密、建号、重置、找回）共用。
+func ValidatePasswordLength(password string) error {
+	trimmed := strings.TrimSpace(password)
+	if utf8.RuneCountInString(trimmed) < MinPasswordLength {
+		return ErrPasswordTooShort
+	}
+	if utf8.RuneCountInString(password) > MaxPasswordLength || len(password) > bcryptMaxBytes {
+		return ErrPasswordTooLong
+	}
+	return nil
+}
+
+// ValidatePasswordChange 校验一次改口令（S3）：新口令满足长度规则且不能与当前口令相同。
 // 当前口令是否正确由调用方比对哈希后判定，规则本身不碰哈希。
 func ValidatePasswordChange(current, next string) error {
-	if len(strings.TrimSpace(next)) < MinPasswordLength {
-		return ErrPasswordTooShort
+	if err := ValidatePasswordLength(next); err != nil {
+		return err
 	}
 	if next == current {
 		return ErrPasswordUnchanged

@@ -1107,7 +1107,7 @@ export interface components {
             currentPassword: string;
             /**
              * Format: password
-             * @description 新口令，至少 8 位且不能与当前口令相同
+             * @description 新密码，8～32 位（按 Unicode 字符计）且不能与当前密码相同
              */
             newPassword: string;
         };

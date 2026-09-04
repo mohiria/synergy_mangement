@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"strings"
 	"errors"
 	"testing"
 	"time"
@@ -208,6 +209,15 @@ func TestValidatePasswordChange(t *testing.T) {
 		{"新口令过短", "old-pass-1", "short7x", ErrPasswordTooShort},
 		{"新口令与当前相同", "old-pass-1", "old-pass-1", ErrPasswordUnchanged},
 		{"新口令为空白", "old-pass-1", "        ", ErrPasswordTooShort},
+		// #193：上限 32 位（按 Unicode 字符计）；恰好 8／32 位通过，7／33 位拒绝。
+		{"恰好 8 位通过", "old-pass-1", "abcdefgh", nil},
+		{"恰好 32 位通过", "old-pass-1", strings.Repeat("a", 32), nil},
+		{"33 位过长", "old-pass-1", strings.Repeat("a", 33), ErrPasswordTooLong},
+		{"128 位过长（旧契约上限）", "old-pass-1", strings.Repeat("a", 128), ErrPasswordTooLong},
+		{"32 个汉字按字符计不超上限但超 72 字节", "old-pass-1", strings.Repeat("密", 32), ErrPasswordTooLong},
+		{"24 个汉字（72 字节）通过", "old-pass-1", strings.Repeat("密", 24), nil},
+		{"8 个汉字按字符计够 8 位", "old-pass-1", strings.Repeat("密", 8), nil},
+		{"7 个汉字按字符计过短（字节数 21 不算数）", "old-pass-1", strings.Repeat("密", 7), ErrPasswordTooShort},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
