@@ -2142,6 +2142,26 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
 
+  /system/users:
+    get:
+      operationId: listSystemUsers
+      tags: [system]
+      summary: 系统设置 → 用户管理的只读用户列表（仅系统管理员，#201）
+      description: 邮箱、状态、最近登录三列由 #202／#204／#208 填充，本版可为空。
+      responses:
+        "200":
+          description: 全部用户，按 id 升序
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SystemUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
   /users:
     get:
       operationId: listUsers
@@ -2265,6 +2285,33 @@ components:
         isSystemAdmin:
           type: boolean
           description: 系统管理员（#200）：对任意项目隐式视同项目管理员、可进系统设置；不进审批链、不出现在成员列表与人员选择器
+    SystemUser:
+      type: object
+      description: 系统设置 → 用户管理的一行（#201）
+      required: [id, username, displayName, isSystemAdmin, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        username:
+          type: string
+        displayName:
+          type: string
+        email:
+          type: string
+          description: 邮箱（#202 起必填；此前为空）
+        isSystemAdmin:
+          type: boolean
+        disabled:
+          type: boolean
+          description: 是否已停用（#204 起）
+        createdAt:
+          type: string
+          format: date-time
+        lastLoginAt:
+          type: string
+          format: date-time
+          description: 最近登录时间（#208 起）
     UserSummary:
       type: object
       required: [id, username, displayName]

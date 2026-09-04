@@ -15,7 +15,7 @@ type Project = components["schemas"]["Project"];
 
 
 // 项目内页面共用壳层：浅色侧边栏 + 顶栏（原型 index.html 结构）。
-// 侧边栏自上而下：brand → project-switch（项目切换）→ main-nav → sidebar-foot（项目设置）。
+// 侧边栏自上而下：brand → project-switch（项目切换）→ main-nav（含项目设置）→ sidebar-foot（系统设置，仅系统管理员）。
 const NAV_ITEMS: { key: string; label: string; path: string; icon: IconName }[] = [
   { key: "overview", label: "项目总览", path: "", icon: "overview" },
   // #125：「OKR 管理」并入项目总览——/okr 是总览页头进入的全页管理模式，不再单列导航。
@@ -24,6 +24,8 @@ const NAV_ITEMS: { key: string; label: string; path: string; icon: IconName }[] 
   { key: "mywork", label: "我的工作", path: "/my-work", icon: "inbox" },
   { key: "artifacts", label: "成果归档", path: "/artifacts", icon: "archive" },
   { key: "reports", label: "项目报告", path: "/reports", icon: "report" },
+  // #201：「项目设置」从侧栏底部移入主导航末项；侧栏底部改放「系统设置」（仅系统管理员）。
+  { key: "settings", label: "项目设置", path: "/settings", icon: "settings" },
 ];
 
 // 项目切换浮层（原型 .project-switch 的 project-menu 动作；原型只是单项目占位，此处落成真实切换）。
@@ -124,7 +126,6 @@ export default function ProjectShell({
   };
 
 
-  const settingsPath = `/projects/${projectId}/settings`;
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -167,13 +168,15 @@ export default function ProjectShell({
             );
           })}
         </nav>
-        {/* #131：侧栏只留「项目设置」；回项目列表走切换浮层底部的「全部项目」或面包屑。 */}
-        <div className="sidebar-foot">
-          <Link className={`nav-row ${pathname === settingsPath ? "active" : ""}`} to={settingsPath}>
-            <Icon name="settings" />
-            <span>项目设置</span>
-          </Link>
-        </div>
+        {/* #131：回项目列表走切换浮层底部的「全部项目」或面包屑。#201：底部只放「系统设置」，非系统管理员不渲染。 */}
+        {user.isSystemAdmin && (
+          <div className="sidebar-foot">
+            <Link className="nav-row" to="/system/users">
+              <Icon name="lock" />
+              <span>系统设置</span>
+            </Link>
+          </div>
+        )}
       </aside>
       <section className="workspace">
         <header className="topbar">

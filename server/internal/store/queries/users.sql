@@ -7,6 +7,10 @@ SELECT * FROM users WHERE id = $1;
 -- name: ListUsers :many
 SELECT id, username, display_name FROM users ORDER BY id;
 
+-- name: ListSystemUsers :many
+-- #201：系统设置 → 用户管理列表（仅系统管理员）。
+SELECT id, username, display_name, is_system_admin, created_at FROM users ORDER BY id;
+
 -- name: CreateUser :one
 INSERT INTO users (username, display_name, password_hash, is_system_admin)
 VALUES ($1, $2, $3, $4)

@@ -1071,6 +1071,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 系统设置 → 用户管理的只读用户列表（仅系统管理员，#201）
+         * @description 邮箱、状态、最近登录三列由
+         */
+        get: operations["listSystemUsers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/users": {
         parameters: {
             query?: never;
@@ -1123,6 +1143,25 @@ export interface components {
             displayName: string;
             /** @description 系统管理员（#200）：对任意项目隐式视同项目管理员、可进系统设置；不进审批链、不出现在成员列表与人员选择器 */
             isSystemAdmin: boolean;
+        };
+        /** @description 系统设置 → 用户管理的一行（#201） */
+        SystemUser: {
+            /** Format: int64 */
+            id: number;
+            username: string;
+            displayName: string;
+            /** @description 邮箱（#202 起必填；此前为空） */
+            email?: string;
+            isSystemAdmin: boolean;
+            /** @description 是否已停用（#204 起） */
+            disabled?: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /**
+             * Format: date-time
+             * @description 最近登录时间（#208 起）
+             */
+            lastLoginAt?: string;
         };
         UserSummary: {
             /** Format: int64 */
@@ -4241,6 +4280,28 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+        };
+    };
+    listSystemUsers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 全部用户，按 id 升序 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemUser"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     listUsers: {

@@ -6665,3 +6665,40 @@ func TestSystemAdminImplicitProjectAdmin(t *testing.T) {
 		t.Fatalf("系统管理员的项目写操作应进项目审计且操作者为本人: %+v", audits)
 	}
 }
+
+// #201：系统设置用户列表只对系统管理员开放——200 含全部用户与标记，普通用户 403。
+func TestSystemUsersListRequiresSystemAdmin(t *testing.T) {
+	q, pool := setupDB(t)
+	seedUser(t, q, "alice", "张三", "alice-pass")
+	rootUser := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(context.Background(), store.SetUserSystemAdminParams{ID: rootUser.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	login := func(username, password string) *http.Client {
+		t.Helper()
+		c := newClient(t)
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+		return c
+	}
+	alice := login("alice", "alice-pass")
+	root := login("root", "root-pass1")
+
+	resp := doJSON(t, alice, http.MethodGet, base+"/system/users", nil)
+	wantStatus(t, resp, http.StatusForbidden)
+	if e := decodeBody[api.Error](t, resp); e.Code != "system_admin_required" {
+		t.Fatalf("code = %q, want system_admin_required", e.Code)
+	}
+
+	users := decodeBody[[]api.SystemUser](t, doJSONAgain(t, root, http.MethodGet, base+"/system/users"))
+	if len(users) != 2 {
+		t.Fatalf("应列出全部 2 个用户: %+v", users)
+	}
+	if users[0].Username != "alice" || users[0].IsSystemAdmin || users[1].Username != "root" || !users[1].IsSystemAdmin {
+		t.Fatalf("列表按 id 升序且带系统管理员标记: %+v", users)
+	}
+}

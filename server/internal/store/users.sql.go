@@ -7,6 +7,8 @@ package store
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createUser = `-- name: CreateUser :one
@@ -75,6 +77,45 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 		&i.IsSystemAdmin,
 	)
 	return i, err
+}
+
+const listSystemUsers = `-- name: ListSystemUsers :many
+SELECT id, username, display_name, is_system_admin, created_at FROM users ORDER BY id
+`
+
+type ListSystemUsersRow struct {
+	ID            int64
+	Username      string
+	DisplayName   string
+	IsSystemAdmin bool
+	CreatedAt     pgtype.Timestamptz
+}
+
+// #201：系统设置 → 用户管理列表（仅系统管理员）。
+func (q *Queries) ListSystemUsers(ctx context.Context) ([]ListSystemUsersRow, error) {
+	rows, err := q.db.Query(ctx, listSystemUsers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSystemUsersRow
+	for rows.Next() {
+		var i ListSystemUsersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Username,
+			&i.DisplayName,
+			&i.IsSystemAdmin,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listUsers = `-- name: ListUsers :many

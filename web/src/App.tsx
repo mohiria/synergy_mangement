@@ -13,6 +13,7 @@ import ProjectSettingsPage from "./ProjectSettingsPage";
 import CollaborationPage from "./CollaborationPage";
 import ArtifactsPage from "./ArtifactsPage";
 import ReportsPage from "./ReportsPage";
+import SystemSettingsPage from "./SystemSettingsPage";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 
@@ -46,6 +47,9 @@ export default function App() {
       <Route path="/projects/:projectId/reports" element={<ReportsPage user={user} onLogout={logout} />} />
       <Route path="/projects/:projectId/my-work" element={<MyWorkPage user={user} onLogout={logout} />} />
       <Route path="/projects/:projectId/settings" element={<ProjectSettingsPage user={user} onLogout={logout} />} />
+      {/* #201：系统设置不挂在项目下；/system 无分节时跳到用户管理。 */}
+      <Route path="/system" element={<SystemSettingsPage user={user} onLogout={logout} />} />
+      <Route path="/system/:section" element={<SystemSettingsPage user={user} onLogout={logout} />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

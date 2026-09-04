@@ -6,9 +6,7 @@ import { client } from "./api/client";
 import type { components } from "./api/schema";
 import DateRangeField from "./DateRangeField";
 import Icon from "./icons";
-import NotificationBell from "./NotificationBell";
-import { Brand } from "./Brand";
-import { IdentityMenu } from "./IdentityMenu";
+import PlainShell from "./PlainShell";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
@@ -128,27 +126,7 @@ export default function ProjectsPage({
   const publicCount = projects.filter((p) => p.implicitViewer).length;
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <Brand />
-        <nav>
-          <button className="nav-row active" type="button">
-            <Icon name="package" />
-            <span>项目列表</span>
-          </button>
-        </nav>
-      </aside>
-      <section className="workspace">
-        <header className="topbar">
-          <div className="breadcrumbs">
-            <b>项目列表</b>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <NotificationBell />
-          <IdentityMenu user={user} onLogout={logout} />
-          </div>
-        </header>
-        <main className="page">
+    <PlainShell user={user} onLogout={logout} active="projects" crumb={<b>项目列表</b>}>
           <div className="page-head">
             <div>
               <h1>项目列表</h1>
@@ -291,8 +269,6 @@ export default function ProjectsPage({
               ]}
             />
           </div>
-        </main>
-      </section>
       <Modal
         title="新建项目"
         open={modalOpen}
@@ -327,6 +303,6 @@ export default function ProjectsPage({
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </PlainShell>
   );
 }
