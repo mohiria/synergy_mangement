@@ -19,7 +19,7 @@ RETURNING *;
 
 -- name: ListMailOutbox :many
 -- 最近发送记录，最新在前。
-SELECT id, to_address, subject, event, status, attempts, last_error, created_at, sent_at
+SELECT id, to_address, subject, body, event, status, attempts, last_error, created_at, sent_at
 FROM mail_outbox ORDER BY id DESC LIMIT $1;
 
 -- name: ClaimDueMail :many

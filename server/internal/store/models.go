@@ -171,6 +171,15 @@ type Objective struct {
 	CreatedBy   pgtype.Int8
 }
 
+type PasswordResetToken struct {
+	ID        int64
+	UserID    int64
+	TokenHash string
+	ExpiresAt pgtype.Timestamptz
+	UsedAt    pgtype.Timestamptz
+	CreatedAt pgtype.Timestamptz
+}
+
 type PendingObjectDeletion struct {
 	ObjectKey string
 	Attempts  int32

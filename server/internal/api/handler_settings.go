@@ -20,10 +20,15 @@ func (s *Server) GetBranding(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, err)
 		return
 	}
+	ms, err := s.q.GetMailSettings(r.Context())
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
 	b := Branding{
 		SystemName: st.SystemName, Subtitle: st.Subtitle, LoginHint: st.LoginHint,
-		// #214 起按邮件通道是否已配置判定。
-		CanRecoverPassword: false,
+		// #214：邮件通道已配置才显示「忘记密码」。
+		CanRecoverPassword: domain.CanRecoverPassword(domain.MailChannelConfigured(ms.Host, ms.FromAddress)),
 	}
 	if st.LogoKey != "" {
 		v := int(st.LogoVersion)

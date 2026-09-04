@@ -339,6 +339,48 @@ paths:
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
+  /auth/password-reset/request:
+    post:
+      operationId: requestPasswordReset
+      tags: [auth]
+      summary: 找回密码——请求重置邮件（免登录，#214）：输入用户名或邮箱，无论账号是否存在、是否停用都返回同一文案；挂登录限速
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordResetRequest"
+      responses:
+        "202":
+          description: 已受理（统一文案）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PasswordResetRequested"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /auth/password-reset/confirm:
+    post:
+      operationId: confirmPasswordReset
+      tags: [auth]
+      summary: 找回密码——用重置链接里的 token 设置新密码（免登录，#214）：成功后作废 token、清「须改密码」、踢掉全部会话、记系统级审计
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordResetConfirm"
+      responses:
+        "204":
+          description: 已重置
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
   /auth/logout:
     post:
       operationId: logout
@@ -3132,12 +3174,43 @@ components:
           description: 已尝试次数
         lastError:
           type: string
+        body:
+          type: string
+          description: 正文（仅系统管理员可见的发送记录里返回，便于核对与冒烟）
         createdAt:
           type: string
           format: date-time
         sentAt:
           type: string
           format: date-time
+    PasswordResetRequest:
+      type: object
+      required: [identifier]
+      properties:
+        identifier:
+          type: string
+          minLength: 1
+          maxLength: 254
+          description: 用户名或邮箱
+    PasswordResetRequested:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          description: 统一文案「若账号存在，重置邮件已发送」
+    PasswordResetConfirm:
+      type: object
+      required: [token, password]
+      properties:
+        token:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          minLength: 8
+          maxLength: 32
+          format: password
     CreateSystemUserRequest:
       type: object
       required: [username, displayName, email, password]

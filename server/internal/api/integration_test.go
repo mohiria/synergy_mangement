@@ -5,6 +5,7 @@ package api_test
 // 无 Postgres 环境用 go test -short ./... 跳过。
 
 import (
+	"regexp"
 	"bytes"
 	"context"
 	"database/sql"
@@ -7695,5 +7696,152 @@ func TestNotificationMailSync(t *testing.T) {
 	if item := decodeBody[[]api.MailOutboxItem](t, doJSONAgain(t, root, http.MethodGet, base+"/system/mail-outbox")); len(item) != 2 || item[0].ToAddress != "bob@example.com" || item[0].EventLabel != "讨论区被 @" || !strings.Contains(item[0].Subject, "讨论区被 @") {
 		t.Fatalf("outbox 内容异常: %+v", item)
 	}
+}
+
+// #214：SMTP 未配置时品牌 canRecoverPassword 为假且请求接口 422；配置后三种请求返回同一文案、
+// 只有正常用户入 outbox；token 过期／已用／篡改被拒；成功重置后旧会话 401、新密码可登录且不被
+// 强制改密、记一条系统级审计；连续请求触发 429。
+func TestPasswordRecovery(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	rootUser := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(context.Background(), store.SetUserSystemAdminParams{ID: rootUser.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+	if _, err := q.SetUserDisabledAt(context.Background(), store.SetUserDisabledAtParams{ID: bobUser.ID, DisabledAt: pgtype.Timestamptz{Time: time.Now(), Valid: true}}); err != nil {
+		t.Fatalf("disable bob: %v", err)
+	}
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	mailRecorder.Err = nil
+	mailRecorder.Sent = nil
+	anon := func() *http.Client { return newClient(t) }
+	branding := func() api.Branding {
+		r, _ := http.Get(base + "/branding")
+		return decodeBody[api.Branding](t, r)
+	}
+	if branding().CanRecoverPassword {
+		t.Fatal("SMTP 未配置时不应可找回密码")
+	}
+	resp := doJSON(t, anon(), http.MethodPost, base+"/auth/password-reset/request", api.PasswordResetRequest{Identifier: "alice"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+
+	// 配置通道与访问地址。
+	root := newClient(t)
+	resp = doJSON(t, root, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: "root", Password: "root-pass1"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, root, http.MethodPut, base+"/system/mail-settings", api.MailSettingsInput{Host: "smtp.example.com", Port: 25, Encryption: api.MailSettingsInputEncryptionNone, FromAddress: "bot@example.com"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, root, http.MethodPut, base+"/system/settings", api.SystemSettingsInput{SystemName: "协同", Subtitle: "", LoginHint: "", BaseUrl: "http://203.0.113.10"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	if !branding().CanRecoverPassword {
+		t.Fatal("配置后应可找回密码")
+	}
+
+	// alice 先登录一处，稍后验证重置后失效。
+	aliceOld := newClient(t)
+	resp = doJSON(t, aliceOld, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: "alice", Password: "alice-pass"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	// 三种请求同一文案；只有 alice 入 outbox（按邮箱大小写不敏感）。
+	for _, id := range []string{"nobody", "bob", "ALICE@example.com"} {
+		resp := doJSON(t, anon(), http.MethodPost, base+"/auth/password-reset/request", api.PasswordResetRequest{Identifier: id})
+		wantStatus(t, resp, http.StatusAccepted)
+		if m := decodeBody[api.PasswordResetRequested](t, resp); m.Message != "若账号存在，重置邮件已发送" {
+			t.Fatalf("文案 = %q", m.Message)
+		}
+	}
+	outbox := decodeBody[[]api.MailOutboxItem](t, doJSONAgain(t, root, http.MethodGet, base+"/system/mail-outbox"))
+	if len(outbox) != 1 || outbox[0].ToAddress != "alice@example.com" || outbox[0].EventLabel != "找回密码" || outbox[0].Body == nil {
+		t.Fatalf("outbox 应只有 alice 的重置邮件: %+v", outbox)
+	}
+	link := regexp.MustCompile(`http://203\.0\.113\.10/reset-password\?token=([0-9a-f]{64})`).FindStringSubmatch(*outbox[0].Body)
+	if link == nil {
+		t.Fatalf("邮件正文应含重置链接: %q", *outbox[0].Body)
+	}
+	token := link[1]
+	// 库里只有哈希。
+	rows, _ := pool.Query(context.Background(), "SELECT token_hash FROM password_reset_tokens")
+	for rows.Next() {
+		var h string
+		_ = rows.Scan(&h)
+		if h == token {
+			t.Fatal("库里不应存 token 明文")
+		}
+	}
+	rows.Close()
+	// 请求阶段不记审计。
+	if logs := decodeBody[[]api.AuditLog](t, doJSONAgain(t, root, http.MethodGet, base+"/system/audit-logs")); len(logs) != 2 {
+		t.Fatalf("请求阶段不应记审计（只有两条系统设置修改）: %+v", logs)
+	}
+
+	// 篡改 token 与过短密码被拒。
+	resp = doJSON(t, anon(), http.MethodPost, base+"/auth/password-reset/confirm", api.PasswordResetConfirm{Token: strings.Repeat("0", 64), Password: "brand-new-pass-1"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	resp = doJSON(t, anon(), http.MethodPost, base+"/auth/password-reset/confirm", api.PasswordResetConfirm{Token: token, Password: "short7x"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	// 新请求作废旧 token。
+	resp = doJSON(t, anon(), http.MethodPost, base+"/auth/password-reset/request", api.PasswordResetRequest{Identifier: "alice"})
+	wantStatus(t, resp, http.StatusAccepted)
+	resp.Body.Close()
+	resp = doJSON(t, anon(), http.MethodPost, base+"/auth/password-reset/confirm", api.PasswordResetConfirm{Token: token, Password: "brand-new-pass-1"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	outbox = decodeBody[[]api.MailOutboxItem](t, doJSONAgain(t, root, http.MethodGet, base+"/system/mail-outbox"))
+	token = regexp.MustCompile(`token=([0-9a-f]{64})`).FindStringSubmatch(*outbox[0].Body)[1]
+	// 成功重置。
+	resp = doJSON(t, anon(), http.MethodPost, base+"/auth/password-reset/confirm", api.PasswordResetConfirm{Token: token, Password: "brand-new-pass-1"})
+	wantStatus(t, resp, http.StatusNoContent)
+	resp.Body.Close()
+	// 已用 token 再用被拒。
+	resp = doJSON(t, anon(), http.MethodPost, base+"/auth/password-reset/confirm", api.PasswordResetConfirm{Token: token, Password: "another-pass-2"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	// 旧会话 401；新密码登录且不被强制改密。
+	resp = doJSON(t, aliceOld, http.MethodGet, base+"/auth/me", nil)
+	wantStatus(t, resp, http.StatusUnauthorized)
+	resp.Body.Close()
+	resp = doJSON(t, anon(), http.MethodPost, base+"/auth/login", api.LoginRequest{Username: "alice", Password: "brand-new-pass-1"})
+	wantStatus(t, resp, http.StatusOK)
+	if me := decodeBody[api.CurrentUser](t, resp); me.MustChangePassword || me.Id != aliceUser.ID {
+		t.Fatalf("重置后登录不应被强制改密: %+v", me)
+	}
+	// 系统级审计多一条「找回密码重置」，对象为 alice。
+	logs := decodeBody[[]api.AuditLog](t, doJSONAgain(t, root, http.MethodGet, base+"/system/audit-logs"))
+	if len(logs) != 3 || logs[0].Action != "找回密码重置" || logs[0].ObjectId == nil || *logs[0].ObjectId != aliceUser.ID {
+		t.Fatalf("应记一条找回密码重置审计: %+v", logs)
+	}
+	// 过期：把 token 拨到过去后被拒。
+	resp = doJSON(t, anon(), http.MethodPost, base+"/auth/password-reset/request", api.PasswordResetRequest{Identifier: "alice"})
+	wantStatus(t, resp, http.StatusAccepted)
+	resp.Body.Close()
+	if _, err := pool.Exec(context.Background(), "UPDATE password_reset_tokens SET expires_at = now() - interval '1 minute' WHERE used_at IS NULL"); err != nil {
+		t.Fatalf("expire: %v", err)
+	}
+	outbox = decodeBody[[]api.MailOutboxItem](t, doJSONAgain(t, root, http.MethodGet, base+"/system/mail-outbox"))
+	expired := regexp.MustCompile(`token=([0-9a-f]{64})`).FindStringSubmatch(*outbox[0].Body)[1]
+	resp = doJSON(t, anon(), http.MethodPost, base+"/auth/password-reset/confirm", api.PasswordResetConfirm{Token: expired, Password: "yet-another-3"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	// 连续请求触发限速 429。
+	c := anon()
+	var last *http.Response
+	for i := 0; i < domain.MaxLoginFailures+1; i++ {
+		last = doJSON(t, c, http.MethodPost, base+"/auth/password-reset/request", api.PasswordResetRequest{Identifier: "someone"})
+		if i < domain.MaxLoginFailures {
+			last.Body.Close()
+		}
+	}
+	wantStatus(t, last, http.StatusTooManyRequests)
+	last.Body.Close()
 }
 

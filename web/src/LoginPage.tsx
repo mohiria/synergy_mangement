@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { Alert, Button, Form, Input } from "antd";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
@@ -71,6 +72,12 @@ export default function LoginPage({ onLogin }: { onLogin: (u: CurrentUser) => vo
               {locked ? `${retryAfter} 秒后可再试` : "登录"}
             </Button>
           </Form>
+          {/* #214：邮件通道已配置时才有找回密码入口。 */}
+          {branding.canRecoverPassword && (
+            <p style={{ margin: "12px 0 0", textAlign: "right" }}>
+              <Link to="/forgot-password">忘记密码？</Link>
+            </p>
+          )}
         </div>
         {/* #210：登录页提示语读系统设置，为空则不显示该行。 */}
         {branding.loginHint && (

@@ -195,6 +195,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/password-reset/request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 找回密码——请求重置邮件（免登录，#214）：输入用户名或邮箱，无论账号是否存在、是否停用都返回同一文案；挂登录限速 */
+        post: operations["requestPasswordReset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/password-reset/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 找回密码——用重置链接里的 token 设置新密码（免登录，#214）：成功后作废 token、清「须改密码」、踢掉全部会话、记系统级审计 */
+        post: operations["confirmPasswordReset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/logout": {
         parameters: {
             query?: never;
@@ -1643,10 +1677,25 @@ export interface components {
             /** @description 已尝试次数 */
             attempts: number;
             lastError?: string;
+            /** @description 正文（仅系统管理员可见的发送记录里返回，便于核对与冒烟） */
+            body?: string;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
             sentAt?: string;
+        };
+        PasswordResetRequest: {
+            /** @description 用户名或邮箱 */
+            identifier: string;
+        };
+        PasswordResetRequested: {
+            /** @description 统一文案「若账号存在，重置邮件已发送」 */
+            message: string;
+        };
+        PasswordResetConfirm: {
+            token: string;
+            /** Format: password */
+            password: string;
         };
         CreateSystemUserRequest: {
             /** @description 小写字母、数字、点、下划线、连字符 */
@@ -3327,6 +3376,55 @@ export interface operations {
             };
             413: components["responses"]["PayloadTooLarge"];
             429: components["responses"]["TooManyRequests"];
+        };
+    };
+    requestPasswordReset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetRequest"];
+            };
+        };
+        responses: {
+            /** @description 已受理（统一文案） */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasswordResetRequested"];
+                };
+            };
+            422: components["responses"]["ValidationError"];
+            429: components["responses"]["TooManyRequests"];
+        };
+    };
+    confirmPasswordReset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetConfirm"];
+            };
+        };
+        responses: {
+            /** @description 已重置 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: components["responses"]["ValidationError"];
         };
     };
     logout: {

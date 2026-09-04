@@ -134,7 +134,7 @@ const (
 )
 
 // 无需会话即可访问的路径（按路由后缀匹配，其余一律要求有效会话）。
-var publicSuffixes = []string{"/healthz", "/auth/login", "/branding", "/branding/logo"}
+var publicSuffixes = []string{"/healthz", "/auth/login", "/branding", "/branding/logo", "/auth/password-reset/request", "/auth/password-reset/confirm"}
 
 func (s *Server) sessionMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

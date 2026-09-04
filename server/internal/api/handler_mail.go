@@ -144,7 +144,7 @@ func (s *Server) ListMailOutbox(w http.ResponseWriter, r *http.Request) {
 		out = append(out, MailOutboxItem{
 			Id: x.ID, ToAddress: x.ToAddress, Subject: x.Subject, Event: x.Event, EventLabel: domain.MailEventLabel(x.Event),
 			Status: MailOutboxItemStatus(x.Status), StatusLabel: domain.MailStatusLabel(x.Status), Attempts: int(x.Attempts),
-			LastError: optString(x.LastError), CreatedAt: x.CreatedAt.Time, SentAt: fromPgTime(x.SentAt),
+			LastError: optString(x.LastError), Body: optString(x.Body), CreatedAt: x.CreatedAt.Time, SentAt: fromPgTime(x.SentAt),
 		})
 	}
 	writeJSON(w, http.StatusOK, out)

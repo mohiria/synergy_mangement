@@ -149,7 +149,7 @@ func (q *Queries) GetUserMailPrefs(ctx context.Context, userID int64) (UserMailP
 }
 
 const listMailOutbox = `-- name: ListMailOutbox :many
-SELECT id, to_address, subject, event, status, attempts, last_error, created_at, sent_at
+SELECT id, to_address, subject, body, event, status, attempts, last_error, created_at, sent_at
 FROM mail_outbox ORDER BY id DESC LIMIT $1
 `
 
@@ -157,6 +157,7 @@ type ListMailOutboxRow struct {
 	ID        int64
 	ToAddress string
 	Subject   string
+	Body      string
 	Event     string
 	Status    string
 	Attempts  int32
@@ -179,6 +180,7 @@ func (q *Queries) ListMailOutbox(ctx context.Context, limit int32) ([]ListMailOu
 			&i.ID,
 			&i.ToAddress,
 			&i.Subject,
+			&i.Body,
 			&i.Event,
 			&i.Status,
 			&i.Attempts,

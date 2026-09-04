@@ -16,6 +16,7 @@ import ReportsPage from "./ReportsPage";
 import SystemSettingsPage from "./SystemSettingsPage";
 import ForcePasswordPage from "./ForcePasswordPage";
 import MePage from "./MePage";
+import { ForgotPasswordPage, ResetPasswordPage } from "./PasswordRecoveryPages";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 
@@ -35,7 +36,14 @@ export default function App() {
     return <Spin fullscreen />;
   }
   if (!user) {
-    return <LoginPage onLogin={setUser} />;
+    // #214：找回密码两页在未登录态可达；其余路径一律登录页。
+    return (
+      <Routes>
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="*" element={<LoginPage onLogin={setUser} />} />
+      </Routes>
+    );
   }
   const logout = () => setUser(null);
   // #203：「须改密码」为真时整页只有首次改密页，任何路由都回到这里；改完重读当前用户进入系统。
