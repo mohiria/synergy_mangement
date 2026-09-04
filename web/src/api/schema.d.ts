@@ -21,6 +21,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/branding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 品牌信息（免登录，#210）：登录页在拿到会话前就要显示；只含品牌字段，不暴露账号信息 */
+        get: operations["getBranding"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 系统设置 → 基本信息（仅系统管理员，#210） */
+        get: operations["getSystemSettings"];
+        /** 修改基本信息（仅系统管理员，#210）；写操作自动进系统级审计 */
+        put: operations["updateSystemSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/login": {
         parameters: {
             query?: never;
@@ -1376,6 +1411,34 @@ export interface components {
             /** @description 是否当前会话 */
             current: boolean;
         };
+        /** @description 登录页与两套壳品牌区读取的字段（#210）；logo 与找回密码开关由 */
+        Branding: {
+            systemName: string;
+            subtitle: string;
+            /** @description 登录页提示语；为空则不显示该行 */
+            loginHint: string;
+            /** @description 邮件通道已配置时为真，登录页才显示「忘记密码」（#214） */
+            canRecoverPassword: boolean;
+            /** @description 已上传 logo 的版本号，未上传为空（#211） */
+            logoVersion?: number;
+        };
+        SystemSettings: {
+            systemName: string;
+            subtitle: string;
+            loginHint: string;
+            /** @description 访问地址，找回密码邮件拼链接用；为空时用请求 Host 兜底 */
+            baseUrl: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        SystemSettingsInput: {
+            /** @description ≤10 个 Unicode 字符，必填 */
+            systemName: string;
+            subtitle: string;
+            loginHint: string;
+            /** @description http:// 或 https:// 开头的完整地址，或空 */
+            baseUrl: string;
+        };
         CreateSystemUserRequest: {
             /** @description 小写字母、数字、点、下划线、连字符 */
             username: string;
@@ -2705,6 +2768,75 @@ export interface operations {
                     "application/json": components["schemas"]["Health"];
                 };
             };
+        };
+    };
+    getBranding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 品牌信息 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branding"];
+                };
+            };
+        };
+    };
+    getSystemSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 当前配置 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    updateSystemSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SystemSettingsInput"];
+            };
+        };
+        responses: {
+            /** @description 已保存 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
         };
     };
     login: {

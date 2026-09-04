@@ -86,7 +86,7 @@ func ValidateDisplayName(name string) error {
 
 // passwordChangeRequiredAllowlist 「须改密码」为真时仍放行的路由后缀（模块 PRD §5.3、§11）：
 // 登录、登出、修改密码、读当前用户，以及无需会话的健康检查；品牌读取（#210）到时加入。
-var passwordChangeRequiredAllowlist = []string{"/auth/login", "/auth/logout", "/auth/change-password", "/auth/me", "/healthz"}
+var passwordChangeRequiredAllowlist = []string{"/auth/login", "/auth/logout", "/auth/change-password", "/auth/me", "/healthz", "/branding"}
 
 // PasswordChangeRequiredAllows 判定某路径在「须改密码」状态下是否放行；其余一律 403。
 func PasswordChangeRequiredAllows(path string) bool {

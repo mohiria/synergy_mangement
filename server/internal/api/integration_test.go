@@ -7282,3 +7282,62 @@ func TestLoginSecuritySessions(t *testing.T) {
 	}
 }
 
+// #210：品牌读取免登录；修改基本信息仅系统管理员，超长被拒，改后品牌读取同步；写操作进系统级审计。
+func TestSystemSettingsBranding(t *testing.T) {
+	q, pool := setupDB(t)
+	seedUser(t, q, "alice", "张三", "alice-pass")
+	rootUser := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(context.Background(), store.SetUserSystemAdminParams{ID: rootUser.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	// 未登录可读品牌，默认值齐全。
+	resp, err := http.Get(base + "/branding")
+	if err != nil {
+		t.Fatalf("branding: %v", err)
+	}
+	wantStatus(t, resp, http.StatusOK)
+	b := decodeBody[api.Branding](t, resp)
+	if b.SystemName != "协同管理工具" || b.Subtitle != "O／KR／任务协同推进" || b.LoginHint != "账号由管理员分配" || b.CanRecoverPassword {
+		t.Fatalf("默认品牌异常: %+v", b)
+	}
+
+	login := func(username, password string) *http.Client {
+		t.Helper()
+		c := newClient(t)
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+		return c
+	}
+	alice := login("alice", "alice-pass")
+	root := login("root", "root-pass1")
+	body := api.SystemSettingsInput{SystemName: "新名称", Subtitle: "新副标题", LoginHint: "请用工号登录", BaseUrl: "http://203.0.113.10/"}
+	resp = doJSON(t, alice, http.MethodPut, base+"/system/settings", body)
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodGet, base+"/system/settings", nil)
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	// 超长 422（名称 11 字）。
+	resp = doJSON(t, root, http.MethodPut, base+"/system/settings", api.SystemSettingsInput{SystemName: strings.Repeat("名", 11), Subtitle: "", LoginHint: "", BaseUrl: ""})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	resp = doJSON(t, root, http.MethodPut, base+"/system/settings", body)
+	wantStatus(t, resp, http.StatusOK)
+	if st := decodeBody[api.SystemSettings](t, resp); st.SystemName != "新名称" || st.BaseUrl != "http://203.0.113.10" {
+		t.Fatalf("保存结果异常: %+v", st)
+	}
+	resp, _ = http.Get(base + "/branding")
+	if b := decodeBody[api.Branding](t, resp); b.SystemName != "新名称" || b.Subtitle != "新副标题" || b.LoginHint != "请用工号登录" {
+		t.Fatalf("品牌读取应同步: %+v", b)
+	}
+	logs := decodeBody[[]api.AuditLog](t, doJSONAgain(t, root, http.MethodGet, base+"/system/audit-logs"))
+	if len(logs) != 1 || logs[0].Action != "修改系统基本信息" {
+		t.Fatalf("应有一条系统级审计: %+v", logs)
+	}
+}
+

@@ -115,6 +115,7 @@ func TestSystemAuditActionLabel(t *testing.T) {
 		{"POST", "/system/users/{userId}/reset-password", "重置用户密码"},
 		{"PUT", "/system/users/{userId}/profile", "修改用户资料"},
 		{"PUT", "/system/users/{userId}/system-admin", "设／撤系统管理员"},
+		{"PUT", "/system/settings", "修改系统基本信息"},
 		{"PUT", "/system/whatever", "系统设置写操作"},
 	}
 	for _, c := range cases {

@@ -5,10 +5,12 @@ import type { components } from "./api/schema";
 import Icon from "./icons";
 import { Brand } from "./Brand";
 import PasswordInput from "./PasswordInput";
+import { useBranding } from "./branding";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 
 export default function LoginPage({ onLogin }: { onLogin: (u: CurrentUser) => void }) {
+  const { branding } = useBranding();
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   // #209：被限速（429）时按接口返回的剩余秒数倒计时，归零后可再试。
@@ -70,10 +72,13 @@ export default function LoginPage({ onLogin }: { onLogin: (u: CurrentUser) => vo
             </Button>
           </Form>
         </div>
-        <p className="login-foot">
-          <Icon name="lock" size={13} />
-          账号由管理员分配
-        </p>
+        {/* #210：登录页提示语读系统设置，为空则不显示该行。 */}
+        {branding.loginHint && (
+          <p className="login-foot">
+            <Icon name="lock" size={13} />
+            {branding.loginHint}
+          </p>
+        )}
       </div>
     </div>
   );

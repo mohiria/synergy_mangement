@@ -8,17 +8,19 @@ import { client } from "./api/client";
 import type { components } from "./api/schema";
 import PlainShell from "./PlainShell";
 import PasswordInput from "./PasswordInput";
+import { useBranding } from "./branding";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type SystemUser = components["schemas"]["SystemUser"];
 type CreateSystemUserRequest = components["schemas"]["CreateSystemUserRequest"];
 type UpdateUserProfileRequest = components["schemas"]["UpdateUserProfileRequest"];
 type AuditLog = components["schemas"]["AuditLog"];
+type SystemSettingsInput = components["schemas"]["SystemSettingsInput"];
 
 // 系统设置四节（模块 PRD §7）。本版只落「用户管理」只读列表（#201），其余节由后续票填入：
 // 基本信息 #210／#211，通知设置 #212／#213，操作审计 #206。
 const SECTIONS = [
-  { key: "basic", label: "基本信息", hint: "系统名称、副标题、登录页提示语、访问地址与 logo（#210、#211）" },
+  { key: "basic", label: "基本信息", hint: "" },
   { key: "notifications", label: "通知设置", hint: "邮件通道、测试邮件与事件开关（#212、#213）" },
   { key: "users", label: "用户管理", hint: "" },
   { key: "audit", label: "操作审计", hint: "" },
@@ -84,6 +86,8 @@ export default function SystemSettingsPage({ user, onLogout }: { user: CurrentUs
             <UsersSection me={user} />
           ) : section === "audit" ? (
             <AuditSection />
+          ) : section === "basic" ? (
+            <BasicSection />
           ) : (
             <PlaceholderSection section={SECTIONS.find((s) => s.key === section)!} />
           )}
@@ -499,6 +503,75 @@ function AuditSection() {
           </table>
         </div>
       ) : null}
+    </>
+  );
+}
+
+// BasicSection 基本信息（#210）：系统名称、副标题、登录页提示语、访问地址；输入框显示字数与上限，
+// 规则以后端为准；保存后刷新品牌上下文，侧栏、登录页与标签页标题同步。logo 见 #211。
+const LIMITS = { systemName: 10, subtitle: 16, loginHint: 60 } as const;
+
+function BasicSection() {
+  const { reload } = useBranding();
+  const [form] = Form.useForm<SystemSettingsInput>();
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    client.GET("/system/settings").then(({ data, error: err }) => {
+      if (data) {
+        form.setFieldsValue({ systemName: data.systemName, subtitle: data.subtitle, loginHint: data.loginHint, baseUrl: data.baseUrl });
+        setLoaded(true);
+      } else {
+        setError(err?.message ?? "加载失败");
+      }
+    });
+  }, [form]);
+  const submit = async (values: SystemSettingsInput) => {
+    setSaving(true);
+    setError(null);
+    const res = await client.PUT("/system/settings", { body: values });
+    setSaving(false);
+    if (res.data) {
+      message.success("已保存");
+      form.setFieldsValue({ systemName: res.data.systemName, subtitle: res.data.subtitle, loginHint: res.data.loginHint, baseUrl: res.data.baseUrl });
+      await reload();
+    } else {
+      setError(res.error?.message ?? "保存失败");
+    }
+  };
+  return (
+    <>
+      <div className="settings-panel-head">
+        <div>
+          <h2>基本信息</h2>
+          <span className="muted">系统名称、副标题与登录页提示语在登录页与侧栏显示；访问地址用于找回密码邮件拼链接。</span>
+        </div>
+      </div>
+      <div className="settings-panel-body">
+        {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
+        {loaded ? (
+          <Form form={form} layout="vertical" onFinish={submit} requiredMark={false} style={{ maxWidth: 520 }}>
+            <Form.Item name="systemName" label="系统名称" rules={[{ required: true, message: "请输入系统名称" }]}>
+              <Input maxLength={LIMITS.systemName} showCount />
+            </Form.Item>
+            <Form.Item name="subtitle" label="副标题（可空）">
+              <Input maxLength={LIMITS.subtitle} showCount />
+            </Form.Item>
+            <Form.Item name="loginHint" label="登录页提示语（可空）">
+              <Input maxLength={LIMITS.loginHint} showCount />
+            </Form.Item>
+            <Form.Item name="baseUrl" label="访问地址（可空）" extra="http:// 或 https:// 开头的完整地址，如 http://203.0.113.10">
+              <Input maxLength={254} placeholder="http://" />
+            </Form.Item>
+            <Button type="primary" htmlType="submit" loading={saving}>
+              保存
+            </Button>
+          </Form>
+        ) : !error ? (
+          <Spin />
+        ) : null}
+      </div>
     </>
   );
 }

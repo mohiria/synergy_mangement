@@ -41,6 +41,60 @@ paths:
               schema:
                 $ref: "#/components/schemas/Health"
 
+  /branding:
+    get:
+      operationId: getBranding
+      tags: [system]
+      summary: 品牌信息（免登录，#210）：登录页在拿到会话前就要显示；只含品牌字段，不暴露账号信息
+      security: []
+      responses:
+        "200":
+          description: 品牌信息
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Branding"
+
+  /system/settings:
+    get:
+      operationId: getSystemSettings
+      tags: [system]
+      summary: 系统设置 → 基本信息（仅系统管理员，#210）
+      responses:
+        "200":
+          description: 当前配置
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemSettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    put:
+      operationId: updateSystemSettings
+      tags: [system]
+      summary: 修改基本信息（仅系统管理员，#210）；写操作自动进系统级审计
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SystemSettingsInput"
+      responses:
+        "200":
+          description: 已保存
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemSettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
   /auth/login:
     post:
       operationId: login
@@ -2668,6 +2722,59 @@ components:
         current:
           type: boolean
           description: 是否当前会话
+    Branding:
+      type: object
+      description: 登录页与两套壳品牌区读取的字段（#210）；logo 与找回密码开关由 #211／#214 填充
+      required: [systemName, subtitle, loginHint, canRecoverPassword]
+      properties:
+        systemName:
+          type: string
+        subtitle:
+          type: string
+        loginHint:
+          type: string
+          description: 登录页提示语；为空则不显示该行
+        canRecoverPassword:
+          type: boolean
+          description: 邮件通道已配置时为真，登录页才显示「忘记密码」（#214）
+        logoVersion:
+          type: integer
+          description: 已上传 logo 的版本号，未上传为空（#211）
+    SystemSettings:
+      type: object
+      required: [systemName, subtitle, loginHint, baseUrl, updatedAt]
+      properties:
+        systemName:
+          type: string
+        subtitle:
+          type: string
+        loginHint:
+          type: string
+        baseUrl:
+          type: string
+          description: 访问地址，找回密码邮件拼链接用；为空时用请求 Host 兜底
+        updatedAt:
+          type: string
+          format: date-time
+    SystemSettingsInput:
+      type: object
+      required: [systemName, subtitle, loginHint, baseUrl]
+      properties:
+        systemName:
+          type: string
+          minLength: 1
+          maxLength: 10
+          description: ≤10 个 Unicode 字符，必填
+        subtitle:
+          type: string
+          maxLength: 16
+        loginHint:
+          type: string
+          maxLength: 60
+        baseUrl:
+          type: string
+          maxLength: 254
+          description: http:// 或 https:// 开头的完整地址，或空
     CreateSystemUserRequest:
       type: object
       required: [username, displayName, email, password]

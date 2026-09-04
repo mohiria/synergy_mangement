@@ -73,6 +73,7 @@ var systemAuditActions = map[string]string{
 	"POST /system/users/{userId}/reset-password": "重置用户密码",
 	"PUT /system/users/{userId}/profile":         "修改用户资料",
 	"PUT /system/users/{userId}/system-admin":    "设／撤系统管理员",
+	"PUT /system/settings":                       "修改系统基本信息",
 }
 
 // SystemAuditable 判定一次请求是否进系统级审计（#206）：/system 下的写请求才记。

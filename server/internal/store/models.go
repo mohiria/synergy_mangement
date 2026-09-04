@@ -188,6 +188,15 @@ type Session struct {
 	LastActiveAt pgtype.Timestamptz
 }
 
+type SystemSetting struct {
+	ID         int16
+	SystemName string
+	Subtitle   string
+	LoginHint  string
+	BaseUrl    string
+	UpdatedAt  pgtype.Timestamptz
+}
+
 type Task struct {
 	ID                 int64
 	KeyResultID        int64
