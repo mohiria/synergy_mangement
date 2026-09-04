@@ -174,7 +174,7 @@ func (s *Server) GetTaskFileDownloadUrl(w http.ResponseWriter, r *http.Request, 
 	}
 	// #124：预览（inline）或下载（attachment，默认）由调用方声明；预签名带对应 disposition。
 	inline := params.Disposition != nil && string(*params.Disposition) == "inline"
-	url, err := s.files.PresignGet(r.Context(), f.ObjectKey, f.FileName, inline, presignExpiry)
+	url, err := s.files.PresignGet(r.Context(), f.ObjectKey, f.FileName, inline, presignDownloadExpiry)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return

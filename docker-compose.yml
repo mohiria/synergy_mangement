@@ -23,7 +23,8 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-synergy}:${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-synergy}?sslmode=disable
       MINIO_ENDPOINT: minio:9000
-      # 预签名 URL 面向浏览器：必须填浏览器可达的地址（服务器 IP 或主机名），不能是 localhost。
+      # 预签名 URL 面向浏览器：填浏览器访问本站的地址（公网 IP 或主机名，不带端口或与 HTTP_PORT 一致），
+      # 经 Caddy 80 端口反代到 MinIO（#194）；不能是 localhost。
       MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:?请在 .env 中设置 MINIO_PUBLIC_ENDPOINT}
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-synergy}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?请在 .env 中设置 MINIO_ROOT_PASSWORD}
@@ -78,9 +79,9 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-synergy}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?请在 .env 中设置 MINIO_ROOT_PASSWORD}
-    # 9000 必须对浏览器可达（预签名 URL 直连，不经 Caddy——改写路径会破坏签名）；控制台 9001 只绑回环。
+    # #194：9000 只绑回环留本机调试；浏览器的预签名 URL 经 Caddy 80 端口按桶名前缀反代（web/Caddyfile）。
     ports:
-      - "${MINIO_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_PORT:-9000}:9000"
       - "127.0.0.1:9001:9001"
     volumes:
       - miniodata:/data

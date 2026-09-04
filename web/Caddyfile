@@ -21,6 +21,16 @@
 		reverse_proxy app:8080
 	}
 
+	# 对象存储（#194）：MinIO 不再暴露 9000，浏览器的预签名上传／下载经这里按桶名前缀原样反代。
+	# 不改路径、透传 Host（reverse_proxy 默认行为），签名才能验过；MINIO_PUBLIC_ENDPOINT 填公网 IP（不带端口）。
+	# 请求体上限与单文件上限一致（domain.MaxUploadSize，20 MB），只作用于本路径，/api 的 4 MB 上限在 Go 里。
+	handle /synergy/* {
+		request_body {
+			max_size 20MB
+		}
+		reverse_proxy minio:9000
+	}
+
 	# SPA history fallback：react-router 的深链接（如 /projects/1/tasks）交给 index.html。
 	handle {
 		try_files {path} /index.html
