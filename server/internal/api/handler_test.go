@@ -57,3 +57,60 @@ func TestGetHealthz(t *testing.T) {
 		t.Fatalf("status field = %q, want %q", body.Status, Ok)
 	}
 }
+
+// #192：写请求同源校验——SameSite=Lax 之外的第二道 CSRF 防线，挂在 /api 最外层、认证之前。
+// 只和请求 Host 比对（IP 部署无固定域名，不写允许列表）；缺 Origin 放行（非浏览器客户端拿不到受害者 cookie）；
+// Sec-Fetch-Site: cross-site 直接拒绝；GET/HEAD/OPTIONS 不校验。
+func TestSameOriginMiddleware(t *testing.T) {
+	tests := []struct {
+		name         string
+		method       string
+		origin       string
+		secFetchSite string
+		want         int
+	}{
+		{"同源 Origin 的 POST 通过", http.MethodPost, "http://app.local:8080", "", http.StatusOK},
+		{"跨源 Origin 的 POST 拒绝", http.MethodPost, "http://evil.example", "", http.StatusForbidden},
+		{"无 Origin 的 POST 通过", http.MethodPost, "", "", http.StatusOK},
+		{"Sec-Fetch-Site cross-site 直接拒绝", http.MethodPost, "", "cross-site", http.StatusForbidden},
+		{"Sec-Fetch-Site cross-site 即使 Origin 同源也拒绝", http.MethodPost, "http://app.local:8080", "cross-site", http.StatusForbidden},
+		{"Sec-Fetch-Site same-origin 通过", http.MethodPost, "http://app.local:8080", "same-origin", http.StatusOK},
+		{"Sec-Fetch-Site none（地址栏直达）通过", http.MethodPost, "", "none", http.StatusOK},
+		{"GET 跨源不校验", http.MethodGet, "http://evil.example", "", http.StatusOK},
+		{"HEAD 跨源不校验", http.MethodHead, "http://evil.example", "", http.StatusOK},
+		{"OPTIONS 跨源不校验", http.MethodOptions, "http://evil.example", "", http.StatusOK},
+		{"PUT 跨源拒绝", http.MethodPut, "http://evil.example", "", http.StatusForbidden},
+		{"PATCH 跨源拒绝", http.MethodPatch, "http://evil.example", "", http.StatusForbidden},
+		{"DELETE 跨源拒绝", http.MethodDelete, "http://evil.example", "", http.StatusForbidden},
+		{"Origin: null 拒绝", http.MethodPost, "null", "", http.StatusForbidden},
+		{"Origin host 大小写不敏感", http.MethodPost, "http://APP.LOCAL:8080", "", http.StatusOK},
+		{"Origin 端口不同视为跨源", http.MethodPost, "http://app.local:9000", "", http.StatusForbidden},
+		{"Origin 无端口而 Host 有端口视为跨源", http.MethodPost, "http://app.local", "", http.StatusForbidden},
+		{"Origin 不是合法 URL 拒绝", http.MethodPost, "app.local:8080", "", http.StatusForbidden},
+	}
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := sameOriginMiddleware(next)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := httptest.NewRequest(tt.method, "/api/v1/auth/login", nil)
+			r.Host = "app.local:8080"
+			if tt.origin != "" {
+				r.Header.Set("Origin", tt.origin)
+			}
+			if tt.secFetchSite != "" {
+				r.Header.Set("Sec-Fetch-Site", tt.secFetchSite)
+			}
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			if w.Code != tt.want {
+				t.Fatalf("status = %d, want %d (body %s)", w.Code, tt.want, w.Body.String())
+			}
+			if tt.want == http.StatusForbidden {
+				var e Error
+				if err := json.Unmarshal(w.Body.Bytes(), &e); err != nil || e.Code != "cross_origin" {
+					t.Fatalf("403 应带统一 Error 结构且 code=cross_origin，得到 %s", w.Body.String())
+				}
+			}
+		})
+	}
+}

@@ -6448,3 +6448,80 @@ func TestPublicProjectImplicitViewer(t *testing.T) {
 	wantStatus(t, resp, http.StatusNotFound)
 	resp.Body.Close()
 }
+
+// #192：写请求同源校验在真实装配（含登录接口）上的四条验收——同源通过、跨源 403、
+// 无 Origin 通过、Sec-Fetch-Site: cross-site 403；GET 不受影响。
+func TestSameOriginGuardOnRealHandler(t *testing.T) {
+	q, pool := setupDB(t)
+	seedUser(t, q, "alice", "张三", "alice-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	loginWith := func(headers map[string]string) *http.Response {
+		t.Helper()
+		body, _ := json.Marshal(api.LoginRequest{Username: "alice", Password: "alice-pass"})
+		req, err := http.NewRequest(http.MethodPost, base+"/auth/login", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		resp, err := newClient(t).Do(req)
+		if err != nil {
+			t.Fatalf("login: %v", err)
+		}
+		return resp
+	}
+
+	t.Run("同源 Origin 的登录通过", func(t *testing.T) {
+		resp := loginWith(map[string]string{"Origin": ts.URL, "Sec-Fetch-Site": "same-origin"})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	})
+	t.Run("跨源 Origin 的登录得 403", func(t *testing.T) {
+		resp := loginWith(map[string]string{"Origin": "http://evil.example"})
+		wantStatus(t, resp, http.StatusForbidden)
+		if e := decodeBody[api.Error](t, resp); e.Code != "cross_origin" {
+			t.Fatalf("code = %q, want cross_origin", e.Code)
+		}
+	})
+	t.Run("无 Origin 的登录通过", func(t *testing.T) {
+		resp := loginWith(nil)
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	})
+	t.Run("Sec-Fetch-Site cross-site 得 403", func(t *testing.T) {
+		resp := loginWith(map[string]string{"Sec-Fetch-Site": "cross-site"})
+		wantStatus(t, resp, http.StatusForbidden)
+		resp.Body.Close()
+	})
+	t.Run("GET 带跨源 Origin 不受影响", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, base+"/healthz", nil)
+		req.Header.Set("Origin", "http://evil.example")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("healthz: %v", err)
+		}
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	})
+	t.Run("已登录后的跨源写请求同样 403", func(t *testing.T) {
+		c := newClient(t)
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: "alice", Password: "alice-pass"})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+		req, _ := http.NewRequest(http.MethodPost, base+"/projects", strings.NewReader(`{"name":"x"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Origin", "http://evil.example")
+		resp, err := c.Do(req)
+		if err != nil {
+			t.Fatalf("projects: %v", err)
+		}
+		wantStatus(t, resp, http.StatusForbidden)
+		resp.Body.Close()
+	})
+}

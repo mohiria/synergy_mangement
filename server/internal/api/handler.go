@@ -49,13 +49,14 @@ func NewHandler(db *pgxpool.Pool, baseURL string, files filestore.Store) http.Ha
 
 // NewHandlerFromServer 由既有 Server 组装路由；main 需要同一个 Server 同时跑卡点 ticker。
 func NewHandlerFromServer(s *Server, baseURL string) http.Handler {
-	return HandlerWithOptions(s, StdHTTPServerOptions{
+	// 同源校验包在整个 /api 之外（#192）：认证之前、覆盖登录接口，路由不存在时也先拒跨源写请求。
+	return sameOriginMiddleware(HandlerWithOptions(s, StdHTTPServerOptions{
 		BaseURL:    baseURL,
 		BaseRouter: http.NewServeMux(),
 		// 切片里靠前的先包住 handler，也就是越靠前越内层：写路径装饰器要放最前，
 		// 才能在会话中间件之后运行、拿得到当前用户。
 		Middlewares: []MiddlewareFunc{s.writePathMiddleware, requestIDMiddleware, s.sessionMiddleware, requestValidator()},
-	})
+	}))
 }
 
 // requestValidator 用契约本身兜底校验请求：enum、required、长度与格式不再依赖各 handler 手工判定。
