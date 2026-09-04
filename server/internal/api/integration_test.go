@@ -36,6 +36,7 @@ import (
 	"synergy/server/internal/api"
 	"synergy/server/internal/domain"
 	"synergy/server/internal/filestore"
+	"synergy/server/internal/mail"
 	"synergy/server/internal/store"
 )
 
@@ -53,8 +54,18 @@ func newTestHandler(t *testing.T, pool *pgxpool.Pool) http.Handler {
 	}
 	// MinIO 容器可达时确保测试桶存在（真实上传/打包路径）；不可达时相关断言自动降级。
 	_ = files.EnsureBucket(context.Background())
-	return api.NewHandler(pool, "/api/v1", files)
+	srv := api.NewServer(pool, files)
+	// #212：固定测试密钥 + 记录器发送器；测试里取 mailRecorder 断言发出的邮件。
+	srv.ConfigureMail(testSecretKey, mailRecorder)
+	testServer = srv
+	return api.NewHandlerFromServer(srv, "/api/v1")
 }
+
+var (
+	testSecretKey = bytes.Repeat([]byte{7}, 32)
+	mailRecorder  = &mail.Recorder{}
+	testServer    *api.Server
+)
 
 // putObject 直传对象；MinIO 与 Postgres 一样是集成测试的前置依赖（docker compose up -d minio）。
 func putObject(t *testing.T, url, content string) {
@@ -3810,7 +3821,7 @@ func TestImportAndPool(t *testing.T) {
 		t.Fatalf("成功与失败各应留一条导入记录: %+v", records)
 	}
 	failed := records[0]
-	if failed.Result != api.Failed || failed.ResultLabel != "失败" {
+	if failed.Result != api.ImportRecordResultFailed || failed.ResultLabel != "失败" {
 		t.Fatalf("失败的一次不应写成功: %+v", failed)
 	}
 	if failed.ObjectiveCount != 0 || failed.KeyResultCount != 0 || failed.TaskCount != 0 {
@@ -3820,7 +3831,7 @@ func TestImportAndPool(t *testing.T) {
 		t.Fatalf("失败记录应带摘要: %+v", failed.FailureSummary)
 	}
 	success := records[1]
-	if success.Result != api.Success || success.ResultLabel != "成功" {
+	if success.Result != api.ImportRecordResultSuccess || success.ResultLabel != "成功" {
 		t.Fatalf("成功的一次记录异常: %+v", success)
 	}
 	if success.ObjectiveCount != 1 || success.KeyResultCount != 2 || success.TaskCount != 3 {
@@ -3886,7 +3897,7 @@ func TestImportAndPool(t *testing.T) {
 		t.Fatalf("任务导入的成功与失败各应再留一条: %d", len(afterTaskImport))
 	}
 	latest := afterTaskImport[0]
-	if latest.Result != api.Success || latest.TaskCount != 2 || latest.ObjectiveCount != 0 || latest.KeyResultCount != 0 {
+	if latest.Result != api.ImportRecordResultSuccess || latest.TaskCount != 2 || latest.ObjectiveCount != 0 || latest.KeyResultCount != 0 {
 		t.Fatalf("任务导入记录异常: %+v", latest)
 	}
 	if latest.SourceFileName == nil || *latest.SourceFileName != "任务批量导入.xlsx" {
@@ -7431,3 +7442,140 @@ func TestSystemLogo(t *testing.T) {
 		t.Fatalf("审计应含两次上传与一次删除: %+v", logs)
 	}
 }
+
+// #212：配置保存后密码落库为密文且读取不回显；测试邮件两个选项入 outbox 并被后台发送；
+// 发送失败时记录显示失败原因与重试次数；非系统管理员 403。
+func TestMailChannel(t *testing.T) {
+	q, pool := setupDB(t)
+	seedUser(t, q, "alice", "张三", "alice-pass")
+	rootUser := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(context.Background(), store.SetUserSystemAdminParams{ID: rootUser.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	mailRecorder.Err = nil
+	mailRecorder.Sent = nil
+	login := func(username, password string) *http.Client {
+		t.Helper()
+		c := newClient(t)
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+		return c
+	}
+	alice := login("alice", "alice-pass")
+	root := login("root", "root-pass1")
+
+	for _, tc := range []struct {
+		method, path string
+		body         any
+	}{
+		{http.MethodGet, base + "/system/mail-settings", nil},
+		{http.MethodPut, base + "/system/mail-settings", api.MailSettingsInput{Host: "h", Port: 25, Encryption: api.MailSettingsInputEncryptionNone, FromAddress: "a@b.co"}},
+		{http.MethodPost, base + "/system/mail-settings/test", api.TestMailRequest{Target: api.Me}},
+		{http.MethodGet, base + "/system/mail-outbox", nil},
+	} {
+		resp := doJSON(t, alice, tc.method, tc.path, tc.body)
+		wantStatus(t, resp, http.StatusForbidden)
+		resp.Body.Close()
+	}
+	// 未配置时发测试邮件 422。
+	resp := doJSON(t, root, http.MethodPost, base+"/system/mail-settings/test", api.TestMailRequest{Target: api.Me})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	// 保存配置（含密码）。
+	pw := "smtp-secret-1"
+	resp = doJSON(t, root, http.MethodPut, base+"/system/mail-settings", api.MailSettingsInput{
+		Host: "smtp.example.com", Port: 587, Encryption: api.MailSettingsInputEncryptionStarttls, Username: "bot",
+		Password: &pw, FromName: "协同", FromAddress: "Bot@Example.com",
+	})
+	wantStatus(t, resp, http.StatusOK)
+	ms := decodeBody[api.MailSettings](t, resp)
+	if !ms.PasswordSet || !ms.Configured || ms.FromAddress != "bot@example.com" {
+		t.Fatalf("保存结果异常: %+v", ms)
+	}
+	raw, err := q.GetMailSettings(context.Background())
+	if err != nil || raw.PasswordEnc == "" || raw.PasswordEnc == pw || strings.Contains(raw.PasswordEnc, pw) {
+		t.Fatalf("密码应以密文落库: %q %v", raw.PasswordEnc, err)
+	}
+	body, _ := json.Marshal(decodeBody[api.MailSettings](t, doJSONAgain(t, root, http.MethodGet, base+"/system/mail-settings")))
+	if strings.Contains(string(body), pw) || strings.Contains(string(body), raw.PasswordEnc) {
+		t.Fatalf("读取接口不应返回密码: %s", body)
+	}
+	// 再保存但密码留空：保持原密文。
+	resp = doJSON(t, root, http.MethodPut, base+"/system/mail-settings", api.MailSettingsInput{
+		Host: "smtp.example.com", Port: 587, Encryption: api.MailSettingsInputEncryptionStarttls, Username: "bot", FromName: "协同", FromAddress: "bot@example.com",
+	})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	if again, _ := q.GetMailSettings(context.Background()); again.PasswordEnc != raw.PasswordEnc {
+		t.Fatal("密码留空应保持原密文")
+	}
+
+	// 测试邮件：发到我 + 发到手填地址；非法地址 422。
+	resp = doJSON(t, root, http.MethodPost, base+"/system/mail-settings/test", api.TestMailRequest{Target: api.Me})
+	wantStatus(t, resp, http.StatusAccepted)
+	if item := decodeBody[api.MailOutboxItem](t, resp); item.ToAddress != "root@example.com" || item.Status != api.MailOutboxItemStatusPending {
+		t.Fatalf("入队异常: %+v", item)
+	}
+	addr := "Ops@Example.com"
+	resp = doJSON(t, root, http.MethodPost, base+"/system/mail-settings/test", api.TestMailRequest{Target: api.Custom, Address: &addr})
+	wantStatus(t, resp, http.StatusAccepted)
+	resp.Body.Close()
+	bad := "nope"
+	resp = doJSON(t, root, http.MethodPost, base+"/system/mail-settings/test", api.TestMailRequest{Target: api.Custom, Address: &bad})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	// 后台发送一轮：两封都已发送，记录器收到并带解密后的通道配置。
+	if n := testServer.ProcessMailOutbox(context.Background()); n != 2 {
+		t.Fatalf("应处理 2 封，得到 %d", n)
+	}
+	sent := mailRecorder.Messages()
+	if len(sent) != 2 || sent[0].To != "root@example.com" || sent[1].To != "ops@example.com" || sent[0].Subject != "测试邮件" {
+		t.Fatalf("发出的邮件异常: %+v", sent)
+	}
+	outbox := decodeBody[[]api.MailOutboxItem](t, doJSONAgain(t, root, http.MethodGet, base+"/system/mail-outbox"))
+	if len(outbox) != 2 || outbox[0].Status != api.MailOutboxItemStatusSent || outbox[0].SentAt == nil || outbox[0].EventLabel != "测试邮件" {
+		t.Fatalf("发送记录异常: %+v", outbox)
+	}
+
+	// SMTP 不可达：API 立即返回 202，记录显示失败原因与重试次数递增，四次后标记失败。
+	mailRecorder.Err = errors.New("dial tcp: connection refused")
+	resp = doJSON(t, root, http.MethodPost, base+"/system/mail-settings/test", api.TestMailRequest{Target: api.Me})
+	wantStatus(t, resp, http.StatusAccepted)
+	resp.Body.Close()
+	testServer.ProcessMailOutbox(context.Background())
+	outbox = decodeBody[[]api.MailOutboxItem](t, doJSONAgain(t, root, http.MethodGet, base+"/system/mail-outbox"))
+	if outbox[0].Status != api.MailOutboxItemStatusPending || outbox[0].Attempts != 1 || outbox[0].LastError == nil || !strings.Contains(*outbox[0].LastError, "connection refused") {
+		t.Fatalf("首次失败应待重试并记录原因: %+v", outbox[0])
+	}
+	// 未到重试时间不会再被取走。
+	if n := testServer.ProcessMailOutbox(context.Background()); n != 0 {
+		t.Fatalf("退避期内不应重试，处理了 %d", n)
+	}
+	// 把重试时间拨回，连续失败到第 4 次标记失败。
+	for i := 0; i < 3; i++ {
+		if _, err := pool.Exec(context.Background(), "UPDATE mail_outbox SET next_attempt_at = now() WHERE status = 'pending'"); err != nil {
+			t.Fatalf("rewind: %v", err)
+		}
+		testServer.ProcessMailOutbox(context.Background())
+	}
+	outbox = decodeBody[[]api.MailOutboxItem](t, doJSONAgain(t, root, http.MethodGet, base+"/system/mail-outbox"))
+	if outbox[0].Status != api.MailOutboxItemStatusFailed || outbox[0].Attempts != 4 {
+		t.Fatalf("四次失败后应标记失败: %+v", outbox[0])
+	}
+	mailRecorder.Err = nil
+	// 审计：修改通道两次 + 入队成功的测试邮件三次（未配置与地址非法的 422 不留痕）。
+	logs := decodeBody[[]api.AuditLog](t, doJSONAgain(t, root, http.MethodGet, base+"/system/audit-logs"))
+	if len(logs) != 5 {
+		t.Fatalf("审计条数 = %d, want 5: %+v", len(logs), logs)
+	}
+	for _, a := range logs {
+		if strings.Contains(a.Action, pw) || strings.Contains(a.Route, pw) {
+			t.Fatalf("密码不应进入审计: %+v", a)
+		}
+	}
+}
+

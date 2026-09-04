@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
-import { Alert, Button, Dropdown, Form, Input, Modal, Popconfirm, Spin, Table, Upload, message } from "antd";
+import { Alert, Button, Dropdown, Form, Input, InputNumber, Modal, Popconfirm, Radio, Select, Spin, Table, Upload, message } from "antd";
 import type { MenuProps } from "antd";
 import Icon from "./icons";
 import dayjs from "dayjs";
@@ -16,12 +16,15 @@ type CreateSystemUserRequest = components["schemas"]["CreateSystemUserRequest"];
 type UpdateUserProfileRequest = components["schemas"]["UpdateUserProfileRequest"];
 type AuditLog = components["schemas"]["AuditLog"];
 type SystemSettingsInput = components["schemas"]["SystemSettingsInput"];
+type MailSettings = components["schemas"]["MailSettings"];
+type MailSettingsInput = components["schemas"]["MailSettingsInput"];
+type MailOutboxItem = components["schemas"]["MailOutboxItem"];
 
 // 系统设置四节（模块 PRD §7）。本版只落「用户管理」只读列表（#201），其余节由后续票填入：
 // 基本信息 #210／#211，通知设置 #212／#213，操作审计 #206。
 const SECTIONS = [
   { key: "basic", label: "基本信息", hint: "" },
-  { key: "notifications", label: "通知设置", hint: "邮件通道、测试邮件与事件开关（#212、#213）" },
+  { key: "notifications", label: "通知设置", hint: "" },
   { key: "users", label: "用户管理", hint: "" },
   { key: "audit", label: "操作审计", hint: "" },
 ] as const;
@@ -88,6 +91,8 @@ export default function SystemSettingsPage({ user, onLogout }: { user: CurrentUs
             <AuditSection />
           ) : section === "basic" ? (
             <BasicSection />
+          ) : section === "notifications" ? (
+            <NotificationsSection me={user} />
           ) : (
             <PlaceholderSection section={SECTIONS.find((s) => s.key === section)!} />
           )}
@@ -628,6 +633,161 @@ function BasicSection() {
             </div>
             {logoError && <Alert type="error" message={logoError} style={{ marginTop: 8, maxWidth: 520 }} data-testid="logo-error" />}
           </Form>
+        ) : !error ? (
+          <Spin />
+        ) : null}
+      </div>
+    </>
+  );
+}
+
+// NotificationsSection 通知设置（#212）：邮件通道配置（密码只显示「已设置」、留空保持原值）、
+// 测试邮件两个选项、最近发送记录。事件开关见 #213。
+function NotificationsSection({ me }: { me: CurrentUser }) {
+  const [form] = Form.useForm<MailSettingsInput>();
+  const [settings, setSettings] = useState<MailSettings | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [outbox, setOutbox] = useState<MailOutboxItem[]>([]);
+  const [target, setTarget] = useState<"me" | "custom">("me");
+  const [address, setAddress] = useState("");
+  const [sending, setSending] = useState(false);
+  const loadOutbox = () => {
+    client.GET("/system/mail-outbox").then(({ data }) => {
+      if (data) setOutbox(data);
+    });
+  };
+  useEffect(() => {
+    client.GET("/system/mail-settings").then(({ data, error: err }) => {
+      if (data) {
+        setSettings(data);
+        form.setFieldsValue({
+          host: data.host, port: data.port, encryption: data.encryption, username: data.username,
+          fromName: data.fromName, fromAddress: data.fromAddress, password: "",
+        });
+      } else {
+        setError(err?.message ?? "加载失败");
+      }
+    });
+    loadOutbox();
+  }, [form]);
+  const submit = async (values: MailSettingsInput) => {
+    setSaving(true);
+    setError(null);
+    const res = await client.PUT("/system/mail-settings", { body: { ...values, password: values.password || undefined } });
+    setSaving(false);
+    if (res.data) {
+      message.success("邮件通道已保存");
+      setSettings(res.data);
+      form.setFieldValue("password", "");
+    } else {
+      setError(res.error?.message ?? "保存失败");
+    }
+  };
+  const sendTest = async () => {
+    setSending(true);
+    const res = await client.POST("/system/mail-settings/test", {
+      body: target === "me" ? { target: "me" } : { target: "custom", address },
+    });
+    setSending(false);
+    if (res.data) {
+      message.success(`测试邮件已加入发送队列：${res.data.toAddress}`);
+      loadOutbox();
+    } else {
+      message.error(res.error?.message ?? "发送失败");
+    }
+  };
+  return (
+    <>
+      <div className="settings-panel-head">
+        <div>
+          <h2>通知设置</h2>
+          <span className="muted">
+            邮件通道：SMTP 密码用应用密钥加密后落库，保存后不回显；所有邮件先入队由后台异步发送，失败自动重试三次。
+          </span>
+        </div>
+      </div>
+      <div className="settings-panel-body">
+        {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
+        {settings ? (
+          <>
+            <Form form={form} layout="vertical" onFinish={submit} requiredMark={false} style={{ maxWidth: 560 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 140px 160px", gap: 12 }}>
+                <Form.Item name="host" label="SMTP 主机" rules={[{ required: true, message: "请输入主机" }]}>
+                  <Input placeholder="smtp.example.com" />
+                </Form.Item>
+                <Form.Item name="port" label="端口" rules={[{ required: true, message: "请输入端口" }]}>
+                  <InputNumber min={1} max={65535} style={{ width: "100%" }} />
+                </Form.Item>
+                <Form.Item name="encryption" label="加密方式">
+                  <Select
+                    options={[
+                      { value: "none", label: "无" },
+                      { value: "starttls", label: "STARTTLS" },
+                      { value: "ssl", label: "SSL" },
+                    ]}
+                  />
+                </Form.Item>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <Form.Item name="username" label="账号（可空）">
+                  <Input autoComplete="off" />
+                </Form.Item>
+                <Form.Item name="password" label={settings.passwordSet ? "密码（已设置，留空保持不变）" : "密码"}>
+                  <PasswordInput autoComplete="new-password" placeholder={settings.passwordSet ? "已设置" : ""} />
+                </Form.Item>
+                <Form.Item name="fromName" label="发件人显示名（可空）">
+                  <Input maxLength={50} />
+                </Form.Item>
+                <Form.Item name="fromAddress" label="发件人地址" rules={[{ required: true, message: "请输入发件人地址" }]}>
+                  <Input autoComplete="off" />
+                </Form.Item>
+              </div>
+              <Button type="primary" htmlType="submit" loading={saving}>
+                保存通道
+              </Button>
+              <span className="muted" style={{ marginLeft: 12, fontSize: 12 }}>
+                {settings.configured ? "通道已配置" : "通道未配置：找回密码与邮件通知不可用"}
+              </span>
+            </Form>
+
+            <div className="property" style={{ marginTop: 20, alignItems: "flex-start" }} data-testid="test-mail">
+              <label>测试邮件</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <Radio.Group value={target} onChange={(e) => setTarget(e.target.value)}>
+                  <Radio value="me">发到我绑定的邮箱（{me.email}）</Radio>
+                  <Radio value="custom">发到其他邮箱</Radio>
+                </Radio.Group>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {target === "custom" && (
+                    <Input style={{ width: 280 }} placeholder="收件地址" value={address} onChange={(e) => setAddress(e.target.value)} />
+                  )}
+                  <Button size="small" loading={sending} disabled={!settings.configured || (target === "custom" && !address)} onClick={sendTest}>
+                    发送测试邮件
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            <h3 style={{ fontSize: 14, margin: "20px 0 8px" }}>最近发送记录</h3>
+            <Table<MailOutboxItem>
+              size="small"
+              rowKey="id"
+              pagination={false}
+              dataSource={outbox}
+              locale={{ emptyText: "暂无发送记录" }}
+              columns={[
+                { title: "收件人", dataIndex: "toAddress", key: "toAddress" },
+                { title: "事件", dataIndex: "eventLabel", key: "event" },
+                { title: "状态", key: "status", render: (_, x) => `${x.statusLabel}${x.attempts ? `（${x.attempts} 次）` : ""}` },
+                { title: "失败原因", key: "lastError", render: (_, x) => x.lastError || "—", ellipsis: true },
+                { title: "时间", key: "createdAt", render: (_, x) => fmtTime(x.sentAt ?? x.createdAt) },
+              ]}
+            />
+            <Button size="small" type="link" onClick={loadOutbox} style={{ paddingLeft: 0 }}>
+              刷新记录
+            </Button>
+          </>
         ) : !error ? (
           <Spin />
         ) : null}

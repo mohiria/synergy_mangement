@@ -73,6 +73,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/mail-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 通知设置 → 邮件通道配置（仅系统管理员，#212）；密码永不回显，只给「已设置」 */
+        get: operations["getMailSettings"];
+        /** 保存邮件通道（仅系统管理员，#212）：密码留空表示保持原值，给了则用应用密钥加密落库；进系统级审计（密码不进摘要） */
+        put: operations["updateMailSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/mail-settings/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 发送测试邮件（仅系统管理员，#212）：发到我绑定的邮箱或手填地址；只入 outbox，立即返回 */
+        post: operations["sendTestMail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/mail-outbox": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 最近发送记录（最近 50 条，仅系统管理员，#212） */
+        get: operations["listMailOutbox"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/system/settings": {
         parameters: {
             query?: never;
@@ -1481,6 +1533,65 @@ export interface components {
             loginHint: string;
             /** @description http:// 或 https:// 开头的完整地址，或空 */
             baseUrl: string;
+        };
+        /** @description 邮件通道配置（#212）；密码永不回显 */
+        MailSettings: {
+            host: string;
+            port: number;
+            /** @enum {string} */
+            encryption: "none" | "starttls" | "ssl";
+            username: string;
+            fromName: string;
+            fromAddress: string;
+            /** @description 已设置密码（密文落库） */
+            passwordSet: boolean;
+            /** @description 主机与发件人地址齐全即视为已配置；找回密码入口据此显示（#214） */
+            configured: boolean;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        MailSettingsInput: {
+            host: string;
+            port: number;
+            /** @enum {string} */
+            encryption: "none" | "starttls" | "ssl";
+            username: string;
+            /**
+             * Format: password
+             * @description 留空或省略表示保持原值
+             */
+            password?: string;
+            fromName: string;
+            fromAddress: string;
+        };
+        TestMailRequest: {
+            /**
+             * @description me＝发到我绑定的邮箱；custom＝发到 address
+             * @enum {string}
+             */
+            target: "me" | "custom";
+            address?: string;
+        };
+        /** @description outbox 里的一封邮件（#212） */
+        MailOutboxItem: {
+            /** Format: int64 */
+            id: number;
+            toAddress: string;
+            subject: string;
+            /** @description 事件标识（test／password_reset／站内通知 kind） */
+            event: string;
+            /** @description 事件显示文案（派生字段） */
+            eventLabel: string;
+            /** @enum {string} */
+            status: "pending" | "sent" | "failed";
+            statusLabel: string;
+            /** @description 已尝试次数 */
+            attempts: number;
+            lastError?: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            sentAt?: string;
         };
         CreateSystemUserRequest: {
             /** @description 小写字母、数字、点、下划线、连字符 */
@@ -2902,6 +3013,104 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SystemSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getMailSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 当前配置 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    updateMailSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailSettingsInput"];
+            };
+        };
+        responses: {
+            /** @description 已保存 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    sendTestMail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TestMailRequest"];
+            };
+        };
+        responses: {
+            /** @description 已入队 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailOutboxItem"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    listMailOutbox: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 发送记录，最新在前 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailOutboxItem"][];
                 };
             };
             401: components["responses"]["Unauthorized"];

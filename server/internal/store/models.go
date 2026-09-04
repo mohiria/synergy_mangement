@@ -117,6 +117,32 @@ type KeyResult struct {
 	CreatedBy   pgtype.Int8
 }
 
+type MailOutbox struct {
+	ID            int64
+	ToAddress     string
+	Subject       string
+	Body          string
+	Event         string
+	Status        string
+	Attempts      int32
+	LastError     string
+	NextAttemptAt pgtype.Timestamptz
+	CreatedAt     pgtype.Timestamptz
+	SentAt        pgtype.Timestamptz
+}
+
+type MailSetting struct {
+	ID          int16
+	Host        string
+	Port        int32
+	Encryption  string
+	Username    string
+	PasswordEnc string
+	FromName    string
+	FromAddress string
+	UpdatedAt   pgtype.Timestamptz
+}
+
 type Notification struct {
 	ID        int64
 	UserID    int64

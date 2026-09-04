@@ -218,3 +218,27 @@ test("上传 logo 后品牌位与 favicon 显示图片，SVG 被拒，删除后�
   await expect(page.locator(".sidebar .brand-mark")).toHaveText("协");
 });
 
+// #212：保存邮件通道（密码不回显）→ 发送测试邮件入队 → 发送记录可见（AC-82）。
+// 本机没有 SMTP，后台发送会失败并显示原因；这里只断言入队与记录，不等待重试。
+test("邮件通道保存后密码不回显，测试邮件入队并出现在发送记录", async ({ page }) => {
+  await login(page);
+  await page.goto("/system/notifications");
+  await page.getByLabel("SMTP 主机").fill("smtp.invalid");
+  await page.getByLabel("端口").fill("2525");
+  await page.getByLabel("账号（可空）").fill("bot");
+  await page.getByLabel("密码").fill("smtp-secret-1");
+  await page.getByLabel("发件人地址").fill("bot@example.com");
+  await page.getByRole("button", { name: "保存通道" }).click();
+  await expect(page.getByText("通道已配置")).toBeVisible();
+  await expect(page.getByLabel("密码（已设置，留空保持不变）")).toHaveValue("");
+  await page.reload();
+  await expect(page.getByLabel("密码（已设置，留空保持不变）")).toHaveValue("");
+
+  await page.locator('[data-testid="test-mail"]').getByText("发到其他邮箱").click();
+  await page.getByPlaceholder("收件地址").fill("ops@example.com");
+  await page.getByRole("button", { name: "发送测试邮件" }).click();
+  const row = page.locator(".settings-panel tbody tr", { hasText: "ops@example.com" });
+  await expect(row).toContainText("测试邮件");
+  await expect(row).toContainText(/待发送|失败/);
+});
+

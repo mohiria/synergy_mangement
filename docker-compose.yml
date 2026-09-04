@@ -28,6 +28,8 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-synergy}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?请在 .env 中设置 MINIO_ROOT_PASSWORD}
       GOTENBERG_URL: http://gotenberg:3000
+      # 应用密钥：SMTP 密码等敏感配置的加解密（#212）；缺失时 app 拒绝启动。
+      APP_SECRET_KEY: ${APP_SECRET_KEY:?请在 .env 中设置 APP_SECRET_KEY（openssl rand -hex 32）}
       APPRISE_URL: http://apprise:8000
     depends_on:
       postgres:

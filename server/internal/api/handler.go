@@ -1,12 +1,12 @@
 package api
 
 import (
-	"fmt"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -23,6 +23,7 @@ import (
 
 	"synergy/server/internal/domain"
 	"synergy/server/internal/filestore"
+	"synergy/server/internal/mail"
 	"synergy/server/internal/store"
 )
 
@@ -34,6 +35,9 @@ type Server struct {
 	files    filestore.Store
 	throttle *domain.LoginThrottle
 	now      func() time.Time
+	// #212：应用密钥（SMTP 密码加解密）与邮件发送器；由 ConfigureMail 注入。
+	secretKey []byte
+	mailer    mail.Sender
 }
 
 var _ ServerInterface = (*Server)(nil)

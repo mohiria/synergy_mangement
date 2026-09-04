@@ -126,6 +126,90 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /system/mail-settings:
+    get:
+      operationId: getMailSettings
+      tags: [system]
+      summary: 通知设置 → 邮件通道配置（仅系统管理员，#212）；密码永不回显，只给「已设置」
+      responses:
+        "200":
+          description: 当前配置
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MailSettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    put:
+      operationId: updateMailSettings
+      tags: [system]
+      summary: 保存邮件通道（仅系统管理员，#212）：密码留空表示保持原值，给了则用应用密钥加密落库；进系统级审计（密码不进摘要）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MailSettingsInput"
+      responses:
+        "200":
+          description: 已保存
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MailSettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /system/mail-settings/test:
+    post:
+      operationId: sendTestMail
+      tags: [system]
+      summary: 发送测试邮件（仅系统管理员，#212）：发到我绑定的邮箱或手填地址；只入 outbox，立即返回
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TestMailRequest"
+      responses:
+        "202":
+          description: 已入队
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MailOutboxItem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /system/mail-outbox:
+    get:
+      operationId: listMailOutbox
+      tags: [system]
+      summary: 最近发送记录（最近 50 条，仅系统管理员，#212）
+      responses:
+        "200":
+          description: 发送记录，最新在前
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MailOutboxItem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
   /system/settings:
     get:
       operationId: getSystemSettings
@@ -2859,6 +2943,104 @@ components:
           type: string
           maxLength: 254
           description: http:// 或 https:// 开头的完整地址，或空
+    MailSettings:
+      type: object
+      description: 邮件通道配置（#212）；密码永不回显
+      required: [host, port, encryption, username, fromName, fromAddress, passwordSet, configured, updatedAt]
+      properties:
+        host:
+          type: string
+        port:
+          type: integer
+        encryption:
+          type: string
+          enum: [none, starttls, ssl]
+        username:
+          type: string
+        fromName:
+          type: string
+        fromAddress:
+          type: string
+        passwordSet:
+          type: boolean
+          description: 已设置密码（密文落库）
+        configured:
+          type: boolean
+          description: 主机与发件人地址齐全即视为已配置；找回密码入口据此显示（#214）
+        updatedAt:
+          type: string
+          format: date-time
+    MailSettingsInput:
+      type: object
+      required: [host, port, encryption, username, fromName, fromAddress]
+      properties:
+        host:
+          type: string
+          maxLength: 253
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        encryption:
+          type: string
+          enum: [none, starttls, ssl]
+        username:
+          type: string
+          maxLength: 254
+        password:
+          type: string
+          format: password
+          description: 留空或省略表示保持原值
+        fromName:
+          type: string
+          maxLength: 50
+        fromAddress:
+          type: string
+          maxLength: 254
+    TestMailRequest:
+      type: object
+      required: [target]
+      properties:
+        target:
+          type: string
+          enum: [me, custom]
+          description: me＝发到我绑定的邮箱；custom＝发到 address
+        address:
+          type: string
+    MailOutboxItem:
+      type: object
+      description: outbox 里的一封邮件（#212）
+      required: [id, toAddress, subject, event, eventLabel, status, statusLabel, attempts, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        toAddress:
+          type: string
+        subject:
+          type: string
+        event:
+          type: string
+          description: 事件标识（test／password_reset／站内通知 kind）
+        eventLabel:
+          type: string
+          description: 事件显示文案（派生字段）
+        status:
+          type: string
+          enum: [pending, sent, failed]
+        statusLabel:
+          type: string
+        attempts:
+          type: integer
+          description: 已尝试次数
+        lastError:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        sentAt:
+          type: string
+          format: date-time
     CreateSystemUserRequest:
       type: object
       required: [username, displayName, email, password]
