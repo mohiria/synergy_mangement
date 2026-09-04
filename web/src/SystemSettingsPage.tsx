@@ -13,6 +13,7 @@ type CurrentUser = components["schemas"]["CurrentUser"];
 type SystemUser = components["schemas"]["SystemUser"];
 type CreateSystemUserRequest = components["schemas"]["CreateSystemUserRequest"];
 type UpdateUserProfileRequest = components["schemas"]["UpdateUserProfileRequest"];
+type AuditLog = components["schemas"]["AuditLog"];
 
 // 系统设置四节（模块 PRD §7）。本版只落「用户管理」只读列表（#201），其余节由后续票填入：
 // 基本信息 #210／#211，通知设置 #212／#213，操作审计 #206。
@@ -20,7 +21,7 @@ const SECTIONS = [
   { key: "basic", label: "基本信息", hint: "系统名称、副标题、登录页提示语、访问地址与 logo（#210、#211）" },
   { key: "notifications", label: "通知设置", hint: "邮件通道、测试邮件与事件开关（#212、#213）" },
   { key: "users", label: "用户管理", hint: "" },
-  { key: "audit", label: "操作审计", hint: "系统级写操作的审计记录（#206）" },
+  { key: "audit", label: "操作审计", hint: "" },
 ] as const;
 type SectionKey = (typeof SECTIONS)[number]["key"];
 
@@ -81,6 +82,8 @@ export default function SystemSettingsPage({ user, onLogout }: { user: CurrentUs
         <section className="settings-panel">
           {section === "users" ? (
             <UsersSection me={user} />
+          ) : section === "audit" ? (
+            <AuditSection />
           ) : (
             <PlaceholderSection section={SECTIONS.find((s) => s.key === section)!} />
           )}
@@ -437,6 +440,66 @@ function EditProfileModal({
         </Form.Item>
       </Form>
     </Modal>
+  );
+}
+
+// AuditSection 系统级操作审计（#206）：只列无项目作用域的记录，列与项目设置审计页一致。
+function AuditSection() {
+  const [logs, setLogs] = useState<AuditLog[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    client.GET("/system/audit-logs").then(({ data, error: err }) => {
+      if (data) setLogs(data);
+      else setError(err?.message ?? "加载失败");
+    });
+  }, []);
+  return (
+    <>
+      <div className="settings-panel-head">
+        <div>
+          <h2>操作审计</h2>
+          <span className="muted">
+            用户管理与系统设置的每一次成功写操作都在这里留痕：谁、什么时候、对哪个对象做了什么。
+            由后端写路径统一记录，后续系统设置写接口自动覆盖；个人中心的本人改密、改资料不记。
+          </span>
+        </div>
+      </div>
+      {error && (
+        <div className="settings-panel-body">
+          <Alert type="error" message={error} />
+        </div>
+      )}
+      {logs === null && !error ? (
+        <div className="settings-panel-body">
+          <Spin />
+        </div>
+      ) : logs && logs.length === 0 ? (
+        <div className="empty">暂无操作记录</div>
+      ) : logs ? (
+        <div className="data-table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th style={{ width: 170 }}>时间</th>
+                <th style={{ width: 110 }}>操作人</th>
+                <th>动作</th>
+                <th style={{ width: 160 }}>对象</th>
+              </tr>
+            </thead>
+            <tbody>
+              {logs.map((a) => (
+                <tr key={a.id}>
+                  <td className="mono">{new Date(a.occurredAt).toLocaleString("zh-CN")}</td>
+                  <td title={a.actorName ?? "系统"}>{a.actorName ?? "系统"}</td>
+                  <td title={a.action}>{a.action}</td>
+                  <td className="muted">{a.objectType ? `${a.objectType}${a.objectId ? ` #${a.objectId}` : ""}` : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+    </>
   );
 }
 

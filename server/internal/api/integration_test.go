@@ -7086,3 +7086,83 @@ func TestSystemUserResetProfileAdmin(t *testing.T) {
 	resp.Body.Close()
 }
 
+// #206：建号、停用、重置密码、设撤管理员各产生一条系统级审计（操作者为当前管理员、无项目作用域、
+// 密码不进摘要）；操作审计只对系统管理员可见；项目域审计行为不变（既有用例覆盖）。
+func TestSystemAuditLogs(t *testing.T) {
+	q, pool := setupDB(t)
+	seedUser(t, q, "alice", "张三", "alice-pass")
+	rootUser := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(context.Background(), store.SetUserSystemAdminParams{ID: rootUser.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	login := func(username, password string) *http.Client {
+		t.Helper()
+		c := newClient(t)
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+		return c
+	}
+	alice := login("alice", "alice-pass")
+	root := login("root", "root-pass1")
+
+	resp := doJSON(t, alice, http.MethodGet, base+"/system/audit-logs", nil)
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+
+	// 四种系统级写操作。
+	resp = doJSON(t, root, http.MethodPost, base+"/system/users", api.CreateSystemUserRequest{Username: "carol", DisplayName: "王五", Email: "carol@example.com", Password: "init-pass-1"})
+	wantStatus(t, resp, http.StatusCreated)
+	carol := decodeBody[api.SystemUser](t, resp)
+	carolURL := fmt.Sprintf("%s/system/users/%d", base, carol.Id)
+	for _, tc := range []struct {
+		method, path string
+		body         any
+	}{
+		{http.MethodPost, carolURL + "/disable", nil},
+		{http.MethodPost, carolURL + "/reset-password", api.ResetPasswordRequest{Password: "reset-pass-1"}},
+		{http.MethodPut, carolURL + "/system-admin", api.SetSystemAdminRequest{IsSystemAdmin: true}},
+	} {
+		resp := doJSON(t, root, tc.method, tc.path, tc.body)
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	// 失败的写操作不留痕：撤销自己 422。
+	resp = doJSON(t, root, http.MethodPut, fmt.Sprintf("%s/system/users/%d/system-admin", base, rootUser.ID), api.SetSystemAdminRequest{IsSystemAdmin: false})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+
+	logs := decodeBody[[]api.AuditLog](t, doJSONAgain(t, root, http.MethodGet, base+"/system/audit-logs"))
+	if len(logs) != 4 {
+		t.Fatalf("应有 4 条系统级审计，得到 %d: %+v", len(logs), logs)
+	}
+	wantActions := []string{"设／撤系统管理员", "重置用户密码", "停用用户", "新建用户"}
+	for i, a := range logs {
+		if a.Action != wantActions[i] {
+			t.Fatalf("第 %d 条动作 = %q, want %q", i, a.Action, wantActions[i])
+		}
+		if a.ActorName == nil || *a.ActorName != "系统管理员" {
+			t.Fatalf("操作者应为当前管理员: %+v", a)
+		}
+		if strings.Contains(a.Action, "pass") || strings.Contains(a.Route, "init-pass") {
+			t.Fatalf("密码不应进入审计: %+v", a)
+		}
+	}
+	if logs[3].ObjectType == nil || *logs[3].ObjectType != "users" || logs[0].ObjectId == nil || *logs[0].ObjectId != carol.Id {
+		t.Fatalf("对象应指向用户: %+v %+v", logs[3], logs[0])
+	}
+	// 系统级记录不混入任何项目的审计（项目域查询按 project_id 过滤，直接查库确认作用域为空）。
+	rows, err := q.ListSystemAuditLogs(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for _, r := range rows {
+		if r.ProjectID.Valid {
+			t.Fatalf("系统级审计的 project_id 应为空: %+v", r)
+		}
+	}
+}
+

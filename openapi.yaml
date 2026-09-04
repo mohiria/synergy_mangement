@@ -2231,6 +2231,33 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /system/audit-logs:
+    get:
+      operationId: listSystemAuditLogs
+      tags: [system]
+      summary: 系统级操作审计（仅系统管理员，#206）：用户管理与系统设置的写操作由写路径装饰器自动记录，project 作用域为空
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 100
+      responses:
+        "200":
+          description: 审计记录，最新在前
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditLog"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
   /system/users/{userId}/reset-password:
     parameters:
       - name: userId

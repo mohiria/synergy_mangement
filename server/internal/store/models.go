@@ -10,7 +10,7 @@ import (
 
 type AuditLog struct {
 	ID         int64
-	ProjectID  int64
+	ProjectID  pgtype.Int8
 	ActorID    pgtype.Int8
 	Action     string
 	Method     string

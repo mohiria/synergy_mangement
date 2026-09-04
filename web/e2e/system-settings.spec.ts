@@ -143,3 +143,23 @@ test("重置密码后新密码登录被引导改密；设撤系统管理员且�
   await expect(page.getByRole("heading", { name: "首次登录请设置新密码" })).toBeVisible();
 });
 
+// #206：系统设置「操作审计」列出系统级写操作（建号等），操作者为当前管理员（AC-76）。
+test("操作审计节列出系统级写操作", async ({ page }) => {
+  await login(page);
+  await page.goto("/system/users");
+  await page.getByRole("button", { name: "新建用户" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("用户名").fill("e2e_audited");
+  await dialog.getByLabel("显示名").fill("审计样本");
+  await dialog.getByLabel("邮箱").fill("e2e_audited@example.com");
+  await dialog.getByLabel("初始密码").fill("init-pass-1");
+  await dialog.getByRole("button", { name: "创 建" }).click();
+  await expect(page.locator(".settings-panel tr", { hasText: "e2e_audited" })).toBeVisible();
+
+  await page.locator(".settings-nav button", { hasText: "操作审计" }).click();
+  await expect(page).toHaveURL(/\/system\/audit$/);
+  const first = page.locator(".settings-panel tbody tr").first();
+  await expect(first).toContainText("新建用户");
+  await expect(first).toContainText(DEMO.admin.displayName);
+});
+

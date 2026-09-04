@@ -264,3 +264,31 @@ func (s *Server) CreateSystemUser(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusCreated, toSystemUser(u))
 }
+
+// ListSystemAuditLogs 系统级操作审计（#206）：只列 project 作用域为空的记录，列与项目审计一致。
+func (s *Server) ListSystemAuditLogs(w http.ResponseWriter, r *http.Request, params ListSystemAuditLogsParams) {
+	if !requireSystemAdmin(w, r) {
+		return
+	}
+	limit := int32(100)
+	if params.Limit != nil {
+		limit = int32(*params.Limit)
+	}
+	rows, err := s.q.ListSystemAuditLogs(r.Context(), limit)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	out := make([]AuditLog, 0, len(rows))
+	for _, a := range rows {
+		item := AuditLog{
+			Id: a.ID, Action: a.Action, Method: a.Method, Route: a.Route,
+			ObjectType: optString(a.ObjectType), ActorName: fromPgText(a.ActorName), OccurredAt: a.CreatedAt.Time,
+		}
+		if a.ObjectID.Valid {
+			item.ObjectId = &a.ObjectID.Int64
+		}
+		out = append(out, item)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
