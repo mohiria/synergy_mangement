@@ -1286,6 +1286,10 @@ export interface components {
             /** @description 面向用户的错误说明 */
             message: string;
         };
+        RateLimitedError: components["schemas"]["Error"] & {
+            /** @description 距可再次尝试的剩余秒数（向上取整）；前端据此倒计时（#209） */
+            retryAfterSeconds: number;
+        };
         ChangePasswordRequest: {
             /**
              * Format: password
@@ -2621,13 +2625,13 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description 登录失败次数过多，暂时限速 */
+        /** @description 登录失败次数过多，暂时限速；带剩余等待秒数（#209） */
         TooManyRequests: {
             headers: {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": components["schemas"]["Error"];
+                "application/json": components["schemas"]["RateLimitedError"];
             };
         };
         /** @description 请求内容未通过校验 */

@@ -2480,11 +2480,11 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
     TooManyRequests:
-      description: 登录失败次数过多，暂时限速
+      description: 登录失败次数过多，暂时限速；带剩余等待秒数（#209）
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/Error"
+            $ref: "#/components/schemas/RateLimitedError"
     ValidationError:
       description: 请求内容未通过校验
       content:
@@ -2533,6 +2533,15 @@ components:
         message:
           type: string
           description: 面向用户的错误说明
+    RateLimitedError:
+      allOf:
+        - $ref: "#/components/schemas/Error"
+        - type: object
+          required: [retryAfterSeconds]
+          properties:
+            retryAfterSeconds:
+              type: integer
+              description: 距可再次尝试的剩余秒数（向上取整）；前端据此倒计时（#209）
     ChangePasswordRequest:
       type: object
       required: [newPassword]

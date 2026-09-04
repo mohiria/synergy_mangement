@@ -253,3 +253,34 @@ func TestSessionViews(t *testing.T) {
 	}
 }
 
+// #209：被限速时告知剩余等待秒数——锁定窗口减去距上次失败的时长，向上取整到秒；
+// 未被限速为 0。
+func TestLoginThrottleRetryAfter(t *testing.T) {
+	th := NewLoginThrottle()
+	base := time.Date(2026, 9, 4, 10, 0, 0, 0, time.UTC)
+	if got := th.RetryAfter("alice", "1.1.1.1", base); got != 0 {
+		t.Fatalf("无失败记录应为 0，得到 %v", got)
+	}
+	for i := 0; i < MaxLoginFailures; i++ {
+		th.RecordFailure("alice", "1.1.1.1", base.Add(time.Duration(i)*time.Second))
+	}
+	last := base.Add(time.Duration(MaxLoginFailures-1) * time.Second)
+	if got := th.RetryAfter("alice", "1.1.1.1", last.Add(10*time.Second)); got != LoginLockWindow-10*time.Second {
+		t.Fatalf("剩余等待 = %v, want %v", got, LoginLockWindow-10*time.Second)
+	}
+	// 未达上限不限速，剩余为 0。
+	th2 := NewLoginThrottle()
+	th2.RecordFailure("bob", "1.1.1.1", base)
+	if got := th2.RetryAfter("bob", "1.1.1.1", base.Add(time.Second)); got != 0 {
+		t.Fatalf("未达上限应为 0，得到 %v", got)
+	}
+	// 锁定窗口过后为 0。
+	if got := th.RetryAfter("alice", "1.1.1.1", last.Add(LoginLockWindow+time.Second)); got != 0 {
+		t.Fatalf("窗口过后应为 0，得到 %v", got)
+	}
+	// 亚秒向上取整。
+	if got := th.RetryAfter("alice", "1.1.1.1", last.Add(LoginLockWindow-1500*time.Millisecond)); got != 2*time.Second {
+		t.Fatalf("应向上取整到 2s，得到 %v", got)
+	}
+}
+

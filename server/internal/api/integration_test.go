@@ -4069,9 +4069,19 @@ func TestLoginRateLimit(t *testing.T) {
 	}
 	resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: "nobody", Password: "x"})
 	wantStatus(t, resp, http.StatusTooManyRequests)
-	e := decodeBody[api.Error](t, resp)
+	if ra := resp.Header.Get("Retry-After"); ra == "" {
+		t.Fatal("429 应带 Retry-After 头")
+	}
+	e := decodeBody[api.RateLimitedError](t, resp)
 	if e.Code != "rate_limited" {
 		t.Fatalf("code = %q, want rate_limited", e.Code)
+	}
+	// #209：剩余等待秒数在 (0, 锁定窗口] 内，文案含秒数。
+	if e.RetryAfterSeconds <= 0 || e.RetryAfterSeconds > int(domain.LoginLockWindow/time.Second) {
+		t.Fatalf("retryAfterSeconds = %d 超出范围", e.RetryAfterSeconds)
+	}
+	if !strings.Contains(e.Message, fmt.Sprintf("%d 秒", e.RetryAfterSeconds)) {
+		t.Fatalf("文案应含剩余秒数: %q", e.Message)
 	}
 }
 

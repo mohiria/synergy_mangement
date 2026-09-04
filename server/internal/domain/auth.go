@@ -70,6 +70,25 @@ func (t *LoginThrottle) Allow(username, ip string, now time.Time) bool {
 	return s.failures < MaxLoginFailures
 }
 
+// RetryAfter 被限速时距可再次尝试的剩余时长（#209）：锁定窗口减去距上次失败的时长，向上取整到秒；
+// 未被限速（无记录、未达上限或窗口已过）为 0。
+func (t *LoginThrottle) RetryAfter(username, ip string, now time.Time) time.Duration {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	s, ok := t.state[throttleKey{username: username, ip: ip}]
+	if !ok || s.failures < MaxLoginFailures {
+		return 0
+	}
+	remaining := LoginLockWindow - now.Sub(s.lastFailure)
+	if remaining <= 0 {
+		return 0
+	}
+	if rem := remaining % time.Second; rem != 0 {
+		remaining += time.Second - rem
+	}
+	return remaining
+}
+
 // RecordFailure 记录一次登录失败。
 func (t *LoginThrottle) RecordFailure(username, ip string, now time.Time) {
 	t.mu.Lock()

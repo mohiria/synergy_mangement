@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -202,7 +203,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	now := s.now()
 	ip := clientIP(r)
 	if !s.throttle.Allow(req.Username, ip, now) {
-		writeJSON(w, http.StatusTooManyRequests, Error{Code: "rate_limited", Message: "登录失败次数过多，请稍后再试"})
+		writeRateLimited(w, s.throttle.RetryAfter(req.Username, ip, now))
 		return
 	}
 	user, err := s.q.GetUserByUsername(r.Context(), req.Username)
@@ -1224,3 +1225,15 @@ func clientIP(r *http.Request) string {
 }
 
 func optBool(v bool) *bool { return &v }
+
+// writeRateLimited 429 带剩余等待秒数（#209）；找回密码请求（#214）复用。
+func writeRateLimited(w http.ResponseWriter, retryAfter time.Duration) {
+	secs := int(retryAfter / time.Second)
+	if retryAfter%time.Second != 0 {
+		secs++
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(secs))
+	writeJSON(w, http.StatusTooManyRequests, RateLimitedError{
+		Code: "rate_limited", Message: fmt.Sprintf("尝试过多，请 %d 秒后再试", secs), RetryAfterSeconds: secs,
+	})
+}
