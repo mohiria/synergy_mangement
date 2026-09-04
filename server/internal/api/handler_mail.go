@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"synergy/server/internal/domain"
@@ -268,8 +269,172 @@ func toMailSettings(ms store.MailSetting) MailSettings {
 		FromName: ms.FromName, FromAddress: ms.FromAddress,
 		PasswordSet: strings.TrimSpace(ms.PasswordEnc) != "",
 		Configured:  domain.MailChannelConfigured(ms.Host, ms.FromAddress),
+		Notify:      toNotifySwitches(systemSwitches(ms), nil),
 		UpdatedAt:   ms.UpdatedAt.Time,
 	}
+}
+
+// systemSwitches 系统级开关（#213）。
+func systemSwitches(ms store.MailSetting) domain.MailSwitches {
+	return domain.MailSwitches{Enabled: ms.NotifyEnabled, Events: map[string]bool{
+		domain.NotifyDiscussionMention:    ms.NotifyDiscussionMention,
+		domain.NotifyDiscussionOwner:      ms.NotifyDiscussionOwner,
+		domain.NotifyTaskInvite:           ms.NotifyTaskInvite,
+		domain.NotifyUpstreamTaskAssigned: ms.NotifyUpstreamTaskAssigned,
+		domain.NotifyBlockerRemind:        ms.NotifyBlockerRemind,
+	}}
+}
+
+// userSwitches 个人偏好；无行即全开。
+func userSwitches(p store.UserMailPref, found bool) domain.MailSwitches {
+	if !found {
+		return domain.AllOn()
+	}
+	return domain.MailSwitches{Enabled: p.Enabled, Events: map[string]bool{
+		domain.NotifyDiscussionMention:    p.NotifyDiscussionMention,
+		domain.NotifyDiscussionOwner:      p.NotifyDiscussionOwner,
+		domain.NotifyTaskInvite:           p.NotifyTaskInvite,
+		domain.NotifyUpstreamTaskAssigned: p.NotifyUpstreamTaskAssigned,
+		domain.NotifyBlockerRemind:        p.NotifyBlockerRemind,
+	}}
+}
+
+// toNotifySwitches 转契约；system 非空时给每个事件附带系统级是否启用（个人页置灰用）。
+func toNotifySwitches(sw domain.MailSwitches, system *domain.MailSwitches) MailNotifySwitches {
+	out := MailNotifySwitches{Enabled: sw.Enabled, Events: make([]MailEventSwitch, 0, len(domain.MailNotifyKinds))}
+	for _, k := range domain.MailNotifyKinds {
+		on, ok := sw.Events[k]
+		item := MailEventSwitch{Kind: k, Label: domain.MailNotifyKindLabel(k), Enabled: !ok || on}
+		if system != nil {
+			se := system.Enabled && system.Events[k]
+			item.SystemEnabled = &se
+		}
+		out.Events = append(out.Events, item)
+	}
+	return out
+}
+
+func fromNotifySwitches(in MailNotifySwitches) domain.MailSwitches {
+	sw := domain.AllOn()
+	sw.Enabled = in.Enabled
+	for _, e := range in.Events {
+		if _, ok := sw.Events[e.Kind]; ok {
+			sw.Events[e.Kind] = e.Enabled
+		}
+	}
+	return sw
+}
+
+// UpdateMailNotify 系统级开关（仅系统管理员，#213）；进系统级审计。
+func (s *Server) UpdateMailNotify(w http.ResponseWriter, r *http.Request) {
+	if !requireSystemAdmin(w, r) {
+		return
+	}
+	var req MailNotifySwitches
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_request", Message: "请求内容无法解析"})
+		return
+	}
+	sw := fromNotifySwitches(req)
+	ms, err := s.q.UpdateMailNotifySwitches(r.Context(), store.UpdateMailNotifySwitchesParams{
+		NotifyEnabled: sw.Enabled, NotifyDiscussionMention: sw.Events[domain.NotifyDiscussionMention],
+		NotifyDiscussionOwner: sw.Events[domain.NotifyDiscussionOwner], NotifyTaskInvite: sw.Events[domain.NotifyTaskInvite],
+		NotifyUpstreamTaskAssigned: sw.Events[domain.NotifyUpstreamTaskAssigned], NotifyBlockerRemind: sw.Events[domain.NotifyBlockerRemind],
+	})
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toMailSettings(ms))
+}
+
+// GetMyMailPreferences 个人通知偏好（#213）：本人开关 + 系统级开关（置灰用）。
+func (s *Server) GetMyMailPreferences(w http.ResponseWriter, r *http.Request) {
+	prefs, ok := s.loadMailPreferences(w, r)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, prefs)
+}
+
+// UpdateMyMailPreferences 保存本人偏好（#213）；不进审计（/me 不在 /system 下）。
+func (s *Server) UpdateMyMailPreferences(w http.ResponseWriter, r *http.Request) {
+	var req MailNotifySwitches
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_request", Message: "请求内容无法解析"})
+		return
+	}
+	sw := fromNotifySwitches(req)
+	if _, err := s.q.UpsertUserMailPrefs(r.Context(), store.UpsertUserMailPrefsParams{
+		UserID: currentUser(r).ID, Enabled: sw.Enabled,
+		NotifyDiscussionMention: sw.Events[domain.NotifyDiscussionMention], NotifyDiscussionOwner: sw.Events[domain.NotifyDiscussionOwner],
+		NotifyTaskInvite: sw.Events[domain.NotifyTaskInvite], NotifyUpstreamTaskAssigned: sw.Events[domain.NotifyUpstreamTaskAssigned],
+		NotifyBlockerRemind: sw.Events[domain.NotifyBlockerRemind],
+	}); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	prefs, ok := s.loadMailPreferences(w, r)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, prefs)
+}
+
+func (s *Server) loadMailPreferences(w http.ResponseWriter, r *http.Request) (MailPreferences, bool) {
+	ms, err := s.q.GetMailSettings(r.Context())
+	if err != nil {
+		writeInternalError(w, r, err)
+		return MailPreferences{}, false
+	}
+	system := systemSwitches(ms)
+	row, err := s.q.GetUserMailPrefs(r.Context(), currentUser(r).ID)
+	found := err == nil
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		writeInternalError(w, r, err)
+		return MailPreferences{}, false
+	}
+	sw := toNotifySwitches(userSwitches(row, found), &system)
+	return MailPreferences{Enabled: sw.Enabled, Events: sw.Events, SystemEnabled: system.Enabled}, true
+}
+
+// notify 站内通知的唯一写入口（#213）：落通知，再按系统开关 × 个人偏好 × 停用状态决定是否同时入 outbox。
+// 邮件失败不影响通知；q 为当前事务的 Queries，通知与邮件同事务落库。
+func (s *Server) notify(ctx context.Context, q *store.Queries, params store.CreateNotificationParams) error {
+	if _, err := q.CreateNotification(ctx, params); err != nil {
+		return err
+	}
+	ms, err := q.GetMailSettings(ctx)
+	if err != nil {
+		log.Printf("notify mail: settings failed: %v", err)
+		return nil
+	}
+	if !domain.MailChannelConfigured(ms.Host, ms.FromAddress) {
+		return nil
+	}
+	user, err := q.GetUserByID(ctx, params.UserID)
+	if err != nil {
+		log.Printf("notify mail: user %d failed: %v", params.UserID, err)
+		return nil
+	}
+	row, perr := q.GetUserMailPrefs(ctx, params.UserID)
+	if !domain.ShouldMailNotification(params.Kind, systemSwitches(ms), userSwitches(row, perr == nil), user.DisabledAt.Valid) {
+		return nil
+	}
+	st, err := q.GetSystemSettings(ctx)
+	if err != nil {
+		log.Printf("notify mail: system settings failed: %v", err)
+		return nil
+	}
+	subject := "[" + st.SystemName + "] " + domain.MailNotifyKindLabel(params.Kind)
+	body := params.Content + "\n\n请登录系统查看"
+	if st.BaseUrl != "" {
+		body += "：" + st.BaseUrl
+	}
+	if _, err := q.EnqueueMail(ctx, store.EnqueueMailParams{ToAddress: user.Email, Subject: subject, Body: body, Event: params.Kind}); err != nil {
+		log.Printf("notify mail: enqueue failed: %v", err)
+	}
+	return nil
 }
 
 func fromPgTime(t pgtype.Timestamptz) *time.Time {

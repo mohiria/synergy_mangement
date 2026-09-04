@@ -101,7 +101,7 @@ func (q *Queries) EnqueueMail(ctx context.Context, arg EnqueueMailParams) (MailO
 }
 
 const getMailSettings = `-- name: GetMailSettings :one
-SELECT id, host, port, encryption, username, password_enc, from_name, from_address, updated_at FROM mail_settings WHERE id = 1
+SELECT id, host, port, encryption, username, password_enc, from_name, from_address, updated_at, notify_enabled, notify_discussion_mention, notify_discussion_owner, notify_task_invite, notify_upstream_task_assigned, notify_blocker_remind FROM mail_settings WHERE id = 1
 `
 
 // #212：单行邮件通道配置；password_enc 是密文，handler 永不回显。
@@ -117,6 +117,32 @@ func (q *Queries) GetMailSettings(ctx context.Context) (MailSetting, error) {
 		&i.PasswordEnc,
 		&i.FromName,
 		&i.FromAddress,
+		&i.UpdatedAt,
+		&i.NotifyEnabled,
+		&i.NotifyDiscussionMention,
+		&i.NotifyDiscussionOwner,
+		&i.NotifyTaskInvite,
+		&i.NotifyUpstreamTaskAssigned,
+		&i.NotifyBlockerRemind,
+	)
+	return i, err
+}
+
+const getUserMailPrefs = `-- name: GetUserMailPrefs :one
+SELECT user_id, enabled, notify_discussion_mention, notify_discussion_owner, notify_task_invite, notify_upstream_task_assigned, notify_blocker_remind, updated_at FROM user_mail_prefs WHERE user_id = $1
+`
+
+func (q *Queries) GetUserMailPrefs(ctx context.Context, userID int64) (UserMailPref, error) {
+	row := q.db.QueryRow(ctx, getUserMailPrefs, userID)
+	var i UserMailPref
+	err := row.Scan(
+		&i.UserID,
+		&i.Enabled,
+		&i.NotifyDiscussionMention,
+		&i.NotifyDiscussionOwner,
+		&i.NotifyTaskInvite,
+		&i.NotifyUpstreamTaskAssigned,
+		&i.NotifyBlockerRemind,
 		&i.UpdatedAt,
 	)
 	return i, err
@@ -217,11 +243,59 @@ func (q *Queries) SetMailPassword(ctx context.Context, passwordEnc string) error
 	return err
 }
 
+const updateMailNotifySwitches = `-- name: UpdateMailNotifySwitches :one
+UPDATE mail_settings
+SET notify_enabled = $1, notify_discussion_mention = $2, notify_discussion_owner = $3,
+    notify_task_invite = $4, notify_upstream_task_assigned = $5, notify_blocker_remind = $6, updated_at = now()
+WHERE id = 1
+RETURNING id, host, port, encryption, username, password_enc, from_name, from_address, updated_at, notify_enabled, notify_discussion_mention, notify_discussion_owner, notify_task_invite, notify_upstream_task_assigned, notify_blocker_remind
+`
+
+type UpdateMailNotifySwitchesParams struct {
+	NotifyEnabled              bool
+	NotifyDiscussionMention    bool
+	NotifyDiscussionOwner      bool
+	NotifyTaskInvite           bool
+	NotifyUpstreamTaskAssigned bool
+	NotifyBlockerRemind        bool
+}
+
+// #213：系统级总开关与五个事件开关。
+func (q *Queries) UpdateMailNotifySwitches(ctx context.Context, arg UpdateMailNotifySwitchesParams) (MailSetting, error) {
+	row := q.db.QueryRow(ctx, updateMailNotifySwitches,
+		arg.NotifyEnabled,
+		arg.NotifyDiscussionMention,
+		arg.NotifyDiscussionOwner,
+		arg.NotifyTaskInvite,
+		arg.NotifyUpstreamTaskAssigned,
+		arg.NotifyBlockerRemind,
+	)
+	var i MailSetting
+	err := row.Scan(
+		&i.ID,
+		&i.Host,
+		&i.Port,
+		&i.Encryption,
+		&i.Username,
+		&i.PasswordEnc,
+		&i.FromName,
+		&i.FromAddress,
+		&i.UpdatedAt,
+		&i.NotifyEnabled,
+		&i.NotifyDiscussionMention,
+		&i.NotifyDiscussionOwner,
+		&i.NotifyTaskInvite,
+		&i.NotifyUpstreamTaskAssigned,
+		&i.NotifyBlockerRemind,
+	)
+	return i, err
+}
+
 const updateMailSettings = `-- name: UpdateMailSettings :one
 UPDATE mail_settings
 SET host = $1, port = $2, encryption = $3, username = $4, from_name = $5, from_address = $6, updated_at = now()
 WHERE id = 1
-RETURNING id, host, port, encryption, username, password_enc, from_name, from_address, updated_at
+RETURNING id, host, port, encryption, username, password_enc, from_name, from_address, updated_at, notify_enabled, notify_discussion_mention, notify_discussion_owner, notify_task_invite, notify_upstream_task_assigned, notify_blocker_remind
 `
 
 type UpdateMailSettingsParams struct {
@@ -253,6 +327,61 @@ func (q *Queries) UpdateMailSettings(ctx context.Context, arg UpdateMailSettings
 		&i.PasswordEnc,
 		&i.FromName,
 		&i.FromAddress,
+		&i.UpdatedAt,
+		&i.NotifyEnabled,
+		&i.NotifyDiscussionMention,
+		&i.NotifyDiscussionOwner,
+		&i.NotifyTaskInvite,
+		&i.NotifyUpstreamTaskAssigned,
+		&i.NotifyBlockerRemind,
+	)
+	return i, err
+}
+
+const upsertUserMailPrefs = `-- name: UpsertUserMailPrefs :one
+INSERT INTO user_mail_prefs (user_id, enabled, notify_discussion_mention, notify_discussion_owner,
+    notify_task_invite, notify_upstream_task_assigned, notify_blocker_remind)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (user_id) DO UPDATE SET
+    enabled = EXCLUDED.enabled,
+    notify_discussion_mention = EXCLUDED.notify_discussion_mention,
+    notify_discussion_owner = EXCLUDED.notify_discussion_owner,
+    notify_task_invite = EXCLUDED.notify_task_invite,
+    notify_upstream_task_assigned = EXCLUDED.notify_upstream_task_assigned,
+    notify_blocker_remind = EXCLUDED.notify_blocker_remind,
+    updated_at = now()
+RETURNING user_id, enabled, notify_discussion_mention, notify_discussion_owner, notify_task_invite, notify_upstream_task_assigned, notify_blocker_remind, updated_at
+`
+
+type UpsertUserMailPrefsParams struct {
+	UserID                     int64
+	Enabled                    bool
+	NotifyDiscussionMention    bool
+	NotifyDiscussionOwner      bool
+	NotifyTaskInvite           bool
+	NotifyUpstreamTaskAssigned bool
+	NotifyBlockerRemind        bool
+}
+
+func (q *Queries) UpsertUserMailPrefs(ctx context.Context, arg UpsertUserMailPrefsParams) (UserMailPref, error) {
+	row := q.db.QueryRow(ctx, upsertUserMailPrefs,
+		arg.UserID,
+		arg.Enabled,
+		arg.NotifyDiscussionMention,
+		arg.NotifyDiscussionOwner,
+		arg.NotifyTaskInvite,
+		arg.NotifyUpstreamTaskAssigned,
+		arg.NotifyBlockerRemind,
+	)
+	var i UserMailPref
+	err := row.Scan(
+		&i.UserID,
+		&i.Enabled,
+		&i.NotifyDiscussionMention,
+		&i.NotifyDiscussionOwner,
+		&i.NotifyTaskInvite,
+		&i.NotifyUpstreamTaskAssigned,
+		&i.NotifyBlockerRemind,
 		&i.UpdatedAt,
 	)
 	return i, err

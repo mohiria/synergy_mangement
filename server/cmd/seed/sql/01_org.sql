@@ -22,8 +22,17 @@ TRUNCATE TABLE
     deliverable_files, deliverables,
     task_receipts, task_receivers, task_reviewers, task_invites,
     tasks, key_results, objectives,
-    project_members, projects, users
+    project_members, projects, users,
+    mail_outbox, user_mail_prefs
     RESTART IDENTITY CASCADE;
+
+-- #212／#213：系统级配置重置为默认（单行表不 TRUNCATE，避免丢行）。
+UPDATE system_settings SET system_name = DEFAULT, subtitle = DEFAULT, login_hint = DEFAULT, base_url = DEFAULT,
+    logo_key = DEFAULT, logo_content_type = DEFAULT, updated_at = now() WHERE id = 1;
+UPDATE mail_settings SET host = DEFAULT, port = DEFAULT, encryption = DEFAULT, username = DEFAULT, password_enc = DEFAULT,
+    from_name = DEFAULT, from_address = DEFAULT, notify_enabled = DEFAULT, notify_discussion_mention = DEFAULT,
+    notify_discussion_owner = DEFAULT, notify_task_invite = DEFAULT, notify_upstream_task_assigned = DEFAULT,
+    notify_blocker_remind = DEFAULT, updated_at = now() WHERE id = 1;
 
 -- ── 用户 ──────────────────────────────────────────────────────────────────────
 -- 密码统一取环境变量 SEED_PASSWORD（cmd/seed 在事务里 set_config 进来，bcrypt cost 10）。

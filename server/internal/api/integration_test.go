@@ -7579,3 +7579,121 @@ func TestMailChannel(t *testing.T) {
 	}
 }
 
+// #213：触发一次 @ 提及——系统开关与个人开关全开时 outbox 有一条；关闭任一开关时没有；
+// 站内通知照常产生；个人偏好接口带系统级置灰信息。
+func TestNotificationMailSync(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	rootUser := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(context.Background(), store.SetUserSystemAdminParams{ID: rootUser.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	login := func(username, password string) *http.Client {
+		t.Helper()
+		c := newClient(t)
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+		return c
+	}
+	alice := login("alice", "alice-pass")
+	bob := login("bob", "bob-pass")
+	root := login("root", "root-pass1")
+
+	// 项目、成员、任务（alice 负责），bob 为成员。
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "邮件同步", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	project := decodeBody[api.Project](t, resp)
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, project.Id), api.AddProjectMembersRequest{UserIds: []int64{bobUser.ID}, Role: api.Member})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, project.Id), api.CreateOkrBatchRequest{
+		Items: []api.CreateOkrBatchItem{{Title: strPtr("O1"), KeyResults: &[]api.CreateKeyResultInput{{Description: "KR1"}}}},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	krID := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/tasks", base, project.Id), api.CreateTaskBatchRequest{Items: []api.CreateTaskItem{{
+		KeyResultId: krID, Name: "同步任务", OwnerId: aliceUser.ID, StartDate: openapiDate(t, "2026-09-01"), EndDate: openapiDate(t, "2026-09-30"),
+	}}})
+	wantStatus(t, resp, http.StatusCreated)
+	taskID := decodeBody[[]api.Task](t, resp)[0].Id
+	discussURL := fmt.Sprintf("%s/projects/%d/tasks/%d/discussions", base, project.Id, taskID)
+	outboxCount := func() int {
+		n, err := q.CountMailOutboxByEvent(context.Background(), domain.NotifyDiscussionMention)
+		if err != nil {
+			t.Fatalf("count: %v", err)
+		}
+		return int(n)
+	}
+	mention := func() {
+		t.Helper()
+		resp := doJSON(t, alice, http.MethodPost, discussURL, api.CreateDiscussionRequest{Content: "请看一下 @李四", MentionUserIds: &[]int64{bobUser.ID}})
+		wantStatus(t, resp, http.StatusCreated)
+		resp.Body.Close()
+	}
+
+	// 通道未配置：只有站内通知，没有邮件。
+	mention()
+	if outboxCount() != 0 {
+		t.Fatal("通道未配置不应入 outbox")
+	}
+	// 配置通道后全开：一条邮件。
+	resp = doJSON(t, root, http.MethodPut, base+"/system/mail-settings", api.MailSettingsInput{Host: "smtp.example.com", Port: 25, Encryption: api.MailSettingsInputEncryptionNone, FromAddress: "bot@example.com"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	mention()
+	if outboxCount() != 1 {
+		t.Fatalf("全开时应有 1 条邮件，得到 %d", outboxCount())
+	}
+	// 系统事件关：不发。
+	off := api.MailNotifySwitches{Enabled: true, Events: []api.MailEventSwitch{{Kind: domain.NotifyDiscussionMention, Label: "", Enabled: false}}}
+	resp = doJSON(t, root, http.MethodPut, base+"/system/mail-notify", off)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	mention()
+	if outboxCount() != 1 {
+		t.Fatalf("系统事件关不应发邮件，得到 %d", outboxCount())
+	}
+	// 个人偏好接口：系统级已关的事件带 systemEnabled=false。
+	prefs := decodeBody[api.MailPreferences](t, doJSONAgain(t, bob, http.MethodGet, base+"/me/mail-preferences"))
+	for _, e := range prefs.Events {
+		if e.Kind == domain.NotifyDiscussionMention && (e.SystemEnabled == nil || *e.SystemEnabled) {
+			t.Fatalf("系统已关的事件应标 systemEnabled=false: %+v", e)
+		}
+	}
+	// 系统恢复全开，个人关该事件：不发；个人再开：发。
+	resp = doJSON(t, root, http.MethodPut, base+"/system/mail-notify", api.MailNotifySwitches{Enabled: true, Events: []api.MailEventSwitch{}})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodPut, base+"/me/mail-preferences", api.MailNotifySwitches{Enabled: true, Events: []api.MailEventSwitch{{Kind: domain.NotifyDiscussionMention, Enabled: false}}})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	mention()
+	if outboxCount() != 1 {
+		t.Fatalf("个人事件关不应发邮件，得到 %d", outboxCount())
+	}
+	resp = doJSON(t, bob, http.MethodPut, base+"/me/mail-preferences", api.MailNotifySwitches{Enabled: true, Events: []api.MailEventSwitch{}})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	mention()
+	if outboxCount() != 2 {
+		t.Fatalf("个人恢复后应发邮件，得到 %d", outboxCount())
+	}
+	// 停用收件人：不发。
+	resp = doJSON(t, root, http.MethodPost, fmt.Sprintf("%s/system/users/%d/disable", base, bobUser.ID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	mention()
+	if outboxCount() != 2 {
+		t.Fatalf("停用后不应发邮件，得到 %d", outboxCount())
+	}
+	// outbox 只有两条，收件人、事件与主题正确；站内通知照常产生由既有讨论用例覆盖。
+	if item := decodeBody[[]api.MailOutboxItem](t, doJSONAgain(t, root, http.MethodGet, base+"/system/mail-outbox")); len(item) != 2 || item[0].ToAddress != "bob@example.com" || item[0].EventLabel != "讨论区被 @" || !strings.Contains(item[0].Subject, "讨论区被 @") {
+		t.Fatalf("outbox 内容异常: %+v", item)
+	}
+}
+

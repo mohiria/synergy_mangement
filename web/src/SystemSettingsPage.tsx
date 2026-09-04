@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
-import { Alert, Button, Dropdown, Form, Input, InputNumber, Modal, Popconfirm, Radio, Select, Spin, Table, Upload, message } from "antd";
+import { Alert, Button, Dropdown, Form, Input, InputNumber, Modal, Popconfirm, Radio, Select, Spin, Switch, Table, Upload, message } from "antd";
 import type { MenuProps } from "antd";
 import Icon from "./icons";
 import dayjs from "dayjs";
@@ -19,6 +19,7 @@ type SystemSettingsInput = components["schemas"]["SystemSettingsInput"];
 type MailSettings = components["schemas"]["MailSettings"];
 type MailSettingsInput = components["schemas"]["MailSettingsInput"];
 type MailOutboxItem = components["schemas"]["MailOutboxItem"];
+type MailNotifySwitches = components["schemas"]["MailNotifySwitches"];
 
 // 系统设置四节（模块 PRD §7）。本版只落「用户管理」只读列表（#201），其余节由后续票填入：
 // 基本信息 #210／#211，通知设置 #212／#213，操作审计 #206。
@@ -652,6 +653,15 @@ function NotificationsSection({ me }: { me: CurrentUser }) {
   const [target, setTarget] = useState<"me" | "custom">("me");
   const [address, setAddress] = useState("");
   const [sending, setSending] = useState(false);
+  // #213：系统级总开关 + 五个事件开关；改一个就保存。
+  const saveNotify = async (next: MailNotifySwitches) => {
+    const res = await client.PUT("/system/mail-notify", { body: next });
+    if (res.data) {
+      setSettings(res.data);
+    } else {
+      message.error(res.error?.message ?? "保存失败");
+    }
+  };
   const loadOutbox = () => {
     client.GET("/system/mail-outbox").then(({ data }) => {
       if (data) setOutbox(data);
@@ -767,6 +777,36 @@ function NotificationsSection({ me }: { me: CurrentUser }) {
                   </Button>
                 </div>
               </div>
+            </div>
+
+            <h3 style={{ fontSize: 14, margin: "20px 0 8px" }}>邮件通知</h3>
+            <div data-testid="notify-switches" style={{ display: "grid", gap: 8, maxWidth: 560 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <Switch
+                  checked={settings.notify.enabled}
+                  onChange={(v) => saveNotify({ ...settings.notify, enabled: v })}
+                  aria-label="启用邮件通知"
+                />
+                <b>启用邮件通知</b>
+                <span className="muted" style={{ fontSize: 12 }}>站内通知产生时同步发邮件；找回密码邮件不受此控制</span>
+              </label>
+              {settings.notify.events.map((ev) => (
+                <label key={ev.kind} style={{ display: "flex", alignItems: "center", gap: 10, paddingLeft: 12 }}>
+                  <Switch
+                    size="small"
+                    checked={ev.enabled}
+                    disabled={!settings.notify.enabled}
+                    aria-label={ev.label}
+                    onChange={(v) =>
+                      saveNotify({
+                        ...settings.notify,
+                        events: settings.notify.events.map((x) => (x.kind === ev.kind ? { ...x, enabled: v } : x)),
+                      })
+                    }
+                  />
+                  <span>{ev.label}</span>
+                </label>
+              ))}
             </div>
 
             <h3 style={{ fontSize: 14, margin: "20px 0 8px" }}>最近发送记录</h3>

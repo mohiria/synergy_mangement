@@ -73,3 +73,28 @@ test("登录安全：两处登录、退出其他设备", async ({ page, browser 
   await other.close();
 });
 
+// #213：系统级关掉某事件后，个人通知偏好里该事件置灰并注明「系统未启用」；恢复后可切换（AC-83）。
+test("通知偏好：系统级已关的事件置灰", async ({ page }) => {
+  await login(page);
+  await page.goto("/system/notifications");
+  const sysSwitch = page.locator('[data-testid="notify-switches"]').getByRole("switch", { name: "任务创建邀请" });
+  await sysSwitch.click();
+  await expect(sysSwitch).toHaveAttribute("aria-checked", "false");
+
+  await page.goto("/me/notifications");
+  const row = page.locator('[data-testid="notify-prefs"] label', { hasText: "任务创建邀请" });
+  await expect(row.getByRole("switch")).toBeDisabled();
+  await expect(row).toContainText("系统未启用");
+  // 其他事件仍可切换并保存。
+  const mention = page.locator('[data-testid="notify-prefs"]').getByRole("switch", { name: "讨论区被 @" });
+  await mention.click();
+  await expect(mention).toHaveAttribute("aria-checked", "false");
+  await page.reload();
+  await expect(page.locator('[data-testid="notify-prefs"]').getByRole("switch", { name: "讨论区被 @" })).toHaveAttribute("aria-checked", "false");
+
+  // 恢复系统开关，避免影响其他用例。
+  await page.goto("/system/notifications");
+  await page.locator('[data-testid="notify-switches"]').getByRole("switch", { name: "任务创建邀请" }).click();
+  await expect(page.locator('[data-testid="notify-switches"]').getByRole("switch", { name: "任务创建邀请" })).toHaveAttribute("aria-checked", "true");
+});
+

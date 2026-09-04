@@ -41,3 +41,29 @@ UPDATE mail_outbox SET status = 'failed', attempts = attempts + 1, last_error = 
 
 -- name: CountMailOutboxByEvent :one
 SELECT count(*) FROM mail_outbox WHERE event = $1;
+
+-- name: UpdateMailNotifySwitches :one
+-- #213：系统级总开关与五个事件开关。
+UPDATE mail_settings
+SET notify_enabled = $1, notify_discussion_mention = $2, notify_discussion_owner = $3,
+    notify_task_invite = $4, notify_upstream_task_assigned = $5, notify_blocker_remind = $6, updated_at = now()
+WHERE id = 1
+RETURNING *;
+
+-- name: GetUserMailPrefs :one
+SELECT * FROM user_mail_prefs WHERE user_id = $1;
+
+-- name: UpsertUserMailPrefs :one
+INSERT INTO user_mail_prefs (user_id, enabled, notify_discussion_mention, notify_discussion_owner,
+    notify_task_invite, notify_upstream_task_assigned, notify_blocker_remind)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (user_id) DO UPDATE SET
+    enabled = EXCLUDED.enabled,
+    notify_discussion_mention = EXCLUDED.notify_discussion_mention,
+    notify_discussion_owner = EXCLUDED.notify_discussion_owner,
+    notify_task_invite = EXCLUDED.notify_task_invite,
+    notify_upstream_task_assigned = EXCLUDED.notify_upstream_task_assigned,
+    notify_blocker_remind = EXCLUDED.notify_blocker_remind,
+    updated_at = now()
+RETURNING *;
+

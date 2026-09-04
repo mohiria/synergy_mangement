@@ -91,6 +91,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/mail-notify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 通知设置 → 邮件通知开关（仅系统管理员，#213）：总开关 + 五个事件开关；找回密码邮件不受控制 */
+        put: operations["updateMailNotify"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me/mail-preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 个人中心 → 通知偏好（#213）：本人开关，附系统级开关供置灰 */
+        get: operations["getMyMailPreferences"];
+        /** 保存本人通知偏好（#213）；不进审计 */
+        put: operations["updateMyMailPreferences"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/system/mail-settings/test": {
         parameters: {
             query?: never;
@@ -1547,8 +1582,28 @@ export interface components {
             passwordSet: boolean;
             /** @description 主机与发件人地址齐全即视为已配置；找回密码入口据此显示（#214） */
             configured: boolean;
+            notify: components["schemas"]["MailNotifySwitches"];
             /** Format: date-time */
             updatedAt: string;
+        };
+        /** @description 邮件通知开关（#213）：总开关 + 五个事件开关，事件键与站内通知 kind 一致 */
+        MailNotifySwitches: {
+            enabled: boolean;
+            events: components["schemas"]["MailEventSwitch"][];
+        };
+        MailEventSwitch: {
+            /** @description discussion_mention／discussion_owner／task_invite／upstream_task_assigned／blocker_remind */
+            kind: string;
+            label: string;
+            enabled: boolean;
+            /** @description 个人偏好里附带：系统级已关的事件置灰不可用 */
+            systemEnabled?: boolean;
+        };
+        MailPreferences: {
+            enabled: boolean;
+            events: components["schemas"]["MailEventSwitch"][];
+            /** @description 系统级总开关 */
+            systemEnabled: boolean;
         };
         MailSettingsInput: {
             host: string;
@@ -3066,6 +3121,78 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             422: components["responses"]["ValidationError"];
+        };
+    };
+    updateMailNotify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailNotifySwitches"];
+            };
+        };
+        responses: {
+            /** @description 已保存 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getMyMailPreferences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 偏好 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailPreferences"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    updateMyMailPreferences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailNotifySwitches"];
+            };
+        };
+        responses: {
+            /** @description 已保存 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailPreferences"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
         };
     };
     sendTestMail: {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
-import { Alert, Button, Form, Input, Popconfirm, Table, message } from "antd";
+import { Alert, Button, Form, Input, Popconfirm, Switch, Table, message } from "antd";
 import dayjs from "dayjs";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
@@ -10,13 +10,15 @@ import PasswordInput from "./PasswordInput";
 type CurrentUser = components["schemas"]["CurrentUser"];
 type UpdateUserProfileRequest = components["schemas"]["UpdateUserProfileRequest"];
 type SessionInfo = components["schemas"]["SessionInfo"];
+type MailPreferences = components["schemas"]["MailPreferences"];
 
 // 个人中心（模块 PRD §6；#207）：/me，不挂项目，两套壳都能进；左侧分节导航复用项目设置的形态。
-// 基本信息、修改密码（#207）、登录安全（#208）；通知偏好 #213 后续填入。
+// 基本信息、修改密码（#207）、登录安全（#208）、通知偏好（#213）。
 const SECTIONS = [
   { key: "profile", label: "基本信息" },
   { key: "password", label: "修改密码" },
   { key: "security", label: "登录安全" },
+  { key: "notifications", label: "通知偏好" },
 ] as const;
 type SectionKey = (typeof SECTIONS)[number]["key"];
 
@@ -69,6 +71,8 @@ export default function MePage({
             <ProfileSection user={user} onUserChange={onUserChange} />
           ) : section === "security" ? (
             <SecuritySection user={user} />
+          ) : section === "notifications" ? (
+            <NotificationPrefsSection />
           ) : (
             <PasswordSection />
           )}
@@ -256,6 +260,71 @@ function SecuritySection({ user }: { user: CurrentUser }) {
             },
           ]}
         />
+      </div>
+    </>
+  );
+}
+
+// NotificationPrefsSection 通知偏好（#213）：本人总开关 + 五个事件开关，默认全开；
+// 系统级已关的事件置灰不可用并注明「系统未启用」。只影响是否同步邮件，不影响站内通知。
+function NotificationPrefsSection() {
+  const [prefs, setPrefs] = useState<MailPreferences | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    client.GET("/me/mail-preferences").then(({ data, error: err }) => {
+      if (data) setPrefs(data);
+      else setError(err?.message ?? "加载失败");
+    });
+  }, []);
+  const save = async (next: MailPreferences) => {
+    const res = await client.PUT("/me/mail-preferences", { body: { enabled: next.enabled, events: next.events } });
+    if (res.data) setPrefs(res.data);
+    else message.error(res.error?.message ?? "保存失败");
+  };
+  return (
+    <>
+      <div className="settings-panel-head">
+        <div>
+          <h2>通知偏好</h2>
+          <span className="muted">站内通知产生时是否同步发到我的邮箱；不影响站内通知本身。</span>
+        </div>
+      </div>
+      <div className="settings-panel-body">
+        {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
+        {prefs && (
+          <div data-testid="notify-prefs" style={{ display: "grid", gap: 8, maxWidth: 560 }}>
+            {!prefs.systemEnabled && <Alert type="info" showIcon message="系统未启用邮件通知，以下偏好暂不生效" />}
+            <label style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <Switch
+                checked={prefs.enabled}
+                disabled={!prefs.systemEnabled}
+                aria-label="邮件通知"
+                onChange={(v) => save({ ...prefs, enabled: v })}
+              />
+              <b>邮件通知</b>
+            </label>
+            {prefs.events.map((ev) => {
+              const systemOff = ev.systemEnabled === false;
+              return (
+                <label key={ev.kind} style={{ display: "flex", alignItems: "center", gap: 10, paddingLeft: 12 }}>
+                  <Switch
+                    size="small"
+                    checked={ev.enabled}
+                    disabled={systemOff || !prefs.enabled}
+                    aria-label={ev.label}
+                    onChange={(v) => save({ ...prefs, events: prefs.events.map((x) => (x.kind === ev.kind ? { ...x, enabled: v } : x)) })}
+                  />
+                  <span className={systemOff ? "muted" : undefined}>{ev.label}</span>
+                  {systemOff && (
+                    <span className="muted" style={{ fontSize: 12 }}>
+                      系统未启用
+                    </span>
+                  )}
+                </label>
+              );
+            })}
+          </div>
+        )}
       </div>
     </>
   );

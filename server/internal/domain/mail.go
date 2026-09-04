@@ -102,7 +102,8 @@ func MailEventLabel(event string) string {
 	if l, ok := mailEventLabels[event]; ok {
 		return l
 	}
-	return event
+	// 站内通知同步的邮件用通知事件文案（#213）。
+	return MailNotifyKindLabel(event)
 }
 
 var mailStatusLabels = map[string]string{

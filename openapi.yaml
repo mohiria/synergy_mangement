@@ -166,6 +166,63 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /system/mail-notify:
+    put:
+      operationId: updateMailNotify
+      tags: [system]
+      summary: 通知设置 → 邮件通知开关（仅系统管理员，#213）：总开关 + 五个事件开关；找回密码邮件不受控制
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MailNotifySwitches"
+      responses:
+        "200":
+          description: 已保存
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MailSettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /me/mail-preferences:
+    get:
+      operationId: getMyMailPreferences
+      tags: [auth]
+      summary: 个人中心 → 通知偏好（#213）：本人开关，附系统级开关供置灰
+      responses:
+        "200":
+          description: 偏好
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MailPreferences"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    put:
+      operationId: updateMyMailPreferences
+      tags: [auth]
+      summary: 保存本人通知偏好（#213）；不进审计
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MailNotifySwitches"
+      responses:
+        "200":
+          description: 已保存
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MailPreferences"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /system/mail-settings/test:
     post:
       operationId: sendTestMail
@@ -2946,7 +3003,7 @@ components:
     MailSettings:
       type: object
       description: 邮件通道配置（#212）；密码永不回显
-      required: [host, port, encryption, username, fromName, fromAddress, passwordSet, configured, updatedAt]
+      required: [host, port, encryption, username, fromName, fromAddress, passwordSet, configured, notify, updatedAt]
       properties:
         host:
           type: string
@@ -2967,9 +3024,49 @@ components:
         configured:
           type: boolean
           description: 主机与发件人地址齐全即视为已配置；找回密码入口据此显示（#214）
+        notify:
+          $ref: "#/components/schemas/MailNotifySwitches"
         updatedAt:
           type: string
           format: date-time
+    MailNotifySwitches:
+      type: object
+      description: 邮件通知开关（#213）：总开关 + 五个事件开关，事件键与站内通知 kind 一致
+      required: [enabled, events]
+      properties:
+        enabled:
+          type: boolean
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/MailEventSwitch"
+    MailEventSwitch:
+      type: object
+      required: [kind, label, enabled]
+      properties:
+        kind:
+          type: string
+          description: discussion_mention／discussion_owner／task_invite／upstream_task_assigned／blocker_remind
+        label:
+          type: string
+        enabled:
+          type: boolean
+        systemEnabled:
+          type: boolean
+          description: 个人偏好里附带：系统级已关的事件置灰不可用
+    MailPreferences:
+      type: object
+      required: [enabled, events, systemEnabled]
+      properties:
+        enabled:
+          type: boolean
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/MailEventSwitch"
+        systemEnabled:
+          type: boolean
+          description: 系统级总开关
     MailSettingsInput:
       type: object
       required: [host, port, encryption, username, fromName, fromAddress]

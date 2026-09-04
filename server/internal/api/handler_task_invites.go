@@ -102,7 +102,7 @@ func (s *Server) CreateTaskInvites(w http.ResponseWriter, r *http.Request, proje
 			writeInternalError(w, r, err)
 			return
 		}
-		if _, err := qtx.CreateNotification(r.Context(), store.CreateNotificationParams{
+		if err := s.notify(r.Context(), qtx, store.CreateNotificationParams{
 			UserID:    inviteeID,
 			Kind:      domain.NotifyTaskInvite,
 			Content:   inviteContent,

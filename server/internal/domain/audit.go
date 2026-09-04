@@ -78,6 +78,7 @@ var systemAuditActions = map[string]string{
 	"DELETE /system/logo":                        "删除系统 logo",
 	"PUT /system/mail-settings":                  "修改邮件通道",
 	"POST /system/mail-settings/test":            "发送测试邮件",
+	"PUT /system/mail-notify":                    "修改邮件通知开关",
 }
 
 // SystemAuditable 判定一次请求是否进系统级审计（#206）：/system 下的写请求才记。

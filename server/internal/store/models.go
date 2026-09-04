@@ -132,15 +132,21 @@ type MailOutbox struct {
 }
 
 type MailSetting struct {
-	ID          int16
-	Host        string
-	Port        int32
-	Encryption  string
-	Username    string
-	PasswordEnc string
-	FromName    string
-	FromAddress string
-	UpdatedAt   pgtype.Timestamptz
+	ID                         int16
+	Host                       string
+	Port                       int32
+	Encryption                 string
+	Username                   string
+	PasswordEnc                string
+	FromName                   string
+	FromAddress                string
+	UpdatedAt                  pgtype.Timestamptz
+	NotifyEnabled              bool
+	NotifyDiscussionMention    bool
+	NotifyDiscussionOwner      bool
+	NotifyTaskInvite           bool
+	NotifyUpstreamTaskAssigned bool
+	NotifyBlockerRemind        bool
 }
 
 type Notification struct {
@@ -314,4 +320,15 @@ type User struct {
 	MustChangePassword bool
 	DisabledAt         pgtype.Timestamptz
 	LastLoginAt        pgtype.Timestamptz
+}
+
+type UserMailPref struct {
+	UserID                     int64
+	Enabled                    bool
+	NotifyDiscussionMention    bool
+	NotifyDiscussionOwner      bool
+	NotifyTaskInvite           bool
+	NotifyUpstreamTaskAssigned bool
+	NotifyBlockerRemind        bool
+	UpdatedAt                  pgtype.Timestamptz
 }

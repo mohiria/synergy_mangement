@@ -237,7 +237,7 @@ test("邮件通道保存后密码不回显，测试邮件入队并出现在发�
   await page.locator('[data-testid="test-mail"]').getByText("发到其他邮箱").click();
   await page.getByPlaceholder("收件地址").fill("ops@example.com");
   await page.getByRole("button", { name: "发送测试邮件" }).click();
-  const row = page.locator(".settings-panel tbody tr", { hasText: "ops@example.com" });
+  const row = page.locator(".settings-panel tbody tr", { hasText: "ops@example.com" }).first();
   await expect(row).toContainText("测试邮件");
   await expect(row).toContainText(/待发送|失败/);
 });

@@ -96,7 +96,7 @@ func (s *Server) CreateReminder(w http.ResponseWriter, r *http.Request, projectI
 	}
 	content := domain.RemindContent(*target)
 	for _, ownerID := range recipients {
-		if _, err := s.q.CreateNotification(r.Context(), blockerRemindNotification(ownerID, projectId, target.TaskID, content)); err != nil {
+		if err := s.notify(r.Context(), s.q, blockerRemindNotification(ownerID, projectId, target.TaskID, content)); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
