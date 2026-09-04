@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Alert, Button, Form, Input, Modal, Popover, Select, Table } from "antd";
+import { Alert, Button, Form, Input, Modal, Select, Table } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
@@ -8,6 +8,7 @@ import DateRangeField from "./DateRangeField";
 import Icon from "./icons";
 import NotificationBell from "./NotificationBell";
 import { Brand } from "./Brand";
+import { IdentityMenu } from "./IdentityMenu";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
@@ -144,33 +145,7 @@ export default function ProjectsPage({
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <NotificationBell />
-          <Popover
-            trigger="click"
-            placement="bottomRight"
-            content={
-              <div className="identity-popover">
-                <div className="identity-popover-head">
-                  <span className="avatar">{user.displayName.slice(0, 1)}</span>
-                  <span>
-                    <b>{user.displayName}</b>
-                    <small>{user.username}</small>
-                  </span>
-                </div>
-                <Button block onClick={logout}>
-                  登出
-                </Button>
-              </div>
-            }
-          >
-            <button className="identity" type="button" aria-label="当前身份">
-              <span className="avatar">{user.displayName.slice(0, 1)}</span>
-              <span className="who">
-                <b>{user.displayName}</b>
-                <small>{user.username}</small>
-              </span>
-              <Icon name="down" size={15} />
-            </button>
-          </Popover>
+          <IdentityMenu user={user} onLogout={logout} />
           </div>
         </header>
         <main className="page">
