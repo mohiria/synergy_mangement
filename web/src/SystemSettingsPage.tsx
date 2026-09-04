@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
-import { Alert, Button, Form, Input, Modal, Spin, Table, message } from "antd";
+import { Alert, Button, Form, Input, Modal, Popconfirm, Spin, Table, message } from "antd";
 import dayjs from "dayjs";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
@@ -77,7 +77,7 @@ export default function SystemSettingsPage({ user, onLogout }: { user: CurrentUs
         </aside>
         <section className="settings-panel">
           {section === "users" ? (
-            <UsersSection />
+            <UsersSection me={user} />
           ) : (
             <PlaceholderSection section={SECTIONS.find((s) => s.key === section)!} />
           )}
@@ -107,7 +107,7 @@ function PlaceholderSection({ section }: { section: (typeof SECTIONS)[number] })
 
 const fmtTime = (v?: string) => (v ? dayjs(v).format("YYYY-MM-DD HH:mm") : "—");
 
-function UsersSection() {
+function UsersSection({ me }: { me: CurrentUser }) {
   const [users, setUsers] = useState<SystemUser[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -118,6 +118,17 @@ function UsersSection() {
     });
   };
   useEffect(load, []);
+  // #204：停用／启用。停用后不能登录、现有会话立即失效；不能停用自己（按钮禁用，服务端同样拒绝）。
+  const setDisabled = async (u: SystemUser, disabled: boolean) => {
+    const path = disabled ? "/system/users/{userId}/disable" : "/system/users/{userId}/enable";
+    const res = await client.POST(path, { params: { path: { userId: u.id } } });
+    if (res.data) {
+      message.success(disabled ? `已停用 ${u.displayName}` : `已启用 ${u.displayName}`);
+      load();
+    } else {
+      message.error(res.error?.message ?? "操作失败");
+    }
+  };
   return (
     <>
       <div className="settings-panel-head">
@@ -163,6 +174,29 @@ function UsersSection() {
               },
               { title: "创建时间", key: "createdAt", render: (_, u) => fmtTime(u.createdAt) },
               { title: "最近登录", key: "lastLoginAt", render: (_, u) => fmtTime(u.lastLoginAt) },
+              {
+                title: "操作",
+                key: "actions",
+                render: (_, u) =>
+                  u.disabled ? (
+                    <Button type="link" size="small" onClick={() => setDisabled(u, false)}>
+                      启用
+                    </Button>
+                  ) : (
+                    <Popconfirm
+                      title={`停用 ${u.displayName}？`}
+                      description="停用后不能登录，现有会话立即失效；历史记录照常显示其名字。"
+                      okText="停用"
+                      cancelText="取消"
+                      onConfirm={() => setDisabled(u, true)}
+                      disabled={u.id === me.id}
+                    >
+                      <Button type="link" size="small" danger disabled={u.id === me.id} title={u.id === me.id ? "不能停用自己" : undefined}>
+                        停用
+                      </Button>
+                    </Popconfirm>
+                  ),
+              },
             ]}
           />
         )}

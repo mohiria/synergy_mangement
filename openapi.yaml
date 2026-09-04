@@ -64,6 +64,12 @@ paths:
                 $ref: "#/components/schemas/CurrentUser"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: 账号已停用（#204，code account_disabled；仅用户名与密码都正确时给出）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
@@ -264,7 +270,13 @@ paths:
     get:
       operationId: listProjectMembers
       tags: [projects]
-      summary: 项目成员列表（含成员角色）
+      summary: 项目成员列表（含成员角色）；停用成员默认不返回（人员选择器口径，#204）
+      parameters:
+        - name: includeDisabled
+          in: query
+          description: 是否带回已停用成员（成员管理与历史记录显示用）；缺省 false
+          schema:
+            type: boolean
       responses:
         "200":
           description: 成员列表
@@ -2191,6 +2203,60 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /system/users/{userId}/disable:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    post:
+      operationId: disableSystemUser
+      tags: [system]
+      summary: 停用用户（仅系统管理员，#204）：不能登录、现有会话立即失效；不能停用自己
+      responses:
+        "200":
+          description: 已停用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /system/users/{userId}/enable:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    post:
+      operationId: enableSystemUser
+      tags: [system]
+      summary: 启用用户（仅系统管理员，#204）
+      responses:
+        "200":
+          description: 已启用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /users:
     get:
       operationId: listUsers
@@ -2386,6 +2452,9 @@ components:
           type: string
         email:
           type: string
+        disabled:
+          type: boolean
+          description: 账号已停用（#204）；/users 默认不返回停用用户，此处恒为 false
     ProjectStatus:
       type: string
       description: 项目状态（未开始／进行中／已完成／已归档），与自由文本“阶段”正交
@@ -2405,6 +2474,9 @@ components:
           type: string
         displayName:
           type: string
+        disabled:
+          type: boolean
+          description: 账号已停用（#204）；成员列表默认不返回停用成员，includeDisabled=true 时带回并由此标记
         role:
           $ref: "#/components/schemas/MemberRole"
         roleLabel:
@@ -2786,6 +2858,9 @@ components:
         ownerName:
           type: string
           description: 任务负责人姓名（派生字段）
+        ownerDisabled:
+          type: boolean
+          description: 负责人账号已停用（#204，派生字段）：历史记录照常显示名字并带「已停用」
         startDate:
           type: string
           format: date

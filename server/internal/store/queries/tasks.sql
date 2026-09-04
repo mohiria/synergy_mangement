@@ -39,7 +39,7 @@ FOR UPDATE OF t;
 
 -- name: ListProjectTasks :many
 -- 项目全部任务，含负责人／创建人姓名（派生动作标志与待行动人在 domain 判定；裁决 12 后 KR 无负责人）。
-SELECT t.*, u.display_name AS owner_name, cu.display_name AS creator_name,
+SELECT t.*, u.display_name AS owner_name, u.disabled_at AS owner_disabled_at, cu.display_name AS creator_name,
     k.code_seq AS kr_code_seq, o.code_seq AS objective_code_seq
 FROM tasks t
 JOIN key_results k ON k.id = t.key_result_id

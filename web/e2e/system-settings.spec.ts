@@ -77,3 +77,36 @@ test("管理员建号后新用户首次登录被引导改密，改完进入系�
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "项目列表" })).toBeVisible();
 });
+
+// #204：停用 → 正确密码登录得「已停用」提示 → 启用后可登录（AC-74）。林小雨不是系统管理员，
+// 只在 2 号项目里。
+test("停用后正确密码登录提示已停用，启用后恢复", async ({ page }) => {
+  await login(page);
+  await page.goto("/system/users");
+  const row = page.locator(".settings-panel tr", { hasText: DEMO.outsider.username });
+  // antd 只给默认尺寸的两字按钮插空格，这里用正则同时兼容「停用」「停 用」。
+  await row.getByRole("button", { name: /停\s*用/ }).click();
+  await page.locator(".ant-popconfirm").getByRole("button", { name: /停\s*用/ }).click(); // Popconfirm 确认
+  await expect(row).toContainText("已停用");
+  // 自己那一行的停用按钮禁用。
+  await expect(page.locator(".settings-panel tr", { hasText: DEMO.admin.username }).getByRole("button", { name: /停\s*用/ })).toBeDisabled();
+
+  await page.getByRole("button", { name: "当前身份" }).click();
+  await page.getByRole("button", { name: "登 出" }).click();
+  await page.getByPlaceholder("请输入用户名").fill(DEMO.outsider.username);
+  await page.getByPlaceholder("请输入密码").fill(DEMO.password);
+  await page.locator('button[type="submit"]').click();
+  await expect(page.getByText("账号已停用，请联系管理员")).toBeVisible();
+  // 错误密码仍是统一文案。
+  await page.getByPlaceholder("请输入密码").fill("definitely-wrong-1");
+  await page.locator('button[type="submit"]').click();
+  await expect(page.getByText("用户名或密码错误")).toBeVisible();
+
+  await login(page);
+  await page.goto("/system/users");
+  await row.getByRole("button", { name: /启\s*用/ }).click();
+  await expect(row).not.toContainText("已停用");
+  await page.getByRole("button", { name: "当前身份" }).click();
+  await page.getByRole("button", { name: "登 出" }).click();
+  await login(page, DEMO.outsider.username);
+});

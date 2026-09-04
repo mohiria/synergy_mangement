@@ -696,6 +696,7 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 			Name:               t.Name,
 			OwnerId:            t.OwnerID,
 			OwnerName:          t.OwnerName,
+			OwnerDisabled:      optBool(t.OwnerDisabledAt.Valid),
 			StartDate:          *fromPgDate(t.StartDate),
 			EndDate:            *fromPgDate(t.EndDate),
 			UpdatedAt:          t.UpdatedAt.Time,

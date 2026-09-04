@@ -273,4 +273,5 @@ type User struct {
 	IsSystemAdmin      bool
 	Email              string
 	MustChangePassword bool
+	DisabledAt         pgtype.Timestamptz
 }

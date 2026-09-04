@@ -5,8 +5,11 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"synergy/server/internal/domain"
 	"synergy/server/internal/store"
@@ -33,14 +36,67 @@ func (s *Server) ListSystemUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := make([]SystemUser, 0, len(rows))
 	for _, u := range rows {
-		resp = append(resp, SystemUser{
-			Id: u.ID, Username: u.Username, DisplayName: u.DisplayName, Email: u.Email,
-			IsSystemAdmin: u.IsSystemAdmin, CreatedAt: u.CreatedAt.Time,
-			MustChangePassword: &u.MustChangePassword,
-		})
+		resp = append(resp, toSystemUser(store.User{
+			ID: u.ID, Username: u.Username, DisplayName: u.DisplayName, Email: u.Email,
+			IsSystemAdmin: u.IsSystemAdmin, CreatedAt: u.CreatedAt,
+			MustChangePassword: u.MustChangePassword, DisabledAt: u.DisabledAt,
+		}))
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
+
+func toSystemUser(u store.User) SystemUser {
+	return SystemUser{
+		Id: u.ID, Username: u.Username, DisplayName: u.DisplayName, Email: u.Email,
+		IsSystemAdmin: u.IsSystemAdmin, CreatedAt: u.CreatedAt.Time,
+		MustChangePassword: optBool(u.MustChangePassword), Disabled: optBool(u.DisabledAt.Valid),
+	}
+}
+
+// DisableSystemUser 停用用户（#204）：不能停用自己；停用后其全部会话立即吊销。
+func (s *Server) DisableSystemUser(w http.ResponseWriter, r *http.Request, userId int64) {
+	if !requireSystemAdmin(w, r) {
+		return
+	}
+	if err := domain.CanDisableUser(currentUser(r).ID, userId); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "cannot_disable_self", Message: err.Error()})
+		return
+	}
+	s.setUserDisabled(w, r, userId, pgtype.Timestamptz{Time: s.now(), Valid: true})
+}
+
+// EnableSystemUser 启用用户（#204）。
+func (s *Server) EnableSystemUser(w http.ResponseWriter, r *http.Request, userId int64) {
+	if !requireSystemAdmin(w, r) {
+		return
+	}
+	s.setUserDisabled(w, r, userId, pgtype.Timestamptz{})
+}
+
+func (s *Server) setUserDisabled(w http.ResponseWriter, r *http.Request, userId int64, at pgtype.Timestamptz) {
+	if _, err := s.q.GetUserByID(r.Context(), userId); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, Error{Code: "not_found", Message: "用户不存在"})
+			return
+		}
+		writeInternalError(w, r, err)
+		return
+	}
+	u, err := s.q.SetUserDisabledAt(r.Context(), store.SetUserDisabledAtParams{ID: userId, DisabledAt: at})
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if at.Valid {
+		if _, err := s.q.DeleteUserSessions(r.Context(), userId); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, toSystemUser(u))
+}
+
+var _ = time.Now
 
 // CreateSystemUser 管理员建号（#203）：字段规则在 domain；初始密码由管理员设定，
 // 新用户带「须改密码」标记，首次登录强制改密。用户名／邮箱重复由唯一索引兜底映射为 409。
@@ -93,8 +149,5 @@ func (s *Server) CreateSystemUser(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, SystemUser{
-		Id: u.ID, Username: u.Username, DisplayName: u.DisplayName, Email: u.Email,
-		IsSystemAdmin: u.IsSystemAdmin, CreatedAt: u.CreatedAt.Time, MustChangePassword: &u.MustChangePassword,
-	})
+	writeJSON(w, http.StatusCreated, toSystemUser(u))
 }

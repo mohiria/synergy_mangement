@@ -7,6 +7,8 @@ package store
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const addProjectMember = `-- name: AddProjectMember :one
@@ -74,7 +76,7 @@ func (q *Queries) GetProjectMember(ctx context.Context, arg GetProjectMemberPara
 }
 
 const listProjectMembers = `-- name: ListProjectMembers :many
-SELECT m.user_id, m.role, u.username, u.display_name
+SELECT m.user_id, m.role, u.username, u.display_name, u.disabled_at
 FROM project_members m
 JOIN users u ON u.id = m.user_id
 WHERE m.project_id = $1
@@ -86,8 +88,11 @@ type ListProjectMembersRow struct {
 	Role        string
 	Username    string
 	DisplayName string
+	DisabledAt  pgtype.Timestamptz
 }
 
+// disabled_at：停用成员照常返回（历史记录与成员管理要显示名字并打「已停用」，#204）；
+// 对人员选择器的过滤在 handler 按 includeDisabled 参数做。
 func (q *Queries) ListProjectMembers(ctx context.Context, projectID int64) ([]ListProjectMembersRow, error) {
 	rows, err := q.db.Query(ctx, listProjectMembers, projectID)
 	if err != nil {
@@ -102,6 +107,7 @@ func (q *Queries) ListProjectMembers(ctx context.Context, projectID int64) ([]Li
 			&i.Role,
 			&i.Username,
 			&i.DisplayName,
+			&i.DisabledAt,
 		); err != nil {
 			return nil, err
 		}

@@ -154,7 +154,7 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** 项目成员列表（含成员角色） */
+        /** 项目成员列表（含成员角色）；停用成员默认不返回（人员选择器口径，#204） */
         get: operations["listProjectMembers"];
         put?: never;
         /**
@@ -1092,6 +1092,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/users/{userId}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 停用用户（仅系统管理员，#204）：不能登录、现有会话立即失效；不能停用自己 */
+        post: operations["disableSystemUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/users/{userId}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 启用用户（仅系统管理员，#204） */
+        post: operations["enableSystemUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/users": {
         parameters: {
             query?: never;
@@ -1190,6 +1228,8 @@ export interface components {
             username: string;
             displayName: string;
             email: string;
+            /** @description 账号已停用（#204）；/users 默认不返回停用用户，此处恒为 false */
+            disabled?: boolean;
         };
         /**
          * @description 项目状态（未开始／进行中／已完成／已归档），与自由文本“阶段”正交
@@ -1206,6 +1246,8 @@ export interface components {
             userId: number;
             username: string;
             displayName: string;
+            /** @description 账号已停用（#204）；成员列表默认不返回停用成员，includeDisabled=true 时带回并由此标记 */
+            disabled?: boolean;
             role: components["schemas"]["MemberRole"];
             /** @description 成员角色显示文案（派生字段；前端不按枚举拼文案） */
             roleLabel?: string;
@@ -1414,6 +1456,8 @@ export interface components {
             ownerId: number;
             /** @description 任务负责人姓名（派生字段） */
             ownerName: string;
+            /** @description 负责人账号已停用（#204，派生字段）：历史记录照常显示名字并带「已停用」 */
+            ownerDisabled?: boolean;
             /** Format: date */
             startDate: string;
             /** Format: date */
@@ -2521,6 +2565,15 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            /** @description 账号已停用（#204，code account_disabled；仅用户名与密码都正确时给出） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             413: components["responses"]["PayloadTooLarge"];
             429: components["responses"]["TooManyRequests"];
         };
@@ -2745,7 +2798,10 @@ export interface operations {
     };
     listProjectMembers: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 是否带回已停用成员（成员管理与历史记录显示用）；缺省 false */
+                includeDisabled?: boolean;
+            };
             header?: never;
             path: {
                 projectId: number;
@@ -4360,6 +4416,57 @@ export interface operations {
                 };
             };
             422: components["responses"]["ValidationError"];
+        };
+    };
+    disableSystemUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已停用 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemUser"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    enableSystemUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已启用 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemUser"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listUsers: {

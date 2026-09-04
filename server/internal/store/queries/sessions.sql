@@ -23,6 +23,10 @@ DELETE FROM sessions WHERE expires_at <= now();
 -- 本人改密同时清除「须改密码」标记（#203）；管理员重置走另一条查询（置真）。
 UPDATE users SET password_hash = $2, must_change_password = false WHERE id = $1;
 
+-- name: DeleteUserSessions :execrows
+-- #204：停用账号时吊销其全部会话。
+DELETE FROM sessions WHERE user_id = $1;
+
 -- name: DeleteOtherUserSessions :execrows
 -- 改密码后吊销本人其余会话（S3）：当前会话保留，免得改完自己被踢出去。
 DELETE FROM sessions WHERE user_id = $1 AND token <> $2;

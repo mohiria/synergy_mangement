@@ -14,7 +14,7 @@ import (
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (username, display_name, password_hash, is_system_admin, email, must_change_password)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password
+RETURNING id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password, disabled_at
 `
 
 type CreateUserParams struct {
@@ -46,12 +46,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.IsSystemAdmin,
 		&i.Email,
 		&i.MustChangePassword,
+		&i.DisabledAt,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password FROM users WHERE lower(email) = lower($1)
+SELECT id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password, disabled_at FROM users WHERE lower(email) = lower($1)
 `
 
 // #202：邮箱大小写不敏感（唯一索引建在 lower(email) 上）。
@@ -67,12 +68,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, lower string) (User, error
 		&i.IsSystemAdmin,
 		&i.Email,
 		&i.MustChangePassword,
+		&i.DisabledAt,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password FROM users WHERE id = $1
+SELECT id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password, disabled_at FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
@@ -87,12 +89,13 @@ func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
 		&i.IsSystemAdmin,
 		&i.Email,
 		&i.MustChangePassword,
+		&i.DisabledAt,
 	)
 	return i, err
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password FROM users WHERE username = $1
+SELECT id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password, disabled_at FROM users WHERE username = $1
 `
 
 func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User, error) {
@@ -107,12 +110,13 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 		&i.IsSystemAdmin,
 		&i.Email,
 		&i.MustChangePassword,
+		&i.DisabledAt,
 	)
 	return i, err
 }
 
 const listSystemUsers = `-- name: ListSystemUsers :many
-SELECT id, username, display_name, email, is_system_admin, must_change_password, created_at FROM users ORDER BY id
+SELECT id, username, display_name, email, is_system_admin, must_change_password, disabled_at, created_at FROM users ORDER BY id
 `
 
 type ListSystemUsersRow struct {
@@ -122,6 +126,7 @@ type ListSystemUsersRow struct {
 	Email              string
 	IsSystemAdmin      bool
 	MustChangePassword bool
+	DisabledAt         pgtype.Timestamptz
 	CreatedAt          pgtype.Timestamptz
 }
 
@@ -142,6 +147,7 @@ func (q *Queries) ListSystemUsers(ctx context.Context) ([]ListSystemUsersRow, er
 			&i.Email,
 			&i.IsSystemAdmin,
 			&i.MustChangePassword,
+			&i.DisabledAt,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -155,7 +161,7 @@ func (q *Queries) ListSystemUsers(ctx context.Context) ([]ListSystemUsersRow, er
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, username, display_name, email FROM users ORDER BY id
+SELECT id, username, display_name, email FROM users WHERE disabled_at IS NULL ORDER BY id
 `
 
 type ListUsersRow struct {
@@ -165,6 +171,7 @@ type ListUsersRow struct {
 	Email       string
 }
 
+// 人员选择与建立成员关系用：停用用户默认不出现（#204）。
 func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
 	rows, err := q.db.Query(ctx, listUsers)
 	if err != nil {
@@ -190,6 +197,34 @@ func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
 	return items, nil
 }
 
+const setUserDisabledAt = `-- name: SetUserDisabledAt :one
+UPDATE users SET disabled_at = $2 WHERE id = $1
+RETURNING id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password, disabled_at
+`
+
+type SetUserDisabledAtParams struct {
+	ID         int64
+	DisabledAt pgtype.Timestamptz
+}
+
+// #204：停用（传时间）／启用（传 NULL）。
+func (q *Queries) SetUserDisabledAt(ctx context.Context, arg SetUserDisabledAtParams) (User, error) {
+	row := q.db.QueryRow(ctx, setUserDisabledAt, arg.ID, arg.DisabledAt)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.DisplayName,
+		&i.PasswordHash,
+		&i.CreatedAt,
+		&i.IsSystemAdmin,
+		&i.Email,
+		&i.MustChangePassword,
+		&i.DisabledAt,
+	)
+	return i, err
+}
+
 const setUserMustChangePassword = `-- name: SetUserMustChangePassword :exec
 UPDATE users SET must_change_password = $2 WHERE id = $1
 `
@@ -207,7 +242,7 @@ func (q *Queries) SetUserMustChangePassword(ctx context.Context, arg SetUserMust
 
 const setUserSystemAdmin = `-- name: SetUserSystemAdmin :one
 UPDATE users SET is_system_admin = $2 WHERE id = $1
-RETURNING id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password
+RETURNING id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password, disabled_at
 `
 
 type SetUserSystemAdminParams struct {
@@ -228,6 +263,7 @@ func (q *Queries) SetUserSystemAdmin(ctx context.Context, arg SetUserSystemAdmin
 		&i.IsSystemAdmin,
 		&i.Email,
 		&i.MustChangePassword,
+		&i.DisabledAt,
 	)
 	return i, err
 }

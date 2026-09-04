@@ -82,3 +82,35 @@ func TestPasswordChangeRequiredAllows(t *testing.T) {
 		})
 	}
 }
+
+// #204：停用账号只在用户名与密码都正确时才提示「已停用」，其余情况维持统一的
+// 「用户名或密码错误」（公网部署防枚举）。
+func TestDecideLogin(t *testing.T) {
+	cases := []struct {
+		name                         string
+		found, passwordOK, disabled bool
+		want                         LoginOutcome
+	}{
+		{"账号不存在", false, false, false, LoginInvalidCredentials},
+		{"密码错误", true, false, false, LoginInvalidCredentials},
+		{"已停用且密码错误仍是统一文案", true, false, true, LoginInvalidCredentials},
+		{"正常登录", true, true, false, LoginOK},
+		{"已停用且密码正确才提示停用", true, true, true, LoginDisabled},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := DecideLogin(c.found, c.passwordOK, c.disabled); got != c.want {
+				t.Fatalf("DecideLogin(%v, %v, %v) = %v, want %v", c.found, c.passwordOK, c.disabled, got, c.want)
+			}
+		})
+	}
+}
+
+func TestCanDisableUser(t *testing.T) {
+	if err := CanDisableUser(1, 1); !errors.Is(err, ErrCannotDisableSelf) {
+		t.Fatalf("停用自己应被拒: %v", err)
+	}
+	if err := CanDisableUser(1, 2); err != nil {
+		t.Fatalf("停用他人应允许: %v", err)
+	}
+}

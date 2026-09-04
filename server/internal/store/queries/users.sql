@@ -5,11 +5,17 @@ SELECT * FROM users WHERE username = $1;
 SELECT * FROM users WHERE id = $1;
 
 -- name: ListUsers :many
-SELECT id, username, display_name, email FROM users ORDER BY id;
+-- 人员选择与建立成员关系用：停用用户默认不出现（#204）。
+SELECT id, username, display_name, email FROM users WHERE disabled_at IS NULL ORDER BY id;
 
 -- name: ListSystemUsers :many
 -- #201：系统设置 → 用户管理列表（仅系统管理员）。
-SELECT id, username, display_name, email, is_system_admin, must_change_password, created_at FROM users ORDER BY id;
+SELECT id, username, display_name, email, is_system_admin, must_change_password, disabled_at, created_at FROM users ORDER BY id;
+
+-- name: SetUserDisabledAt :one
+-- #204：停用（传时间）／启用（传 NULL）。
+UPDATE users SET disabled_at = $2 WHERE id = $1
+RETURNING *;
 
 -- name: GetUserByEmail :one
 -- #202：邮箱大小写不敏感（唯一索引建在 lower(email) 上）。

@@ -66,6 +66,19 @@ func (q *Queries) DeleteSession(ctx context.Context, token string) error {
 	return err
 }
 
+const deleteUserSessions = `-- name: DeleteUserSessions :execrows
+DELETE FROM sessions WHERE user_id = $1
+`
+
+// #204：停用账号时吊销其全部会话。
+func (q *Queries) DeleteUserSessions(ctx context.Context, userID int64) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteUserSessions, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getSession = `-- name: GetSession :one
 SELECT token, user_id, expires_at, created_at FROM sessions WHERE token = $1 AND expires_at > now()
 `
@@ -83,7 +96,7 @@ func (q *Queries) GetSession(ctx context.Context, token string) (Session, error)
 }
 
 const getSessionUser = `-- name: GetSessionUser :one
-SELECT u.id, u.username, u.display_name, u.password_hash, u.created_at, u.is_system_admin, u.email, u.must_change_password FROM sessions s
+SELECT u.id, u.username, u.display_name, u.password_hash, u.created_at, u.is_system_admin, u.email, u.must_change_password, u.disabled_at FROM sessions s
 JOIN users u ON u.id = s.user_id
 WHERE s.token = $1 AND s.expires_at > now()
 `
@@ -100,6 +113,7 @@ func (q *Queries) GetSessionUser(ctx context.Context, token string) (User, error
 		&i.IsSystemAdmin,
 		&i.Email,
 		&i.MustChangePassword,
+		&i.DisabledAt,
 	)
 	return i, err
 }

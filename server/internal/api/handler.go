@@ -157,6 +157,13 @@ func (s *Server) sessionMiddleware(next http.Handler) http.Handler {
 			writeUnauthorized(w)
 			return
 		}
+		// #204：停用后现有会话立即失效（停用时已批量吊销，这里兜底）。
+		if user.DisabledAt.Valid {
+			_ = s.q.DeleteSession(ctx, sess.Token)
+			clearSessionCookie(w)
+			writeUnauthorized(w)
+			return
+		}
 		if newExpiry, renew := domain.SessionRenewal(s.now(), sess.ExpiresAt.Time); renew {
 			err := s.q.UpdateSessionExpiry(ctx, store.UpdateSessionExpiryParams{
 				Token:     sess.Token,
@@ -199,9 +206,16 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user, err := s.q.GetUserByUsername(r.Context(), req.Username)
-	if err != nil || !domain.VerifyPassword(user.PasswordHash, req.Password) {
+	found := err == nil
+	passwordOK := found && domain.VerifyPassword(user.PasswordHash, req.Password)
+	// #204：停用提示只在用户名与密码都正确时给出，其余情况统一文案（防枚举）。
+	switch domain.DecideLogin(found, passwordOK, found && user.DisabledAt.Valid) {
+	case domain.LoginInvalidCredentials:
 		s.throttle.RecordFailure(req.Username, ip, now)
 		writeJSON(w, http.StatusUnauthorized, Error{Code: "invalid_credentials", Message: "用户名或密码错误"})
+		return
+	case domain.LoginDisabled:
+		writeJSON(w, http.StatusForbidden, Error{Code: "account_disabled", Message: domain.ErrAccountDisabled.Error()})
 		return
 	}
 	s.throttle.RecordSuccess(req.Username, ip)
@@ -415,7 +429,7 @@ func (s *Server) UpdateProject(w http.ResponseWriter, r *http.Request, projectId
 	writeJSON(w, http.StatusOK, toProject(p, owner.DisplayName, projectActor(currentUser(r), p.OwnerID, existing.MyRole, p.Visibility)))
 }
 
-func (s *Server) ListProjectMembers(w http.ResponseWriter, r *http.Request, projectId int64) {
+func (s *Server) ListProjectMembers(w http.ResponseWriter, r *http.Request, projectId int64, params ListProjectMembersParams) {
 	if _, ok := s.fetchProject(w, r, projectId); !ok {
 		return
 	}
@@ -424,14 +438,21 @@ func (s *Server) ListProjectMembers(w http.ResponseWriter, r *http.Request, proj
 		writeInternalError(w, r, err)
 		return
 	}
+	includeDisabled := params.IncludeDisabled != nil && *params.IncludeDisabled
 	resp := make([]ProjectMember, 0, len(rows))
 	for _, m := range rows {
+		// #204：停用成员默认不返回（人员选择器口径）；成员管理页显式带回并打标签。
+		if m.DisabledAt.Valid && !includeDisabled {
+			continue
+		}
+		disabled := m.DisabledAt.Valid
 		resp = append(resp, ProjectMember{
 			UserId:      m.UserID,
 			Username:    m.Username,
 			DisplayName: m.DisplayName,
 			Role:        MemberRole(m.Role),
 			RoleLabel:   optString(domain.MemberRoleLabel(m.Role)),
+			Disabled:    &disabled,
 		})
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -980,7 +1001,8 @@ func (s *Server) ListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := make([]UserSummary, 0, len(rows))
 	for _, u := range rows {
-		resp = append(resp, UserSummary{Id: u.ID, Username: u.Username, DisplayName: u.DisplayName, Email: u.Email})
+		notDisabled := false
+		resp = append(resp, UserSummary{Id: u.ID, Username: u.Username, DisplayName: u.DisplayName, Email: u.Email, Disabled: &notDisabled})
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -1192,3 +1214,5 @@ func clientIP(r *http.Request) string {
 	}
 	return r.RemoteAddr
 }
+
+func optBool(v bool) *bool { return &v }

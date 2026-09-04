@@ -6871,3 +6871,118 @@ func TestCreateSystemUserAndForcedPasswordChange(t *testing.T) {
 }
 
 func strPtr(v string) *string { return &v }
+
+// #204：停用／启用——停用后原会话 401；正确密码登录得「已停用」（403），错误密码仍是统一文案（401）；
+// /users 与成员列表默认不含停用用户，成员列表 includeDisabled 带回并标记；任务负责人带 ownerDisabled；
+// 不能停用自己；启用后可登录。
+func TestDisableAndEnableUser(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	rootUser := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(context.Background(), store.SetUserSystemAdminParams{ID: rootUser.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	loginRaw := func(username, password string) (*http.Client, *http.Response) {
+		t.Helper()
+		c := newClient(t)
+		return c, doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+	}
+	alice, resp := loginRaw("alice", "alice-pass")
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	bob, resp := loginRaw("bob", "bob-pass")
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	root, resp := loginRaw("root", "root-pass1")
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	// alice 建项目，bob 加为成员并负责一个任务。
+	resp = doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "停用演示", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	project := decodeBody[api.Project](t, resp)
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, project.Id), api.AddProjectMembersRequest{UserIds: []int64{bobUser.ID}, Role: api.Member})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, project.Id), api.CreateOkrBatchRequest{
+		Items: []api.CreateOkrBatchItem{{Title: strPtr("O1"), KeyResults: &[]api.CreateKeyResultInput{{Description: "KR1"}}}},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	krID := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/tasks", base, project.Id), api.CreateTaskBatchRequest{Items: []api.CreateTaskItem{{
+		KeyResultId: krID, Name: "李四的任务", OwnerId: bobUser.ID, StartDate: openapiDate(t, "2026-09-01"), EndDate: openapiDate(t, "2026-09-30"),
+	}}})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+
+	// 不能停用自己。
+	resp = doJSON(t, root, http.MethodPost, fmt.Sprintf("%s/system/users/%d/disable", base, rootUser.ID), nil)
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	// 非系统管理员 403。
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/system/users/%d/disable", base, bobUser.ID), nil)
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+
+	// 停用 bob。
+	resp = doJSON(t, root, http.MethodPost, fmt.Sprintf("%s/system/users/%d/disable", base, bobUser.ID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if u := decodeBody[api.SystemUser](t, resp); u.Disabled == nil || !*u.Disabled {
+		t.Fatalf("停用后应标记 disabled: %+v", u)
+	}
+	// 原会话 401。
+	resp = doJSON(t, bob, http.MethodGet, base+"/auth/me", nil)
+	wantStatus(t, resp, http.StatusUnauthorized)
+	resp.Body.Close()
+	// 正确密码：403 已停用；错误密码：401 统一文案。
+	_, resp = loginRaw("bob", "bob-pass")
+	wantStatus(t, resp, http.StatusForbidden)
+	if e := decodeBody[api.Error](t, resp); e.Code != "account_disabled" {
+		t.Fatalf("code = %q, want account_disabled", e.Code)
+	}
+	_, resp = loginRaw("bob", "wrong-pass")
+	wantStatus(t, resp, http.StatusUnauthorized)
+	if e := decodeBody[api.Error](t, resp); e.Code != "invalid_credentials" {
+		t.Fatalf("code = %q, want invalid_credentials", e.Code)
+	}
+	// /users 不含 bob；成员列表默认不含 bob，includeDisabled 带回并标记。
+	for _, u := range decodeBody[[]api.UserSummary](t, doJSONAgain(t, alice, http.MethodGet, base+"/users")) {
+		if u.Id == bobUser.ID {
+			t.Fatal("停用用户不应出现在 /users")
+		}
+	}
+	for _, m := range decodeBody[[]api.ProjectMember](t, doJSONAgain(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/members", base, project.Id))) {
+		if m.UserId == bobUser.ID {
+			t.Fatal("停用成员默认不应出现在成员列表")
+		}
+	}
+	found := false
+	for _, m := range decodeBody[[]api.ProjectMember](t, doJSONAgain(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/members?includeDisabled=true", base, project.Id))) {
+		if m.UserId == bobUser.ID {
+			found = true
+			if m.Disabled == nil || !*m.Disabled {
+				t.Fatalf("带回的停用成员应标记 disabled: %+v", m)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("includeDisabled=true 应带回停用成员")
+	}
+	// 任务仍显示 bob 的名字并带 ownerDisabled。
+	tasks := decodeBody[[]api.Task](t, doJSONAgain(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/tasks", base, project.Id)))
+	if len(tasks) != 1 || tasks[0].OwnerName != "李四" || tasks[0].OwnerDisabled == nil || !*tasks[0].OwnerDisabled {
+		t.Fatalf("任务应保留负责人姓名并标记停用: %+v", tasks)
+	}
+
+	// 启用后可登录。
+	resp = doJSON(t, root, http.MethodPost, fmt.Sprintf("%s/system/users/%d/enable", base, bobUser.ID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	_, resp = loginRaw("bob", "bob-pass")
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+}
