@@ -45,6 +45,9 @@ OVERRIDING SYSTEM VALUE VALUES
     (14, 'linxiaoyu',   '林小雨', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '188 days'),
     (15, 'hejing',      '何静',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '150 days');
 
+-- #200：赵文琪为系统管理员（隐式视同所有项目的管理员、可进系统设置；不进审批链）。
+UPDATE users SET is_system_admin = true WHERE id = 1;
+
 -- ── 项目 ──────────────────────────────────────────────────────────────────────
 INSERT INTO projects (id, name, created_by, owner_id, status, stage, planned_start_date, planned_end_date, created_at)
 OVERRIDING SYSTEM VALUE VALUES

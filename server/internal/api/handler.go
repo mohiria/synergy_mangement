@@ -278,8 +278,10 @@ func (s *Server) GetCurrentUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) ListProjects(w http.ResponseWriter, r *http.Request) {
-	uid := currentUser(r).ID
-	rows, err := s.q.ListProjects(r.Context(), uid)
+	u := currentUser(r)
+	uid := u.ID
+	// 系统管理员的项目列表取全部项目（#200）。
+	rows, err := s.q.ListProjects(r.Context(), store.ListProjectsParams{UserID: uid, IncludeAll: u.IsSystemAdmin})
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -297,7 +299,7 @@ func (s *Server) ListProjects(w http.ResponseWriter, r *http.Request) {
 			PlannedStartDate: p.PlannedStartDate,
 			PlannedEndDate:   p.PlannedEndDate,
 			Visibility:       p.Visibility,
-		}, p.OwnerName, projectActor(uid, p.OwnerID, p.MyRole, p.Visibility)))
+		}, p.OwnerName, projectActor(currentUser(r), p.OwnerID, p.MyRole, p.Visibility)))
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -354,12 +356,11 @@ func (s *Server) UpdateProject(w http.ResponseWriter, r *http.Request, projectId
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_request", Message: "请求内容无法解析"})
 		return
 	}
-	uid := currentUser(r).ID
 	existing, ok := s.fetchProject(w, r, projectId)
 	if !ok {
 		return
 	}
-	if !domain.CanEditProject(projectActor(uid, existing.OwnerID, existing.MyRole, existing.Visibility)) {
+	if !domain.CanEditProject(projectActor(currentUser(r), existing.OwnerID, existing.MyRole, existing.Visibility)) {
 		writeForbidden(w)
 		return
 	}
@@ -396,7 +397,7 @@ func (s *Server) UpdateProject(w http.ResponseWriter, r *http.Request, projectId
 		return
 	}
 	// 派生字段按更新后的负责人重新判定（负责人可能已易主）。
-	writeJSON(w, http.StatusOK, toProject(p, owner.DisplayName, projectActor(uid, p.OwnerID, existing.MyRole, p.Visibility)))
+	writeJSON(w, http.StatusOK, toProject(p, owner.DisplayName, projectActor(currentUser(r), p.OwnerID, existing.MyRole, p.Visibility)))
 }
 
 func (s *Server) ListProjectMembers(w http.ResponseWriter, r *http.Request, projectId int64) {
@@ -431,7 +432,7 @@ func (s *Server) AddProjectMembers(w http.ResponseWriter, r *http.Request, proje
 	if !ok {
 		return
 	}
-	if !domain.CanManageMembers(projectActor(currentUser(r).ID, proj.OwnerID, proj.MyRole, proj.Visibility)) {
+	if !domain.CanManageMembers(projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)) {
 		writeForbidden(w)
 		return
 	}
@@ -521,7 +522,7 @@ func (s *Server) UpdateProjectMemberRole(w http.ResponseWriter, r *http.Request,
 	if !ok {
 		return
 	}
-	if !domain.CanManageMembers(projectActor(currentUser(r).ID, proj.OwnerID, proj.MyRole, proj.Visibility)) {
+	if !domain.CanManageMembers(projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)) {
 		writeForbidden(w)
 		return
 	}
@@ -561,7 +562,7 @@ func (s *Server) RemoveProjectMember(w http.ResponseWriter, r *http.Request, pro
 	if !ok {
 		return
 	}
-	if !domain.CanManageMembers(projectActor(currentUser(r).ID, proj.OwnerID, proj.MyRole, proj.Visibility)) {
+	if !domain.CanManageMembers(projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)) {
 		writeForbidden(w)
 		return
 	}
@@ -618,7 +619,6 @@ func (s *Server) GetProject(w http.ResponseWriter, r *http.Request, projectId in
 	if !ok {
 		return
 	}
-	uid := currentUser(r).ID
 	writeJSON(w, http.StatusOK, toProject(store.Project{
 		ID:               row.ID,
 		Name:             row.Name,
@@ -630,7 +630,7 @@ func (s *Server) GetProject(w http.ResponseWriter, r *http.Request, projectId in
 		PlannedStartDate: row.PlannedStartDate,
 		PlannedEndDate:   row.PlannedEndDate,
 		Visibility:       row.Visibility,
-	}, row.OwnerName, projectActor(uid, row.OwnerID, row.MyRole, row.Visibility)))
+	}, row.OwnerName, projectActor(currentUser(r), row.OwnerID, row.MyRole, row.Visibility)))
 }
 
 func (s *Server) ListObjectives(w http.ResponseWriter, r *http.Request, projectId int64) {
@@ -639,7 +639,7 @@ func (s *Server) ListObjectives(w http.ResponseWriter, r *http.Request, projectI
 		return
 	}
 	uid := currentUser(r).ID
-	resp, err := s.okrList(r.Context(), projectId, projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility), uid)
+	resp, err := s.okrList(r.Context(), projectId, projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility), uid)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -657,7 +657,7 @@ func (s *Server) CreateOkrBatch(w http.ResponseWriter, r *http.Request, projectI
 	if !ok {
 		return
 	}
-	if !domain.CanEditProject(projectActor(currentUser(r).ID, proj.OwnerID, proj.MyRole, proj.Visibility)) {
+	if !domain.CanEditProject(projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)) {
 		writeForbidden(w)
 		return
 	}
@@ -722,7 +722,7 @@ func (s *Server) CreateOkrBatch(w http.ResponseWriter, r *http.Request, projectI
 		writeInternalError(w, r, err)
 		return
 	}
-	objectivesResp, err := s.okrList(r.Context(), projectId, projectActor(currentUser(r).ID, proj.OwnerID, proj.MyRole, proj.Visibility), currentUser(r).ID)
+	objectivesResp, err := s.okrList(r.Context(), projectId, projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility), currentUser(r).ID)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -943,7 +943,7 @@ func (s *Server) fetchProject(w http.ResponseWriter, r *http.Request, projectID 
 		}
 		return store.GetProjectRow{}, false
 	}
-	if !domain.CanReadProject(projectActor(uid, row.OwnerID, row.MyRole, row.Visibility)) {
+	if !domain.CanReadProject(projectActor(currentUser(r), row.OwnerID, row.MyRole, row.Visibility)) {
 		writeJSON(w, http.StatusNotFound, Error{Code: "not_found", Message: "项目不存在"})
 		return store.GetProjectRow{}, false
 	}
@@ -951,10 +951,10 @@ func (s *Server) fetchProject(w http.ResponseWriter, r *http.Request, projectID 
 }
 
 // projectActor 组装当前用户在某项目内的身份事实（domain.Actor）。
-// 判定本身在 domain.ProjectIdentity——显式成员身份优先，公开项目才落到隐式访客（#111），
-// 这里只负责把行上的列喂进去，handler 不再各写一遍身份。
-func projectActor(userID, ownerID int64, myRole pgtype.Text, visibility string) domain.Actor {
-	return domain.ProjectIdentity(userID, ownerID, myRole.String, visibility)
+// 判定本身在 domain.ProjectIdentity——显式成员身份优先，系统管理员视同管理员（#200），
+// 公开项目才落到隐式访客（#111）；这里只负责把行上的列喂进去，handler 不再各写一遍身份。
+func projectActor(u store.User, ownerID int64, myRole pgtype.Text, visibility string) domain.Actor {
+	return domain.ProjectIdentity(u.ID, ownerID, myRole.String, visibility, u.IsSystemAdmin)
 }
 
 func (s *Server) ListUsers(w http.ResponseWriter, r *http.Request) {
@@ -992,7 +992,7 @@ func (s *Server) validateProjectFields(w http.ResponseWriter, name, stage, statu
 }
 
 func toCurrentUser(u store.User) CurrentUser {
-	return CurrentUser{Id: u.ID, Username: u.Username, DisplayName: u.DisplayName}
+	return CurrentUser{Id: u.ID, Username: u.Username, DisplayName: u.DisplayName, IsSystemAdmin: u.IsSystemAdmin}
 }
 
 func toProject(p store.Project, ownerName string, actor domain.Actor) Project {

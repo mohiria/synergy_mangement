@@ -33,8 +33,7 @@ func (s *Server) pendingReviewStageByTask(ctx context.Context, projectID int64) 
 	return out, nil
 }
 
-// projectFinalReviewers 终审人集合（裁决 11，#181）：项目负责人 + 管理员成员，
-// 按处理时点动态解析角色、不快照；项目负责人排首位（显示文案「待{首位姓名}等N人审批」）。
+// projectFinalReviewers 终审人集合（裁决 11，#181）：装载负责人与成员表，规则在 domain.FinalReviewers。
 func (s *Server) projectFinalReviewers(ctx context.Context, projectID int64) ([]int64, []string, error) {
 	proj, err := s.q.GetProject(ctx, store.GetProjectParams{ID: projectID})
 	if err != nil {
@@ -44,17 +43,12 @@ func (s *Server) projectFinalReviewers(ctx context.Context, projectID int64) ([]
 	if err != nil {
 		return nil, nil, err
 	}
-	ids := []int64{proj.OwnerID}
-	names := []string{proj.OwnerName}
-	seen := map[int64]bool{proj.OwnerID: true}
+	facts := make([]domain.ProjectMemberFact, 0, len(members))
 	for _, m := range members {
-		if m.Role != domain.RoleAdmin || seen[m.UserID] {
-			continue
-		}
-		ids = append(ids, m.UserID)
-		names = append(names, m.DisplayName)
-		seen[m.UserID] = true
+		facts = append(facts, domain.ProjectMemberFact{UserID: m.UserID, Name: m.DisplayName, Role: m.Role})
 	}
+	// 只读成员表：系统管理员的隐式身份不进审批链（#200）。
+	ids, names := domain.FinalReviewers(proj.OwnerID, proj.OwnerName, facts)
 	return ids, names, nil
 }
 
@@ -84,7 +78,7 @@ func (s *Server) SubmitCompletion(w http.ResponseWriter, r *http.Request, projec
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
+	actor := projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)
 	task, facts, ok := s.fetchTask(w, r, projectId, taskId)
 	if !ok {
 		return
@@ -191,7 +185,7 @@ func (s *Server) DecideCompletion(w http.ResponseWriter, r *http.Request, projec
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
+	actor := projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)
 	opinion := ""
 	if req.Opinion != nil {
 		opinion = strings.TrimSpace(*req.Opinion)
@@ -419,7 +413,7 @@ func (s *Server) SetTaskReviewers(w http.ResponseWriter, r *http.Request, projec
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
+	actor := projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)
 	_, facts, ok := s.fetchTask(w, r, projectId, taskId)
 	if !ok {
 		return

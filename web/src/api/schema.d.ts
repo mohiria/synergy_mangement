@@ -1121,6 +1121,8 @@ export interface components {
             id: number;
             username: string;
             displayName: string;
+            /** @description 系统管理员（#200）：对任意项目隐式视同项目管理员、可进系统设置；不进审批链、不出现在成员列表与人员选择器 */
+            isSystemAdmin: boolean;
         };
         UserSummary: {
             /** Format: int64 */

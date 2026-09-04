@@ -265,9 +265,10 @@ type TaskReviewer struct {
 }
 
 type User struct {
-	ID           int64
-	Username     string
-	DisplayName  string
-	PasswordHash string
-	CreatedAt    pgtype.Timestamptz
+	ID            int64
+	Username      string
+	DisplayName   string
+	PasswordHash  string
+	CreatedAt     pgtype.Timestamptz
+	IsSystemAdmin bool
 }

@@ -55,7 +55,7 @@ func TestProjectIdentity(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := ProjectIdentity(c.userID, c.ownerID, c.memberRole, c.visibility)
+			got := ProjectIdentity(c.userID, c.ownerID, c.memberRole, c.visibility, false)
 			if got != c.want {
 				t.Fatalf("ProjectIdentity(%d, %d, %q, %q) = %+v, want %+v",
 					c.userID, c.ownerID, c.memberRole, c.visibility, got, c.want)
@@ -124,5 +124,40 @@ func TestImplicitViewerReadsAllButWritesNothing(t *testing.T) {
 	}
 	if err := CanConfirmReceipt(Actor{Role: RoleViewer}, me, receipt); err != nil {
 		t.Fatalf("显式访客被指定为接收方时应可确认接收: %v", err)
+	}
+}
+
+// #200：系统管理员对任意项目隐式视同项目管理员，但显式负责人／管理员身份仍按显式表达；
+// 隐式身份只影响权限判定（SystemAdmin 位标记来源），不是隐式访客。
+func TestProjectIdentitySystemAdmin(t *testing.T) {
+	const me, owner = int64(5), int64(9)
+	cases := []struct {
+		name       string
+		userID     int64
+		ownerID    int64
+		memberRole string
+		visibility string
+		want       Actor
+	}{
+		{"私有项目的非成员系统管理员视同管理员", me, owner, "", VisibilityPrivate, Actor{Role: RoleAdmin, SystemAdmin: true}},
+		{"公开项目的非成员系统管理员视同管理员而非隐式访客", me, owner, "", VisibilityPublic, Actor{Role: RoleAdmin, SystemAdmin: true}},
+		{"显式访客的系统管理员权限仍视同管理员", me, owner, RoleViewer, VisibilityPrivate, Actor{Role: RoleAdmin, SystemAdmin: true}},
+		{"显式项目成员的系统管理员权限仍视同管理员", me, owner, RoleMember, VisibilityPrivate, Actor{Role: RoleAdmin, SystemAdmin: true}},
+		{"显式管理员的系统管理员按显式身份", me, owner, RoleAdmin, VisibilityPrivate, Actor{Role: RoleAdmin}},
+		{"项目负责人的系统管理员按负责人身份", owner, owner, "", VisibilityPrivate, Actor{IsOwner: true}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := ProjectIdentity(c.userID, c.ownerID, c.memberRole, c.visibility, true)
+			if got != c.want {
+				t.Fatalf("ProjectIdentity(..., systemAdmin=true) = %+v, want %+v", got, c.want)
+			}
+			if !CanEditProject(got) || !CanManageMembers(got) || !CanReadProject(got) || !CanWriteProject(got) {
+				t.Fatalf("系统管理员应具备管理员全部权限：%+v", got)
+			}
+			if got.Implicit || !CanDiscuss(got) {
+				t.Fatalf("系统管理员不是隐式访客，应可发表讨论：%+v", got)
+			}
+		})
 	}
 }

@@ -28,7 +28,7 @@ func (s *Server) CreateUpstreamTask(w http.ResponseWriter, r *http.Request, proj
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
+	actor := projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)
 	task, facts, ok := s.fetchTask(w, r, projectId, taskId)
 	if !ok {
 		return

@@ -6570,3 +6570,98 @@ func TestRequestBodyLimit(t *testing.T) {
 		resp.Body.Close()
 	})
 }
+
+// #200：系统管理员隐式视同任意项目的管理员——能读写其非成员的私有项目、项目列表含全部项目；
+// 成员列表不含仅隐式身份；当前用户接口带 isSystemAdmin；普通非成员对同一项目仍是 404。
+func TestSystemAdminImplicitProjectAdmin(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	seedUser(t, q, "bob", "李四", "bob-pass")
+	rootUser := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(context.Background(), store.SetUserSystemAdminParams{ID: rootUser.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(username, password string) *http.Client {
+		t.Helper()
+		c := newClient(t)
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+		return c
+	}
+	alice := login("alice", "alice-pass")
+	bob := login("bob", "bob-pass")
+	root := login("root", "root-pass1")
+
+	// 当前用户接口带系统管理员标记。
+	me := decodeBody[api.CurrentUser](t, doJSONAgain(t, root, http.MethodGet, base+"/auth/me"))
+	if !me.IsSystemAdmin {
+		t.Fatalf("root 应为系统管理员: %+v", me)
+	}
+	if decodeBody[api.CurrentUser](t, doJSONAgain(t, alice, http.MethodGet, base+"/auth/me")).IsSystemAdmin {
+		t.Fatal("alice 不应为系统管理员")
+	}
+
+	// alice 建一个私有项目，root 与 bob 都不是成员。
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "私有项目", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+
+	// 普通非成员：404（读越权与写越权同一道边界）。
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/projects/%d", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusNotFound)
+	resp.Body.Close()
+
+	// 系统管理员：项目列表含全部项目，读得到、派生权限视同管理员。
+	list := decodeBody[[]api.Project](t, doJSONAgain(t, root, http.MethodGet, base+"/projects"))
+	found := false
+	for _, p := range list {
+		if p.Id == created.Id {
+			found = true
+			if !p.CanEdit || p.ImplicitViewer {
+				t.Fatalf("系统管理员在项目列表里应可编辑且不是隐式访客: %+v", p)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("系统管理员的项目列表应含非成员项目: %+v", list)
+	}
+	got := decodeBody[api.Project](t, doJSONAgain(t, root, http.MethodGet, fmt.Sprintf("%s/projects/%d", base, created.Id)))
+	if !got.CanEdit || got.ImplicitViewer {
+		t.Fatalf("系统管理员读项目应视同管理员: %+v", got)
+	}
+
+	// 写：改项目基础信息、改规则设置、加成员，均 200。
+	resp = doJSON(t, root, http.MethodPut, fmt.Sprintf("%s/projects/%d", base, created.Id), api.UpdateProjectRequest{
+		Name: "私有项目（管理员改名）", OwnerId: aliceUser.ID, Status: api.ProjectStatusInProgress, Visibility: api.Private,
+	})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, root, http.MethodGet, fmt.Sprintf("%s/projects/%d/settings", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	// 成员列表不含仅隐式身份的系统管理员。
+	members := decodeBody[[]api.ProjectMember](t, doJSONAgain(t, root, http.MethodGet, fmt.Sprintf("%s/projects/%d/members", base, created.Id)))
+	for _, m := range members {
+		if m.UserId == rootUser.ID {
+			t.Fatalf("仅隐式身份的系统管理员不应出现在成员列表: %+v", members)
+		}
+	}
+	// 项目审计里的操作者是本人（隐式身份的写操作照常留痕）。
+	audits := decodeBody[[]api.AuditLog](t, doJSONAgain(t, root, http.MethodGet, fmt.Sprintf("%s/projects/%d/audit-logs", base, created.Id)))
+	seenRoot := false
+	for _, a := range audits {
+		if a.ActorName != nil && *a.ActorName == rootUser.DisplayName {
+			seenRoot = true
+		}
+	}
+	if !seenRoot {
+		t.Fatalf("系统管理员的项目写操作应进项目审计且操作者为本人: %+v", audits)
+	}
+}

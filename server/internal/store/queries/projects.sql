@@ -2,11 +2,12 @@
 -- my_role：当前用户在各项目中的成员角色（非成员为 NULL），供 domain 层判定动作权限。
 -- 只返回当前用户可读的项目：项目内成员、项目负责人，以及公开项目（此人在其中是隐式访客，
 -- 身份由 domain.ProjectIdentity 判定，本查询只负责把候选行取全，见 #111）。
+-- include_all：系统管理员对任意项目视同管理员，项目列表取全部（#200）。
 SELECT p.*, u.display_name AS owner_name, m.role AS my_role
 FROM projects p
 JOIN users u ON u.id = p.owner_id
 LEFT JOIN project_members m ON m.project_id = p.id AND m.user_id = $1
-WHERE m.user_id IS NOT NULL OR p.owner_id = $1 OR p.visibility = 'public'
+WHERE sqlc.arg(include_all)::boolean OR m.user_id IS NOT NULL OR p.owner_id = $1 OR p.visibility = 'public'
 ORDER BY p.created_at DESC;
 
 -- name: GetProject :one

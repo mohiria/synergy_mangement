@@ -10,19 +10,25 @@ import (
 )
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO users (username, display_name, password_hash)
-VALUES ($1, $2, $3)
-RETURNING id, username, display_name, password_hash, created_at
+INSERT INTO users (username, display_name, password_hash, is_system_admin)
+VALUES ($1, $2, $3, $4)
+RETURNING id, username, display_name, password_hash, created_at, is_system_admin
 `
 
 type CreateUserParams struct {
-	Username     string
-	DisplayName  string
-	PasswordHash string
+	Username      string
+	DisplayName   string
+	PasswordHash  string
+	IsSystemAdmin bool
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
-	row := q.db.QueryRow(ctx, createUser, arg.Username, arg.DisplayName, arg.PasswordHash)
+	row := q.db.QueryRow(ctx, createUser,
+		arg.Username,
+		arg.DisplayName,
+		arg.PasswordHash,
+		arg.IsSystemAdmin,
+	)
 	var i User
 	err := row.Scan(
 		&i.ID,
@@ -30,12 +36,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.DisplayName,
 		&i.PasswordHash,
 		&i.CreatedAt,
+		&i.IsSystemAdmin,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, username, display_name, password_hash, created_at FROM users WHERE id = $1
+SELECT id, username, display_name, password_hash, created_at, is_system_admin FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
@@ -47,12 +54,13 @@ func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
 		&i.DisplayName,
 		&i.PasswordHash,
 		&i.CreatedAt,
+		&i.IsSystemAdmin,
 	)
 	return i, err
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, username, display_name, password_hash, created_at FROM users WHERE username = $1
+SELECT id, username, display_name, password_hash, created_at, is_system_admin FROM users WHERE username = $1
 `
 
 func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User, error) {
@@ -64,6 +72,7 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 		&i.DisplayName,
 		&i.PasswordHash,
 		&i.CreatedAt,
+		&i.IsSystemAdmin,
 	)
 	return i, err
 }
@@ -96,4 +105,29 @@ func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const setUserSystemAdmin = `-- name: SetUserSystemAdmin :one
+UPDATE users SET is_system_admin = $2 WHERE id = $1
+RETURNING id, username, display_name, password_hash, created_at, is_system_admin
+`
+
+type SetUserSystemAdminParams struct {
+	ID            int64
+	IsSystemAdmin bool
+}
+
+// #200：设／撤系统管理员标记（CLI usermod；界面入口见 #205）。
+func (q *Queries) SetUserSystemAdmin(ctx context.Context, arg SetUserSystemAdminParams) (User, error) {
+	row := q.db.QueryRow(ctx, setUserSystemAdmin, arg.ID, arg.IsSystemAdmin)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.DisplayName,
+		&i.PasswordHash,
+		&i.CreatedAt,
+		&i.IsSystemAdmin,
+	)
+	return i, err
 }

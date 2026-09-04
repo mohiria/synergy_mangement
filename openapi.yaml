@@ -2253,7 +2253,7 @@ components:
           format: password
     CurrentUser:
       type: object
-      required: [id, username, displayName]
+      required: [id, username, displayName, isSystemAdmin]
       properties:
         id:
           type: integer
@@ -2262,6 +2262,9 @@ components:
           type: string
         displayName:
           type: string
+        isSystemAdmin:
+          type: boolean
+          description: 系统管理员（#200）：对任意项目隐式视同项目管理员、可进系统设置；不进审批链、不出现在成员列表与人员选择器
     UserSummary:
       type: object
       required: [id, username, displayName]
