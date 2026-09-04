@@ -10,7 +10,7 @@
 -- 场景：某集团数字化中心（约 100 人）在跑的四个项目。
 -- 本目录下的文件按文件名顺序执行（go run ./cmd/seed 会在一个事务里跑完）。
 
--- 口令哈希用 pgcrypto 的 bcrypt 现算（$2a$10$，与 golang.org/x/crypto/bcrypt 兼容），
+-- 密码哈希用 pgcrypto 的 bcrypt 现算（$2a$10$，与 golang.org/x/crypto/bcrypt 兼容），
 -- 使本文件可以脱离 Go 直接用 psql -f 执行。
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
@@ -26,7 +26,7 @@ TRUNCATE TABLE
     RESTART IDENTITY CASCADE;
 
 -- ── 用户 ──────────────────────────────────────────────────────────────────────
--- 口令统一取环境变量 SEED_PASSWORD（cmd/seed 在事务里 set_config 进来，bcrypt cost 10）。
+-- 密码统一取环境变量 SEED_PASSWORD（cmd/seed 在事务里 set_config 进来，bcrypt cost 10）。
 INSERT INTO users (id, username, display_name, password_hash, created_at)
 OVERRIDING SYSTEM VALUE VALUES
     (1,  'zhaowenqi',   '赵文琪', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '400 days'),

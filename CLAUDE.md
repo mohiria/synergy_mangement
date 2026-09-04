@@ -43,8 +43,8 @@
 
 - 契约生成：`go tool oapi-codegen -config oapi-codegen.yaml ..\openapi.yaml` → `internal/api/api.gen.go`
 - 查询生成：`go tool sqlc generate`（schema 读 `migrations/`，查询在 `internal/store/queries/`）
-- 迁移：先 `$env:DATABASE_URL = "postgres://<用户>:<口令>@localhost:5432/synergy?sslmode=disable"`（口令取本机 `.env`，不写进文档与命令历史），再 `go tool goose -dir migrations postgres $env:DATABASE_URL up`（`status` 查看状态）
-- 重置演示数据：`$env:SEED_PASSWORD = "<自定口令>"; go run ./cmd/seed`（清空含用户在内的全部业务数据后重建，数据在 `cmd/seed/sql/`；演示账号口令统一取 `SEED_PASSWORD`，必填、不入库；`-skip-files` 跳过 MinIO 占位文件）
+- 迁移：先 `$env:DATABASE_URL = "postgres://<用户>:<密码>@localhost:5432/synergy?sslmode=disable"`（密码取本机 `.env`，不写进文档与命令历史），再 `go tool goose -dir migrations postgres $env:DATABASE_URL up`（`status` 查看状态）
+- 重置演示数据：`$env:SEED_PASSWORD = "<自定密码>"; go run ./cmd/seed`（清空含用户在内的全部业务数据后重建，数据在 `cmd/seed/sql/`；演示账号密码统一取 `SEED_PASSWORD`，必填、不入库；`-skip-files` 跳过 MinIO 占位文件）
 
 `web/` 目录下：
 
@@ -53,9 +53,9 @@
 - 纯函数单测：`npm test`（vitest，只跑 `src/**/*.test.ts`；e2e 归 Playwright）
 - SheetJS（xlsx 解析与模板生成）走仓库内的 `web/vendor/xlsx-0.20.3.tgz`：npm 上的 xlsx 停在 0.18.5 且有两条未修复的高危公告，官方新版只从 cdn.sheetjs.com 分发，内网离线构建因此把 tarball 入库
 
-仓库根（先 `cp .env.example .env` 填好口令，compose 对口令类变量不设默认值）：
+仓库根（先 `cp .env.example .env` 填好密码，compose 对密码类变量不设默认值）：
 
-- 开发只起数据库：`docker compose up -d postgres`（用户名与库名默认 synergy，口令取 `.env`）；跑集成测试还需 `docker compose up -d minio`（上传走两阶段提交，候选内容必须真的落进对象存储）
+- 开发只起数据库：`docker compose up -d postgres`（用户名与库名默认 synergy，密码取 `.env`）；跑集成测试还需 `docker compose up -d minio`（上传走两阶段提交，候选内容必须真的落进对象存储）
 - 全量启动（本地构建镜像）：`docker compose up -d --build`
 - 部署见 `docs/部署.md`（服务器上 clone + `docker compose up -d --build`，镜像本地构建，不走镜像仓库）
 - Playwright 冒烟：`cd web && npm run test:e2e`（需要 postgres 与 minio；会先跑 `cmd/seed` 重建演示数据，**清空全部业务数据**，只在开发库上跑）。覆盖范围与前置见 `web/e2e/README.md`

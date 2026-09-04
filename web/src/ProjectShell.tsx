@@ -104,7 +104,7 @@ export default function ProjectShell({
 }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
-  // 修改口令入口挂在身份浮层里（S3）：改完后端会吊销本人其余会话。
+  // 修改密码入口挂在身份浮层里（S3）：改完后端会吊销本人其余会话。
   const [passwordOpen, setPasswordOpen] = useState(false);
   const logout = async () => {
     await client.POST("/auth/logout");
@@ -211,7 +211,7 @@ export default function ProjectShell({
                     </span>
                   </div>
                   <Button block style={{ marginBottom: 8 }} onClick={() => setPasswordOpen(true)}>
-                    修改口令
+                    修改密码
                   </Button>
                   <Button block onClick={logout}>
                     登出
@@ -237,7 +237,7 @@ export default function ProjectShell({
   );
 }
 
-// ChangePasswordModal 修改本人登录口令（S3）：成功后本人其余会话立即失效，当前会话保留。
+// ChangePasswordModal 修改本人登录密码（S3）：成功后本人其余会话立即失效，当前会话保留。
 function ChangePasswordModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -256,7 +256,7 @@ function ChangePasswordModal({ open, onClose }: { open: boolean; onClose: () => 
 
   const submit = async () => {
     if (next !== confirm) {
-      setError("两次输入的新口令不一致");
+      setError("两次输入的新密码不一致");
       return;
     }
     setSaving(true);
@@ -266,7 +266,7 @@ function ChangePasswordModal({ open, onClose }: { open: boolean; onClose: () => 
     });
     setSaving(false);
     if (res.response.ok) {
-      message.success("口令已修改，本人其余会话已失效");
+      message.success("密码已修改，本人其余会话已失效");
       onClose();
     } else {
       setError(res.error?.message ?? "修改失败");
@@ -275,7 +275,7 @@ function ChangePasswordModal({ open, onClose }: { open: boolean; onClose: () => 
 
   return (
     <Modal
-      title="修改登录口令"
+      title="修改登录密码"
       open={open}
       okText="确认修改"
       cancelText="取消"
@@ -289,7 +289,7 @@ function ChangePasswordModal({ open, onClose }: { open: boolean; onClose: () => 
         新密码 8～32 位；修改成功后除当前浏览器外，本人其余登录会话会立即失效。
       </p>
       <Input.Password
-        placeholder="当前口令"
+        placeholder="当前密码"
         value={current}
         onChange={(e) => setCurrent(e.target.value)}
         style={{ marginBottom: 8 }}

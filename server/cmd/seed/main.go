@@ -6,9 +6,9 @@
 //	go run ./cmd/seed -skip-files     # 只重建数据库
 //
 // 数据库连接取 DATABASE_URL，MinIO 取 MINIO_* 环境变量，默认值与 cmd/server 一致。
-// 演示账号的统一口令取 SEED_PASSWORD（必填，仓库里不存明文）：
+// 演示账号的统一密码取 SEED_PASSWORD（必填，仓库里不存明文）：
 //
-//	$env:SEED_PASSWORD = '你的口令'; go run ./cmd/seed
+//	$env:SEED_PASSWORD = '你的密码'; go run ./cmd/seed
 //
 // 全部 SQL 在一个事务里跑，任一步失败整体回滚，不会留下半套数据。
 package main
@@ -32,10 +32,10 @@ import (
 //go:embed sql/*.sql
 var scripts embed.FS
 
-// seedPasswordEnv 提供全部演示账号的初始口令；SQL 里用 current_setting 读，哈希由 pgcrypto 现算。
+// seedPasswordEnv 提供全部演示账号的初始密码；SQL 里用 current_setting 读，哈希由 pgcrypto 现算。
 const seedPasswordEnv = "SEED_PASSWORD"
 
-// seedPasswordSetting 是口令在事务内的配置项名，与 sql/01_org.sql 里的 current_setting 对应。
+// seedPasswordSetting 是密码在事务内的配置项名，与 sql/01_org.sql 里的 current_setting 对应。
 const seedPasswordSetting = "synergy.seed_password"
 
 func main() {
@@ -51,7 +51,7 @@ func main() {
 func run(ctx context.Context, skipFiles bool) error {
 	password := os.Getenv(seedPasswordEnv)
 	if password == "" {
-		return fmt.Errorf("请先设置 %s 环境变量，作为全部演示账号的初始口令", seedPasswordEnv)
+		return fmt.Errorf("请先设置 %s 环境变量，作为全部演示账号的初始密码", seedPasswordEnv)
 	}
 
 	conn, err := connect(ctx)
@@ -70,7 +70,7 @@ func run(ctx context.Context, skipFiles bool) error {
 		return fmt.Errorf("begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	// 口令以事务级配置项传进去，SQL 脚本里不出现明文。
+	// 密码以事务级配置项传进去，SQL 脚本里不出现明文。
 	if _, err := tx.Exec(ctx, "SELECT set_config($1, $2, true)", seedPasswordSetting, password); err != nil {
 		return fmt.Errorf("set %s: %w", seedPasswordSetting, err)
 	}
@@ -193,7 +193,7 @@ func summarize(ctx context.Context, conn *pgx.Conn, password string) error {
 		fmt.Fprintf(&b, "  %-22s %4d\n", t, n)
 	}
 	fmt.Printf("演示数据已重建，合计 %d 行：\n%s", total, b.String())
-	fmt.Printf("全部账号口令：%s（来自 %s）\n", password, seedPasswordEnv)
+	fmt.Printf("全部账号密码：%s（来自 %s）\n", password, seedPasswordEnv)
 	return nil
 }
 

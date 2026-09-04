@@ -48,10 +48,10 @@ export default function LoginPage({ onLogin }: { onLogin: (u: CurrentUser) => vo
             </Form.Item>
             <Form.Item
               name="password"
-              label="口令"
-              rules={[{ required: true, message: "请输入口令" }]}
+              label="密码"
+              rules={[{ required: true, message: "请输入密码" }]}
             >
-              <Input.Password autoComplete="current-password" placeholder="请输入口令" />
+              <Input.Password autoComplete="current-password" placeholder="请输入密码" />
             </Form.Item>
             <Button type="primary" htmlType="submit" block loading={submitting}>
               登录

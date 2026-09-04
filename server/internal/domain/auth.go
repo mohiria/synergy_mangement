@@ -33,7 +33,7 @@ func SessionRenewal(now, expiresAt time.Time) (time.Time, bool) {
 }
 
 // LoginThrottle 进程内登录失败限速（ADR-0001：进程内缓存替代 Redis）。
-// 计数维度是 (用户名, 来源 IP)：只按用户名计数时，任何人对着别人的账号连打几次错口令
+// 计数维度是 (用户名, 来源 IP)：只按用户名计数时，任何人对着别人的账号连打几次错密码
 // 就能把真实用户锁在门外（S3）。同一 (用户名, IP) 连续失败达上限后在锁定窗口内拒绝继续尝试；
 // 距上次失败超过锁定窗口的旧记录不再累计，并由 Sweep 清出 map。
 type LoginThrottle struct {
@@ -112,7 +112,7 @@ func (t *LoginThrottle) Size() int {
 	return len(t.state)
 }
 
-// MinPasswordLength 口令最小长度（S3：内网自用，只挡住明显过短的口令）。
+// MinPasswordLength 密码最小长度（S3：内网自用，只挡住明显过短的密码）。
 const MinPasswordLength = 8
 
 // MaxPasswordLength 密码最大长度（#193，按 Unicode 字符计）。
@@ -120,9 +120,9 @@ const MaxPasswordLength = 32
 
 var (
 	ErrPasswordTooLong   = errors.New("新密码最多 32 位")
-	ErrPasswordTooShort  = errors.New("新口令至少 8 位")
-	ErrPasswordUnchanged = errors.New("新口令不能与当前口令相同")
-	ErrPasswordWrong     = errors.New("当前口令不正确")
+	ErrPasswordTooShort  = errors.New("新密码至少 8 位")
+	ErrPasswordUnchanged = errors.New("新密码不能与当前密码相同")
+	ErrPasswordWrong     = errors.New("当前密码不正确")
 )
 
 // bcryptMaxBytes bcrypt 只取前 72 字节，更长的部分会被静默截断；
@@ -142,8 +142,8 @@ func ValidatePasswordLength(password string) error {
 	return nil
 }
 
-// ValidatePasswordChange 校验一次改口令（S3）：新口令满足长度规则且不能与当前口令相同。
-// 当前口令是否正确由调用方比对哈希后判定，规则本身不碰哈希。
+// ValidatePasswordChange 校验一次改密码（S3）：新密码满足长度规则且不能与当前密码相同。
+// 当前密码是否正确由调用方比对哈希后判定，规则本身不碰哈希。
 func ValidatePasswordChange(current, next string) error {
 	if err := ValidatePasswordLength(next); err != nil {
 		return err
@@ -163,7 +163,7 @@ func HashPassword(password string) (string, error) {
 	return string(b), nil
 }
 
-// VerifyPassword 校验明文口令与 bcrypt 哈希是否匹配。
+// VerifyPassword 校验明文密码与 bcrypt 哈希是否匹配。
 func VerifyPassword(hash, password string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }

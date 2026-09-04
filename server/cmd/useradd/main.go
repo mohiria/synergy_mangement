@@ -18,7 +18,7 @@ import (
 func main() {
 	username := flag.String("username", "", "登录用户名（必填）")
 	display := flag.String("display", "", "显示名（必填）")
-	password := flag.String("password", "", "初始口令（必填）")
+	password := flag.String("password", "", "初始密码（必填）")
 	flag.Parse()
 
 	if *username == "" || *display == "" || *password == "" {

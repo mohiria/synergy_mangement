@@ -386,7 +386,7 @@ func TestAuthAndProjectsEndToEnd(t *testing.T) {
 	wantStatus(t, resp, http.StatusUnauthorized)
 	resp.Body.Close()
 
-	// 错误口令 401
+	// 错误密码 401
 	resp = doJSON(t, alice, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: "alice", Password: "wrong"})
 	wantStatus(t, resp, http.StatusUnauthorized)
 	resp.Body.Close()
@@ -5568,7 +5568,7 @@ func TestEntityCodesStable(t *testing.T) {
 	}
 }
 
-// S3：改口令后本人其余会话立即失效，当前会话保留；新口令生效、旧口令失效。
+// S3：改密码后本人其余会话立即失效，当前会话保留；新密码生效、旧密码失效。
 func TestChangePasswordRevokesOtherSessions(t *testing.T) {
 	q, pool := setupDB(t)
 	seedUser(t, q, "alice", "张三", "alice-pass")
@@ -5586,7 +5586,7 @@ func TestChangePasswordRevokesOtherSessions(t *testing.T) {
 		resp.Body.Close()
 	}
 
-	// 当前口令不对、新口令过短、新口令与旧口令相同都要被拒
+	// 当前密码不对、新密码过短、新密码与旧密码相同都要被拒
 	resp := doJSON(t, first, http.MethodPost, base+"/auth/change-password",
 		api.ChangePasswordRequest{CurrentPassword: "wrong-pass", NewPassword: "brand-new-pass"})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
@@ -5600,7 +5600,7 @@ func TestChangePasswordRevokesOtherSessions(t *testing.T) {
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 
-	// 改口令成功
+	// 改密码成功
 	resp = doJSON(t, first, http.MethodPost, base+"/auth/change-password",
 		api.ChangePasswordRequest{CurrentPassword: "alice-pass", NewPassword: "brand-new-pass"})
 	wantStatus(t, resp, http.StatusNoContent)
@@ -5614,7 +5614,7 @@ func TestChangePasswordRevokesOtherSessions(t *testing.T) {
 	wantStatus(t, resp, http.StatusUnauthorized)
 	resp.Body.Close()
 
-	// 旧口令不再能登录，新口令可以
+	// 旧密码不再能登录，新密码可以
 	third := newClient(t)
 	resp = doJSON(t, third, http.MethodPost, base+"/auth/login",
 		api.LoginRequest{Username: "alice", Password: "alice-pass"})

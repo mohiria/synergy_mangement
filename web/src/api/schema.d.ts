@@ -64,7 +64,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 修改本人登录口令（S3）；改完除当前会话外，本人其余会话全部失效 */
+        /** 修改本人登录密码（S3）；改完除当前会话外，本人其余会话全部失效 */
         post: operations["changePassword"];
         delete?: never;
         options?: never;

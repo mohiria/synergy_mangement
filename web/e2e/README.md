@@ -37,8 +37,8 @@ cd server && go tool goose -dir migrations postgres "$DATABASE_URL" up
 
 ```sh
 cd web
-export DATABASE_URL='postgres://<用户>:<口令>@localhost:5432/synergy?sslmode=disable'
-export SEED_PASSWORD='<自定口令>'
+export DATABASE_URL='postgres://<用户>:<密码>@localhost:5432/synergy?sslmode=disable'
+export SEED_PASSWORD='<自定密码>'
 npm run test:e2e
 ```
 

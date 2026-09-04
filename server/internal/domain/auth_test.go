@@ -173,10 +173,10 @@ func TestPasswordHashAndVerify(t *testing.T) {
 		t.Fatal("哈希不得等于明文")
 	}
 	if !VerifyPassword(hash, "s3cret") {
-		t.Fatal("正确口令应通过")
+		t.Fatal("正确密码应通过")
 	}
 	if VerifyPassword(hash, "wrong") {
-		t.Fatal("错误口令不应通过")
+		t.Fatal("错误密码不应通过")
 	}
 }
 
@@ -197,7 +197,7 @@ func TestNewSessionToken(t *testing.T) {
 	}
 }
 
-// S3：改口令的校验规则——当前口令必须正确、新口令至少 8 位且不能与当前口令相同。
+// S3：改密码的校验规则——当前密码必须正确、新密码至少 8 位且不能与当前密码相同。
 func TestValidatePasswordChange(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -206,9 +206,9 @@ func TestValidatePasswordChange(t *testing.T) {
 		want    error
 	}{
 		{"合法修改", "old-pass-1", "new-pass-2", nil},
-		{"新口令过短", "old-pass-1", "short7x", ErrPasswordTooShort},
-		{"新口令与当前相同", "old-pass-1", "old-pass-1", ErrPasswordUnchanged},
-		{"新口令为空白", "old-pass-1", "        ", ErrPasswordTooShort},
+		{"新密码过短", "old-pass-1", "short7x", ErrPasswordTooShort},
+		{"新密码与当前相同", "old-pass-1", "old-pass-1", ErrPasswordUnchanged},
+		{"新密码为空白", "old-pass-1", "        ", ErrPasswordTooShort},
 		// #193：上限 32 位（按 Unicode 字符计）；恰好 8／32 位通过，7／33 位拒绝。
 		{"恰好 8 位通过", "old-pass-1", "abcdefgh", nil},
 		{"恰好 32 位通过", "old-pass-1", strings.Repeat("a", 32), nil},

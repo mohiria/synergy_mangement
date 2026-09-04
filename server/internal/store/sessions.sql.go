@@ -48,7 +48,7 @@ type DeleteOtherUserSessionsParams struct {
 	Token  string
 }
 
-// 改口令后吊销本人其余会话（S3）：当前会话保留，免得改完自己被踢出去。
+// 改密码后吊销本人其余会话（S3）：当前会话保留，免得改完自己被踢出去。
 func (q *Queries) DeleteOtherUserSessions(ctx context.Context, arg DeleteOtherUserSessionsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteOtherUserSessions, arg.UserID, arg.Token)
 	if err != nil {

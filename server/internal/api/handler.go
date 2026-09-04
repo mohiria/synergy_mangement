@@ -184,7 +184,7 @@ func (s *Server) GetHealthz(w http.ResponseWriter, r *http.Request) {
 func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Username == "" || req.Password == "" {
-		writeJSON(w, http.StatusUnauthorized, Error{Code: "invalid_credentials", Message: "用户名或口令错误"})
+		writeJSON(w, http.StatusUnauthorized, Error{Code: "invalid_credentials", Message: "用户名或密码错误"})
 		return
 	}
 	now := s.now()
@@ -196,7 +196,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	user, err := s.q.GetUserByUsername(r.Context(), req.Username)
 	if err != nil || !domain.VerifyPassword(user.PasswordHash, req.Password) {
 		s.throttle.RecordFailure(req.Username, ip, now)
-		writeJSON(w, http.StatusUnauthorized, Error{Code: "invalid_credentials", Message: "用户名或口令错误"})
+		writeJSON(w, http.StatusUnauthorized, Error{Code: "invalid_credentials", Message: "用户名或密码错误"})
 		return
 	}
 	s.throttle.RecordSuccess(req.Username, ip)
@@ -218,8 +218,8 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toCurrentUser(user))
 }
 
-// ChangePassword 修改本人口令（S3）：改完把本人其余会话一并吊销，
-// 只保留当前会话——否则旧口令泄露后已经建立的会话仍然有效，改口令等于没改。
+// ChangePassword 修改本人密码（S3）：改完把本人其余会话一并吊销，
+// 只保留当前会话——否则旧密码泄露后已经建立的会话仍然有效，改密码等于没改。
 func (s *Server) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	var req ChangePasswordRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

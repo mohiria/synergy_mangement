@@ -1,10 +1,10 @@
 # 单机内网部署（ADR 0001）：Caddy(web) + Go 应用 + PostgreSQL + MinIO + Gotenberg + Apprise。
 #
-# 部署方式：服务器上 git clone 本仓库 → cp .env.example .env 并填真实口令 → docker compose up -d --build
+# 部署方式：服务器上 git clone 本仓库 → cp .env.example .env 并填真实密码 → docker compose up -d --build
 # 镜像在服务器本地构建，不依赖任何外部镜像仓库；更新版本只需 git pull 后重跑同一条命令。
 # 本机开发：同样先建 .env（.env.example 里的默认值即可），只起库用 docker compose up -d postgres。
 #
-# 口令一律从 .env 读，compose 里不留默认值：漏配会直接报错，不会静默用弱口令跑起来。
+# 密码一律从 .env 读，compose 里不留默认值：漏配会直接报错，不会静默用弱密码跑起来。
 services:
   # 前端与反向代理：静态托管 dist + 把 /api/* 转给 app，保证 SPA 与 API 同源。
   web:
