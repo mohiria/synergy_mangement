@@ -2,8 +2,11 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -113,4 +116,60 @@ func TestSameOriginMiddleware(t *testing.T) {
 			}
 		})
 	}
+}
+
+// #191：/api 请求体全局上限 4 MB。声明的 Content-Length 超限直接 413（不读 body）；
+// 未声明长度（分块）时用 MaxBytesReader 兜底，读到上限即报 *http.MaxBytesError，服务端不整包读入内存。
+func TestBodyLimitMiddleware(t *testing.T) {
+	var sawMaxBytes bool
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, err := io.ReadAll(r.Body)
+		var mbe *http.MaxBytesError
+		sawMaxBytes = errors.As(err, &mbe)
+		w.WriteHeader(http.StatusOK)
+	})
+	h := bodyLimitMiddleware(next)
+
+	t.Run("Content-Length 超限直接 413", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader("{}"))
+		r.ContentLength = maxRequestBodyBytes + 1
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("status = %d, want 413", w.Code)
+		}
+		var e Error
+		if err := json.Unmarshal(w.Body.Bytes(), &e); err != nil || e.Code != "payload_too_large" {
+			t.Fatalf("413 应带统一 Error 结构且 code=payload_too_large，得到 %s", w.Body.String())
+		}
+	})
+	t.Run("恰好等于上限放行", func(t *testing.T) {
+		sawMaxBytes = false
+		body := strings.Repeat("x", maxRequestBodyBytes)
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusOK || sawMaxBytes {
+			t.Fatalf("status = %d, sawMaxBytes = %v；上限以内应原样交给 handler", w.Code, sawMaxBytes)
+		}
+	})
+	t.Run("未声明长度的超限 body 由 MaxBytesReader 截断", func(t *testing.T) {
+		sawMaxBytes = false
+		body := strings.Repeat("x", maxRequestBodyBytes+1)
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(body))
+		r.ContentLength = -1
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if !sawMaxBytes {
+			t.Fatalf("handler 读 body 应得到 *http.MaxBytesError")
+		}
+	})
+	t.Run("GET 无 body 不受影响", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/healthz", nil)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", w.Code)
+		}
+	})
 }

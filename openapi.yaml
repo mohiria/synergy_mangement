@@ -54,6 +54,8 @@ paths:
             schema:
               $ref: "#/components/schemas/LoginRequest"
       responses:
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "200":
           description: 登录成功
           content:
@@ -1997,6 +1999,8 @@ paths:
             schema:
               $ref: "#/components/schemas/ImportRequest"
       responses:
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "201":
           description: 导入成功
           content:
@@ -2034,6 +2038,8 @@ paths:
             schema:
               $ref: "#/components/schemas/ImportTasksRequest"
       responses:
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "201":
           description: 导入成功
           content:
@@ -2192,6 +2198,12 @@ components:
             $ref: "#/components/schemas/Error"
     Conflict:
       description: 与现有资源状态冲突
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    PayloadTooLarge:
+      description: 请求体超过 /api 全局上限 4 MB（#191；所有写接口通用，文件本体走对象存储不受此限）
       content:
         application/json:
           schema:

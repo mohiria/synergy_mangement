@@ -6525,3 +6525,48 @@ func TestSameOriginGuardOnRealHandler(t *testing.T) {
 		resp.Body.Close()
 	})
 }
+
+// #191：真实装配上的请求体上限——超限 413 与统一 Error；上限以内（含只差几十字节）行为不变。
+func TestRequestBodyLimit(t *testing.T) {
+	q, pool := setupDB(t)
+	seedUser(t, q, "alice", "张三", "alice-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	// 合法 JSON 内部填空白，把 body 撑到目标大小：JSON 语法允许对象内任意空白。
+	paddedLogin := func(size int) string {
+		head := `{"username":"alice","password":"alice-pass"`
+		tail := `}`
+		return head + strings.Repeat(" ", size-len(head)-len(tail)) + tail
+	}
+	limit := 4 << 20
+
+	t.Run("超限 1 字节得 413", func(t *testing.T) {
+		resp := doRaw(t, newClient(t), http.MethodPost, base+"/auth/login", paddedLogin(limit+1))
+		wantStatus(t, resp, http.StatusRequestEntityTooLarge)
+		if e := decodeBody[api.Error](t, resp); e.Code != "payload_too_large" {
+			t.Fatalf("code = %q, want payload_too_large", e.Code)
+		}
+	})
+	t.Run("恰好上限通过", func(t *testing.T) {
+		resp := doRaw(t, newClient(t), http.MethodPost, base+"/auth/login", paddedLogin(limit))
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	})
+	t.Run("未声明长度的超限 body 同样 413", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodPost, base+"/auth/login", io.NopCloser(strings.NewReader(paddedLogin(limit+1))))
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		req.ContentLength = -1 // 强制分块传输，服务端拿不到 Content-Length
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := newClient(t).Do(req)
+		if err != nil {
+			t.Fatalf("login: %v", err)
+		}
+		wantStatus(t, resp, http.StatusRequestEntityTooLarge)
+		resp.Body.Close()
+	})
+}
