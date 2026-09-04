@@ -7,6 +7,7 @@ import type { components } from "./api/schema";
 import Icon from "./icons";
 import NotificationBell from "./NotificationBell";
 import type { IconName } from "./icons";
+import { Brand } from "./Brand";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
@@ -128,13 +129,7 @@ export default function ProjectShell({
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="brand">
-          <span className="brand-mark">协</span>
-          <div className="brand-name">
-            <b>协同管理工具</b>
-            <span>O／KR／任务协同推进</span>
-          </div>
-        </div>
+        <Brand />
         <Popover
           trigger="click"
           placement="bottomLeft"

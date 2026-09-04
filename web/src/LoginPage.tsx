@@ -3,6 +3,7 @@ import { Alert, Button, Form, Input } from "antd";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import Icon from "./icons";
+import { Brand } from "./Brand";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 
@@ -25,13 +26,7 @@ export default function LoginPage({ onLogin }: { onLogin: (u: CurrentUser) => vo
   return (
     <div className="login-shell">
       <div className="login-panel">
-        <div className="login-brand">
-          <span className="brand-mark">协</span>
-          <div className="brand-name">
-            <b>协同管理工具</b>
-            <span>O／KR／任务协同推进</span>
-          </div>
-        </div>
+        <Brand className="login-brand" />
         <div className="login-card">
           <div className="login-card-head">
             <h1>登录</h1>
