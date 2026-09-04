@@ -55,6 +55,77 @@ paths:
               schema:
                 $ref: "#/components/schemas/Branding"
 
+  /branding/logo:
+    get:
+      operationId: getBrandingLogo
+      tags: [system]
+      summary: 系统 logo 出图（免登录，#211）：经后端流式读取对象存储，不给直链；带 ETag 与长缓存，URL 以 ?v= 版本区分
+      security: []
+      parameters:
+        - name: v
+          in: query
+          description: 版本号，仅用于让浏览器在换图后拿到新图
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 图片
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /system/logo:
+    post:
+      operationId: uploadSystemLogo
+      tags: [system]
+      summary: 上传 logo（仅系统管理员，#211）：仅 PNG／JPG／WebP、≤512KB，按内容探测类型，不收 SVG
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadLogoRequest"
+      responses:
+        "200":
+          description: 已上传，返回最新配置（logoVersion 递增）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemSettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    delete:
+      operationId: deleteSystemLogo
+      tags: [system]
+      summary: 删除 logo 恢复默认（仅系统管理员，#211）
+      responses:
+        "200":
+          description: 已删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemSettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
   /system/settings:
     get:
       operationId: getSystemSettings
@@ -2744,6 +2815,9 @@ components:
       type: object
       required: [systemName, subtitle, loginHint, baseUrl, updatedAt]
       properties:
+        logoVersion:
+          type: integer
+          description: 已上传 logo 的版本号；未上传或已删除为空（#211）
         systemName:
           type: string
         subtitle:
@@ -2756,6 +2830,16 @@ components:
         updatedAt:
           type: string
           format: date-time
+    UploadLogoRequest:
+      type: object
+      required: [fileName, dataBase64]
+      properties:
+        fileName:
+          type: string
+          description: 原文件名（只用于提示，类型以内容探测为准）
+        dataBase64:
+          type: string
+          description: 文件内容的 base64（≤512KB 解码后）
     SystemSettingsInput:
       type: object
       required: [systemName, subtitle, loginHint, baseUrl]

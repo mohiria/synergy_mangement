@@ -69,6 +69,7 @@ func TestPasswordChangeRequiredAllows(t *testing.T) {
 		{"/api/v1/auth/me", true},
 		{"/api/v1/healthz", true},
 		{"/api/v1/branding", true},
+		{"/api/v1/branding/logo", true},
 		{"/api/v1/projects", false},
 		{"/api/v1/projects/1", false},
 		{"/api/v1/system/users", false},

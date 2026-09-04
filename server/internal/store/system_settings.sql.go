@@ -10,7 +10,7 @@ import (
 )
 
 const getSystemSettings = `-- name: GetSystemSettings :one
-SELECT id, system_name, subtitle, login_hint, base_url, updated_at FROM system_settings WHERE id = 1
+SELECT id, system_name, subtitle, login_hint, base_url, updated_at, logo_key, logo_content_type, logo_version FROM system_settings WHERE id = 1
 `
 
 // #210：单行系统配置；行在迁移里预置。
@@ -24,6 +24,39 @@ func (q *Queries) GetSystemSettings(ctx context.Context) (SystemSetting, error) 
 		&i.LoginHint,
 		&i.BaseUrl,
 		&i.UpdatedAt,
+		&i.LogoKey,
+		&i.LogoContentType,
+		&i.LogoVersion,
+	)
+	return i, err
+}
+
+const setSystemLogo = `-- name: SetSystemLogo :one
+UPDATE system_settings
+SET logo_key = $1, logo_content_type = $2, logo_version = logo_version + 1, updated_at = now()
+WHERE id = 1
+RETURNING id, system_name, subtitle, login_hint, base_url, updated_at, logo_key, logo_content_type, logo_version
+`
+
+type SetSystemLogoParams struct {
+	LogoKey         string
+	LogoContentType string
+}
+
+// #211：上传（传 key 与类型）或删除（传空串）logo，版本号自增。
+func (q *Queries) SetSystemLogo(ctx context.Context, arg SetSystemLogoParams) (SystemSetting, error) {
+	row := q.db.QueryRow(ctx, setSystemLogo, arg.LogoKey, arg.LogoContentType)
+	var i SystemSetting
+	err := row.Scan(
+		&i.ID,
+		&i.SystemName,
+		&i.Subtitle,
+		&i.LoginHint,
+		&i.BaseUrl,
+		&i.UpdatedAt,
+		&i.LogoKey,
+		&i.LogoContentType,
+		&i.LogoVersion,
 	)
 	return i, err
 }
@@ -32,7 +65,7 @@ const updateSystemSettings = `-- name: UpdateSystemSettings :one
 UPDATE system_settings
 SET system_name = $1, subtitle = $2, login_hint = $3, base_url = $4, updated_at = now()
 WHERE id = 1
-RETURNING id, system_name, subtitle, login_hint, base_url, updated_at
+RETURNING id, system_name, subtitle, login_hint, base_url, updated_at, logo_key, logo_content_type, logo_version
 `
 
 type UpdateSystemSettingsParams struct {
@@ -57,6 +90,9 @@ func (q *Queries) UpdateSystemSettings(ctx context.Context, arg UpdateSystemSett
 		&i.LoginHint,
 		&i.BaseUrl,
 		&i.UpdatedAt,
+		&i.LogoKey,
+		&i.LogoContentType,
+		&i.LogoVersion,
 	)
 	return i, err
 }

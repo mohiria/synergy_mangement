@@ -38,6 +38,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/branding/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 系统 logo 出图（免登录，#211）：经后端流式读取对象存储，不给直链；带 ETag 与长缓存，URL 以 ?v= 版本区分 */
+        get: operations["getBrandingLogo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 上传 logo（仅系统管理员，#211）：仅 PNG／JPG／WebP、≤512KB，按内容探测类型，不收 SVG */
+        post: operations["uploadSystemLogo"];
+        /** 删除 logo 恢复默认（仅系统管理员，#211） */
+        delete: operations["deleteSystemLogo"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/system/settings": {
         parameters: {
             query?: never;
@@ -1423,6 +1458,8 @@ export interface components {
             logoVersion?: number;
         };
         SystemSettings: {
+            /** @description 已上传 logo 的版本号；未上传或已删除为空（#211） */
+            logoVersion?: number;
             systemName: string;
             subtitle: string;
             loginHint: string;
@@ -1430,6 +1467,12 @@ export interface components {
             baseUrl: string;
             /** Format: date-time */
             updatedAt: string;
+        };
+        UploadLogoRequest: {
+            /** @description 原文件名（只用于提示，类型以内容探测为准） */
+            fileName: string;
+            /** @description 文件内容的 base64（≤512KB 解码后） */
+            dataBase64: string;
         };
         SystemSettingsInput: {
             /** @description ≤10 个 Unicode 字符，必填 */
@@ -2788,6 +2831,81 @@ export interface operations {
                     "application/json": components["schemas"]["Branding"];
                 };
             };
+        };
+    };
+    getBrandingLogo: {
+        parameters: {
+            query?: {
+                /** @description 版本号，仅用于让浏览器在换图后拿到新图 */
+                v?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 图片 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                    "image/jpeg": string;
+                    "image/webp": string;
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    uploadSystemLogo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadLogoRequest"];
+            };
+        };
+        responses: {
+            /** @description 已上传，返回最新配置（logoVersion 递增） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    deleteSystemLogo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     getSystemSettings: {

@@ -192,3 +192,29 @@ test("改系统名称后侧栏、标签页与登录页同步，超长被拒", as
   await expect(page.locator(".sidebar .brand-name b")).toHaveText("协同管理工具");
 });
 
+// #211：上传 PNG 后侧栏品牌位与 favicon 显示该图，SVG 被拒；删除后回退首字（AC-81）。
+test("上传 logo 后品牌位与 favicon 显示图片，SVG 被拒，删除后回退首字", async ({ page }) => {
+  await login(page);
+  await page.goto("/system/basic");
+  // 1×1 红色 PNG。
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==",
+    "base64",
+  );
+  const fileInput = page.locator('[data-testid="logo-block"] input[type="file"]');
+  await fileInput.setInputFiles({ name: "bad.svg", mimeType: "image/svg+xml", buffer: Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'/>") });
+  await expect(page.locator('[data-testid="logo-error"]')).toContainText("仅支持 PNG、JPG、WebP");
+  await fileInput.setInputFiles({ name: "logo.png", mimeType: "image/png", buffer: png });
+  await expect(page.locator(".sidebar .brand-mark img")).toBeVisible();
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute("href", /\/api\/v1\/branding\/logo\?v=\d+/);
+  await expect.poll(async () => {
+    const res = await page.request.get("/api/v1/branding/logo");
+    return `${res.status()} ${res.headers()["content-type"]}`;
+  }).toBe("200 image/png");
+
+  await page.getByRole("button", { name: "删除 logo" }).click();
+  await page.getByRole("button", { name: /删\s*除/ }).last().click();
+  await expect(page.locator(".sidebar .brand-mark img")).toHaveCount(0);
+  await expect(page.locator(".sidebar .brand-mark")).toHaveText("协");
+});
+

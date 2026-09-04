@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
-import { Alert, Button, Dropdown, Form, Input, Modal, Popconfirm, Spin, Table, message } from "antd";
+import { Alert, Button, Dropdown, Form, Input, Modal, Popconfirm, Spin, Table, Upload, message } from "antd";
 import type { MenuProps } from "antd";
 import Icon from "./icons";
 import dayjs from "dayjs";
@@ -8,7 +8,7 @@ import { client } from "./api/client";
 import type { components } from "./api/schema";
 import PlainShell from "./PlainShell";
 import PasswordInput from "./PasswordInput";
-import { useBranding } from "./branding";
+import { logoUrl, useBranding } from "./branding";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type SystemUser = components["schemas"]["SystemUser"];
@@ -512,7 +512,43 @@ function AuditSection() {
 const LIMITS = { systemName: 10, subtitle: 16, loginHint: 60 } as const;
 
 function BasicSection() {
-  const { reload } = useBranding();
+  const { branding, reload } = useBranding();
+  const [logoBusy, setLogoBusy] = useState(false);
+  const [logoError, setLogoError] = useState<string | null>(null);
+  // #211：文件在浏览器读成 base64 走 JSON 上传（入站 /api 无 multipart）；类型与大小以后端探测为准，前端只做提示。
+  const uploadLogo = async (file: File) => {
+    setLogoError(null);
+    if (file.size > 512 * 1024) {
+      setLogoError("logo 不能超过 512KB");
+      return false;
+    }
+    setLogoBusy(true);
+    const dataBase64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+    const res = await client.POST("/system/logo", { body: { fileName: file.name, dataBase64 } });
+    setLogoBusy(false);
+    if (res.data) {
+      message.success("logo 已更新");
+      await reload();
+    } else {
+      // 错误就地显示而不用瞬时 toast：类型／大小被拒时用户要能看清原因。
+      setLogoError(res.error?.message ?? "上传失败");
+    }
+    return false;
+  };
+  const deleteLogo = async () => {
+    const res = await client.DELETE("/system/logo");
+    if (res.data) {
+      message.success("已恢复默认标志");
+      await reload();
+    } else {
+      message.error(res.error?.message ?? "删除失败");
+    }
+  };
   const [form] = Form.useForm<SystemSettingsInput>();
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -567,6 +603,30 @@ function BasicSection() {
             <Button type="primary" htmlType="submit" loading={saving}>
               保存
             </Button>
+            <div className="property" style={{ marginTop: 20, alignItems: "flex-start" }} data-testid="logo-block">
+              <label>logo</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <span className="brand-mark" style={{ width: 40, height: 40 }}>
+                  {logoUrl(branding) ? <img src={logoUrl(branding)!} alt="" /> : branding.systemName.slice(0, 1)}
+                </span>
+                <Upload accept="image/png,image/jpeg,image/webp" showUploadList={false} beforeUpload={(f) => uploadLogo(f)}>
+                  <Button size="small" loading={logoBusy}>
+                    上传 logo
+                  </Button>
+                </Upload>
+                {logoUrl(branding) && (
+                  <Popconfirm title="删除 logo，恢复系统名称首字？" okText="删除" cancelText="取消" onConfirm={deleteLogo}>
+                    <Button size="small" danger>
+                      删除 logo
+                    </Button>
+                  </Popconfirm>
+                )}
+                <span className="muted" style={{ fontSize: 12 }}>
+                  仅 PNG／JPG／WebP，≤512KB，建议正方形；非正方形居中裁切；兼作浏览器标签页图标。不收 SVG。
+                </span>
+              </div>
+            </div>
+            {logoError && <Alert type="error" message={logoError} style={{ marginTop: 8, maxWidth: 520 }} data-testid="logo-error" />}
           </Form>
         ) : !error ? (
           <Spin />

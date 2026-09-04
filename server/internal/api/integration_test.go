@@ -6,11 +6,14 @@ package api_test
 
 import (
 	"bytes"
-	"errors"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"image"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -2185,7 +2188,7 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 	// 裁决 10：配置输入源收归项目管理员，直接生效、边立即建立）
 	inputsURL := func(id int64) string { return fmt.Sprintf("%s/%d/inputs", tasksURL, id) }
 	resp = doJSON(t, alice, http.MethodPost, inputsURL(taskB.Id), api.CreateTaskInputRequest{
-		Necessity: api.Required,
+		Necessity:     api.Required,
 		SourceTaskIds: []int64{taskA.Id},
 	})
 	wantStructureAccepted(t, resp)
@@ -2685,7 +2688,7 @@ func TestMultiSourceInputs(t *testing.T) {
 	// AC-53：一次选择两个来源任务 → 分别建立两条边，各自独立未就绪
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, taskC),
 		api.CreateTaskInputRequest{
-			Necessity: api.Required,
+			Necessity:     api.Required,
 			SourceTaskIds: []int64{taskA, taskB2},
 		})
 	wantStructureAccepted(t, resp)
@@ -2859,7 +2862,7 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 	// 下游挂一条来自上游任务的必要输入：上游未完成 ⇒ 上游未就绪卡点，待行动人为上游负责人 bob。
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, downstream.Id),
 		api.CreateTaskInputRequest{
-			Necessity: api.Required,
+			Necessity:     api.Required,
 			SourceTaskIds: []int64{upstream.Id},
 		})
 	wantStructureAccepted(t, resp)
@@ -3355,7 +3358,7 @@ func TestArtifacts(t *testing.T) {
 	}
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, downstreamID),
 		api.CreateTaskInputRequest{
-			Necessity: api.Required,
+			Necessity:     api.Required,
 			SourceTaskIds: []int64{taskID},
 		})
 	wantStatus(t, resp, http.StatusOK)
@@ -4926,7 +4929,7 @@ func TestStructureEditDirect(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		Items:           []api.CreateTaskItem{{KeyResultId: kr1, Name: "联调验证", OwnerId: carolUser.ID, StartDate: start, EndDate: end}},
+		Items: []api.CreateTaskItem{{KeyResultId: kr1, Name: "联调验证", OwnerId: carolUser.ID, StartDate: start, EndDate: end}},
 	})
 	wantStatus(t, resp, http.StatusCreated)
 	taskID := decodeBody[[]api.Task](t, resp)[0].Id
@@ -5012,7 +5015,7 @@ func TestDeliverableStructureFree(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		Items:           []api.CreateTaskItem{{KeyResultId: kr1, Name: "联调验证", OwnerId: carolUser.ID, StartDate: start, EndDate: end}},
+		Items: []api.CreateTaskItem{{KeyResultId: kr1, Name: "联调验证", OwnerId: carolUser.ID, StartDate: start, EndDate: end}},
 	})
 	wantStatus(t, resp, http.StatusCreated)
 	taskID := decodeBody[[]api.Task](t, resp)[0].Id
@@ -6817,8 +6820,8 @@ func TestCreateSystemUserAndForcedPasswordChange(t *testing.T) {
 	for name, bad := range map[string]api.CreateSystemUserRequest{
 		"密码 7 位":  {Username: "u1", DisplayName: "x", Email: "u1@example.com", Password: "abcdefg"},
 		"密码 33 位": {Username: "u2", DisplayName: "x", Email: "u2@example.com", Password: strings.Repeat("a", 33)},
-		"用户名大写":  {Username: "Bad", DisplayName: "x", Email: "u3@example.com", Password: "abcdefgh"},
-		"邮箱非法":   {Username: "user4", DisplayName: "x", Email: "nope", Password: "abcdefgh"},
+		"用户名大写":   {Username: "Bad", DisplayName: "x", Email: "u3@example.com", Password: "abcdefgh"},
+		"邮箱非法":    {Username: "user4", DisplayName: "x", Email: "nope", Password: "abcdefgh"},
 	} {
 		resp := doJSON(t, root, http.MethodPost, base+"/system/users", bad)
 		if resp.StatusCode != http.StatusUnprocessableEntity {
@@ -7341,3 +7344,90 @@ func TestSystemSettingsBranding(t *testing.T) {
 	}
 }
 
+// #211：上传 PNG 后品牌带 logoVersion、出图带 ETag 与缓存头；SVG／超 512KB／非图片 422；删除后 404 且版本清空。
+func TestSystemLogo(t *testing.T) {
+	q, pool := setupDB(t)
+	seedUser(t, q, "alice", "张三", "alice-pass")
+	rootUser := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(context.Background(), store.SetUserSystemAdminParams{ID: rootUser.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	login := func(username, password string) *http.Client {
+		t.Helper()
+		c := newClient(t)
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+		return c
+	}
+	alice := login("alice", "alice-pass")
+	root := login("root", "root-pass1")
+
+	// 8×8 纯色 PNG。
+	img := image.NewRGBA(image.Rect(0, 0, 8, 8))
+	for i := range img.Pix {
+		img.Pix[i] = 0x80
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("png: %v", err)
+	}
+	pngB64 := base64.StdEncoding.EncodeToString(buf.Bytes())
+
+	resp := doJSON(t, alice, http.MethodPost, base+"/system/logo", api.UploadLogoRequest{FileName: "logo.png", DataBase64: pngB64})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	for name, bad := range map[string]string{
+		"SVG":     base64.StdEncoding.EncodeToString([]byte(`<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`)),
+		"文本":      base64.StdEncoding.EncodeToString([]byte("hello, not an image")),
+		"超 512KB": base64.StdEncoding.EncodeToString(append(append([]byte{}, buf.Bytes()...), make([]byte, domain.MaxLogoBytes)...)),
+	} {
+		resp := doJSON(t, root, http.MethodPost, base+"/system/logo", api.UploadLogoRequest{FileName: "x.png", DataBase64: bad})
+		if resp.StatusCode != http.StatusUnprocessableEntity {
+			t.Fatalf("%s: status = %d, want 422", name, resp.StatusCode)
+		}
+		resp.Body.Close()
+	}
+	resp = doJSON(t, root, http.MethodPost, base+"/system/logo", api.UploadLogoRequest{FileName: "logo.png", DataBase64: pngB64})
+	wantStatus(t, resp, http.StatusOK)
+	st := decodeBody[api.SystemSettings](t, resp)
+	if st.LogoVersion == nil || *st.LogoVersion < 1 {
+		t.Fatalf("上传后应有版本号: %+v", st)
+	}
+	b := decodeBody[api.Branding](t, func() *http.Response { r, _ := http.Get(base + "/branding"); return r }())
+	if b.LogoVersion == nil || *b.LogoVersion != *st.LogoVersion {
+		t.Fatalf("品牌读取应带 logo 版本: %+v", b)
+	}
+	imgResp, err := http.Get(fmt.Sprintf("%s/branding/logo?v=%d", base, *st.LogoVersion))
+	if err != nil {
+		t.Fatalf("logo: %v", err)
+	}
+	wantStatus(t, imgResp, http.StatusOK)
+	body, _ := io.ReadAll(imgResp.Body)
+	imgResp.Body.Close()
+	if imgResp.Header.Get("Content-Type") != "image/png" || imgResp.Header.Get("ETag") == "" || !strings.Contains(imgResp.Header.Get("Cache-Control"), "max-age") || !bytes.Equal(body, buf.Bytes()) {
+		t.Fatalf("出图头或内容异常: %v len=%d", imgResp.Header, len(body))
+	}
+	// 二次上传版本递增。
+	resp = doJSON(t, root, http.MethodPost, base+"/system/logo", api.UploadLogoRequest{FileName: "logo2.png", DataBase64: pngB64})
+	wantStatus(t, resp, http.StatusOK)
+	if st2 := decodeBody[api.SystemSettings](t, resp); st2.LogoVersion == nil || *st2.LogoVersion != *st.LogoVersion+1 {
+		t.Fatalf("换图后版本应递增: %+v", st2)
+	}
+	// 删除后 404、版本清空；审计有上传与删除。
+	resp = doJSON(t, root, http.MethodDelete, base+"/system/logo", nil)
+	wantStatus(t, resp, http.StatusOK)
+	if st3 := decodeBody[api.SystemSettings](t, resp); st3.LogoVersion != nil {
+		t.Fatalf("删除后版本应为空: %+v", st3)
+	}
+	gone, _ := http.Get(base + "/branding/logo")
+	wantStatus(t, gone, http.StatusNotFound)
+	gone.Body.Close()
+	logs := decodeBody[[]api.AuditLog](t, doJSONAgain(t, root, http.MethodGet, base+"/system/audit-logs"))
+	if len(logs) != 3 || logs[0].Action != "删除系统 logo" || logs[2].Action != "上传系统 logo" {
+		t.Fatalf("审计应含两次上传与一次删除: %+v", logs)
+	}
+}

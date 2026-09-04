@@ -31,9 +31,21 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.title = branding.systemName;
   }, [branding.systemName]);
+  // favicon 跟随 logo（#211）：未上传时保持 index.html 的内联图标。
+  useEffect(() => {
+    const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+    if (!link) return;
+    if (!link.dataset.defaultHref) link.dataset.defaultHref = link.href;
+    link.href = logoUrl(branding) ?? link.dataset.defaultHref;
+  }, [branding]);
   return <BrandingContext.Provider value={{ branding, reload }}>{children}</BrandingContext.Provider>;
 }
 
 export function useBranding() {
   return useContext(BrandingContext);
+}
+
+// logo 出图地址（#211）：经后端流式读取，URL 带版本号让换图后浏览器拿到新图；未上传为空。
+export function logoUrl(b: Branding): string | null {
+  return b.logoVersion ? `/api/v1/branding/logo?v=${b.logoVersion}` : null;
 }

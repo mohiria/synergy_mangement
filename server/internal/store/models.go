@@ -189,12 +189,15 @@ type Session struct {
 }
 
 type SystemSetting struct {
-	ID         int16
-	SystemName string
-	Subtitle   string
-	LoginHint  string
-	BaseUrl    string
-	UpdatedAt  pgtype.Timestamptz
+	ID              int16
+	SystemName      string
+	Subtitle        string
+	LoginHint       string
+	BaseUrl         string
+	UpdatedAt       pgtype.Timestamptz
+	LogoKey         string
+	LogoContentType string
+	LogoVersion     int32
 }
 
 type Task struct {
