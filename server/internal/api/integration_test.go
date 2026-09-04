@@ -6,6 +6,7 @@ package api_test
 
 import (
 	"bytes"
+	"errors"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -22,6 +23,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -232,6 +234,7 @@ func seedUser(t *testing.T, q *store.Queries, username, display, password string
 	}
 	u, err := q.CreateUser(context.Background(), store.CreateUserParams{
 		Username: username, DisplayName: display, PasswordHash: hash,
+		Email: domain.NormalizeEmail(username + "@example.com"),
 	})
 	if err != nil {
 		t.Fatalf("seed user %s: %v", username, err)
@@ -6700,5 +6703,75 @@ func TestSystemUsersListRequiresSystemAdmin(t *testing.T) {
 	}
 	if users[0].Username != "alice" || users[0].IsSystemAdmin || users[1].Username != "root" || !users[1].IsSystemAdmin {
 		t.Fatalf("列表按 id 升序且带系统管理员标记: %+v", users)
+	}
+}
+
+// #202：邮箱必填且全局唯一（大小写不敏感）；迁移在含既有用户的库上可 up/down 且回填占位；
+// 当前用户、用户摘要与系统用户列表都带邮箱。
+func TestUserEmailRequiredAndUnique(t *testing.T) {
+	q, pool := setupDB(t)
+
+	// 迁移回退到 00050、插入无邮箱的存量用户、再升级：回填 <用户名>@local.invalid。
+	migDB, err := sql.Open("pgx", pool.Config().ConnString())
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer migDB.Close()
+	if err := goose.DownTo(migDB, "../../migrations", 50); err != nil {
+		t.Fatalf("goose down: %v", err)
+	}
+	if _, err := migDB.Exec(`INSERT INTO users (username, display_name, password_hash) VALUES ('legacy', '存量用户', 'x')`); err != nil {
+		t.Fatalf("insert legacy: %v", err)
+	}
+	if err := goose.Up(migDB, "../../migrations"); err != nil {
+		t.Fatalf("goose up: %v", err)
+	}
+	legacy, err := q.GetUserByUsername(context.Background(), "legacy")
+	if err != nil {
+		t.Fatalf("legacy: %v", err)
+	}
+	if legacy.Email != "legacy@local.invalid" {
+		t.Fatalf("存量用户应回填占位邮箱，得到 %q", legacy.Email)
+	}
+
+	// 重复邮箱（含大小写差异）被唯一索引拒绝。
+	seedUser(t, q, "alice", "张三", "alice-pass")
+	hash, _ := domain.HashPassword("dup-pass-1")
+	_, err = q.CreateUser(context.Background(), store.CreateUserParams{
+		Username: "alice2", DisplayName: "张三二号", PasswordHash: hash, Email: "ALICE@Example.com",
+	})
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23505" {
+		t.Fatalf("大小写不同的重复邮箱应触发唯一冲突，得到 %v", err)
+	}
+	if _, err := q.GetUserByEmail(context.Background(), "Alice@EXAMPLE.com"); err != nil {
+		t.Fatalf("按邮箱查找应大小写不敏感: %v", err)
+	}
+
+	// 接口带邮箱。
+	rootUser := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(context.Background(), store.SetUserSystemAdminParams{ID: rootUser.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	root := newClient(t)
+	resp := doJSON(t, root, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: "root", Password: "root-pass1"})
+	wantStatus(t, resp, http.StatusOK)
+	if me := decodeBody[api.CurrentUser](t, resp); me.Email != "root@example.com" {
+		t.Fatalf("当前用户应带邮箱: %+v", me)
+	}
+	users := decodeBody[[]api.UserSummary](t, doJSONAgain(t, root, http.MethodGet, base+"/users"))
+	for _, u := range users {
+		if u.Email == "" {
+			t.Fatalf("用户摘要应带邮箱: %+v", u)
+		}
+	}
+	sys := decodeBody[[]api.SystemUser](t, doJSONAgain(t, root, http.MethodGet, base+"/system/users"))
+	for _, u := range sys {
+		if u.Email == "" {
+			t.Fatalf("系统用户列表应带邮箱: %+v", u)
+		}
 	}
 }

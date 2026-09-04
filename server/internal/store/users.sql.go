@@ -12,9 +12,9 @@ import (
 )
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO users (username, display_name, password_hash, is_system_admin)
-VALUES ($1, $2, $3, $4)
-RETURNING id, username, display_name, password_hash, created_at, is_system_admin
+INSERT INTO users (username, display_name, password_hash, is_system_admin, email)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, username, display_name, password_hash, created_at, is_system_admin, email
 `
 
 type CreateUserParams struct {
@@ -22,14 +22,17 @@ type CreateUserParams struct {
 	DisplayName   string
 	PasswordHash  string
 	IsSystemAdmin bool
+	Email         string
 }
 
+// email 由调用方先经 domain.NormalizeEmail／ValidateEmail；重复由唯一索引兜底（#202）。
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
 	row := q.db.QueryRow(ctx, createUser,
 		arg.Username,
 		arg.DisplayName,
 		arg.PasswordHash,
 		arg.IsSystemAdmin,
+		arg.Email,
 	)
 	var i User
 	err := row.Scan(
@@ -39,12 +42,33 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.PasswordHash,
 		&i.CreatedAt,
 		&i.IsSystemAdmin,
+		&i.Email,
+	)
+	return i, err
+}
+
+const getUserByEmail = `-- name: GetUserByEmail :one
+SELECT id, username, display_name, password_hash, created_at, is_system_admin, email FROM users WHERE lower(email) = lower($1)
+`
+
+// #202：邮箱大小写不敏感（唯一索引建在 lower(email) 上）。
+func (q *Queries) GetUserByEmail(ctx context.Context, lower string) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByEmail, lower)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.DisplayName,
+		&i.PasswordHash,
+		&i.CreatedAt,
+		&i.IsSystemAdmin,
+		&i.Email,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, username, display_name, password_hash, created_at, is_system_admin FROM users WHERE id = $1
+SELECT id, username, display_name, password_hash, created_at, is_system_admin, email FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
@@ -57,12 +81,13 @@ func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
 		&i.PasswordHash,
 		&i.CreatedAt,
 		&i.IsSystemAdmin,
+		&i.Email,
 	)
 	return i, err
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, username, display_name, password_hash, created_at, is_system_admin FROM users WHERE username = $1
+SELECT id, username, display_name, password_hash, created_at, is_system_admin, email FROM users WHERE username = $1
 `
 
 func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User, error) {
@@ -75,18 +100,20 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 		&i.PasswordHash,
 		&i.CreatedAt,
 		&i.IsSystemAdmin,
+		&i.Email,
 	)
 	return i, err
 }
 
 const listSystemUsers = `-- name: ListSystemUsers :many
-SELECT id, username, display_name, is_system_admin, created_at FROM users ORDER BY id
+SELECT id, username, display_name, email, is_system_admin, created_at FROM users ORDER BY id
 `
 
 type ListSystemUsersRow struct {
 	ID            int64
 	Username      string
 	DisplayName   string
+	Email         string
 	IsSystemAdmin bool
 	CreatedAt     pgtype.Timestamptz
 }
@@ -105,6 +132,7 @@ func (q *Queries) ListSystemUsers(ctx context.Context) ([]ListSystemUsersRow, er
 			&i.ID,
 			&i.Username,
 			&i.DisplayName,
+			&i.Email,
 			&i.IsSystemAdmin,
 			&i.CreatedAt,
 		); err != nil {
@@ -119,13 +147,14 @@ func (q *Queries) ListSystemUsers(ctx context.Context) ([]ListSystemUsersRow, er
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, username, display_name FROM users ORDER BY id
+SELECT id, username, display_name, email FROM users ORDER BY id
 `
 
 type ListUsersRow struct {
 	ID          int64
 	Username    string
 	DisplayName string
+	Email       string
 }
 
 func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
@@ -137,7 +166,12 @@ func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
 	var items []ListUsersRow
 	for rows.Next() {
 		var i ListUsersRow
-		if err := rows.Scan(&i.ID, &i.Username, &i.DisplayName); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.Username,
+			&i.DisplayName,
+			&i.Email,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -150,7 +184,7 @@ func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
 
 const setUserSystemAdmin = `-- name: SetUserSystemAdmin :one
 UPDATE users SET is_system_admin = $2 WHERE id = $1
-RETURNING id, username, display_name, password_hash, created_at, is_system_admin
+RETURNING id, username, display_name, password_hash, created_at, is_system_admin, email
 `
 
 type SetUserSystemAdminParams struct {
@@ -169,6 +203,7 @@ func (q *Queries) SetUserSystemAdmin(ctx context.Context, arg SetUserSystemAdmin
 		&i.PasswordHash,
 		&i.CreatedAt,
 		&i.IsSystemAdmin,
+		&i.Email,
 	)
 	return i, err
 }

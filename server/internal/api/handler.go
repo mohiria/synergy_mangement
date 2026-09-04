@@ -965,7 +965,7 @@ func (s *Server) ListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := make([]UserSummary, 0, len(rows))
 	for _, u := range rows {
-		resp = append(resp, UserSummary{Id: u.ID, Username: u.Username, DisplayName: u.DisplayName})
+		resp = append(resp, UserSummary{Id: u.ID, Username: u.Username, DisplayName: u.DisplayName, Email: u.Email})
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -992,7 +992,7 @@ func (s *Server) validateProjectFields(w http.ResponseWriter, name, stage, statu
 }
 
 func toCurrentUser(u store.User) CurrentUser {
-	return CurrentUser{Id: u.ID, Username: u.Username, DisplayName: u.DisplayName, IsSystemAdmin: u.IsSystemAdmin}
+	return CurrentUser{Id: u.ID, Username: u.Username, DisplayName: u.DisplayName, Email: u.Email, IsSystemAdmin: u.IsSystemAdmin}
 }
 
 func toProject(p store.Project, ownerName string, actor domain.Actor) Project {

@@ -17,6 +17,7 @@ test("系统管理员从项目列表壳进入系统设置并看到用户列表",
   await expect(page.locator(".settings-nav button.active")).toHaveText("用户管理");
   const row = page.locator(".settings-panel tr", { hasText: DEMO.admin.username });
   await expect(row).toContainText(DEMO.admin.displayName);
+  await expect(row).toContainText(`${DEMO.admin.username}@example.com`); // #202：邮箱列
   await expect(row).toContainText("是");
 });
 

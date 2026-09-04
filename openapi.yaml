@@ -2273,22 +2273,7 @@ components:
           format: password
     CurrentUser:
       type: object
-      required: [id, username, displayName, isSystemAdmin]
-      properties:
-        id:
-          type: integer
-          format: int64
-        username:
-          type: string
-        displayName:
-          type: string
-        isSystemAdmin:
-          type: boolean
-          description: 系统管理员（#200）：对任意项目隐式视同项目管理员、可进系统设置；不进审批链、不出现在成员列表与人员选择器
-    SystemUser:
-      type: object
-      description: 系统设置 → 用户管理的一行（#201）
-      required: [id, username, displayName, isSystemAdmin, createdAt]
+      required: [id, username, displayName, email, isSystemAdmin]
       properties:
         id:
           type: integer
@@ -2299,7 +2284,25 @@ components:
           type: string
         email:
           type: string
-          description: 邮箱（#202 起必填；此前为空）
+          description: 邮箱（#202 起必填、全局唯一、大小写不敏感；存量用户回填 <用户名>@local.invalid 占位）
+        isSystemAdmin:
+          type: boolean
+          description: 系统管理员（#200）：对任意项目隐式视同项目管理员、可进系统设置；不进审批链、不出现在成员列表与人员选择器
+    SystemUser:
+      type: object
+      description: 系统设置 → 用户管理的一行（#201）
+      required: [id, username, displayName, email, isSystemAdmin, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        username:
+          type: string
+        displayName:
+          type: string
+        email:
+          type: string
+          description: 邮箱（#202 起必填、全局唯一）
         isSystemAdmin:
           type: boolean
         disabled:
@@ -2314,7 +2317,7 @@ components:
           description: 最近登录时间（#208 起）
     UserSummary:
       type: object
-      required: [id, username, displayName]
+      required: [id, username, displayName, email]
       properties:
         id:
           type: integer
@@ -2322,6 +2325,8 @@ components:
         username:
           type: string
         displayName:
+          type: string
+        email:
           type: string
     ProjectStatus:
       type: string

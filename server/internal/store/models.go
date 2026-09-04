@@ -271,4 +271,5 @@ type User struct {
 	PasswordHash  string
 	CreatedAt     pgtype.Timestamptz
 	IsSystemAdmin bool
+	Email         string
 }

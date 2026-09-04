@@ -28,7 +28,7 @@ func (s *Server) ListSystemUsers(w http.ResponseWriter, r *http.Request) {
 	resp := make([]SystemUser, 0, len(rows))
 	for _, u := range rows {
 		resp = append(resp, SystemUser{
-			Id: u.ID, Username: u.Username, DisplayName: u.DisplayName,
+			Id: u.ID, Username: u.Username, DisplayName: u.DisplayName, Email: u.Email,
 			IsSystemAdmin: u.IsSystemAdmin, CreatedAt: u.CreatedAt.Time,
 		})
 	}

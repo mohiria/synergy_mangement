@@ -27,23 +27,24 @@ TRUNCATE TABLE
 
 -- ── 用户 ──────────────────────────────────────────────────────────────────────
 -- 密码统一取环境变量 SEED_PASSWORD（cmd/seed 在事务里 set_config 进来，bcrypt cost 10）。
-INSERT INTO users (id, username, display_name, password_hash, created_at)
+-- #202：邮箱用 <用户名>@example.com（RFC 2606 保留域，永不投递）。
+INSERT INTO users (id, username, display_name, password_hash, created_at, email)
 OVERRIDING SYSTEM VALUE VALUES
-    (1,  'zhaowenqi',   '赵文琪', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '400 days'),
-    (2,  'lijianhui',   '李建辉', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '398 days'),
-    (3,  'chenmuyang',  '陈牧阳', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '395 days'),
-    (4,  'wanghaoran',  '王浩然', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '395 days'),
-    (5,  'liuxinyi',    '刘欣怡', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '380 days'),
-    (6,  'sunpeng',     '孙鹏',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '372 days'),
-    (7,  'zhoujiaqi',   '周佳琪', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '365 days'),
-    (8,  'wuyufan',     '吴雨凡', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '333 days'),
-    (9,  'zhengkai',    '郑凯',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '330 days'),
-    (10, 'hanmeng',     '韩萌',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '300 days'),
-    (11, 'xushuai',     '徐帅',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '288 days'),
-    (12, 'guoting',     '郭婷',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '260 days'),
-    (13, 'maozhicheng', '毛志成', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '210 days'),
-    (14, 'linxiaoyu',   '林小雨', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '188 days'),
-    (15, 'hejing',      '何静',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '150 days');
+    (1,  'zhaowenqi',   '赵文琪', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '400 days', 'zhaowenqi@example.com'),
+    (2,  'lijianhui',   '李建辉', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '398 days', 'lijianhui@example.com'),
+    (3,  'chenmuyang',  '陈牧阳', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '395 days', 'chenmuyang@example.com'),
+    (4,  'wanghaoran',  '王浩然', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '395 days', 'wanghaoran@example.com'),
+    (5,  'liuxinyi',    '刘欣怡', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '380 days', 'liuxinyi@example.com'),
+    (6,  'sunpeng',     '孙鹏',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '372 days', 'sunpeng@example.com'),
+    (7,  'zhoujiaqi',   '周佳琪', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '365 days', 'zhoujiaqi@example.com'),
+    (8,  'wuyufan',     '吴雨凡', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '333 days', 'wuyufan@example.com'),
+    (9,  'zhengkai',    '郑凯',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '330 days', 'zhengkai@example.com'),
+    (10, 'hanmeng',     '韩萌',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '300 days', 'hanmeng@example.com'),
+    (11, 'xushuai',     '徐帅',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '288 days', 'xushuai@example.com'),
+    (12, 'guoting',     '郭婷',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '260 days', 'guoting@example.com'),
+    (13, 'maozhicheng', '毛志成', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '210 days', 'maozhicheng@example.com'),
+    (14, 'linxiaoyu',   '林小雨', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '188 days', 'linxiaoyu@example.com'),
+    (15, 'hejing',      '何静',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '150 days', 'hejing@example.com');
 
 -- #200：赵文琪为系统管理员（隐式视同所有项目的管理员、可进系统设置；不进审批链）。
 UPDATE users SET is_system_admin = true WHERE id = 1;

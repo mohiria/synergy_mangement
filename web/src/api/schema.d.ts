@@ -1141,6 +1141,8 @@ export interface components {
             id: number;
             username: string;
             displayName: string;
+            /** @description 邮箱（#202 起必填、全局唯一、大小写不敏感；存量用户回填 <用户名>@local.invalid 占位） */
+            email: string;
             /** @description 系统管理员（#200）：对任意项目隐式视同项目管理员、可进系统设置；不进审批链、不出现在成员列表与人员选择器 */
             isSystemAdmin: boolean;
         };
@@ -1150,8 +1152,8 @@ export interface components {
             id: number;
             username: string;
             displayName: string;
-            /** @description 邮箱（#202 起必填；此前为空） */
-            email?: string;
+            /** @description 邮箱（#202 起必填、全局唯一） */
+            email: string;
             isSystemAdmin: boolean;
             /** @description 是否已停用（#204 起） */
             disabled?: boolean;
@@ -1168,6 +1170,7 @@ export interface components {
             id: number;
             username: string;
             displayName: string;
+            email: string;
         };
         /**
          * @description 项目状态（未开始／进行中／已完成／已归档），与自由文本“阶段”正交
