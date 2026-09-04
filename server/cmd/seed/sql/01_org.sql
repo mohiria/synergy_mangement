@@ -10,7 +10,7 @@
 -- 场景：某集团数字化中心（约 100 人）在跑的四个项目。
 -- 本目录下的文件按文件名顺序执行（go run ./cmd/seed 会在一个事务里跑完）。
 
--- 口令哈希用 pgcrypto 的 bcrypt 现算（$2a$10$，与 golang.org/x/crypto/bcrypt 兼容），
+-- 密码哈希用 pgcrypto 的 bcrypt 现算（$2a$10$，与 golang.org/x/crypto/bcrypt 兼容），
 -- 使本文件可以脱离 Go 直接用 psql -f 执行。
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
@@ -22,28 +22,41 @@ TRUNCATE TABLE
     deliverable_files, deliverables,
     task_receipts, task_receivers, task_reviewers, task_invites,
     tasks, key_results, objectives,
-    project_members, projects, users
+    project_members, projects, users,
+    mail_outbox, user_mail_prefs
     RESTART IDENTITY CASCADE;
 
+-- #212／#213：系统级配置重置为默认（单行表不 TRUNCATE，避免丢行）。
+UPDATE system_settings SET system_name = DEFAULT, subtitle = DEFAULT, login_hint = DEFAULT, base_url = DEFAULT,
+    logo_key = DEFAULT, logo_content_type = DEFAULT, updated_at = now() WHERE id = 1;
+UPDATE mail_settings SET host = DEFAULT, port = DEFAULT, encryption = DEFAULT, username = DEFAULT, password_enc = DEFAULT,
+    from_name = DEFAULT, from_address = DEFAULT, notify_enabled = DEFAULT, notify_discussion_mention = DEFAULT,
+    notify_discussion_owner = DEFAULT, notify_task_invite = DEFAULT, notify_upstream_task_assigned = DEFAULT,
+    notify_blocker_remind = DEFAULT, updated_at = now() WHERE id = 1;
+
 -- ── 用户 ──────────────────────────────────────────────────────────────────────
--- 口令统一取环境变量 SEED_PASSWORD（cmd/seed 在事务里 set_config 进来，bcrypt cost 10）。
-INSERT INTO users (id, username, display_name, password_hash, created_at)
+-- 密码统一取环境变量 SEED_PASSWORD（cmd/seed 在事务里 set_config 进来，bcrypt cost 10）。
+-- #202：邮箱用 <用户名>@example.com（RFC 2606 保留域，永不投递）。
+INSERT INTO users (id, username, display_name, password_hash, created_at, email)
 OVERRIDING SYSTEM VALUE VALUES
-    (1,  'zhaowenqi',   '赵文琪', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '400 days'),
-    (2,  'lijianhui',   '李建辉', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '398 days'),
-    (3,  'chenmuyang',  '陈牧阳', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '395 days'),
-    (4,  'wanghaoran',  '王浩然', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '395 days'),
-    (5,  'liuxinyi',    '刘欣怡', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '380 days'),
-    (6,  'sunpeng',     '孙鹏',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '372 days'),
-    (7,  'zhoujiaqi',   '周佳琪', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '365 days'),
-    (8,  'wuyufan',     '吴雨凡', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '333 days'),
-    (9,  'zhengkai',    '郑凯',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '330 days'),
-    (10, 'hanmeng',     '韩萌',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '300 days'),
-    (11, 'xushuai',     '徐帅',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '288 days'),
-    (12, 'guoting',     '郭婷',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '260 days'),
-    (13, 'maozhicheng', '毛志成', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '210 days'),
-    (14, 'linxiaoyu',   '林小雨', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '188 days'),
-    (15, 'hejing',      '何静',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '150 days');
+    (1,  'zhaowenqi',   '赵文琪', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '400 days', 'zhaowenqi@example.com'),
+    (2,  'lijianhui',   '李建辉', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '398 days', 'lijianhui@example.com'),
+    (3,  'chenmuyang',  '陈牧阳', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '395 days', 'chenmuyang@example.com'),
+    (4,  'wanghaoran',  '王浩然', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '395 days', 'wanghaoran@example.com'),
+    (5,  'liuxinyi',    '刘欣怡', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '380 days', 'liuxinyi@example.com'),
+    (6,  'sunpeng',     '孙鹏',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '372 days', 'sunpeng@example.com'),
+    (7,  'zhoujiaqi',   '周佳琪', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '365 days', 'zhoujiaqi@example.com'),
+    (8,  'wuyufan',     '吴雨凡', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '333 days', 'wuyufan@example.com'),
+    (9,  'zhengkai',    '郑凯',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '330 days', 'zhengkai@example.com'),
+    (10, 'hanmeng',     '韩萌',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '300 days', 'hanmeng@example.com'),
+    (11, 'xushuai',     '徐帅',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '288 days', 'xushuai@example.com'),
+    (12, 'guoting',     '郭婷',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '260 days', 'guoting@example.com'),
+    (13, 'maozhicheng', '毛志成', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '210 days', 'maozhicheng@example.com'),
+    (14, 'linxiaoyu',   '林小雨', crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '188 days', 'linxiaoyu@example.com'),
+    (15, 'hejing',      '何静',   crypt(current_setting('synergy.seed_password'), gen_salt('bf', 10)), now() - interval '150 days', 'hejing@example.com');
+
+-- #200：赵文琪为系统管理员（隐式视同所有项目的管理员、可进系统设置；不进审批链）。
+UPDATE users SET is_system_admin = true WHERE id = 1;
 
 -- ── 项目 ──────────────────────────────────────────────────────────────────────
 INSERT INTO projects (id, name, created_by, owner_id, status, stage, planned_start_date, planned_end_date, created_at)

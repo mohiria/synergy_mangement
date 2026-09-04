@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"strings"
 	"errors"
 	"testing"
 	"time"
@@ -172,10 +173,10 @@ func TestPasswordHashAndVerify(t *testing.T) {
 		t.Fatal("哈希不得等于明文")
 	}
 	if !VerifyPassword(hash, "s3cret") {
-		t.Fatal("正确口令应通过")
+		t.Fatal("正确密码应通过")
 	}
 	if VerifyPassword(hash, "wrong") {
-		t.Fatal("错误口令不应通过")
+		t.Fatal("错误密码不应通过")
 	}
 }
 
@@ -196,7 +197,7 @@ func TestNewSessionToken(t *testing.T) {
 	}
 }
 
-// S3：改口令的校验规则——当前口令必须正确、新口令至少 8 位且不能与当前口令相同。
+// S3：改密码的校验规则——当前密码必须正确、新密码至少 8 位且不能与当前密码相同。
 func TestValidatePasswordChange(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -205,9 +206,18 @@ func TestValidatePasswordChange(t *testing.T) {
 		want    error
 	}{
 		{"合法修改", "old-pass-1", "new-pass-2", nil},
-		{"新口令过短", "old-pass-1", "short7x", ErrPasswordTooShort},
-		{"新口令与当前相同", "old-pass-1", "old-pass-1", ErrPasswordUnchanged},
-		{"新口令为空白", "old-pass-1", "        ", ErrPasswordTooShort},
+		{"新密码过短", "old-pass-1", "short7x", ErrPasswordTooShort},
+		{"新密码与当前相同", "old-pass-1", "old-pass-1", ErrPasswordUnchanged},
+		{"新密码为空白", "old-pass-1", "        ", ErrPasswordTooShort},
+		// #193：上限 32 位（按 Unicode 字符计）；恰好 8／32 位通过，7／33 位拒绝。
+		{"恰好 8 位通过", "old-pass-1", "abcdefgh", nil},
+		{"恰好 32 位通过", "old-pass-1", strings.Repeat("a", 32), nil},
+		{"33 位过长", "old-pass-1", strings.Repeat("a", 33), ErrPasswordTooLong},
+		{"128 位过长（旧契约上限）", "old-pass-1", strings.Repeat("a", 128), ErrPasswordTooLong},
+		{"32 个汉字按字符计不超上限但超 72 字节", "old-pass-1", strings.Repeat("密", 32), ErrPasswordTooLong},
+		{"24 个汉字（72 字节）通过", "old-pass-1", strings.Repeat("密", 24), nil},
+		{"8 个汉字按字符计够 8 位", "old-pass-1", strings.Repeat("密", 8), nil},
+		{"7 个汉字按字符计过短（字节数 21 不算数）", "old-pass-1", strings.Repeat("密", 7), ErrPasswordTooShort},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -217,3 +227,60 @@ func TestValidatePasswordChange(t *testing.T) {
 		})
 	}
 }
+
+// #208：登录安全的会话列表——保持输入顺序（最新活动在前），当前会话按 token 标出，token 本身不外泄。
+func TestSessionViews(t *testing.T) {
+	base := time.Date(2026, 9, 4, 10, 0, 0, 0, time.UTC)
+	in := []SessionFact{
+		{Token: "tok-b", CreatedAt: base.Add(-time.Hour), LastActiveAt: base, ExpiresAt: base.Add(6 * 24 * time.Hour)},
+		{Token: "tok-a", CreatedAt: base.Add(-48 * time.Hour), LastActiveAt: base.Add(-time.Hour), ExpiresAt: base.Add(5 * 24 * time.Hour)},
+	}
+	got := SessionViews(in, "tok-a")
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if got[0].Current || !got[1].Current {
+		t.Fatalf("应只标出 tok-a 为当前会话: %+v", got)
+	}
+	if !got[0].LastActiveAt.Equal(base) || !got[1].CreatedAt.Equal(base.Add(-48*time.Hour)) || !got[1].ExpiresAt.Equal(base.Add(5*24*time.Hour)) {
+		t.Fatalf("时间字段应原样带出: %+v", got)
+	}
+	if none := SessionViews(in, "unknown"); none[0].Current || none[1].Current {
+		t.Fatalf("token 不匹配时不标当前: %+v", none)
+	}
+	if empty := SessionViews(nil, "tok-a"); len(empty) != 0 {
+		t.Fatalf("空输入应得空切片: %+v", empty)
+	}
+}
+
+// #209：被限速时告知剩余等待秒数——锁定窗口减去距上次失败的时长，向上取整到秒；
+// 未被限速为 0。
+func TestLoginThrottleRetryAfter(t *testing.T) {
+	th := NewLoginThrottle()
+	base := time.Date(2026, 9, 4, 10, 0, 0, 0, time.UTC)
+	if got := th.RetryAfter("alice", "1.1.1.1", base); got != 0 {
+		t.Fatalf("无失败记录应为 0，得到 %v", got)
+	}
+	for i := 0; i < MaxLoginFailures; i++ {
+		th.RecordFailure("alice", "1.1.1.1", base.Add(time.Duration(i)*time.Second))
+	}
+	last := base.Add(time.Duration(MaxLoginFailures-1) * time.Second)
+	if got := th.RetryAfter("alice", "1.1.1.1", last.Add(10*time.Second)); got != LoginLockWindow-10*time.Second {
+		t.Fatalf("剩余等待 = %v, want %v", got, LoginLockWindow-10*time.Second)
+	}
+	// 未达上限不限速，剩余为 0。
+	th2 := NewLoginThrottle()
+	th2.RecordFailure("bob", "1.1.1.1", base)
+	if got := th2.RetryAfter("bob", "1.1.1.1", base.Add(time.Second)); got != 0 {
+		t.Fatalf("未达上限应为 0，得到 %v", got)
+	}
+	// 锁定窗口过后为 0。
+	if got := th.RetryAfter("alice", "1.1.1.1", last.Add(LoginLockWindow+time.Second)); got != 0 {
+		t.Fatalf("窗口过后应为 0，得到 %v", got)
+	}
+	// 亚秒向上取整。
+	if got := th.RetryAfter("alice", "1.1.1.1", last.Add(LoginLockWindow-1500*time.Millisecond)); got != 2*time.Second {
+		t.Fatalf("应向上取整到 2s，得到 %v", got)
+	}
+}
+

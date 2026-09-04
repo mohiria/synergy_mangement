@@ -1,5 +1,7 @@
 -- name: ListProjectMembers :many
-SELECT m.user_id, m.role, u.username, u.display_name
+-- disabled_at：停用成员照常返回（历史记录与成员管理要显示名字并打「已停用」，#204）；
+-- 对人员选择器的过滤在 handler 按 includeDisabled 参数做。
+SELECT m.user_id, m.role, u.username, u.display_name, u.disabled_at
 FROM project_members m
 JOIN users u ON u.id = m.user_id
 WHERE m.project_id = $1

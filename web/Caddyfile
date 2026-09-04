@@ -1,11 +1,34 @@
 # 同源提供 SPA 与 API：前端用相对路径 /api/v1（web/src/api/client.ts），必须与后端同源。
-# 内网明文 HTTP（ADR 0001「认证会话」）；日后上 HTTPS 时把 :80 换成域名即可，代码不用改。
+# 公网 IP:80 明文 HTTP（ADR 0001「修订：公网部署」）；日后上 HTTPS 时把 :80 换成域名即可，代码不用改。
 :80 {
 	encode gzip
+
+	# 基础安全响应头（#190，ADR 0001 安全改造）：页面与 /api 统一带，防点击劫持与 MIME 嗅探。
+	# 不做完整 CSP：Ant Design 依赖内联样式（style 属性与 <style> 注入），完整 CSP 要么放行
+	# 'unsafe-inline' 形同虚设，要么改造成本大于收益；只用 frame-ancestors 一项挡住被嵌入。
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Content-Security-Policy "frame-ancestors 'none'"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
 	root * /srv
 
 	handle /api/* {
 		reverse_proxy app:8080
+	}
+
+	# 对象存储（#194）：MinIO 不再暴露 9000，浏览器的预签名上传／下载经这里按桶名前缀原样反代。
+	# 不改路径、透传 Host（reverse_proxy 默认行为），签名才能验过；MINIO_PUBLIC_ENDPOINT 填公网 IP（不带端口）。
+	# 请求体上限与单文件上限一致（domain.MaxUploadSize，1 GB，#195），只作用于本路径，/api 的 4 MB 上限在 Go 里。
+	handle /synergy/* {
+		request_body {
+			max_size 1GB
+		}
+		reverse_proxy minio:9000
 	}
 
 	# SPA history fallback：react-router 的深链接（如 /projects/1/tasks）交给 index.html。

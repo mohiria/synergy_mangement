@@ -26,7 +26,7 @@ func (s *Server) CreateDiscussion(w http.ResponseWriter, r *http.Request, projec
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
+	actor := projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)
 	if !domain.CanDiscuss(actor) {
 		writeForbidden(w)
 		return
@@ -88,7 +88,7 @@ func (s *Server) CreateDiscussion(w http.ResponseWriter, r *http.Request, projec
 			kind = domain.NotifyDiscussionMention
 			text = fmt.Sprintf("%s 在任务「%s」的讨论中提到了你", author.DisplayName, task.Name)
 		}
-		if _, err := qtx.CreateNotification(r.Context(), store.CreateNotificationParams{
+		if err := s.notify(r.Context(), qtx, store.CreateNotificationParams{
 			UserID:    target,
 			Kind:      kind,
 			Content:   text,

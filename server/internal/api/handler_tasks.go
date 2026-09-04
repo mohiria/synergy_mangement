@@ -22,7 +22,7 @@ func (s *Server) ListTasks(w http.ResponseWriter, r *http.Request, projectId int
 		return
 	}
 	uid := currentUser(r).ID
-	resp, err := s.taskList(r.Context(), projectId, uid, projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility))
+	resp, err := s.taskList(r.Context(), projectId, uid, projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility))
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -56,7 +56,7 @@ func (s *Server) CreateTaskBatch(w http.ResponseWriter, r *http.Request, project
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
+	actor := projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)
 	// 裁决 10（#180）：直接创建收归项目管理员；任务创建邀请（AC-03）是管理员授权的
 	// 间接创建路径，受邀的非只读成员仍可经邀请提交（身份与 KR 归属由 FulfillInvite 校验）。
 	if req.TaskInviteId != nil {
@@ -247,7 +247,7 @@ func (s *Server) UpdateTaskStatus(w http.ResponseWriter, r *http.Request, projec
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
+	actor := projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)
 	task, facts, ok := s.fetchTask(w, r, projectId, taskId)
 	if !ok {
 		return
@@ -286,7 +286,7 @@ func (s *Server) UpdateTaskProgress(w http.ResponseWriter, r *http.Request, proj
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
+	actor := projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)
 	_, facts, ok := s.fetchTask(w, r, projectId, taskId)
 	if !ok {
 		return
@@ -337,7 +337,7 @@ func (s *Server) GetTaskDetail(w http.ResponseWriter, r *http.Request, projectId
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
+	actor := projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)
 	task, taskFacts, ok := s.fetchTask(w, r, projectId, taskId)
 	if !ok {
 		return
@@ -696,6 +696,7 @@ func (s *Server) taskList(ctx context.Context, projectID, userID int64, actor do
 			Name:               t.Name,
 			OwnerId:            t.OwnerID,
 			OwnerName:          t.OwnerName,
+			OwnerDisabled:      optBool(t.OwnerDisabledAt.Valid),
 			StartDate:          *fromPgDate(t.StartDate),
 			EndDate:            *fromPgDate(t.EndDate),
 			UpdatedAt:          t.UpdatedAt.Time,

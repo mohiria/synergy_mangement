@@ -41,6 +41,272 @@ paths:
               schema:
                 $ref: "#/components/schemas/Health"
 
+  /branding:
+    get:
+      operationId: getBranding
+      tags: [system]
+      summary: 品牌信息（免登录，#210）：登录页在拿到会话前就要显示；只含品牌字段，不暴露账号信息
+      security: []
+      responses:
+        "200":
+          description: 品牌信息
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Branding"
+
+  /branding/logo:
+    get:
+      operationId: getBrandingLogo
+      tags: [system]
+      summary: 系统 logo 出图（免登录，#211）：经后端流式读取对象存储，不给直链；带 ETag 与长缓存，URL 以 ?v= 版本区分
+      security: []
+      parameters:
+        - name: v
+          in: query
+          description: 版本号，仅用于让浏览器在换图后拿到新图
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 图片
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /system/logo:
+    post:
+      operationId: uploadSystemLogo
+      tags: [system]
+      summary: 上传 logo（仅系统管理员，#211）：仅 PNG／JPG／WebP、≤512KB，按内容探测类型，不收 SVG
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadLogoRequest"
+      responses:
+        "200":
+          description: 已上传，返回最新配置（logoVersion 递增）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemSettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    delete:
+      operationId: deleteSystemLogo
+      tags: [system]
+      summary: 删除 logo 恢复默认（仅系统管理员，#211）
+      responses:
+        "200":
+          description: 已删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemSettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /system/mail-settings:
+    get:
+      operationId: getMailSettings
+      tags: [system]
+      summary: 通知设置 → 邮件通道配置（仅系统管理员，#212）；密码永不回显，只给「已设置」
+      responses:
+        "200":
+          description: 当前配置
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MailSettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    put:
+      operationId: updateMailSettings
+      tags: [system]
+      summary: 保存邮件通道（仅系统管理员，#212）：密码留空表示保持原值，给了则用应用密钥加密落库；进系统级审计（密码不进摘要）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MailSettingsInput"
+      responses:
+        "200":
+          description: 已保存
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MailSettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /system/mail-notify:
+    put:
+      operationId: updateMailNotify
+      tags: [system]
+      summary: 通知设置 → 邮件通知开关（仅系统管理员，#213）：总开关 + 五个事件开关；找回密码邮件不受控制
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MailNotifySwitches"
+      responses:
+        "200":
+          description: 已保存
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MailSettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /me/mail-preferences:
+    get:
+      operationId: getMyMailPreferences
+      tags: [auth]
+      summary: 个人中心 → 通知偏好（#213）：本人开关，附系统级开关供置灰
+      responses:
+        "200":
+          description: 偏好
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MailPreferences"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    put:
+      operationId: updateMyMailPreferences
+      tags: [auth]
+      summary: 保存本人通知偏好（#213）；不进审计
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MailNotifySwitches"
+      responses:
+        "200":
+          description: 已保存
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MailPreferences"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /system/mail-settings/test:
+    post:
+      operationId: sendTestMail
+      tags: [system]
+      summary: 发送测试邮件（仅系统管理员，#212）：发到我绑定的邮箱或手填地址；只入 outbox，立即返回
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TestMailRequest"
+      responses:
+        "202":
+          description: 已入队
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MailOutboxItem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /system/mail-outbox:
+    get:
+      operationId: listMailOutbox
+      tags: [system]
+      summary: 最近发送记录（最近 50 条，仅系统管理员，#212）
+      responses:
+        "200":
+          description: 发送记录，最新在前
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MailOutboxItem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /system/settings:
+    get:
+      operationId: getSystemSettings
+      tags: [system]
+      summary: 系统设置 → 基本信息（仅系统管理员，#210）
+      responses:
+        "200":
+          description: 当前配置
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemSettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    put:
+      operationId: updateSystemSettings
+      tags: [system]
+      summary: 修改基本信息（仅系统管理员，#210）；写操作自动进系统级审计
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SystemSettingsInput"
+      responses:
+        "200":
+          description: 已保存
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemSettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
   /auth/login:
     post:
       operationId: login
@@ -54,6 +320,8 @@ paths:
             schema:
               $ref: "#/components/schemas/LoginRequest"
       responses:
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "200":
           description: 登录成功
           content:
@@ -62,8 +330,56 @@ paths:
                 $ref: "#/components/schemas/CurrentUser"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: 账号已停用（#204，code account_disabled；仅用户名与密码都正确时给出）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "429":
           $ref: "#/components/responses/TooManyRequests"
+
+  /auth/password-reset/request:
+    post:
+      operationId: requestPasswordReset
+      tags: [auth]
+      summary: 找回密码——请求重置邮件（免登录，#214）：输入用户名或邮箱，无论账号是否存在、是否停用都返回同一文案；挂登录限速
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordResetRequest"
+      responses:
+        "202":
+          description: 已受理（统一文案）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PasswordResetRequested"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /auth/password-reset/confirm:
+    post:
+      operationId: confirmPasswordReset
+      tags: [auth]
+      summary: 找回密码——用重置链接里的 token 设置新密码（免登录，#214）：成功后作废 token、清「须改密码」、踢掉全部会话、记系统级审计
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordResetConfirm"
+      responses:
+        "204":
+          description: 已重置
+        "422":
+          $ref: "#/components/responses/ValidationError"
 
   /auth/logout:
     post:
@@ -78,7 +394,7 @@ paths:
     post:
       operationId: changePassword
       tags: [auth]
-      summary: 修改本人登录口令（S3）；改完除当前会话外，本人其余会话全部失效
+      summary: 修改本人登录密码（S3）；改完除当前会话外，本人其余会话全部失效
       requestBody:
         required: true
         content:
@@ -92,6 +408,63 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "422":
           $ref: "#/components/responses/ValidationError"
+
+  /me/profile:
+    put:
+      operationId: updateMyProfile
+      tags: [auth]
+      summary: 个人中心 → 基本信息：本人修改显示名与邮箱（#207）；用户名只读；不进审计
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserProfileRequest"
+      responses:
+        "200":
+          description: 已修改，返回最新的当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurrentUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: 邮箱已被使用（code email_taken）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /me/sessions:
+    get:
+      operationId: listMySessions
+      tags: [auth]
+      summary: 个人中心 → 登录安全：本人活跃会话（#208），最新活动在前，当前会话带标记
+      responses:
+        "200":
+          description: 会话列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SessionInfo"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /me/sessions/logout-others:
+    post:
+      operationId: logoutOtherSessions
+      tags: [auth]
+      summary: 退出其他设备（#208）：吊销本人除当前会话外的全部会话
+      responses:
+        "204":
+          description: 已退出其他设备
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /auth/me:
     get:
@@ -262,7 +635,13 @@ paths:
     get:
       operationId: listProjectMembers
       tags: [projects]
-      summary: 项目成员列表（含成员角色）
+      summary: 项目成员列表（含成员角色）；停用成员默认不返回（人员选择器口径，#204）
+      parameters:
+        - name: includeDisabled
+          in: query
+          description: 是否带回已停用成员（成员管理与历史记录显示用）；缺省 false
+          schema:
+            type: boolean
       responses:
         "200":
           description: 成员列表
@@ -1997,6 +2376,8 @@ paths:
             schema:
               $ref: "#/components/schemas/ImportRequest"
       responses:
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "201":
           description: 导入成功
           content:
@@ -2034,6 +2415,8 @@ paths:
             schema:
               $ref: "#/components/schemas/ImportTasksRequest"
       responses:
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "201":
           description: 导入成功
           content:
@@ -2136,6 +2519,244 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
 
+  /system/users:
+    get:
+      operationId: listSystemUsers
+      tags: [system]
+      summary: 系统设置 → 用户管理的只读用户列表（仅系统管理员，#201）
+      description: 邮箱、状态、最近登录三列由 #202／#204／#208 填充，本版可为空。
+      responses:
+        "200":
+          description: 全部用户，按 id 升序
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SystemUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      operationId: createSystemUser
+      tags: [system]
+      summary: 新建用户（仅系统管理员，#203）：设初始密码，新用户带「须改密码」标记
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSystemUserRequest"
+      responses:
+        "201":
+          description: 已创建
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: 用户名或邮箱已被使用（code 为 username_taken／email_taken）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /system/users/{userId}/disable:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    post:
+      operationId: disableSystemUser
+      tags: [system]
+      summary: 停用用户（仅系统管理员，#204）：不能登录、现有会话立即失效；不能停用自己
+      responses:
+        "200":
+          description: 已停用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /system/audit-logs:
+    get:
+      operationId: listSystemAuditLogs
+      tags: [system]
+      summary: 系统级操作审计（仅系统管理员，#206）：用户管理与系统设置的写操作由写路径装饰器自动记录，project 作用域为空
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 100
+      responses:
+        "200":
+          description: 审计记录，最新在前
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditLog"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /system/users/{userId}/reset-password:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    post:
+      operationId: resetSystemUserPassword
+      tags: [system]
+      summary: 重置密码（仅系统管理员，#205）：管理员设新密码，该用户全部会话失效并置「须改密码」
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordRequest"
+      responses:
+        "200":
+          description: 已重置
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /system/users/{userId}/profile:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    put:
+      operationId: updateSystemUserProfile
+      tags: [system]
+      summary: 修改显示名与邮箱（仅系统管理员，#205）；邮箱仍必填、全局唯一
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserProfileRequest"
+      responses:
+        "200":
+          description: 已修改
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: 邮箱已被使用（code email_taken）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /system/users/{userId}/system-admin:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    put:
+      operationId: setSystemUserAdmin
+      tags: [system]
+      summary: 设／撤系统管理员（仅系统管理员，#205）；不能撤销自己
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetSystemAdminRequest"
+      responses:
+        "200":
+          description: 已更新
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /system/users/{userId}/enable:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    post:
+      operationId: enableSystemUser
+      tags: [system]
+      summary: 启用用户（仅系统管理员，#204）
+      responses:
+        "200":
+          description: 已启用
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /users:
     get:
       operationId: listUsers
@@ -2167,11 +2788,11 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
     TooManyRequests:
-      description: 登录失败次数过多，暂时限速
+      description: 登录失败次数过多，暂时限速；带剩余等待秒数（#209）
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/Error"
+            $ref: "#/components/schemas/RateLimitedError"
     ValidationError:
       description: 请求内容未通过校验
       content:
@@ -2196,6 +2817,12 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
+    PayloadTooLarge:
+      description: 请求体超过 /api 全局上限 4 MB（#191；所有写接口通用，文件本体走对象存储不受此限）
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
   schemas:
     Health:
       type: object
@@ -2214,20 +2841,29 @@ components:
         message:
           type: string
           description: 面向用户的错误说明
+    RateLimitedError:
+      allOf:
+        - $ref: "#/components/schemas/Error"
+        - type: object
+          required: [retryAfterSeconds]
+          properties:
+            retryAfterSeconds:
+              type: integer
+              description: 距可再次尝试的剩余秒数（向上取整）；前端据此倒计时（#209）
     ChangePasswordRequest:
       type: object
-      required: [currentPassword, newPassword]
+      required: [newPassword]
       properties:
         currentPassword:
           type: string
-          minLength: 1
           format: password
+          description: 当前密码；「须改密码」为真（首次改密页）时可省略，其余情况必填且须正确（#203）
         newPassword:
           type: string
           minLength: 8
-          maxLength: 128
+          maxLength: 32
           format: password
-          description: 新口令，至少 8 位且不能与当前口令相同
+          description: 新密码，8～32 位（按 Unicode 字符计）且不能与当前密码相同
     LoginRequest:
       type: object
       required: [username, password]
@@ -2241,7 +2877,7 @@ components:
           format: password
     CurrentUser:
       type: object
-      required: [id, username, displayName]
+      required: [id, username, displayName, email, isSystemAdmin, mustChangePassword]
       properties:
         id:
           type: integer
@@ -2250,9 +2886,357 @@ components:
           type: string
         displayName:
           type: string
+        email:
+          type: string
+          description: 邮箱（#202 起必填、全局唯一、大小写不敏感；存量用户回填 <用户名>@local.invalid 占位）
+        isSystemAdmin:
+          type: boolean
+          description: 系统管理员（#200）：对任意项目隐式视同项目管理员、可进系统设置；不进审批链、不出现在成员列表与人员选择器
+        mustChangePassword:
+          type: boolean
+          description: 须改密码（#203，词汇表「首次改密」）：为真时除登录、登出、修改密码、读当前用户外的接口一律 403 password_change_required；前端整页引导设置新密码
+        lastLoginAt:
+          type: string
+          format: date-time
+          description: 最近登录时间（#208；本次登录之前的那一次不单独保留，取最近一次成功登录）
+    SystemUser:
+      type: object
+      description: 系统设置 → 用户管理的一行（#201）
+      required: [id, username, displayName, email, isSystemAdmin, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        username:
+          type: string
+        displayName:
+          type: string
+        email:
+          type: string
+          description: 邮箱（#202 起必填、全局唯一）
+        isSystemAdmin:
+          type: boolean
+        disabled:
+          type: boolean
+          description: 是否已停用（#204 起）
+        createdAt:
+          type: string
+          format: date-time
+        lastLoginAt:
+          type: string
+          format: date-time
+          description: 最近登录时间（#208 起）
+        mustChangePassword:
+          type: boolean
+          description: 须改密码（#203）
+    ResetPasswordRequest:
+      type: object
+      required: [password]
+      properties:
+        password:
+          type: string
+          minLength: 8
+          maxLength: 32
+          format: password
+          description: 管理员设定的新密码；用户下次登录强制改密
+    UpdateUserProfileRequest:
+      type: object
+      required: [displayName, email]
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 50
+        email:
+          type: string
+          minLength: 3
+          maxLength: 254
+    SetSystemAdminRequest:
+      type: object
+      required: [isSystemAdmin]
+      properties:
+        isSystemAdmin:
+          type: boolean
+    SessionInfo:
+      type: object
+      description: 本人的一条活跃会话（#208）；不暴露 token
+      required: [createdAt, lastActiveAt, expiresAt, current]
+      properties:
+        createdAt:
+          type: string
+          format: date-time
+          description: 登录时间
+        lastActiveAt:
+          type: string
+          format: date-time
+          description: 最近活动时间（随滑动续期更新，最多滞后 1 小时）
+        expiresAt:
+          type: string
+          format: date-time
+        current:
+          type: boolean
+          description: 是否当前会话
+    Branding:
+      type: object
+      description: 登录页与两套壳品牌区读取的字段（#210）；logo 与找回密码开关由 #211／#214 填充
+      required: [systemName, subtitle, loginHint, canRecoverPassword]
+      properties:
+        systemName:
+          type: string
+        subtitle:
+          type: string
+        loginHint:
+          type: string
+          description: 登录页提示语；为空则不显示该行
+        canRecoverPassword:
+          type: boolean
+          description: 邮件通道已配置时为真，登录页才显示「忘记密码」（#214）
+        logoVersion:
+          type: integer
+          description: 已上传 logo 的版本号，未上传为空（#211）
+    SystemSettings:
+      type: object
+      required: [systemName, subtitle, loginHint, baseUrl, updatedAt]
+      properties:
+        logoVersion:
+          type: integer
+          description: 已上传 logo 的版本号；未上传或已删除为空（#211）
+        systemName:
+          type: string
+        subtitle:
+          type: string
+        loginHint:
+          type: string
+        baseUrl:
+          type: string
+          description: 访问地址，找回密码邮件拼链接用；为空时用请求 Host 兜底
+        updatedAt:
+          type: string
+          format: date-time
+    UploadLogoRequest:
+      type: object
+      required: [fileName, dataBase64]
+      properties:
+        fileName:
+          type: string
+          description: 原文件名（只用于提示，类型以内容探测为准）
+        dataBase64:
+          type: string
+          description: 文件内容的 base64（≤512KB 解码后）
+    SystemSettingsInput:
+      type: object
+      required: [systemName, subtitle, loginHint, baseUrl]
+      properties:
+        systemName:
+          type: string
+          minLength: 1
+          maxLength: 10
+          description: ≤10 个 Unicode 字符，必填
+        subtitle:
+          type: string
+          maxLength: 16
+        loginHint:
+          type: string
+          maxLength: 60
+        baseUrl:
+          type: string
+          maxLength: 254
+          description: http:// 或 https:// 开头的完整地址，或空
+    MailSettings:
+      type: object
+      description: 邮件通道配置（#212）；密码永不回显
+      required: [host, port, encryption, username, fromName, fromAddress, passwordSet, configured, notify, updatedAt]
+      properties:
+        host:
+          type: string
+        port:
+          type: integer
+        encryption:
+          type: string
+          enum: [none, starttls, ssl]
+        username:
+          type: string
+        fromName:
+          type: string
+        fromAddress:
+          type: string
+        passwordSet:
+          type: boolean
+          description: 已设置密码（密文落库）
+        configured:
+          type: boolean
+          description: 主机与发件人地址齐全即视为已配置；找回密码入口据此显示（#214）
+        notify:
+          $ref: "#/components/schemas/MailNotifySwitches"
+        updatedAt:
+          type: string
+          format: date-time
+    MailNotifySwitches:
+      type: object
+      description: 邮件通知开关（#213）：总开关 + 五个事件开关，事件键与站内通知 kind 一致
+      required: [enabled, events]
+      properties:
+        enabled:
+          type: boolean
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/MailEventSwitch"
+    MailEventSwitch:
+      type: object
+      required: [kind, label, enabled]
+      properties:
+        kind:
+          type: string
+          description: discussion_mention／discussion_owner／task_invite／upstream_task_assigned／blocker_remind
+        label:
+          type: string
+        enabled:
+          type: boolean
+        systemEnabled:
+          type: boolean
+          description: 个人偏好里附带：系统级已关的事件置灰不可用
+    MailPreferences:
+      type: object
+      required: [enabled, events, systemEnabled]
+      properties:
+        enabled:
+          type: boolean
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/MailEventSwitch"
+        systemEnabled:
+          type: boolean
+          description: 系统级总开关
+    MailSettingsInput:
+      type: object
+      required: [host, port, encryption, username, fromName, fromAddress]
+      properties:
+        host:
+          type: string
+          maxLength: 253
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        encryption:
+          type: string
+          enum: [none, starttls, ssl]
+        username:
+          type: string
+          maxLength: 254
+        password:
+          type: string
+          format: password
+          description: 留空或省略表示保持原值
+        fromName:
+          type: string
+          maxLength: 50
+        fromAddress:
+          type: string
+          maxLength: 254
+    TestMailRequest:
+      type: object
+      required: [target]
+      properties:
+        target:
+          type: string
+          enum: [me, custom]
+          description: me＝发到我绑定的邮箱；custom＝发到 address
+        address:
+          type: string
+    MailOutboxItem:
+      type: object
+      description: outbox 里的一封邮件（#212）
+      required: [id, toAddress, subject, event, eventLabel, status, statusLabel, attempts, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        toAddress:
+          type: string
+        subject:
+          type: string
+        event:
+          type: string
+          description: 事件标识（test／password_reset／站内通知 kind）
+        eventLabel:
+          type: string
+          description: 事件显示文案（派生字段）
+        status:
+          type: string
+          enum: [pending, sent, failed]
+        statusLabel:
+          type: string
+        attempts:
+          type: integer
+          description: 已尝试次数
+        lastError:
+          type: string
+        body:
+          type: string
+          description: 正文（仅系统管理员可见的发送记录里返回，便于核对与冒烟）
+        createdAt:
+          type: string
+          format: date-time
+        sentAt:
+          type: string
+          format: date-time
+    PasswordResetRequest:
+      type: object
+      required: [identifier]
+      properties:
+        identifier:
+          type: string
+          minLength: 1
+          maxLength: 254
+          description: 用户名或邮箱
+    PasswordResetRequested:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          description: 统一文案「若账号存在，重置邮件已发送」
+    PasswordResetConfirm:
+      type: object
+      required: [token, password]
+      properties:
+        token:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          minLength: 8
+          maxLength: 32
+          format: password
+    CreateSystemUserRequest:
+      type: object
+      required: [username, displayName, email, password]
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 32
+          description: 小写字母、数字、点、下划线、连字符
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 50
+        email:
+          type: string
+          minLength: 3
+          maxLength: 254
+        password:
+          type: string
+          minLength: 8
+          maxLength: 32
+          format: password
+          description: 管理员设定的初始密码；新用户首次登录强制改密
     UserSummary:
       type: object
-      required: [id, username, displayName]
+      required: [id, username, displayName, email]
       properties:
         id:
           type: integer
@@ -2261,6 +3245,11 @@ components:
           type: string
         displayName:
           type: string
+        email:
+          type: string
+        disabled:
+          type: boolean
+          description: 账号已停用（#204）；/users 默认不返回停用用户，此处恒为 false
     ProjectStatus:
       type: string
       description: 项目状态（未开始／进行中／已完成／已归档），与自由文本“阶段”正交
@@ -2280,6 +3269,9 @@ components:
           type: string
         displayName:
           type: string
+        disabled:
+          type: boolean
+          description: 账号已停用（#204）；成员列表默认不返回停用成员，includeDisabled=true 时带回并由此标记
         role:
           $ref: "#/components/schemas/MemberRole"
         roleLabel:
@@ -2661,6 +3653,9 @@ components:
         ownerName:
           type: string
           description: 任务负责人姓名（派生字段）
+        ownerDisabled:
+          type: boolean
+          description: 负责人账号已停用（#204，派生字段）：历史记录照常显示名字并带「已停用」
         startDate:
           type: string
           format: date

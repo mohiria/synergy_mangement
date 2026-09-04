@@ -22,6 +22,9 @@
 | `input-source.spec.ts` | 输入源区块：区块名、单行事实与 title、点行进来源任务、逐级返回回到原来的 Tab（#101） |
 | `long-title.spec.ts` | 长 O／KR 标题不撑破配置输入弹窗：弹窗与两侧面板无横向滚动、分组标题截断且带全称（#100；1440／1920 两档） |
 | `import-csv.spec.ts` | 表格导入的读取：三种 CSV 编码、引号包裹字段、按首行判定分隔符、全空行剔除（#97）；xlsx 前端解析、导入流程不发外链请求、模板现生成（#105）；O／KR 导入器只有六个字段、模板表头被原样认出、未填负责人的行走统一指派（#106）。fixture 在 `e2e/fixtures/` |
+| `system-settings.spec.ts` | 系统设置入口与用户管理只读列表：系统管理员在两套壳侧栏底部有入口、四节顺序、主导航七项含项目设置；普通用户无入口、直访 `/system/users` 得 403 页（#201，AC-71） |
+| `me.spec.ts` | 个人中心：两套壳浮层进入、浮层无「修改密码」、改显示名后顶栏即时更新、修改密码节可用（#207，AC-77） |
+| `login.spec.ts` | 登录页体验：限速后剩余秒数倒计时与按钮禁用、密码框显隐切换、显隐两态禁复制／剪切但可粘贴（#209，AC-79） |
 
 解析层本身的口径由 vitest 单测覆盖（`cd web && npm test`，见 `src/import/parseTable.test.ts`），
 这里只验它在真实浏览器与真实上传入口下的表现。
@@ -37,8 +40,8 @@ cd server && go tool goose -dir migrations postgres "$DATABASE_URL" up
 
 ```sh
 cd web
-export DATABASE_URL='postgres://<用户>:<口令>@localhost:5432/synergy?sslmode=disable'
-export SEED_PASSWORD='<自定口令>'
+export DATABASE_URL='postgres://<用户>:<密码>@localhost:5432/synergy?sslmode=disable'
+export SEED_PASSWORD='<自定密码>'
 npm run test:e2e
 ```
 

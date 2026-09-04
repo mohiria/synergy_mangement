@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 
 	"synergy/server/internal/domain"
 	"synergy/server/internal/filestore"
+	"synergy/server/internal/mail"
 	"synergy/server/internal/store"
 )
 
@@ -33,6 +35,9 @@ type Server struct {
 	files    filestore.Store
 	throttle *domain.LoginThrottle
 	now      func() time.Time
+	// #212：应用密钥（SMTP 密码加解密）与邮件发送器；由 ConfigureMail 注入。
+	secretKey []byte
+	mailer    mail.Sender
 }
 
 var _ ServerInterface = (*Server)(nil)
@@ -49,13 +54,15 @@ func NewHandler(db *pgxpool.Pool, baseURL string, files filestore.Store) http.Ha
 
 // NewHandlerFromServer 由既有 Server 组装路由；main 需要同一个 Server 同时跑卡点 ticker。
 func NewHandlerFromServer(s *Server, baseURL string) http.Handler {
-	return HandlerWithOptions(s, StdHTTPServerOptions{
+	// 同源校验（#192）与请求体上限（#191）包在整个 /api 之外：认证之前、覆盖登录接口，
+	// 路由不存在时也先拒跨源写请求与超限请求体。
+	return sameOriginMiddleware(bodyLimitMiddleware(HandlerWithOptions(s, StdHTTPServerOptions{
 		BaseURL:    baseURL,
 		BaseRouter: http.NewServeMux(),
 		// 切片里靠前的先包住 handler，也就是越靠前越内层：写路径装饰器要放最前，
 		// 才能在会话中间件之后运行、拿得到当前用户。
 		Middlewares: []MiddlewareFunc{s.writePathMiddleware, requestIDMiddleware, s.sessionMiddleware, requestValidator()},
-	})
+	})))
 }
 
 // requestValidator 用契约本身兜底校验请求：enum、required、长度与格式不再依赖各 handler 手工判定。
@@ -71,6 +78,12 @@ func requestValidator() MiddlewareFunc {
 			AuthenticationFunc: func(context.Context, *openapi3filter.AuthenticationInput) error { return nil },
 		},
 		ErrorHandlerWithOpts: func(_ context.Context, err error, w http.ResponseWriter, _ *http.Request, opts nethttpmiddleware.ErrorHandlerOpts) {
+			// 校验器先于 handler 读 body：分块传输的超限请求在这里撞上 MaxBytesReader（#191）。
+			var reqErr *openapi3filter.RequestError
+			if isMaxBytesError(err) || (errors.As(err, &reqErr) && isMaxBytesError(reqErr.Err)) {
+				writePayloadTooLarge(w)
+				return
+			}
 			switch opts.StatusCode {
 			case http.StatusNotFound:
 				writeJSON(w, http.StatusNotFound, Error{Code: "not_found", Message: "资源不存在"})
@@ -121,7 +134,7 @@ const (
 )
 
 // 无需会话即可访问的路径（按路由后缀匹配，其余一律要求有效会话）。
-var publicSuffixes = []string{"/healthz", "/auth/login"}
+var publicSuffixes = []string{"/healthz", "/auth/login", "/branding", "/branding/logo", "/auth/password-reset/request", "/auth/password-reset/confirm"}
 
 func (s *Server) sessionMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -149,6 +162,13 @@ func (s *Server) sessionMiddleware(next http.Handler) http.Handler {
 			writeUnauthorized(w)
 			return
 		}
+		// #204：停用后现有会话立即失效（停用时已批量吊销，这里兜底）。
+		if user.DisabledAt.Valid {
+			_ = s.q.DeleteSession(ctx, sess.Token)
+			clearSessionCookie(w)
+			writeUnauthorized(w)
+			return
+		}
 		if newExpiry, renew := domain.SessionRenewal(s.now(), sess.ExpiresAt.Time); renew {
 			err := s.q.UpdateSessionExpiry(ctx, store.UpdateSessionExpiryParams{
 				Token:     sess.Token,
@@ -157,6 +177,11 @@ func (s *Server) sessionMiddleware(next http.Handler) http.Handler {
 			if err == nil {
 				setSessionCookie(w, sess.Token)
 			}
+		}
+		// #203：「须改密码」为真时只放行登录、登出、修改密码、读当前用户，其余一律 403。
+		if user.MustChangePassword && !domain.PasswordChangeRequiredAllows(r.URL.Path) {
+			writeJSON(w, http.StatusForbidden, Error{Code: "password_change_required", Message: domain.ErrPasswordChangeRequired.Error()})
+			return
 		}
 		ctx = context.WithValue(ctx, ctxUser, user)
 		ctx = context.WithValue(ctx, ctxToken, sess.Token)
@@ -176,19 +201,26 @@ func (s *Server) GetHealthz(w http.ResponseWriter, r *http.Request) {
 func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Username == "" || req.Password == "" {
-		writeJSON(w, http.StatusUnauthorized, Error{Code: "invalid_credentials", Message: "用户名或口令错误"})
+		writeJSON(w, http.StatusUnauthorized, Error{Code: "invalid_credentials", Message: "用户名或密码错误"})
 		return
 	}
 	now := s.now()
 	ip := clientIP(r)
 	if !s.throttle.Allow(req.Username, ip, now) {
-		writeJSON(w, http.StatusTooManyRequests, Error{Code: "rate_limited", Message: "登录失败次数过多，请稍后再试"})
+		writeRateLimited(w, s.throttle.RetryAfter(req.Username, ip, now))
 		return
 	}
 	user, err := s.q.GetUserByUsername(r.Context(), req.Username)
-	if err != nil || !domain.VerifyPassword(user.PasswordHash, req.Password) {
+	found := err == nil
+	passwordOK := found && domain.VerifyPassword(user.PasswordHash, req.Password)
+	// #204：停用提示只在用户名与密码都正确时给出，其余情况统一文案（防枚举）。
+	switch domain.DecideLogin(found, passwordOK, found && user.DisabledAt.Valid) {
+	case domain.LoginInvalidCredentials:
 		s.throttle.RecordFailure(req.Username, ip, now)
-		writeJSON(w, http.StatusUnauthorized, Error{Code: "invalid_credentials", Message: "用户名或口令错误"})
+		writeJSON(w, http.StatusUnauthorized, Error{Code: "invalid_credentials", Message: "用户名或密码错误"})
+		return
+	case domain.LoginDisabled:
+		writeJSON(w, http.StatusForbidden, Error{Code: "account_disabled", Message: domain.ErrAccountDisabled.Error()})
 		return
 	}
 	s.throttle.RecordSuccess(req.Username, ip)
@@ -206,12 +238,16 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, err)
 		return
 	}
+	// #208：记录最近登录时间；失败不影响登录。
+	if err := s.q.UpdateUserLastLogin(r.Context(), store.UpdateUserLastLoginParams{ID: user.ID, LastLoginAt: pgtype.Timestamptz{Time: now, Valid: true}}); err == nil {
+		user.LastLoginAt = pgtype.Timestamptz{Time: now, Valid: true}
+	}
 	setSessionCookie(w, token)
 	writeJSON(w, http.StatusOK, toCurrentUser(user))
 }
 
-// ChangePassword 修改本人口令（S3）：改完把本人其余会话一并吊销，
-// 只保留当前会话——否则旧口令泄露后已经建立的会话仍然有效，改口令等于没改。
+// ChangePassword 修改本人密码（S3）：改完把本人其余会话一并吊销，
+// 只保留当前会话——否则旧密码泄露后已经建立的会话仍然有效，改密码等于没改。
 func (s *Server) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	var req ChangePasswordRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -220,12 +256,22 @@ func (s *Server) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	user := currentUser(r)
 	token, _ := r.Context().Value(ctxToken).(string)
-	if !domain.VerifyPassword(user.PasswordHash, req.CurrentPassword) {
+	current := ""
+	if req.CurrentPassword != nil {
+		current = *req.CurrentPassword
+	}
+	// #203：首次改密页不要求输入旧密码（初始密码是管理员设的，用户刚用它登录过）；
+	// 其余情况当前密码必填且须正确。新密码不能与当前密码相同，两种情况都按哈希比对。
+	if !user.MustChangePassword && !domain.VerifyPassword(user.PasswordHash, current) {
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_password", Message: domain.ErrPasswordWrong.Error()})
 		return
 	}
-	if err := domain.ValidatePasswordChange(req.CurrentPassword, req.NewPassword); err != nil {
+	if err := domain.ValidatePasswordLength(req.NewPassword); err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_password", Message: err.Error()})
+		return
+	}
+	if domain.VerifyPassword(user.PasswordHash, req.NewPassword) {
+		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_password", Message: domain.ErrPasswordUnchanged.Error()})
 		return
 	}
 	hash, err := domain.HashPassword(req.NewPassword)
@@ -270,8 +316,10 @@ func (s *Server) GetCurrentUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) ListProjects(w http.ResponseWriter, r *http.Request) {
-	uid := currentUser(r).ID
-	rows, err := s.q.ListProjects(r.Context(), uid)
+	u := currentUser(r)
+	uid := u.ID
+	// 系统管理员的项目列表取全部项目（#200）。
+	rows, err := s.q.ListProjects(r.Context(), store.ListProjectsParams{UserID: uid, IncludeAll: u.IsSystemAdmin})
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -289,7 +337,7 @@ func (s *Server) ListProjects(w http.ResponseWriter, r *http.Request) {
 			PlannedStartDate: p.PlannedStartDate,
 			PlannedEndDate:   p.PlannedEndDate,
 			Visibility:       p.Visibility,
-		}, p.OwnerName, projectActor(uid, p.OwnerID, p.MyRole, p.Visibility)))
+		}, p.OwnerName, projectActor(currentUser(r), p.OwnerID, p.MyRole, p.Visibility)))
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -346,12 +394,11 @@ func (s *Server) UpdateProject(w http.ResponseWriter, r *http.Request, projectId
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_request", Message: "请求内容无法解析"})
 		return
 	}
-	uid := currentUser(r).ID
 	existing, ok := s.fetchProject(w, r, projectId)
 	if !ok {
 		return
 	}
-	if !domain.CanEditProject(projectActor(uid, existing.OwnerID, existing.MyRole, existing.Visibility)) {
+	if !domain.CanEditProject(projectActor(currentUser(r), existing.OwnerID, existing.MyRole, existing.Visibility)) {
 		writeForbidden(w)
 		return
 	}
@@ -388,10 +435,10 @@ func (s *Server) UpdateProject(w http.ResponseWriter, r *http.Request, projectId
 		return
 	}
 	// 派生字段按更新后的负责人重新判定（负责人可能已易主）。
-	writeJSON(w, http.StatusOK, toProject(p, owner.DisplayName, projectActor(uid, p.OwnerID, existing.MyRole, p.Visibility)))
+	writeJSON(w, http.StatusOK, toProject(p, owner.DisplayName, projectActor(currentUser(r), p.OwnerID, existing.MyRole, p.Visibility)))
 }
 
-func (s *Server) ListProjectMembers(w http.ResponseWriter, r *http.Request, projectId int64) {
+func (s *Server) ListProjectMembers(w http.ResponseWriter, r *http.Request, projectId int64, params ListProjectMembersParams) {
 	if _, ok := s.fetchProject(w, r, projectId); !ok {
 		return
 	}
@@ -400,14 +447,21 @@ func (s *Server) ListProjectMembers(w http.ResponseWriter, r *http.Request, proj
 		writeInternalError(w, r, err)
 		return
 	}
+	includeDisabled := params.IncludeDisabled != nil && *params.IncludeDisabled
 	resp := make([]ProjectMember, 0, len(rows))
 	for _, m := range rows {
+		// #204：停用成员默认不返回（人员选择器口径）；成员管理页显式带回并打标签。
+		if m.DisabledAt.Valid && !includeDisabled {
+			continue
+		}
+		disabled := m.DisabledAt.Valid
 		resp = append(resp, ProjectMember{
 			UserId:      m.UserID,
 			Username:    m.Username,
 			DisplayName: m.DisplayName,
 			Role:        MemberRole(m.Role),
 			RoleLabel:   optString(domain.MemberRoleLabel(m.Role)),
+			Disabled:    &disabled,
 		})
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -423,7 +477,7 @@ func (s *Server) AddProjectMembers(w http.ResponseWriter, r *http.Request, proje
 	if !ok {
 		return
 	}
-	if !domain.CanManageMembers(projectActor(currentUser(r).ID, proj.OwnerID, proj.MyRole, proj.Visibility)) {
+	if !domain.CanManageMembers(projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)) {
 		writeForbidden(w)
 		return
 	}
@@ -513,7 +567,7 @@ func (s *Server) UpdateProjectMemberRole(w http.ResponseWriter, r *http.Request,
 	if !ok {
 		return
 	}
-	if !domain.CanManageMembers(projectActor(currentUser(r).ID, proj.OwnerID, proj.MyRole, proj.Visibility)) {
+	if !domain.CanManageMembers(projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)) {
 		writeForbidden(w)
 		return
 	}
@@ -553,7 +607,7 @@ func (s *Server) RemoveProjectMember(w http.ResponseWriter, r *http.Request, pro
 	if !ok {
 		return
 	}
-	if !domain.CanManageMembers(projectActor(currentUser(r).ID, proj.OwnerID, proj.MyRole, proj.Visibility)) {
+	if !domain.CanManageMembers(projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)) {
 		writeForbidden(w)
 		return
 	}
@@ -610,7 +664,6 @@ func (s *Server) GetProject(w http.ResponseWriter, r *http.Request, projectId in
 	if !ok {
 		return
 	}
-	uid := currentUser(r).ID
 	writeJSON(w, http.StatusOK, toProject(store.Project{
 		ID:               row.ID,
 		Name:             row.Name,
@@ -622,7 +675,7 @@ func (s *Server) GetProject(w http.ResponseWriter, r *http.Request, projectId in
 		PlannedStartDate: row.PlannedStartDate,
 		PlannedEndDate:   row.PlannedEndDate,
 		Visibility:       row.Visibility,
-	}, row.OwnerName, projectActor(uid, row.OwnerID, row.MyRole, row.Visibility)))
+	}, row.OwnerName, projectActor(currentUser(r), row.OwnerID, row.MyRole, row.Visibility)))
 }
 
 func (s *Server) ListObjectives(w http.ResponseWriter, r *http.Request, projectId int64) {
@@ -631,7 +684,7 @@ func (s *Server) ListObjectives(w http.ResponseWriter, r *http.Request, projectI
 		return
 	}
 	uid := currentUser(r).ID
-	resp, err := s.okrList(r.Context(), projectId, projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility), uid)
+	resp, err := s.okrList(r.Context(), projectId, projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility), uid)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -649,7 +702,7 @@ func (s *Server) CreateOkrBatch(w http.ResponseWriter, r *http.Request, projectI
 	if !ok {
 		return
 	}
-	if !domain.CanEditProject(projectActor(currentUser(r).ID, proj.OwnerID, proj.MyRole, proj.Visibility)) {
+	if !domain.CanEditProject(projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)) {
 		writeForbidden(w)
 		return
 	}
@@ -714,7 +767,7 @@ func (s *Server) CreateOkrBatch(w http.ResponseWriter, r *http.Request, projectI
 		writeInternalError(w, r, err)
 		return
 	}
-	objectivesResp, err := s.okrList(r.Context(), projectId, projectActor(currentUser(r).ID, proj.OwnerID, proj.MyRole, proj.Visibility), currentUser(r).ID)
+	objectivesResp, err := s.okrList(r.Context(), projectId, projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility), currentUser(r).ID)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -935,7 +988,7 @@ func (s *Server) fetchProject(w http.ResponseWriter, r *http.Request, projectID 
 		}
 		return store.GetProjectRow{}, false
 	}
-	if !domain.CanReadProject(projectActor(uid, row.OwnerID, row.MyRole, row.Visibility)) {
+	if !domain.CanReadProject(projectActor(currentUser(r), row.OwnerID, row.MyRole, row.Visibility)) {
 		writeJSON(w, http.StatusNotFound, Error{Code: "not_found", Message: "项目不存在"})
 		return store.GetProjectRow{}, false
 	}
@@ -943,10 +996,10 @@ func (s *Server) fetchProject(w http.ResponseWriter, r *http.Request, projectID 
 }
 
 // projectActor 组装当前用户在某项目内的身份事实（domain.Actor）。
-// 判定本身在 domain.ProjectIdentity——显式成员身份优先，公开项目才落到隐式访客（#111），
-// 这里只负责把行上的列喂进去，handler 不再各写一遍身份。
-func projectActor(userID, ownerID int64, myRole pgtype.Text, visibility string) domain.Actor {
-	return domain.ProjectIdentity(userID, ownerID, myRole.String, visibility)
+// 判定本身在 domain.ProjectIdentity——显式成员身份优先，系统管理员视同管理员（#200），
+// 公开项目才落到隐式访客（#111）；这里只负责把行上的列喂进去，handler 不再各写一遍身份。
+func projectActor(u store.User, ownerID int64, myRole pgtype.Text, visibility string) domain.Actor {
+	return domain.ProjectIdentity(u.ID, ownerID, myRole.String, visibility, u.IsSystemAdmin)
 }
 
 func (s *Server) ListUsers(w http.ResponseWriter, r *http.Request) {
@@ -957,7 +1010,8 @@ func (s *Server) ListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := make([]UserSummary, 0, len(rows))
 	for _, u := range rows {
-		resp = append(resp, UserSummary{Id: u.ID, Username: u.Username, DisplayName: u.DisplayName})
+		notDisabled := false
+		resp = append(resp, UserSummary{Id: u.ID, Username: u.Username, DisplayName: u.DisplayName, Email: u.Email, Disabled: &notDisabled})
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -984,7 +1038,11 @@ func (s *Server) validateProjectFields(w http.ResponseWriter, name, stage, statu
 }
 
 func toCurrentUser(u store.User) CurrentUser {
-	return CurrentUser{Id: u.ID, Username: u.Username, DisplayName: u.DisplayName}
+	cu := CurrentUser{Id: u.ID, Username: u.Username, DisplayName: u.DisplayName, Email: u.Email, IsSystemAdmin: u.IsSystemAdmin, MustChangePassword: u.MustChangePassword}
+	if u.LastLoginAt.Valid {
+		cu.LastLoginAt = &u.LastLoginAt.Time
+	}
+	return cu
 }
 
 func toProject(p store.Project, ownerName string, actor domain.Actor) Project {
@@ -1168,4 +1226,18 @@ func clientIP(r *http.Request) string {
 		return host
 	}
 	return r.RemoteAddr
+}
+
+func optBool(v bool) *bool { return &v }
+
+// writeRateLimited 429 带剩余等待秒数（#209）；找回密码请求（#214）复用。
+func writeRateLimited(w http.ResponseWriter, retryAfter time.Duration) {
+	secs := int(retryAfter / time.Second)
+	if retryAfter%time.Second != 0 {
+		secs++
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(secs))
+	writeJSON(w, http.StatusTooManyRequests, RateLimitedError{
+		Code: "rate_limited", Message: fmt.Sprintf("尝试过多，请 %d 秒后再试", secs), RetryAfterSeconds: secs,
+	})
 }

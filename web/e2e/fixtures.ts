@@ -19,7 +19,7 @@ export const DEMO = {
 export async function login(page: Page, username: string = DEMO.admin.username) {
   await page.goto("/");
   await page.getByPlaceholder("请输入用户名").fill(username);
-  await page.getByPlaceholder("请输入口令").fill(DEMO.password);
+  await page.getByPlaceholder("请输入密码").fill(DEMO.password);
   // antd 会在两个汉字间插空格，按 name 匹配不稳，直接点提交按钮。
   await page.locator('button[type="submit"]').click();
   await expect(page.getByRole("heading", { name: "项目列表" })).toBeVisible();

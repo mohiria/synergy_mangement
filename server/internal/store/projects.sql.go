@@ -186,9 +186,14 @@ SELECT p.id, p.name, p.created_by, p.created_at, p.owner_id, p.status, p.stage, 
 FROM projects p
 JOIN users u ON u.id = p.owner_id
 LEFT JOIN project_members m ON m.project_id = p.id AND m.user_id = $1
-WHERE m.user_id IS NOT NULL OR p.owner_id = $1 OR p.visibility = 'public'
+WHERE $2::boolean OR m.user_id IS NOT NULL OR p.owner_id = $1 OR p.visibility = 'public'
 ORDER BY p.created_at DESC
 `
+
+type ListProjectsParams struct {
+	UserID     int64
+	IncludeAll bool
+}
 
 type ListProjectsRow struct {
 	ID                  int64
@@ -211,8 +216,9 @@ type ListProjectsRow struct {
 // my_role：当前用户在各项目中的成员角色（非成员为 NULL），供 domain 层判定动作权限。
 // 只返回当前用户可读的项目：项目内成员、项目负责人，以及公开项目（此人在其中是隐式访客，
 // 身份由 domain.ProjectIdentity 判定，本查询只负责把候选行取全，见 #111）。
-func (q *Queries) ListProjects(ctx context.Context, userID int64) ([]ListProjectsRow, error) {
-	rows, err := q.db.Query(ctx, listProjects, userID)
+// include_all：系统管理员对任意项目视同管理员，项目列表取全部（#200）。
+func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]ListProjectsRow, error) {
+	rows, err := q.db.Query(ctx, listProjects, arg.UserID, arg.IncludeAll)
 	if err != nil {
 		return nil, err
 	}

@@ -626,6 +626,11 @@ export default function TaskDrawer({
                 title={canInlineEdit ? "点击编辑" : undefined}
               >
                 {task.ownerName}
+                {task.ownerDisabled && (
+                  <span className="status-pill" style={{ marginLeft: 6 }}>
+                    已停用
+                  </span>
+                )}
               </strong>
             )}
           </div>

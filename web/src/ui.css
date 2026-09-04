@@ -68,8 +68,13 @@ body {
   display: grid; place-items: center;
   box-shadow: 0 5px 14px rgba(23, 42, 73, .16);
 }
-.brand-name b { display: block; font-size: var(--type-title); font-weight: 600; letter-spacing: .02em; color: var(--text); }
-.brand-name span { display: block; font-size: var(--type-aux); color: var(--muted); margin-top: 1px; letter-spacing: .04em; }
+/* #211：logo 图片填满标志位，非正方形居中裁切。 */
+.brand-mark { overflow: hidden; }
+.brand-mark img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.brand-name { min-width: 0; }
+/* #210：名称与副标题可配置，侧栏一行放不下时省略号截断。 */
+.brand-name b { display: block; font-size: var(--type-title); font-weight: 600; letter-spacing: .02em; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brand-name span { display: block; font-size: var(--type-aux); color: var(--muted); margin-top: 1px; letter-spacing: .04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sidebar nav { flex: 1; padding: 0; overflow: auto; display: grid; gap: 2px; align-content: start; }
 .nav-row {
   width: 100%; height: 40px; border: 0; border-radius: var(--radius); padding: 0 11px;

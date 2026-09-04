@@ -5,11 +5,16 @@ package api_test
 // 无 Postgres 环境用 go test -short ./... 跳过。
 
 import (
+	"regexp"
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"image"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -22,6 +27,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -31,6 +37,7 @@ import (
 	"synergy/server/internal/api"
 	"synergy/server/internal/domain"
 	"synergy/server/internal/filestore"
+	"synergy/server/internal/mail"
 	"synergy/server/internal/store"
 )
 
@@ -48,8 +55,18 @@ func newTestHandler(t *testing.T, pool *pgxpool.Pool) http.Handler {
 	}
 	// MinIO 容器可达时确保测试桶存在（真实上传/打包路径）；不可达时相关断言自动降级。
 	_ = files.EnsureBucket(context.Background())
-	return api.NewHandler(pool, "/api/v1", files)
+	srv := api.NewServer(pool, files)
+	// #212：固定测试密钥 + 记录器发送器；测试里取 mailRecorder 断言发出的邮件。
+	srv.ConfigureMail(testSecretKey, mailRecorder)
+	testServer = srv
+	return api.NewHandlerFromServer(srv, "/api/v1")
 }
+
+var (
+	testSecretKey = bytes.Repeat([]byte{7}, 32)
+	mailRecorder  = &mail.Recorder{}
+	testServer    *api.Server
+)
 
 // putObject 直传对象；MinIO 与 Postgres 一样是集成测试的前置依赖（docker compose up -d minio）。
 func putObject(t *testing.T, url, content string) {
@@ -232,6 +249,7 @@ func seedUser(t *testing.T, q *store.Queries, username, display, password string
 	}
 	u, err := q.CreateUser(context.Background(), store.CreateUserParams{
 		Username: username, DisplayName: display, PasswordHash: hash,
+		Email: domain.NormalizeEmail(username + "@example.com"),
 	})
 	if err != nil {
 		t.Fatalf("seed user %s: %v", username, err)
@@ -386,7 +404,7 @@ func TestAuthAndProjectsEndToEnd(t *testing.T) {
 	wantStatus(t, resp, http.StatusUnauthorized)
 	resp.Body.Close()
 
-	// 错误口令 401
+	// 错误密码 401
 	resp = doJSON(t, alice, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: "alice", Password: "wrong"})
 	wantStatus(t, resp, http.StatusUnauthorized)
 	resp.Body.Close()
@@ -2182,7 +2200,7 @@ func TestDeliverableEdgesAndReadiness(t *testing.T) {
 	// 裁决 10：配置输入源收归项目管理员，直接生效、边立即建立）
 	inputsURL := func(id int64) string { return fmt.Sprintf("%s/%d/inputs", tasksURL, id) }
 	resp = doJSON(t, alice, http.MethodPost, inputsURL(taskB.Id), api.CreateTaskInputRequest{
-		Necessity: api.Required,
+		Necessity:     api.Required,
 		SourceTaskIds: []int64{taskA.Id},
 	})
 	wantStructureAccepted(t, resp)
@@ -2682,7 +2700,7 @@ func TestMultiSourceInputs(t *testing.T) {
 	// AC-53：一次选择两个来源任务 → 分别建立两条边，各自独立未就绪
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, taskC),
 		api.CreateTaskInputRequest{
-			Necessity: api.Required,
+			Necessity:     api.Required,
 			SourceTaskIds: []int64{taskA, taskB2},
 		})
 	wantStructureAccepted(t, resp)
@@ -2856,7 +2874,7 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 	// 下游挂一条来自上游任务的必要输入：上游未完成 ⇒ 上游未就绪卡点，待行动人为上游负责人 bob。
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, downstream.Id),
 		api.CreateTaskInputRequest{
-			Necessity: api.Required,
+			Necessity:     api.Required,
 			SourceTaskIds: []int64{upstream.Id},
 		})
 	wantStructureAccepted(t, resp)
@@ -3352,7 +3370,7 @@ func TestArtifacts(t *testing.T) {
 	}
 	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, downstreamID),
 		api.CreateTaskInputRequest{
-			Necessity: api.Required,
+			Necessity:     api.Required,
 			SourceTaskIds: []int64{taskID},
 		})
 	wantStatus(t, resp, http.StatusOK)
@@ -3804,7 +3822,7 @@ func TestImportAndPool(t *testing.T) {
 		t.Fatalf("成功与失败各应留一条导入记录: %+v", records)
 	}
 	failed := records[0]
-	if failed.Result != api.Failed || failed.ResultLabel != "失败" {
+	if failed.Result != api.ImportRecordResultFailed || failed.ResultLabel != "失败" {
 		t.Fatalf("失败的一次不应写成功: %+v", failed)
 	}
 	if failed.ObjectiveCount != 0 || failed.KeyResultCount != 0 || failed.TaskCount != 0 {
@@ -3814,7 +3832,7 @@ func TestImportAndPool(t *testing.T) {
 		t.Fatalf("失败记录应带摘要: %+v", failed.FailureSummary)
 	}
 	success := records[1]
-	if success.Result != api.Success || success.ResultLabel != "成功" {
+	if success.Result != api.ImportRecordResultSuccess || success.ResultLabel != "成功" {
 		t.Fatalf("成功的一次记录异常: %+v", success)
 	}
 	if success.ObjectiveCount != 1 || success.KeyResultCount != 2 || success.TaskCount != 3 {
@@ -3880,7 +3898,7 @@ func TestImportAndPool(t *testing.T) {
 		t.Fatalf("任务导入的成功与失败各应再留一条: %d", len(afterTaskImport))
 	}
 	latest := afterTaskImport[0]
-	if latest.Result != api.Success || latest.TaskCount != 2 || latest.ObjectiveCount != 0 || latest.KeyResultCount != 0 {
+	if latest.Result != api.ImportRecordResultSuccess || latest.TaskCount != 2 || latest.ObjectiveCount != 0 || latest.KeyResultCount != 0 {
 		t.Fatalf("任务导入记录异常: %+v", latest)
 	}
 	if latest.SourceFileName == nil || *latest.SourceFileName != "任务批量导入.xlsx" {
@@ -4066,9 +4084,19 @@ func TestLoginRateLimit(t *testing.T) {
 	}
 	resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: "nobody", Password: "x"})
 	wantStatus(t, resp, http.StatusTooManyRequests)
-	e := decodeBody[api.Error](t, resp)
+	if ra := resp.Header.Get("Retry-After"); ra == "" {
+		t.Fatal("429 应带 Retry-After 头")
+	}
+	e := decodeBody[api.RateLimitedError](t, resp)
 	if e.Code != "rate_limited" {
 		t.Fatalf("code = %q, want rate_limited", e.Code)
+	}
+	// #209：剩余等待秒数在 (0, 锁定窗口] 内，文案含秒数。
+	if e.RetryAfterSeconds <= 0 || e.RetryAfterSeconds > int(domain.LoginLockWindow/time.Second) {
+		t.Fatalf("retryAfterSeconds = %d 超出范围", e.RetryAfterSeconds)
+	}
+	if !strings.Contains(e.Message, fmt.Sprintf("%d 秒", e.RetryAfterSeconds)) {
+		t.Fatalf("文案应含剩余秒数: %q", e.Message)
 	}
 }
 
@@ -4913,7 +4941,7 @@ func TestStructureEditDirect(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		Items:           []api.CreateTaskItem{{KeyResultId: kr1, Name: "联调验证", OwnerId: carolUser.ID, StartDate: start, EndDate: end}},
+		Items: []api.CreateTaskItem{{KeyResultId: kr1, Name: "联调验证", OwnerId: carolUser.ID, StartDate: start, EndDate: end}},
 	})
 	wantStatus(t, resp, http.StatusCreated)
 	taskID := decodeBody[[]api.Task](t, resp)[0].Id
@@ -4999,7 +5027,7 @@ func TestDeliverableStructureFree(t *testing.T) {
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start, end := openapiDate(t, "2026-09-01"), openapiDate(t, "2026-09-30")
 	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
-		Items:           []api.CreateTaskItem{{KeyResultId: kr1, Name: "联调验证", OwnerId: carolUser.ID, StartDate: start, EndDate: end}},
+		Items: []api.CreateTaskItem{{KeyResultId: kr1, Name: "联调验证", OwnerId: carolUser.ID, StartDate: start, EndDate: end}},
 	})
 	wantStatus(t, resp, http.StatusCreated)
 	taskID := decodeBody[[]api.Task](t, resp)[0].Id
@@ -5568,7 +5596,7 @@ func TestEntityCodesStable(t *testing.T) {
 	}
 }
 
-// S3：改口令后本人其余会话立即失效，当前会话保留；新口令生效、旧口令失效。
+// S3：改密码后本人其余会话立即失效，当前会话保留；新密码生效、旧密码失效。
 func TestChangePasswordRevokesOtherSessions(t *testing.T) {
 	q, pool := setupDB(t)
 	seedUser(t, q, "alice", "张三", "alice-pass")
@@ -5586,23 +5614,23 @@ func TestChangePasswordRevokesOtherSessions(t *testing.T) {
 		resp.Body.Close()
 	}
 
-	// 当前口令不对、新口令过短、新口令与旧口令相同都要被拒
+	// 当前密码不对、新密码过短、新密码与旧密码相同都要被拒
 	resp := doJSON(t, first, http.MethodPost, base+"/auth/change-password",
-		api.ChangePasswordRequest{CurrentPassword: "wrong-pass", NewPassword: "brand-new-pass"})
+		api.ChangePasswordRequest{CurrentPassword: strPtr("wrong-pass"), NewPassword: "brand-new-pass"})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 	resp = doJSON(t, first, http.MethodPost, base+"/auth/change-password",
-		api.ChangePasswordRequest{CurrentPassword: "alice-pass", NewPassword: "short7x"})
+		api.ChangePasswordRequest{CurrentPassword: strPtr("alice-pass"), NewPassword: "short7x"})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 	resp = doJSON(t, first, http.MethodPost, base+"/auth/change-password",
-		api.ChangePasswordRequest{CurrentPassword: "alice-pass", NewPassword: "alice-pass"})
+		api.ChangePasswordRequest{CurrentPassword: strPtr("alice-pass"), NewPassword: "alice-pass"})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 
-	// 改口令成功
+	// 改密码成功
 	resp = doJSON(t, first, http.MethodPost, base+"/auth/change-password",
-		api.ChangePasswordRequest{CurrentPassword: "alice-pass", NewPassword: "brand-new-pass"})
+		api.ChangePasswordRequest{CurrentPassword: strPtr("alice-pass"), NewPassword: "brand-new-pass"})
 	wantStatus(t, resp, http.StatusNoContent)
 	resp.Body.Close()
 
@@ -5614,7 +5642,7 @@ func TestChangePasswordRevokesOtherSessions(t *testing.T) {
 	wantStatus(t, resp, http.StatusUnauthorized)
 	resp.Body.Close()
 
-	// 旧口令不再能登录，新口令可以
+	// 旧密码不再能登录，新密码可以
 	third := newClient(t)
 	resp = doJSON(t, third, http.MethodPost, base+"/auth/login",
 		api.LoginRequest{Username: "alice", Password: "alice-pass"})
@@ -6448,3 +6476,1372 @@ func TestPublicProjectImplicitViewer(t *testing.T) {
 	wantStatus(t, resp, http.StatusNotFound)
 	resp.Body.Close()
 }
+
+// #192：写请求同源校验在真实装配（含登录接口）上的四条验收——同源通过、跨源 403、
+// 无 Origin 通过、Sec-Fetch-Site: cross-site 403；GET 不受影响。
+func TestSameOriginGuardOnRealHandler(t *testing.T) {
+	q, pool := setupDB(t)
+	seedUser(t, q, "alice", "张三", "alice-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	loginWith := func(headers map[string]string) *http.Response {
+		t.Helper()
+		body, _ := json.Marshal(api.LoginRequest{Username: "alice", Password: "alice-pass"})
+		req, err := http.NewRequest(http.MethodPost, base+"/auth/login", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		resp, err := newClient(t).Do(req)
+		if err != nil {
+			t.Fatalf("login: %v", err)
+		}
+		return resp
+	}
+
+	t.Run("同源 Origin 的登录通过", func(t *testing.T) {
+		resp := loginWith(map[string]string{"Origin": ts.URL, "Sec-Fetch-Site": "same-origin"})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	})
+	t.Run("跨源 Origin 的登录得 403", func(t *testing.T) {
+		resp := loginWith(map[string]string{"Origin": "http://evil.example"})
+		wantStatus(t, resp, http.StatusForbidden)
+		if e := decodeBody[api.Error](t, resp); e.Code != "cross_origin" {
+			t.Fatalf("code = %q, want cross_origin", e.Code)
+		}
+	})
+	t.Run("无 Origin 的登录通过", func(t *testing.T) {
+		resp := loginWith(nil)
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	})
+	t.Run("Sec-Fetch-Site cross-site 得 403", func(t *testing.T) {
+		resp := loginWith(map[string]string{"Sec-Fetch-Site": "cross-site"})
+		wantStatus(t, resp, http.StatusForbidden)
+		resp.Body.Close()
+	})
+	t.Run("GET 带跨源 Origin 不受影响", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, base+"/healthz", nil)
+		req.Header.Set("Origin", "http://evil.example")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("healthz: %v", err)
+		}
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	})
+	t.Run("已登录后的跨源写请求同样 403", func(t *testing.T) {
+		c := newClient(t)
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: "alice", Password: "alice-pass"})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+		req, _ := http.NewRequest(http.MethodPost, base+"/projects", strings.NewReader(`{"name":"x"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Origin", "http://evil.example")
+		resp, err := c.Do(req)
+		if err != nil {
+			t.Fatalf("projects: %v", err)
+		}
+		wantStatus(t, resp, http.StatusForbidden)
+		resp.Body.Close()
+	})
+}
+
+// #191：真实装配上的请求体上限——超限 413 与统一 Error；上限以内（含只差几十字节）行为不变。
+func TestRequestBodyLimit(t *testing.T) {
+	q, pool := setupDB(t)
+	seedUser(t, q, "alice", "张三", "alice-pass")
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	// 合法 JSON 内部填空白，把 body 撑到目标大小：JSON 语法允许对象内任意空白。
+	paddedLogin := func(size int) string {
+		head := `{"username":"alice","password":"alice-pass"`
+		tail := `}`
+		return head + strings.Repeat(" ", size-len(head)-len(tail)) + tail
+	}
+	limit := 4 << 20
+
+	t.Run("超限 1 字节得 413", func(t *testing.T) {
+		resp := doRaw(t, newClient(t), http.MethodPost, base+"/auth/login", paddedLogin(limit+1))
+		wantStatus(t, resp, http.StatusRequestEntityTooLarge)
+		if e := decodeBody[api.Error](t, resp); e.Code != "payload_too_large" {
+			t.Fatalf("code = %q, want payload_too_large", e.Code)
+		}
+	})
+	t.Run("恰好上限通过", func(t *testing.T) {
+		resp := doRaw(t, newClient(t), http.MethodPost, base+"/auth/login", paddedLogin(limit))
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	})
+	t.Run("未声明长度的超限 body 同样 413", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodPost, base+"/auth/login", io.NopCloser(strings.NewReader(paddedLogin(limit+1))))
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		req.ContentLength = -1 // 强制分块传输，服务端拿不到 Content-Length
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := newClient(t).Do(req)
+		if err != nil {
+			t.Fatalf("login: %v", err)
+		}
+		wantStatus(t, resp, http.StatusRequestEntityTooLarge)
+		resp.Body.Close()
+	})
+}
+
+// #200：系统管理员隐式视同任意项目的管理员——能读写其非成员的私有项目、项目列表含全部项目；
+// 成员列表不含仅隐式身份；当前用户接口带 isSystemAdmin；普通非成员对同一项目仍是 404。
+func TestSystemAdminImplicitProjectAdmin(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	seedUser(t, q, "bob", "李四", "bob-pass")
+	rootUser := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(context.Background(), store.SetUserSystemAdminParams{ID: rootUser.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	login := func(username, password string) *http.Client {
+		t.Helper()
+		c := newClient(t)
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+		return c
+	}
+	alice := login("alice", "alice-pass")
+	bob := login("bob", "bob-pass")
+	root := login("root", "root-pass1")
+
+	// 当前用户接口带系统管理员标记。
+	me := decodeBody[api.CurrentUser](t, doJSONAgain(t, root, http.MethodGet, base+"/auth/me"))
+	if !me.IsSystemAdmin {
+		t.Fatalf("root 应为系统管理员: %+v", me)
+	}
+	if decodeBody[api.CurrentUser](t, doJSONAgain(t, alice, http.MethodGet, base+"/auth/me")).IsSystemAdmin {
+		t.Fatal("alice 不应为系统管理员")
+	}
+
+	// alice 建一个私有项目，root 与 bob 都不是成员。
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "私有项目", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.Project](t, resp)
+
+	// 普通非成员：404（读越权与写越权同一道边界）。
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/projects/%d", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusNotFound)
+	resp.Body.Close()
+
+	// 系统管理员：项目列表含全部项目，读得到、派生权限视同管理员。
+	list := decodeBody[[]api.Project](t, doJSONAgain(t, root, http.MethodGet, base+"/projects"))
+	found := false
+	for _, p := range list {
+		if p.Id == created.Id {
+			found = true
+			if !p.CanEdit || p.ImplicitViewer {
+				t.Fatalf("系统管理员在项目列表里应可编辑且不是隐式访客: %+v", p)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("系统管理员的项目列表应含非成员项目: %+v", list)
+	}
+	got := decodeBody[api.Project](t, doJSONAgain(t, root, http.MethodGet, fmt.Sprintf("%s/projects/%d", base, created.Id)))
+	if !got.CanEdit || got.ImplicitViewer {
+		t.Fatalf("系统管理员读项目应视同管理员: %+v", got)
+	}
+
+	// 写：改项目基础信息、改规则设置、加成员，均 200。
+	resp = doJSON(t, root, http.MethodPut, fmt.Sprintf("%s/projects/%d", base, created.Id), api.UpdateProjectRequest{
+		Name: "私有项目（管理员改名）", OwnerId: aliceUser.ID, Status: api.ProjectStatusInProgress, Visibility: api.Private,
+	})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, root, http.MethodGet, fmt.Sprintf("%s/projects/%d/settings", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	// 成员列表不含仅隐式身份的系统管理员。
+	members := decodeBody[[]api.ProjectMember](t, doJSONAgain(t, root, http.MethodGet, fmt.Sprintf("%s/projects/%d/members", base, created.Id)))
+	for _, m := range members {
+		if m.UserId == rootUser.ID {
+			t.Fatalf("仅隐式身份的系统管理员不应出现在成员列表: %+v", members)
+		}
+	}
+	// 项目审计里的操作者是本人（隐式身份的写操作照常留痕）。
+	audits := decodeBody[[]api.AuditLog](t, doJSONAgain(t, root, http.MethodGet, fmt.Sprintf("%s/projects/%d/audit-logs", base, created.Id)))
+	seenRoot := false
+	for _, a := range audits {
+		if a.ActorName != nil && *a.ActorName == rootUser.DisplayName {
+			seenRoot = true
+		}
+	}
+	if !seenRoot {
+		t.Fatalf("系统管理员的项目写操作应进项目审计且操作者为本人: %+v", audits)
+	}
+}
+
+// #201：系统设置用户列表只对系统管理员开放——200 含全部用户与标记，普通用户 403。
+func TestSystemUsersListRequiresSystemAdmin(t *testing.T) {
+	q, pool := setupDB(t)
+	seedUser(t, q, "alice", "张三", "alice-pass")
+	rootUser := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(context.Background(), store.SetUserSystemAdminParams{ID: rootUser.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	login := func(username, password string) *http.Client {
+		t.Helper()
+		c := newClient(t)
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+		return c
+	}
+	alice := login("alice", "alice-pass")
+	root := login("root", "root-pass1")
+
+	resp := doJSON(t, alice, http.MethodGet, base+"/system/users", nil)
+	wantStatus(t, resp, http.StatusForbidden)
+	if e := decodeBody[api.Error](t, resp); e.Code != "system_admin_required" {
+		t.Fatalf("code = %q, want system_admin_required", e.Code)
+	}
+
+	users := decodeBody[[]api.SystemUser](t, doJSONAgain(t, root, http.MethodGet, base+"/system/users"))
+	if len(users) != 2 {
+		t.Fatalf("应列出全部 2 个用户: %+v", users)
+	}
+	if users[0].Username != "alice" || users[0].IsSystemAdmin || users[1].Username != "root" || !users[1].IsSystemAdmin {
+		t.Fatalf("列表按 id 升序且带系统管理员标记: %+v", users)
+	}
+}
+
+// #202：邮箱必填且全局唯一（大小写不敏感）；迁移在含既有用户的库上可 up/down 且回填占位；
+// 当前用户、用户摘要与系统用户列表都带邮箱。
+func TestUserEmailRequiredAndUnique(t *testing.T) {
+	q, pool := setupDB(t)
+
+	// 迁移回退到 00050、插入无邮箱的存量用户、再升级：回填 <用户名>@local.invalid。
+	migDB, err := sql.Open("pgx", pool.Config().ConnString())
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer migDB.Close()
+	if err := goose.DownTo(migDB, "../../migrations", 50); err != nil {
+		t.Fatalf("goose down: %v", err)
+	}
+	if _, err := migDB.Exec(`INSERT INTO users (username, display_name, password_hash) VALUES ('legacy', '存量用户', 'x')`); err != nil {
+		t.Fatalf("insert legacy: %v", err)
+	}
+	if err := goose.Up(migDB, "../../migrations"); err != nil {
+		t.Fatalf("goose up: %v", err)
+	}
+	legacy, err := q.GetUserByUsername(context.Background(), "legacy")
+	if err != nil {
+		t.Fatalf("legacy: %v", err)
+	}
+	if legacy.Email != "legacy@local.invalid" {
+		t.Fatalf("存量用户应回填占位邮箱，得到 %q", legacy.Email)
+	}
+
+	// 重复邮箱（含大小写差异）被唯一索引拒绝。
+	seedUser(t, q, "alice", "张三", "alice-pass")
+	hash, _ := domain.HashPassword("dup-pass-1")
+	_, err = q.CreateUser(context.Background(), store.CreateUserParams{
+		Username: "alice2", DisplayName: "张三二号", PasswordHash: hash, Email: "ALICE@Example.com",
+	})
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23505" {
+		t.Fatalf("大小写不同的重复邮箱应触发唯一冲突，得到 %v", err)
+	}
+	if _, err := q.GetUserByEmail(context.Background(), "Alice@EXAMPLE.com"); err != nil {
+		t.Fatalf("按邮箱查找应大小写不敏感: %v", err)
+	}
+
+	// 接口带邮箱。
+	rootUser := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(context.Background(), store.SetUserSystemAdminParams{ID: rootUser.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	root := newClient(t)
+	resp := doJSON(t, root, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: "root", Password: "root-pass1"})
+	wantStatus(t, resp, http.StatusOK)
+	if me := decodeBody[api.CurrentUser](t, resp); me.Email != "root@example.com" {
+		t.Fatalf("当前用户应带邮箱: %+v", me)
+	}
+	users := decodeBody[[]api.UserSummary](t, doJSONAgain(t, root, http.MethodGet, base+"/users"))
+	for _, u := range users {
+		if u.Email == "" {
+			t.Fatalf("用户摘要应带邮箱: %+v", u)
+		}
+	}
+	sys := decodeBody[[]api.SystemUser](t, doJSONAgain(t, root, http.MethodGet, base+"/system/users"))
+	for _, u := range sys {
+		if u.Email == "" {
+			t.Fatalf("系统用户列表应带邮箱: %+v", u)
+		}
+	}
+}
+
+// #203：管理员建号 → 新用户带「须改密码」→ 改密前业务接口 403 → 改密（免旧密码）后进入系统；
+// 字段规则与重复用户名／邮箱；建号仅系统管理员可调。
+func TestCreateSystemUserAndForcedPasswordChange(t *testing.T) {
+	q, pool := setupDB(t)
+	seedUser(t, q, "alice", "张三", "alice-pass")
+	rootUser := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(context.Background(), store.SetUserSystemAdminParams{ID: rootUser.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	login := func(username, password string) (*http.Client, api.CurrentUser) {
+		t.Helper()
+		c := newClient(t)
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		return c, decodeBody[api.CurrentUser](t, resp)
+	}
+	alice, _ := login("alice", "alice-pass")
+	root, _ := login("root", "root-pass1")
+
+	newUser := api.CreateSystemUserRequest{Username: "wangwu", DisplayName: "王五", Email: "WangWu@Example.com", Password: "init-pass-1"}
+	// 非系统管理员 403。
+	resp := doJSON(t, alice, http.MethodPost, base+"/system/users", newUser)
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	// 字段规则：密码过短／过长、用户名非法、邮箱非法 → 422。
+	for name, bad := range map[string]api.CreateSystemUserRequest{
+		"密码 7 位":  {Username: "u1", DisplayName: "x", Email: "u1@example.com", Password: "abcdefg"},
+		"密码 33 位": {Username: "u2", DisplayName: "x", Email: "u2@example.com", Password: strings.Repeat("a", 33)},
+		"用户名大写":   {Username: "Bad", DisplayName: "x", Email: "u3@example.com", Password: "abcdefgh"},
+		"邮箱非法":    {Username: "user4", DisplayName: "x", Email: "nope", Password: "abcdefgh"},
+	} {
+		resp := doJSON(t, root, http.MethodPost, base+"/system/users", bad)
+		if resp.StatusCode != http.StatusUnprocessableEntity {
+			t.Fatalf("%s: status = %d, want 422", name, resp.StatusCode)
+		}
+		resp.Body.Close()
+	}
+	// 建号成功：邮箱归一小写、带须改密码。
+	resp = doJSON(t, root, http.MethodPost, base+"/system/users", newUser)
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.SystemUser](t, resp)
+	if created.Email != "wangwu@example.com" || created.MustChangePassword == nil || !*created.MustChangePassword {
+		t.Fatalf("建号结果异常: %+v", created)
+	}
+	// 重复用户名 409 username_taken；重复邮箱（大小写不同）409 email_taken。
+	resp = doJSON(t, root, http.MethodPost, base+"/system/users", api.CreateSystemUserRequest{Username: "wangwu", DisplayName: "x", Email: "other@example.com", Password: "abcdefgh"})
+	wantStatus(t, resp, http.StatusConflict)
+	if e := decodeBody[api.Error](t, resp); e.Code != "username_taken" {
+		t.Fatalf("code = %q, want username_taken", e.Code)
+	}
+	resp = doJSON(t, root, http.MethodPost, base+"/system/users", api.CreateSystemUserRequest{Username: "wangwu2", DisplayName: "x", Email: "WANGWU@example.com", Password: "abcdefgh"})
+	wantStatus(t, resp, http.StatusConflict)
+	if e := decodeBody[api.Error](t, resp); e.Code != "email_taken" {
+		t.Fatalf("code = %q, want email_taken", e.Code)
+	}
+
+	// 新用户首登：标记为真；业务接口 403 password_change_required；读当前用户与登出放行。
+	wang, me := login("wangwu", "init-pass-1")
+	if !me.MustChangePassword {
+		t.Fatalf("新用户登录应带须改密码: %+v", me)
+	}
+	resp = doJSON(t, wang, http.MethodGet, base+"/projects", nil)
+	wantStatus(t, resp, http.StatusForbidden)
+	if e := decodeBody[api.Error](t, resp); e.Code != "password_change_required" {
+		t.Fatalf("code = %q, want password_change_required", e.Code)
+	}
+	resp = doJSON(t, wang, http.MethodGet, base+"/auth/me", nil)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	// 改密：新密码与初始密码相同被拒；不足 8 位被拒；合法则免旧密码通过并清除标记。
+	resp = doJSON(t, wang, http.MethodPost, base+"/auth/change-password", api.ChangePasswordRequest{NewPassword: "init-pass-1"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	resp = doJSON(t, wang, http.MethodPost, base+"/auth/change-password", api.ChangePasswordRequest{NewPassword: "short7x"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	resp = doJSON(t, wang, http.MethodPost, base+"/auth/change-password", api.ChangePasswordRequest{NewPassword: "my-new-pass-9"})
+	wantStatus(t, resp, http.StatusNoContent)
+	resp.Body.Close()
+	if me := decodeBody[api.CurrentUser](t, doJSONAgain(t, wang, http.MethodGet, base+"/auth/me")); me.MustChangePassword {
+		t.Fatalf("改密后标记应清除: %+v", me)
+	}
+	resp = doJSON(t, wang, http.MethodGet, base+"/projects", nil)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	// 非首次改密的用户：省略当前密码或当前密码错误 → 422。
+	resp = doJSON(t, alice, http.MethodPost, base+"/auth/change-password", api.ChangePasswordRequest{NewPassword: "another-pass-1"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+}
+
+func strPtr(v string) *string { return &v }
+
+// #204：停用／启用——停用后原会话 401；正确密码登录得「已停用」（403），错误密码仍是统一文案（401）；
+// /users 与成员列表默认不含停用用户，成员列表 includeDisabled 带回并标记；任务负责人带 ownerDisabled；
+// 不能停用自己；启用后可登录。
+func TestDisableAndEnableUser(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	rootUser := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(context.Background(), store.SetUserSystemAdminParams{ID: rootUser.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	loginRaw := func(username, password string) (*http.Client, *http.Response) {
+		t.Helper()
+		c := newClient(t)
+		return c, doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+	}
+	alice, resp := loginRaw("alice", "alice-pass")
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	bob, resp := loginRaw("bob", "bob-pass")
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	root, resp := loginRaw("root", "root-pass1")
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	// alice 建项目，bob 加为成员并负责一个任务。
+	resp = doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "停用演示", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	project := decodeBody[api.Project](t, resp)
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, project.Id), api.AddProjectMembersRequest{UserIds: []int64{bobUser.ID}, Role: api.Member})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, project.Id), api.CreateOkrBatchRequest{
+		Items: []api.CreateOkrBatchItem{{Title: strPtr("O1"), KeyResults: &[]api.CreateKeyResultInput{{Description: "KR1"}}}},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	krID := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/tasks", base, project.Id), api.CreateTaskBatchRequest{Items: []api.CreateTaskItem{{
+		KeyResultId: krID, Name: "李四的任务", OwnerId: bobUser.ID, StartDate: openapiDate(t, "2026-09-01"), EndDate: openapiDate(t, "2026-09-30"),
+	}}})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+
+	// 不能停用自己。
+	resp = doJSON(t, root, http.MethodPost, fmt.Sprintf("%s/system/users/%d/disable", base, rootUser.ID), nil)
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	// 非系统管理员 403。
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/system/users/%d/disable", base, bobUser.ID), nil)
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+
+	// 停用 bob。
+	resp = doJSON(t, root, http.MethodPost, fmt.Sprintf("%s/system/users/%d/disable", base, bobUser.ID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	if u := decodeBody[api.SystemUser](t, resp); u.Disabled == nil || !*u.Disabled {
+		t.Fatalf("停用后应标记 disabled: %+v", u)
+	}
+	// 原会话 401。
+	resp = doJSON(t, bob, http.MethodGet, base+"/auth/me", nil)
+	wantStatus(t, resp, http.StatusUnauthorized)
+	resp.Body.Close()
+	// 正确密码：403 已停用；错误密码：401 统一文案。
+	_, resp = loginRaw("bob", "bob-pass")
+	wantStatus(t, resp, http.StatusForbidden)
+	if e := decodeBody[api.Error](t, resp); e.Code != "account_disabled" {
+		t.Fatalf("code = %q, want account_disabled", e.Code)
+	}
+	_, resp = loginRaw("bob", "wrong-pass")
+	wantStatus(t, resp, http.StatusUnauthorized)
+	if e := decodeBody[api.Error](t, resp); e.Code != "invalid_credentials" {
+		t.Fatalf("code = %q, want invalid_credentials", e.Code)
+	}
+	// /users 不含 bob；成员列表默认不含 bob，includeDisabled 带回并标记。
+	for _, u := range decodeBody[[]api.UserSummary](t, doJSONAgain(t, alice, http.MethodGet, base+"/users")) {
+		if u.Id == bobUser.ID {
+			t.Fatal("停用用户不应出现在 /users")
+		}
+	}
+	for _, m := range decodeBody[[]api.ProjectMember](t, doJSONAgain(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/members", base, project.Id))) {
+		if m.UserId == bobUser.ID {
+			t.Fatal("停用成员默认不应出现在成员列表")
+		}
+	}
+	found := false
+	for _, m := range decodeBody[[]api.ProjectMember](t, doJSONAgain(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/members?includeDisabled=true", base, project.Id))) {
+		if m.UserId == bobUser.ID {
+			found = true
+			if m.Disabled == nil || !*m.Disabled {
+				t.Fatalf("带回的停用成员应标记 disabled: %+v", m)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("includeDisabled=true 应带回停用成员")
+	}
+	// 任务仍显示 bob 的名字并带 ownerDisabled。
+	tasks := decodeBody[[]api.Task](t, doJSONAgain(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/tasks", base, project.Id)))
+	if len(tasks) != 1 || tasks[0].OwnerName != "李四" || tasks[0].OwnerDisabled == nil || !*tasks[0].OwnerDisabled {
+		t.Fatalf("任务应保留负责人姓名并标记停用: %+v", tasks)
+	}
+
+	// 启用后可登录。
+	resp = doJSON(t, root, http.MethodPost, fmt.Sprintf("%s/system/users/%d/enable", base, bobUser.ID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	_, resp = loginRaw("bob", "bob-pass")
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+}
+
+// #205：重置密码 → 旧会话 401、新密码登录被引导改密；改显示名与邮箱（重复邮箱 409）；
+// 设／撤系统管理员且不能撤销自己；三项接口仅系统管理员可调。
+func TestSystemUserResetProfileAdmin(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	rootUser := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(context.Background(), store.SetUserSystemAdminParams{ID: rootUser.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	loginRaw := func(username, password string) (*http.Client, *http.Response) {
+		t.Helper()
+		c := newClient(t)
+		return c, doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+	}
+	alice, resp := loginRaw("alice", "alice-pass")
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	bob, resp := loginRaw("bob", "bob-pass")
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	root, resp := loginRaw("root", "root-pass1")
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	bobURL := fmt.Sprintf("%s/system/users/%d", base, bobUser.ID)
+
+	// 非系统管理员 403。
+	for _, tc := range []struct {
+		method, path string
+		body         any
+	}{
+		{http.MethodPost, bobURL + "/reset-password", api.ResetPasswordRequest{Password: "reset-pass-1"}},
+		{http.MethodPut, bobURL + "/profile", api.UpdateUserProfileRequest{DisplayName: "x", Email: "x@example.com"}},
+		{http.MethodPut, bobURL + "/system-admin", api.SetSystemAdminRequest{IsSystemAdmin: true}},
+	} {
+		resp := doJSON(t, alice, tc.method, tc.path, tc.body)
+		wantStatus(t, resp, http.StatusForbidden)
+		resp.Body.Close()
+	}
+
+	// 重置密码：过短 422；成功后 bob 旧会话 401、新密码登录带须改密码。
+	resp = doJSON(t, root, http.MethodPost, bobURL+"/reset-password", api.ResetPasswordRequest{Password: "short7x"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	resp = doJSON(t, root, http.MethodPost, bobURL+"/reset-password", api.ResetPasswordRequest{Password: "reset-pass-1"})
+	wantStatus(t, resp, http.StatusOK)
+	if u := decodeBody[api.SystemUser](t, resp); u.MustChangePassword == nil || !*u.MustChangePassword {
+		t.Fatalf("重置后应置须改密码: %+v", u)
+	}
+	resp = doJSON(t, bob, http.MethodGet, base+"/auth/me", nil)
+	wantStatus(t, resp, http.StatusUnauthorized)
+	resp.Body.Close()
+	_, resp = loginRaw("bob", "reset-pass-1")
+	wantStatus(t, resp, http.StatusOK)
+	if me := decodeBody[api.CurrentUser](t, resp); !me.MustChangePassword {
+		t.Fatalf("新密码登录应被引导改密: %+v", me)
+	}
+
+	// 改资料：显示名与邮箱；改为他人已用邮箱（大小写不同）409 email_taken。
+	resp = doJSON(t, root, http.MethodPut, bobURL+"/profile", api.UpdateUserProfileRequest{DisplayName: "李四改", Email: "Bob.New@Example.com"})
+	wantStatus(t, resp, http.StatusOK)
+	if u := decodeBody[api.SystemUser](t, resp); u.DisplayName != "李四改" || u.Email != "bob.new@example.com" {
+		t.Fatalf("改资料结果异常: %+v", u)
+	}
+	resp = doJSON(t, root, http.MethodPut, bobURL+"/profile", api.UpdateUserProfileRequest{DisplayName: "李四", Email: "ALICE@example.com"})
+	wantStatus(t, resp, http.StatusConflict)
+	if e := decodeBody[api.Error](t, resp); e.Code != "email_taken" {
+		t.Fatalf("code = %q, want email_taken", e.Code)
+	}
+	resp = doJSON(t, root, http.MethodPut, bobURL+"/profile", api.UpdateUserProfileRequest{DisplayName: " ", Email: "bob@example.com"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	_ = aliceUser
+
+	// 设／撤系统管理员：设 bob 成功；撤销自己被拒；撤 bob 成功。
+	resp = doJSON(t, root, http.MethodPut, bobURL+"/system-admin", api.SetSystemAdminRequest{IsSystemAdmin: true})
+	wantStatus(t, resp, http.StatusOK)
+	if u := decodeBody[api.SystemUser](t, resp); !u.IsSystemAdmin {
+		t.Fatalf("应已设为系统管理员: %+v", u)
+	}
+	resp = doJSON(t, root, http.MethodPut, fmt.Sprintf("%s/system/users/%d/system-admin", base, rootUser.ID), api.SetSystemAdminRequest{IsSystemAdmin: false})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	if e := decodeBody[api.Error](t, resp); e.Code != "cannot_revoke_own_admin" {
+		t.Fatalf("code = %q, want cannot_revoke_own_admin", e.Code)
+	}
+	resp = doJSON(t, root, http.MethodPut, bobURL+"/system-admin", api.SetSystemAdminRequest{IsSystemAdmin: false})
+	wantStatus(t, resp, http.StatusOK)
+	if u := decodeBody[api.SystemUser](t, resp); u.IsSystemAdmin {
+		t.Fatalf("应已撤销系统管理员: %+v", u)
+	}
+	// 不存在的用户 404。
+	resp = doJSON(t, root, http.MethodPut, fmt.Sprintf("%s/system/users/%d/system-admin", base, 99999), api.SetSystemAdminRequest{IsSystemAdmin: true})
+	wantStatus(t, resp, http.StatusNotFound)
+	resp.Body.Close()
+}
+
+// #206：建号、停用、重置密码、设撤管理员各产生一条系统级审计（操作者为当前管理员、无项目作用域、
+// 密码不进摘要）；操作审计只对系统管理员可见；项目域审计行为不变（既有用例覆盖）。
+func TestSystemAuditLogs(t *testing.T) {
+	q, pool := setupDB(t)
+	seedUser(t, q, "alice", "张三", "alice-pass")
+	rootUser := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(context.Background(), store.SetUserSystemAdminParams{ID: rootUser.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	login := func(username, password string) *http.Client {
+		t.Helper()
+		c := newClient(t)
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+		return c
+	}
+	alice := login("alice", "alice-pass")
+	root := login("root", "root-pass1")
+
+	resp := doJSON(t, alice, http.MethodGet, base+"/system/audit-logs", nil)
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+
+	// 四种系统级写操作。
+	resp = doJSON(t, root, http.MethodPost, base+"/system/users", api.CreateSystemUserRequest{Username: "carol", DisplayName: "王五", Email: "carol@example.com", Password: "init-pass-1"})
+	wantStatus(t, resp, http.StatusCreated)
+	carol := decodeBody[api.SystemUser](t, resp)
+	carolURL := fmt.Sprintf("%s/system/users/%d", base, carol.Id)
+	for _, tc := range []struct {
+		method, path string
+		body         any
+	}{
+		{http.MethodPost, carolURL + "/disable", nil},
+		{http.MethodPost, carolURL + "/reset-password", api.ResetPasswordRequest{Password: "reset-pass-1"}},
+		{http.MethodPut, carolURL + "/system-admin", api.SetSystemAdminRequest{IsSystemAdmin: true}},
+	} {
+		resp := doJSON(t, root, tc.method, tc.path, tc.body)
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+	}
+	// 失败的写操作不留痕：撤销自己 422。
+	resp = doJSON(t, root, http.MethodPut, fmt.Sprintf("%s/system/users/%d/system-admin", base, rootUser.ID), api.SetSystemAdminRequest{IsSystemAdmin: false})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+
+	logs := decodeBody[[]api.AuditLog](t, doJSONAgain(t, root, http.MethodGet, base+"/system/audit-logs"))
+	if len(logs) != 4 {
+		t.Fatalf("应有 4 条系统级审计，得到 %d: %+v", len(logs), logs)
+	}
+	wantActions := []string{"设／撤系统管理员", "重置用户密码", "停用用户", "新建用户"}
+	for i, a := range logs {
+		if a.Action != wantActions[i] {
+			t.Fatalf("第 %d 条动作 = %q, want %q", i, a.Action, wantActions[i])
+		}
+		if a.ActorName == nil || *a.ActorName != "系统管理员" {
+			t.Fatalf("操作者应为当前管理员: %+v", a)
+		}
+		if strings.Contains(a.Action, "pass") || strings.Contains(a.Route, "init-pass") {
+			t.Fatalf("密码不应进入审计: %+v", a)
+		}
+	}
+	if logs[3].ObjectType == nil || *logs[3].ObjectType != "users" || logs[0].ObjectId == nil || *logs[0].ObjectId != carol.Id {
+		t.Fatalf("对象应指向用户: %+v %+v", logs[3], logs[0])
+	}
+	// 系统级记录不混入任何项目的审计（项目域查询按 project_id 过滤，直接查库确认作用域为空）。
+	rows, err := q.ListSystemAuditLogs(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for _, r := range rows {
+		if r.ProjectID.Valid {
+			t.Fatalf("系统级审计的 project_id 应为空: %+v", r)
+		}
+	}
+}
+
+// #207：本人改显示名与邮箱——即时生效于当前用户；邮箱重复 409；不产生系统级审计；
+// 「须改密码」状态下不放行（仍 403）。
+func TestUpdateMyProfile(t *testing.T) {
+	q, pool := setupDB(t)
+	seedUser(t, q, "alice", "张三", "alice-pass")
+	seedUser(t, q, "bob", "李四", "bob-pass")
+	rootUser := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(context.Background(), store.SetUserSystemAdminParams{ID: rootUser.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	login := func(username, password string) *http.Client {
+		t.Helper()
+		c := newClient(t)
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+		return c
+	}
+	alice := login("alice", "alice-pass")
+	root := login("root", "root-pass1")
+
+	resp := doJSON(t, alice, http.MethodPut, base+"/me/profile", api.UpdateUserProfileRequest{DisplayName: "张三丰", Email: "Alice.New@Example.com"})
+	wantStatus(t, resp, http.StatusOK)
+	if me := decodeBody[api.CurrentUser](t, resp); me.DisplayName != "张三丰" || me.Email != "alice.new@example.com" || me.Username != "alice" {
+		t.Fatalf("改资料结果异常: %+v", me)
+	}
+	if me := decodeBody[api.CurrentUser](t, doJSONAgain(t, alice, http.MethodGet, base+"/auth/me")); me.DisplayName != "张三丰" {
+		t.Fatalf("当前用户应即时更新: %+v", me)
+	}
+	resp = doJSON(t, alice, http.MethodPut, base+"/me/profile", api.UpdateUserProfileRequest{DisplayName: "张三丰", Email: "BOB@example.com"})
+	wantStatus(t, resp, http.StatusConflict)
+	if e := decodeBody[api.Error](t, resp); e.Code != "email_taken" {
+		t.Fatalf("code = %q, want email_taken", e.Code)
+	}
+	resp = doJSON(t, alice, http.MethodPut, base+"/me/profile", api.UpdateUserProfileRequest{DisplayName: "张三丰", Email: ""})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	// 本人改资料不进系统级审计。
+	if logs := decodeBody[[]api.AuditLog](t, doJSONAgain(t, root, http.MethodGet, base+"/system/audit-logs")); len(logs) != 0 {
+		t.Fatalf("本人改资料不应产生系统级审计: %+v", logs)
+	}
+}
+
+// #208：两处登录后会话列表两条且当前会话有标识；「退出其他设备」后另一处 401、本处不受影响；
+// 最近登录时间在当前用户与用户管理列表可见。
+func TestLoginSecuritySessions(t *testing.T) {
+	q, pool := setupDB(t)
+	seedUser(t, q, "alice", "张三", "alice-pass")
+	rootUser := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(context.Background(), store.SetUserSystemAdminParams{ID: rootUser.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	login := func(username, password string) (*http.Client, api.CurrentUser) {
+		t.Helper()
+		c := newClient(t)
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		return c, decodeBody[api.CurrentUser](t, resp)
+	}
+	phone, _ := login("alice", "alice-pass")
+	laptop, me := login("alice", "alice-pass")
+	if me.LastLoginAt == nil {
+		t.Fatalf("登录应记录最近登录时间: %+v", me)
+	}
+
+	sessions := decodeBody[[]api.SessionInfo](t, doJSONAgain(t, laptop, http.MethodGet, base+"/me/sessions"))
+	if len(sessions) != 2 {
+		t.Fatalf("应有 2 条活跃会话: %+v", sessions)
+	}
+	current := 0
+	for _, x := range sessions {
+		if x.Current {
+			current++
+		}
+		if x.CreatedAt.IsZero() || x.LastActiveAt.IsZero() || x.ExpiresAt.IsZero() {
+			t.Fatalf("会话时间字段应齐全: %+v", x)
+		}
+	}
+	if current != 1 {
+		t.Fatalf("应恰有 1 条当前会话: %+v", sessions)
+	}
+
+	resp := doJSON(t, laptop, http.MethodPost, base+"/me/sessions/logout-others", nil)
+	wantStatus(t, resp, http.StatusNoContent)
+	resp.Body.Close()
+	resp = doJSON(t, phone, http.MethodGet, base+"/auth/me", nil)
+	wantStatus(t, resp, http.StatusUnauthorized)
+	resp.Body.Close()
+	if left := decodeBody[[]api.SessionInfo](t, doJSONAgain(t, laptop, http.MethodGet, base+"/me/sessions")); len(left) != 1 || !left[0].Current {
+		t.Fatalf("退出其他设备后只剩当前会话: %+v", left)
+	}
+
+	root, _ := login("root", "root-pass1")
+	for _, u := range decodeBody[[]api.SystemUser](t, doJSONAgain(t, root, http.MethodGet, base+"/system/users")) {
+		if u.Username == "alice" && u.LastLoginAt == nil {
+			t.Fatalf("用户管理列表应显示最近登录: %+v", u)
+		}
+	}
+}
+
+// #210：品牌读取免登录；修改基本信息仅系统管理员，超长被拒，改后品牌读取同步；写操作进系统级审计。
+func TestSystemSettingsBranding(t *testing.T) {
+	q, pool := setupDB(t)
+	seedUser(t, q, "alice", "张三", "alice-pass")
+	rootUser := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(context.Background(), store.SetUserSystemAdminParams{ID: rootUser.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+
+	// 未登录可读品牌，默认值齐全。
+	resp, err := http.Get(base + "/branding")
+	if err != nil {
+		t.Fatalf("branding: %v", err)
+	}
+	wantStatus(t, resp, http.StatusOK)
+	b := decodeBody[api.Branding](t, resp)
+	if b.SystemName != "协同管理工具" || b.Subtitle != "O／KR／任务协同推进" || b.LoginHint != "账号由管理员分配" || b.CanRecoverPassword {
+		t.Fatalf("默认品牌异常: %+v", b)
+	}
+
+	login := func(username, password string) *http.Client {
+		t.Helper()
+		c := newClient(t)
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+		return c
+	}
+	alice := login("alice", "alice-pass")
+	root := login("root", "root-pass1")
+	body := api.SystemSettingsInput{SystemName: "新名称", Subtitle: "新副标题", LoginHint: "请用工号登录", BaseUrl: "http://203.0.113.10/"}
+	resp = doJSON(t, alice, http.MethodPut, base+"/system/settings", body)
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodGet, base+"/system/settings", nil)
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	// 超长 422（名称 11 字）。
+	resp = doJSON(t, root, http.MethodPut, base+"/system/settings", api.SystemSettingsInput{SystemName: strings.Repeat("名", 11), Subtitle: "", LoginHint: "", BaseUrl: ""})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	resp = doJSON(t, root, http.MethodPut, base+"/system/settings", body)
+	wantStatus(t, resp, http.StatusOK)
+	if st := decodeBody[api.SystemSettings](t, resp); st.SystemName != "新名称" || st.BaseUrl != "http://203.0.113.10" {
+		t.Fatalf("保存结果异常: %+v", st)
+	}
+	resp, _ = http.Get(base + "/branding")
+	if b := decodeBody[api.Branding](t, resp); b.SystemName != "新名称" || b.Subtitle != "新副标题" || b.LoginHint != "请用工号登录" {
+		t.Fatalf("品牌读取应同步: %+v", b)
+	}
+	logs := decodeBody[[]api.AuditLog](t, doJSONAgain(t, root, http.MethodGet, base+"/system/audit-logs"))
+	if len(logs) != 1 || logs[0].Action != "修改系统基本信息" {
+		t.Fatalf("应有一条系统级审计: %+v", logs)
+	}
+}
+
+// #211：上传 PNG 后品牌带 logoVersion、出图带 ETag 与缓存头；SVG／超 512KB／非图片 422；删除后 404 且版本清空。
+func TestSystemLogo(t *testing.T) {
+	q, pool := setupDB(t)
+	seedUser(t, q, "alice", "张三", "alice-pass")
+	rootUser := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(context.Background(), store.SetUserSystemAdminParams{ID: rootUser.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	login := func(username, password string) *http.Client {
+		t.Helper()
+		c := newClient(t)
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+		return c
+	}
+	alice := login("alice", "alice-pass")
+	root := login("root", "root-pass1")
+
+	// 8×8 纯色 PNG。
+	img := image.NewRGBA(image.Rect(0, 0, 8, 8))
+	for i := range img.Pix {
+		img.Pix[i] = 0x80
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("png: %v", err)
+	}
+	pngB64 := base64.StdEncoding.EncodeToString(buf.Bytes())
+
+	resp := doJSON(t, alice, http.MethodPost, base+"/system/logo", api.UploadLogoRequest{FileName: "logo.png", DataBase64: pngB64})
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	for name, bad := range map[string]string{
+		"SVG":     base64.StdEncoding.EncodeToString([]byte(`<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`)),
+		"文本":      base64.StdEncoding.EncodeToString([]byte("hello, not an image")),
+		"超 512KB": base64.StdEncoding.EncodeToString(append(append([]byte{}, buf.Bytes()...), make([]byte, domain.MaxLogoBytes)...)),
+	} {
+		resp := doJSON(t, root, http.MethodPost, base+"/system/logo", api.UploadLogoRequest{FileName: "x.png", DataBase64: bad})
+		if resp.StatusCode != http.StatusUnprocessableEntity {
+			t.Fatalf("%s: status = %d, want 422", name, resp.StatusCode)
+		}
+		resp.Body.Close()
+	}
+	resp = doJSON(t, root, http.MethodPost, base+"/system/logo", api.UploadLogoRequest{FileName: "logo.png", DataBase64: pngB64})
+	wantStatus(t, resp, http.StatusOK)
+	st := decodeBody[api.SystemSettings](t, resp)
+	if st.LogoVersion == nil || *st.LogoVersion < 1 {
+		t.Fatalf("上传后应有版本号: %+v", st)
+	}
+	b := decodeBody[api.Branding](t, func() *http.Response { r, _ := http.Get(base + "/branding"); return r }())
+	if b.LogoVersion == nil || *b.LogoVersion != *st.LogoVersion {
+		t.Fatalf("品牌读取应带 logo 版本: %+v", b)
+	}
+	imgResp, err := http.Get(fmt.Sprintf("%s/branding/logo?v=%d", base, *st.LogoVersion))
+	if err != nil {
+		t.Fatalf("logo: %v", err)
+	}
+	wantStatus(t, imgResp, http.StatusOK)
+	body, _ := io.ReadAll(imgResp.Body)
+	imgResp.Body.Close()
+	if imgResp.Header.Get("Content-Type") != "image/png" || imgResp.Header.Get("ETag") == "" || !strings.Contains(imgResp.Header.Get("Cache-Control"), "max-age") || !bytes.Equal(body, buf.Bytes()) {
+		t.Fatalf("出图头或内容异常: %v len=%d", imgResp.Header, len(body))
+	}
+	// 二次上传版本递增。
+	resp = doJSON(t, root, http.MethodPost, base+"/system/logo", api.UploadLogoRequest{FileName: "logo2.png", DataBase64: pngB64})
+	wantStatus(t, resp, http.StatusOK)
+	if st2 := decodeBody[api.SystemSettings](t, resp); st2.LogoVersion == nil || *st2.LogoVersion != *st.LogoVersion+1 {
+		t.Fatalf("换图后版本应递增: %+v", st2)
+	}
+	// 删除后 404、版本清空；审计有上传与删除。
+	resp = doJSON(t, root, http.MethodDelete, base+"/system/logo", nil)
+	wantStatus(t, resp, http.StatusOK)
+	if st3 := decodeBody[api.SystemSettings](t, resp); st3.LogoVersion != nil {
+		t.Fatalf("删除后版本应为空: %+v", st3)
+	}
+	gone, _ := http.Get(base + "/branding/logo")
+	wantStatus(t, gone, http.StatusNotFound)
+	gone.Body.Close()
+	logs := decodeBody[[]api.AuditLog](t, doJSONAgain(t, root, http.MethodGet, base+"/system/audit-logs"))
+	if len(logs) != 3 || logs[0].Action != "删除系统 logo" || logs[2].Action != "上传系统 logo" {
+		t.Fatalf("审计应含两次上传与一次删除: %+v", logs)
+	}
+}
+
+// #212：配置保存后密码落库为密文且读取不回显；测试邮件两个选项入 outbox 并被后台发送；
+// 发送失败时记录显示失败原因与重试次数；非系统管理员 403。
+func TestMailChannel(t *testing.T) {
+	q, pool := setupDB(t)
+	seedUser(t, q, "alice", "张三", "alice-pass")
+	rootUser := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(context.Background(), store.SetUserSystemAdminParams{ID: rootUser.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	mailRecorder.Err = nil
+	mailRecorder.Sent = nil
+	login := func(username, password string) *http.Client {
+		t.Helper()
+		c := newClient(t)
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+		return c
+	}
+	alice := login("alice", "alice-pass")
+	root := login("root", "root-pass1")
+
+	for _, tc := range []struct {
+		method, path string
+		body         any
+	}{
+		{http.MethodGet, base + "/system/mail-settings", nil},
+		{http.MethodPut, base + "/system/mail-settings", api.MailSettingsInput{Host: "h", Port: 25, Encryption: api.MailSettingsInputEncryptionNone, FromAddress: "a@b.co"}},
+		{http.MethodPost, base + "/system/mail-settings/test", api.TestMailRequest{Target: api.Me}},
+		{http.MethodGet, base + "/system/mail-outbox", nil},
+	} {
+		resp := doJSON(t, alice, tc.method, tc.path, tc.body)
+		wantStatus(t, resp, http.StatusForbidden)
+		resp.Body.Close()
+	}
+	// 未配置时发测试邮件 422。
+	resp := doJSON(t, root, http.MethodPost, base+"/system/mail-settings/test", api.TestMailRequest{Target: api.Me})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	// 保存配置（含密码）。
+	pw := "smtp-secret-1"
+	resp = doJSON(t, root, http.MethodPut, base+"/system/mail-settings", api.MailSettingsInput{
+		Host: "smtp.example.com", Port: 587, Encryption: api.MailSettingsInputEncryptionStarttls, Username: "bot",
+		Password: &pw, FromName: "协同", FromAddress: "Bot@Example.com",
+	})
+	wantStatus(t, resp, http.StatusOK)
+	ms := decodeBody[api.MailSettings](t, resp)
+	if !ms.PasswordSet || !ms.Configured || ms.FromAddress != "bot@example.com" {
+		t.Fatalf("保存结果异常: %+v", ms)
+	}
+	raw, err := q.GetMailSettings(context.Background())
+	if err != nil || raw.PasswordEnc == "" || raw.PasswordEnc == pw || strings.Contains(raw.PasswordEnc, pw) {
+		t.Fatalf("密码应以密文落库: %q %v", raw.PasswordEnc, err)
+	}
+	body, _ := json.Marshal(decodeBody[api.MailSettings](t, doJSONAgain(t, root, http.MethodGet, base+"/system/mail-settings")))
+	if strings.Contains(string(body), pw) || strings.Contains(string(body), raw.PasswordEnc) {
+		t.Fatalf("读取接口不应返回密码: %s", body)
+	}
+	// 再保存但密码留空：保持原密文。
+	resp = doJSON(t, root, http.MethodPut, base+"/system/mail-settings", api.MailSettingsInput{
+		Host: "smtp.example.com", Port: 587, Encryption: api.MailSettingsInputEncryptionStarttls, Username: "bot", FromName: "协同", FromAddress: "bot@example.com",
+	})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	if again, _ := q.GetMailSettings(context.Background()); again.PasswordEnc != raw.PasswordEnc {
+		t.Fatal("密码留空应保持原密文")
+	}
+
+	// 测试邮件：发到我 + 发到手填地址；非法地址 422。
+	resp = doJSON(t, root, http.MethodPost, base+"/system/mail-settings/test", api.TestMailRequest{Target: api.Me})
+	wantStatus(t, resp, http.StatusAccepted)
+	if item := decodeBody[api.MailOutboxItem](t, resp); item.ToAddress != "root@example.com" || item.Status != api.MailOutboxItemStatusPending {
+		t.Fatalf("入队异常: %+v", item)
+	}
+	addr := "Ops@Example.com"
+	resp = doJSON(t, root, http.MethodPost, base+"/system/mail-settings/test", api.TestMailRequest{Target: api.Custom, Address: &addr})
+	wantStatus(t, resp, http.StatusAccepted)
+	resp.Body.Close()
+	bad := "nope"
+	resp = doJSON(t, root, http.MethodPost, base+"/system/mail-settings/test", api.TestMailRequest{Target: api.Custom, Address: &bad})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	// 后台发送一轮：两封都已发送，记录器收到并带解密后的通道配置。
+	if n := testServer.ProcessMailOutbox(context.Background()); n != 2 {
+		t.Fatalf("应处理 2 封，得到 %d", n)
+	}
+	sent := mailRecorder.Messages()
+	if len(sent) != 2 || sent[0].To != "root@example.com" || sent[1].To != "ops@example.com" || sent[0].Subject != "测试邮件" {
+		t.Fatalf("发出的邮件异常: %+v", sent)
+	}
+	outbox := decodeBody[[]api.MailOutboxItem](t, doJSONAgain(t, root, http.MethodGet, base+"/system/mail-outbox"))
+	if len(outbox) != 2 || outbox[0].Status != api.MailOutboxItemStatusSent || outbox[0].SentAt == nil || outbox[0].EventLabel != "测试邮件" {
+		t.Fatalf("发送记录异常: %+v", outbox)
+	}
+
+	// SMTP 不可达：API 立即返回 202，记录显示失败原因与重试次数递增，四次后标记失败。
+	mailRecorder.Err = errors.New("dial tcp: connection refused")
+	resp = doJSON(t, root, http.MethodPost, base+"/system/mail-settings/test", api.TestMailRequest{Target: api.Me})
+	wantStatus(t, resp, http.StatusAccepted)
+	resp.Body.Close()
+	testServer.ProcessMailOutbox(context.Background())
+	outbox = decodeBody[[]api.MailOutboxItem](t, doJSONAgain(t, root, http.MethodGet, base+"/system/mail-outbox"))
+	if outbox[0].Status != api.MailOutboxItemStatusPending || outbox[0].Attempts != 1 || outbox[0].LastError == nil || !strings.Contains(*outbox[0].LastError, "connection refused") {
+		t.Fatalf("首次失败应待重试并记录原因: %+v", outbox[0])
+	}
+	// 未到重试时间不会再被取走。
+	if n := testServer.ProcessMailOutbox(context.Background()); n != 0 {
+		t.Fatalf("退避期内不应重试，处理了 %d", n)
+	}
+	// 把重试时间拨回，连续失败到第 4 次标记失败。
+	for i := 0; i < 3; i++ {
+		if _, err := pool.Exec(context.Background(), "UPDATE mail_outbox SET next_attempt_at = now() WHERE status = 'pending'"); err != nil {
+			t.Fatalf("rewind: %v", err)
+		}
+		testServer.ProcessMailOutbox(context.Background())
+	}
+	outbox = decodeBody[[]api.MailOutboxItem](t, doJSONAgain(t, root, http.MethodGet, base+"/system/mail-outbox"))
+	if outbox[0].Status != api.MailOutboxItemStatusFailed || outbox[0].Attempts != 4 {
+		t.Fatalf("四次失败后应标记失败: %+v", outbox[0])
+	}
+	mailRecorder.Err = nil
+	// 审计：修改通道两次 + 入队成功的测试邮件三次（未配置与地址非法的 422 不留痕）。
+	logs := decodeBody[[]api.AuditLog](t, doJSONAgain(t, root, http.MethodGet, base+"/system/audit-logs"))
+	if len(logs) != 5 {
+		t.Fatalf("审计条数 = %d, want 5: %+v", len(logs), logs)
+	}
+	for _, a := range logs {
+		if strings.Contains(a.Action, pw) || strings.Contains(a.Route, pw) {
+			t.Fatalf("密码不应进入审计: %+v", a)
+		}
+	}
+}
+
+// #213：触发一次 @ 提及——系统开关与个人开关全开时 outbox 有一条；关闭任一开关时没有；
+// 站内通知照常产生；个人偏好接口带系统级置灰信息。
+func TestNotificationMailSync(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	rootUser := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(context.Background(), store.SetUserSystemAdminParams{ID: rootUser.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	login := func(username, password string) *http.Client {
+		t.Helper()
+		c := newClient(t)
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+		return c
+	}
+	alice := login("alice", "alice-pass")
+	bob := login("bob", "bob-pass")
+	root := login("root", "root-pass1")
+
+	// 项目、成员、任务（alice 负责），bob 为成员。
+	resp := doJSON(t, alice, http.MethodPost, base+"/projects", api.CreateProjectRequest{Name: "邮件同步", OwnerId: aliceUser.ID})
+	wantStatus(t, resp, http.StatusCreated)
+	project := decodeBody[api.Project](t, resp)
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/members", base, project.Id), api.AddProjectMembersRequest{UserIds: []int64{bobUser.ID}, Role: api.Member})
+	wantStatus(t, resp, http.StatusCreated)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/objectives", base, project.Id), api.CreateOkrBatchRequest{
+		Items: []api.CreateOkrBatchItem{{Title: strPtr("O1"), KeyResults: &[]api.CreateKeyResultInput{{Description: "KR1"}}}},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	krID := decodeBody[api.CreateOkrBatchResponse](t, resp).Objectives[0].KeyResults[0].Id
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/tasks", base, project.Id), api.CreateTaskBatchRequest{Items: []api.CreateTaskItem{{
+		KeyResultId: krID, Name: "同步任务", OwnerId: aliceUser.ID, StartDate: openapiDate(t, "2026-09-01"), EndDate: openapiDate(t, "2026-09-30"),
+	}}})
+	wantStatus(t, resp, http.StatusCreated)
+	taskID := decodeBody[[]api.Task](t, resp)[0].Id
+	discussURL := fmt.Sprintf("%s/projects/%d/tasks/%d/discussions", base, project.Id, taskID)
+	outboxCount := func() int {
+		n, err := q.CountMailOutboxByEvent(context.Background(), domain.NotifyDiscussionMention)
+		if err != nil {
+			t.Fatalf("count: %v", err)
+		}
+		return int(n)
+	}
+	mention := func() {
+		t.Helper()
+		resp := doJSON(t, alice, http.MethodPost, discussURL, api.CreateDiscussionRequest{Content: "请看一下 @李四", MentionUserIds: &[]int64{bobUser.ID}})
+		wantStatus(t, resp, http.StatusCreated)
+		resp.Body.Close()
+	}
+
+	// 通道未配置：只有站内通知，没有邮件。
+	mention()
+	if outboxCount() != 0 {
+		t.Fatal("通道未配置不应入 outbox")
+	}
+	// 配置通道后全开：一条邮件。
+	resp = doJSON(t, root, http.MethodPut, base+"/system/mail-settings", api.MailSettingsInput{Host: "smtp.example.com", Port: 25, Encryption: api.MailSettingsInputEncryptionNone, FromAddress: "bot@example.com"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	mention()
+	if outboxCount() != 1 {
+		t.Fatalf("全开时应有 1 条邮件，得到 %d", outboxCount())
+	}
+	// 系统事件关：不发。
+	off := api.MailNotifySwitches{Enabled: true, Events: []api.MailEventSwitch{{Kind: domain.NotifyDiscussionMention, Label: "", Enabled: false}}}
+	resp = doJSON(t, root, http.MethodPut, base+"/system/mail-notify", off)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	mention()
+	if outboxCount() != 1 {
+		t.Fatalf("系统事件关不应发邮件，得到 %d", outboxCount())
+	}
+	// 个人偏好接口：系统级已关的事件带 systemEnabled=false。
+	prefs := decodeBody[api.MailPreferences](t, doJSONAgain(t, bob, http.MethodGet, base+"/me/mail-preferences"))
+	for _, e := range prefs.Events {
+		if e.Kind == domain.NotifyDiscussionMention && (e.SystemEnabled == nil || *e.SystemEnabled) {
+			t.Fatalf("系统已关的事件应标 systemEnabled=false: %+v", e)
+		}
+	}
+	// 系统恢复全开，个人关该事件：不发；个人再开：发。
+	resp = doJSON(t, root, http.MethodPut, base+"/system/mail-notify", api.MailNotifySwitches{Enabled: true, Events: []api.MailEventSwitch{}})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodPut, base+"/me/mail-preferences", api.MailNotifySwitches{Enabled: true, Events: []api.MailEventSwitch{{Kind: domain.NotifyDiscussionMention, Enabled: false}}})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	mention()
+	if outboxCount() != 1 {
+		t.Fatalf("个人事件关不应发邮件，得到 %d", outboxCount())
+	}
+	resp = doJSON(t, bob, http.MethodPut, base+"/me/mail-preferences", api.MailNotifySwitches{Enabled: true, Events: []api.MailEventSwitch{}})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	mention()
+	if outboxCount() != 2 {
+		t.Fatalf("个人恢复后应发邮件，得到 %d", outboxCount())
+	}
+	// 停用收件人：不发。
+	resp = doJSON(t, root, http.MethodPost, fmt.Sprintf("%s/system/users/%d/disable", base, bobUser.ID), nil)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	mention()
+	if outboxCount() != 2 {
+		t.Fatalf("停用后不应发邮件，得到 %d", outboxCount())
+	}
+	// outbox 只有两条，收件人、事件与主题正确；站内通知照常产生由既有讨论用例覆盖。
+	if item := decodeBody[[]api.MailOutboxItem](t, doJSONAgain(t, root, http.MethodGet, base+"/system/mail-outbox")); len(item) != 2 || item[0].ToAddress != "bob@example.com" || item[0].EventLabel != "讨论区被 @" || !strings.Contains(item[0].Subject, "讨论区被 @") {
+		t.Fatalf("outbox 内容异常: %+v", item)
+	}
+}
+
+// #214：SMTP 未配置时品牌 canRecoverPassword 为假且请求接口 422；配置后三种请求返回同一文案、
+// 只有正常用户入 outbox；token 过期／已用／篡改被拒；成功重置后旧会话 401、新密码可登录且不被
+// 强制改密、记一条系统级审计；连续请求触发 429。
+func TestPasswordRecovery(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	rootUser := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(context.Background(), store.SetUserSystemAdminParams{ID: rootUser.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+	if _, err := q.SetUserDisabledAt(context.Background(), store.SetUserDisabledAtParams{ID: bobUser.ID, DisabledAt: pgtype.Timestamptz{Time: time.Now(), Valid: true}}); err != nil {
+		t.Fatalf("disable bob: %v", err)
+	}
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	mailRecorder.Err = nil
+	mailRecorder.Sent = nil
+	anon := func() *http.Client { return newClient(t) }
+	branding := func() api.Branding {
+		r, _ := http.Get(base + "/branding")
+		return decodeBody[api.Branding](t, r)
+	}
+	if branding().CanRecoverPassword {
+		t.Fatal("SMTP 未配置时不应可找回密码")
+	}
+	resp := doJSON(t, anon(), http.MethodPost, base+"/auth/password-reset/request", api.PasswordResetRequest{Identifier: "alice"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+
+	// 配置通道与访问地址。
+	root := newClient(t)
+	resp = doJSON(t, root, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: "root", Password: "root-pass1"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, root, http.MethodPut, base+"/system/mail-settings", api.MailSettingsInput{Host: "smtp.example.com", Port: 25, Encryption: api.MailSettingsInputEncryptionNone, FromAddress: "bot@example.com"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, root, http.MethodPut, base+"/system/settings", api.SystemSettingsInput{SystemName: "协同", Subtitle: "", LoginHint: "", BaseUrl: "http://203.0.113.10"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	if !branding().CanRecoverPassword {
+		t.Fatal("配置后应可找回密码")
+	}
+
+	// alice 先登录一处，稍后验证重置后失效。
+	aliceOld := newClient(t)
+	resp = doJSON(t, aliceOld, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: "alice", Password: "alice-pass"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	// 三种请求同一文案；只有 alice 入 outbox（按邮箱大小写不敏感）。
+	for _, id := range []string{"nobody", "bob", "ALICE@example.com"} {
+		resp := doJSON(t, anon(), http.MethodPost, base+"/auth/password-reset/request", api.PasswordResetRequest{Identifier: id})
+		wantStatus(t, resp, http.StatusAccepted)
+		if m := decodeBody[api.PasswordResetRequested](t, resp); m.Message != "若账号存在，重置邮件已发送" {
+			t.Fatalf("文案 = %q", m.Message)
+		}
+	}
+	outbox := decodeBody[[]api.MailOutboxItem](t, doJSONAgain(t, root, http.MethodGet, base+"/system/mail-outbox"))
+	if len(outbox) != 1 || outbox[0].ToAddress != "alice@example.com" || outbox[0].EventLabel != "找回密码" || outbox[0].Body == nil {
+		t.Fatalf("outbox 应只有 alice 的重置邮件: %+v", outbox)
+	}
+	link := regexp.MustCompile(`http://203\.0\.113\.10/reset-password\?token=([0-9a-f]{64})`).FindStringSubmatch(*outbox[0].Body)
+	if link == nil {
+		t.Fatalf("邮件正文应含重置链接: %q", *outbox[0].Body)
+	}
+	token := link[1]
+	// 库里只有哈希。
+	rows, _ := pool.Query(context.Background(), "SELECT token_hash FROM password_reset_tokens")
+	for rows.Next() {
+		var h string
+		_ = rows.Scan(&h)
+		if h == token {
+			t.Fatal("库里不应存 token 明文")
+		}
+	}
+	rows.Close()
+	// 请求阶段不记审计。
+	if logs := decodeBody[[]api.AuditLog](t, doJSONAgain(t, root, http.MethodGet, base+"/system/audit-logs")); len(logs) != 2 {
+		t.Fatalf("请求阶段不应记审计（只有两条系统设置修改）: %+v", logs)
+	}
+
+	// 篡改 token 与过短密码被拒。
+	resp = doJSON(t, anon(), http.MethodPost, base+"/auth/password-reset/confirm", api.PasswordResetConfirm{Token: strings.Repeat("0", 64), Password: "brand-new-pass-1"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	resp = doJSON(t, anon(), http.MethodPost, base+"/auth/password-reset/confirm", api.PasswordResetConfirm{Token: token, Password: "short7x"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	// 新请求作废旧 token。
+	resp = doJSON(t, anon(), http.MethodPost, base+"/auth/password-reset/request", api.PasswordResetRequest{Identifier: "alice"})
+	wantStatus(t, resp, http.StatusAccepted)
+	resp.Body.Close()
+	resp = doJSON(t, anon(), http.MethodPost, base+"/auth/password-reset/confirm", api.PasswordResetConfirm{Token: token, Password: "brand-new-pass-1"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	outbox = decodeBody[[]api.MailOutboxItem](t, doJSONAgain(t, root, http.MethodGet, base+"/system/mail-outbox"))
+	token = regexp.MustCompile(`token=([0-9a-f]{64})`).FindStringSubmatch(*outbox[0].Body)[1]
+	// 成功重置。
+	resp = doJSON(t, anon(), http.MethodPost, base+"/auth/password-reset/confirm", api.PasswordResetConfirm{Token: token, Password: "brand-new-pass-1"})
+	wantStatus(t, resp, http.StatusNoContent)
+	resp.Body.Close()
+	// 已用 token 再用被拒。
+	resp = doJSON(t, anon(), http.MethodPost, base+"/auth/password-reset/confirm", api.PasswordResetConfirm{Token: token, Password: "another-pass-2"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	// 旧会话 401；新密码登录且不被强制改密。
+	resp = doJSON(t, aliceOld, http.MethodGet, base+"/auth/me", nil)
+	wantStatus(t, resp, http.StatusUnauthorized)
+	resp.Body.Close()
+	resp = doJSON(t, anon(), http.MethodPost, base+"/auth/login", api.LoginRequest{Username: "alice", Password: "brand-new-pass-1"})
+	wantStatus(t, resp, http.StatusOK)
+	if me := decodeBody[api.CurrentUser](t, resp); me.MustChangePassword || me.Id != aliceUser.ID {
+		t.Fatalf("重置后登录不应被强制改密: %+v", me)
+	}
+	// 系统级审计多一条「找回密码重置」，对象为 alice。
+	logs := decodeBody[[]api.AuditLog](t, doJSONAgain(t, root, http.MethodGet, base+"/system/audit-logs"))
+	if len(logs) != 3 || logs[0].Action != "找回密码重置" || logs[0].ObjectId == nil || *logs[0].ObjectId != aliceUser.ID {
+		t.Fatalf("应记一条找回密码重置审计: %+v", logs)
+	}
+	// 过期：把 token 拨到过去后被拒。
+	resp = doJSON(t, anon(), http.MethodPost, base+"/auth/password-reset/request", api.PasswordResetRequest{Identifier: "alice"})
+	wantStatus(t, resp, http.StatusAccepted)
+	resp.Body.Close()
+	if _, err := pool.Exec(context.Background(), "UPDATE password_reset_tokens SET expires_at = now() - interval '1 minute' WHERE used_at IS NULL"); err != nil {
+		t.Fatalf("expire: %v", err)
+	}
+	outbox = decodeBody[[]api.MailOutboxItem](t, doJSONAgain(t, root, http.MethodGet, base+"/system/mail-outbox"))
+	expired := regexp.MustCompile(`token=([0-9a-f]{64})`).FindStringSubmatch(*outbox[0].Body)[1]
+	resp = doJSON(t, anon(), http.MethodPost, base+"/auth/password-reset/confirm", api.PasswordResetConfirm{Token: expired, Password: "yet-another-3"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	// 连续请求触发限速 429。
+	c := anon()
+	var last *http.Response
+	for i := 0; i < domain.MaxLoginFailures+1; i++ {
+		last = doJSON(t, c, http.MethodPost, base+"/auth/password-reset/request", api.PasswordResetRequest{Identifier: "someone"})
+		if i < domain.MaxLoginFailures {
+			last.Body.Close()
+		}
+	}
+	wantStatus(t, last, http.StatusTooManyRequests)
+	last.Body.Close()
+}
+

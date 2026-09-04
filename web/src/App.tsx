@@ -13,6 +13,10 @@ import ProjectSettingsPage from "./ProjectSettingsPage";
 import CollaborationPage from "./CollaborationPage";
 import ArtifactsPage from "./ArtifactsPage";
 import ReportsPage from "./ReportsPage";
+import SystemSettingsPage from "./SystemSettingsPage";
+import ForcePasswordPage from "./ForcePasswordPage";
+import MePage from "./MePage";
+import { ForgotPasswordPage, ResetPasswordPage } from "./PasswordRecoveryPages";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 
@@ -32,9 +36,20 @@ export default function App() {
     return <Spin fullscreen />;
   }
   if (!user) {
-    return <LoginPage onLogin={setUser} />;
+    // #214：找回密码两页在未登录态可达；其余路径一律登录页。
+    return (
+      <Routes>
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="*" element={<LoginPage onLogin={setUser} />} />
+      </Routes>
+    );
   }
   const logout = () => setUser(null);
+  // #203：「须改密码」为真时整页只有首次改密页，任何路由都回到这里；改完重读当前用户进入系统。
+  if (user.mustChangePassword) {
+    return <ForcePasswordPage user={user} onDone={setUser} onLogout={logout} />;
+  }
   return (
     <Routes>
       <Route path="/" element={<ProjectsPage user={user} onLogout={logout} />} />
@@ -46,6 +61,12 @@ export default function App() {
       <Route path="/projects/:projectId/reports" element={<ReportsPage user={user} onLogout={logout} />} />
       <Route path="/projects/:projectId/my-work" element={<MyWorkPage user={user} onLogout={logout} />} />
       <Route path="/projects/:projectId/settings" element={<ProjectSettingsPage user={user} onLogout={logout} />} />
+      {/* #201：系统设置不挂在项目下；/system 无分节时跳到用户管理。 */}
+      <Route path="/system" element={<SystemSettingsPage user={user} onLogout={logout} />} />
+      <Route path="/system/:section" element={<SystemSettingsPage user={user} onLogout={logout} />} />
+      {/* #207：个人中心不挂项目；改显示名后由 App 更新当前用户，两套壳即时刷新。 */}
+      <Route path="/me" element={<MePage user={user} onUserChange={setUser} onLogout={logout} />} />
+      <Route path="/me/:section" element={<MePage user={user} onUserChange={setUser} onLogout={logout} />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

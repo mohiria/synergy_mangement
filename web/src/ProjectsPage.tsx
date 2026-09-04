@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Alert, Button, Form, Input, Modal, Popover, Select, Table } from "antd";
+import { Alert, Button, Form, Input, Modal, Select, Table } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import DateRangeField from "./DateRangeField";
 import Icon from "./icons";
-import NotificationBell from "./NotificationBell";
+import PlainShell from "./PlainShell";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
@@ -126,59 +126,7 @@ export default function ProjectsPage({
   const publicCount = projects.filter((p) => p.implicitViewer).length;
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <span className="brand-mark">协</span>
-          <div className="brand-name">
-            <b>协同管理工具</b>
-            <span>O／KR／任务协同推进</span>
-          </div>
-        </div>
-        <nav>
-          <button className="nav-row active" type="button">
-            <Icon name="package" />
-            <span>项目列表</span>
-          </button>
-        </nav>
-      </aside>
-      <section className="workspace">
-        <header className="topbar">
-          <div className="breadcrumbs">
-            <b>项目列表</b>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <NotificationBell />
-          <Popover
-            trigger="click"
-            placement="bottomRight"
-            content={
-              <div className="identity-popover">
-                <div className="identity-popover-head">
-                  <span className="avatar">{user.displayName.slice(0, 1)}</span>
-                  <span>
-                    <b>{user.displayName}</b>
-                    <small>{user.username}</small>
-                  </span>
-                </div>
-                <Button block onClick={logout}>
-                  登出
-                </Button>
-              </div>
-            }
-          >
-            <button className="identity" type="button" aria-label="当前身份">
-              <span className="avatar">{user.displayName.slice(0, 1)}</span>
-              <span className="who">
-                <b>{user.displayName}</b>
-                <small>{user.username}</small>
-              </span>
-              <Icon name="down" size={15} />
-            </button>
-          </Popover>
-          </div>
-        </header>
-        <main className="page">
+    <PlainShell user={user} onLogout={logout} active="projects" crumb={<b>项目列表</b>}>
           <div className="page-head">
             <div>
               <h1>项目列表</h1>
@@ -321,8 +269,6 @@ export default function ProjectsPage({
               ]}
             />
           </div>
-        </main>
-      </section>
       <Modal
         title="新建项目"
         open={modalOpen}
@@ -357,6 +303,6 @@ export default function ProjectsPage({
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </PlainShell>
   );
 }

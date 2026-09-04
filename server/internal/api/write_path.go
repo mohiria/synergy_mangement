@@ -44,6 +44,15 @@ func (w *statusRecorder) Write(b []byte) (int, error) {
 // writePathMiddleware 见文件头说明。
 func (s *Server) writePathMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// #206：系统级写路径（/system/…）只落审计、不比对卡点；project 作用域为空。
+		if sysRest, ok := systemScope(r.URL.Path); ok && domain.SystemAuditable(r.Method, routeTemplate(sysRest)) {
+			rec := &statusRecorder{ResponseWriter: w}
+			next.ServeHTTP(rec, r)
+			if rec.status >= 200 && rec.status < 300 {
+				s.recordSystemAudit(context.WithoutCancel(r.Context()), r, sysRest)
+			}
+			return
+		}
 		projectID, rest, ok := projectScope(r.URL.Path)
 		if !ok || !domain.Auditable(r.Method, routeTemplate(rest)) {
 			next.ServeHTTP(w, r)
@@ -66,6 +75,56 @@ func (s *Server) writePathMiddleware(next http.Handler) http.Handler {
 		s.recordAudit(after, projectID, r)
 		s.recordBlockerChanges(after, projectID, before)
 	})
+}
+
+// systemScope 取 /system/… 片段；不是系统域请求时返回 ok=false。
+func systemScope(path string) (string, bool) {
+	i := strings.Index(path, "/system/")
+	if i < 0 {
+		return "", false
+	}
+	return path[i:], true
+}
+
+// recordSystemAudit 落一条系统级审计（#206）：project_id 为空，操作者为当前系统管理员；
+// 密码类字段从不进入摘要（summary 留空）。
+func (s *Server) recordSystemAudit(ctx context.Context, r *http.Request, rest string) {
+	route := routeTemplate(rest)
+	actor := currentUser(r)
+	objectType, objectID := systemAuditObject(route, rest)
+	if err := s.q.CreateAuditLog(ctx, store.CreateAuditLogParams{
+		ActorID:    toPgInt8(&actor.ID),
+		Action:     domain.AuditActionLabel(r.Method, route),
+		Method:     r.Method,
+		Route:      route,
+		ObjectType: objectType,
+		ObjectID:   toPgInt8(objectID),
+	}); err != nil {
+		log.Printf("record system audit failed: route=%s err=%v", route, err)
+	}
+}
+
+// systemAuditObject 系统级写操作的直接对象：/system/users/{userId}/… → users #id；无 ID 时取资源名。
+func systemAuditObject(route, path string) (string, *int64) {
+	rSegs := strings.Split(route, "/")
+	pSegs := strings.Split(path, "/")
+	if len(rSegs) != len(pSegs) {
+		return "", nil
+	}
+	for i := 2; i < len(rSegs); i++ {
+		if !strings.HasPrefix(rSegs[i], "{") {
+			continue
+		}
+		id, err := strconv.ParseInt(pSegs[i], 10, 64)
+		if err != nil {
+			return "", nil
+		}
+		return rSegs[i-1], &id
+	}
+	if len(rSegs) > 2 {
+		return rSegs[2], nil
+	}
+	return "system", nil
 }
 
 // projectScope 解析项目 ID 与其后的路径片段；不是项目域请求时返回 ok=false。
@@ -101,6 +160,7 @@ func routeTemplate(path string) string {
 		"cancel-requests":    "{requestId}",
 		"completion-reviews": "{reviewId}",
 		"task-invites":       "{inviteId}",
+		"users":              "{userId}",
 	}
 	for i, seg := range segs {
 		if seg == "" || !isNumeric(seg) {
@@ -132,7 +192,7 @@ func (s *Server) recordAudit(ctx context.Context, projectID int64, r *http.Reque
 	actor := currentUser(r)
 	objectType, objectID := auditObject(route, mustRest(r.URL.Path))
 	if err := s.q.CreateAuditLog(ctx, store.CreateAuditLogParams{
-		ProjectID:  projectID,
+		ProjectID:  toPgInt8(&projectID),
 		ActorID:    toPgInt8(&actor.ID),
 		Action:     domain.AuditActionLabel(r.Method, route),
 		Method:     r.Method,
@@ -183,8 +243,7 @@ func (s *Server) ListAuditLogs(w http.ResponseWriter, r *http.Request, projectId
 	if !ok {
 		return
 	}
-	uid := currentUser(r).ID
-	if !domain.CanEditProject(projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)) {
+	if !domain.CanEditProject(projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)) {
 		writeForbidden(w)
 		return
 	}
@@ -192,7 +251,7 @@ func (s *Server) ListAuditLogs(w http.ResponseWriter, r *http.Request, projectId
 	if params.Limit != nil {
 		limit = int32(*params.Limit)
 	}
-	rows, err := s.q.ListAuditLogsByProject(r.Context(), store.ListAuditLogsByProjectParams{ProjectID: projectId, Limit: limit})
+	rows, err := s.q.ListAuditLogsByProject(r.Context(), store.ListAuditLogsByProjectParams{ProjectID: toPgInt8(&projectId), Limit: limit})
 	if err != nil {
 		writeInternalError(w, r, err)
 		return

@@ -30,7 +30,7 @@ func (s *Server) UploadTaskFile(w http.ResponseWriter, r *http.Request, projectI
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
+	actor := projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)
 	_, facts, ok := s.fetchTask(w, r, projectId, taskId)
 	if !ok {
 		return
@@ -96,7 +96,7 @@ func (s *Server) CommitTaskFile(w http.ResponseWriter, r *http.Request, projectI
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
+	actor := projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)
 	row, ok := s.fetchTaskFile(w, r, projectId, taskId, fileId)
 	if !ok {
 		return
@@ -140,7 +140,7 @@ func (s *Server) DeleteTaskFile(w http.ResponseWriter, r *http.Request, projectI
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
+	actor := projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)
 	row, ok := s.fetchTaskFile(w, r, projectId, taskId, fileId)
 	if !ok {
 		return
@@ -174,7 +174,7 @@ func (s *Server) GetTaskFileDownloadUrl(w http.ResponseWriter, r *http.Request, 
 	}
 	// #124：预览（inline）或下载（attachment，默认）由调用方声明；预签名带对应 disposition。
 	inline := params.Disposition != nil && string(*params.Disposition) == "inline"
-	url, err := s.files.PresignGet(r.Context(), f.ObjectKey, f.FileName, inline, presignExpiry)
+	url, err := s.files.PresignGet(r.Context(), f.ObjectKey, f.FileName, inline, presignDownloadExpiry)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return

@@ -206,7 +206,7 @@ OVERRIDING SYSTEM VALUE VALUES
  '按加固基线逐项核对，共处理 23 项高危配置。', '加固项全部完成并通过复扫。', 'none',
  now() - interval '218 days', now() - interval '189 days'),
 (57, 17, '完成应用系统身份鉴别与审计整改', 4, current_date - 205, current_date - 170, 'completed', 11, 100, '',
- '涉及 6 个业务系统的口令策略、双因素与操作审计。', '身份鉴别与审计要求全部满足测评要求。', 'none',
+ '涉及 6 个业务系统的密码策略、双因素与操作审计。', '身份鉴别与审计要求全部满足测评要求。', 'none',
  now() - interval '208 days', now() - interval '169 days'),
 (58, 17, '组织整改复测并出具结论', 11, current_date - 160, current_date - 140, 'completed', 11, 100, '',
  '测评机构复测，46 项问题全部闭环。', '复测结论无遗留高危项。', 'all',

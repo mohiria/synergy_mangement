@@ -10,7 +10,7 @@ import (
 
 type AuditLog struct {
 	ID         int64
-	ProjectID  int64
+	ProjectID  pgtype.Int8
 	ActorID    pgtype.Int8
 	Action     string
 	Method     string
@@ -117,6 +117,38 @@ type KeyResult struct {
 	CreatedBy   pgtype.Int8
 }
 
+type MailOutbox struct {
+	ID            int64
+	ToAddress     string
+	Subject       string
+	Body          string
+	Event         string
+	Status        string
+	Attempts      int32
+	LastError     string
+	NextAttemptAt pgtype.Timestamptz
+	CreatedAt     pgtype.Timestamptz
+	SentAt        pgtype.Timestamptz
+}
+
+type MailSetting struct {
+	ID                         int16
+	Host                       string
+	Port                       int32
+	Encryption                 string
+	Username                   string
+	PasswordEnc                string
+	FromName                   string
+	FromAddress                string
+	UpdatedAt                  pgtype.Timestamptz
+	NotifyEnabled              bool
+	NotifyDiscussionMention    bool
+	NotifyDiscussionOwner      bool
+	NotifyTaskInvite           bool
+	NotifyUpstreamTaskAssigned bool
+	NotifyBlockerRemind        bool
+}
+
 type Notification struct {
 	ID        int64
 	UserID    int64
@@ -137,6 +169,15 @@ type Objective struct {
 	CreatedAt   pgtype.Timestamptz
 	CodeSeq     int32
 	CreatedBy   pgtype.Int8
+}
+
+type PasswordResetToken struct {
+	ID        int64
+	UserID    int64
+	TokenHash string
+	ExpiresAt pgtype.Timestamptz
+	UsedAt    pgtype.Timestamptz
+	CreatedAt pgtype.Timestamptz
 }
 
 type PendingObjectDeletion struct {
@@ -181,10 +222,23 @@ type RemindLog struct {
 }
 
 type Session struct {
-	Token     string
-	UserID    int64
-	ExpiresAt pgtype.Timestamptz
-	CreatedAt pgtype.Timestamptz
+	Token        string
+	UserID       int64
+	ExpiresAt    pgtype.Timestamptz
+	CreatedAt    pgtype.Timestamptz
+	LastActiveAt pgtype.Timestamptz
+}
+
+type SystemSetting struct {
+	ID              int16
+	SystemName      string
+	Subtitle        string
+	LoginHint       string
+	BaseUrl         string
+	UpdatedAt       pgtype.Timestamptz
+	LogoKey         string
+	LogoContentType string
+	LogoVersion     int32
 }
 
 type Task struct {
@@ -265,9 +319,25 @@ type TaskReviewer struct {
 }
 
 type User struct {
-	ID           int64
-	Username     string
-	DisplayName  string
-	PasswordHash string
-	CreatedAt    pgtype.Timestamptz
+	ID                 int64
+	Username           string
+	DisplayName        string
+	PasswordHash       string
+	CreatedAt          pgtype.Timestamptz
+	IsSystemAdmin      bool
+	Email              string
+	MustChangePassword bool
+	DisabledAt         pgtype.Timestamptz
+	LastLoginAt        pgtype.Timestamptz
+}
+
+type UserMailPref struct {
+	UserID                     int64
+	Enabled                    bool
+	NotifyDiscussionMention    bool
+	NotifyDiscussionOwner      bool
+	NotifyTaskInvite           bool
+	NotifyUpstreamTaskAssigned bool
+	NotifyBlockerRemind        bool
+	UpdatedAt                  pgtype.Timestamptz
 }

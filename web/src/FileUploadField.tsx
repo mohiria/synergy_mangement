@@ -7,9 +7,10 @@ import { Button, Modal, message } from "antd";
 // #120：multiple 模式一次选多个文件（files/onFilesChange 受控），单文件调用方不受影响。
 
 const DEFAULT_ACCEPT = ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.zip";
-const DEFAULT_MAX_MB = 20;
+const DEFAULT_MAX_MB = 1024; // #195：单文件上限 1 GB，与 domain.MaxUploadSize 一致
 
 export function formatFileSize(size = 0): string {
+  if (size >= 1024 * 1024 * 1024) return `${(size / 1024 / 1024 / 1024).toFixed(2)} GB`;
   if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`;
   return `${Math.max(1, Math.round(size / 1024))} KB`;
 }
@@ -23,6 +24,11 @@ export function fileTypeLabel(fileName: string): string {
   if (["png", "jpg", "jpeg", "gif", "webp"].includes(ext)) return "图片";
   if (ext === "zip") return "ZIP";
   return "文件";
+}
+
+// 上限文案：≥1024 MB 按 GB 显示（#195）。
+function limitLabel(mb: number) {
+  return mb >= 1024 && mb % 1024 === 0 ? `${mb / 1024} GB` : `${mb}MB`;
 }
 
 export default function FileUploadField({
@@ -60,7 +66,7 @@ export default function FileUploadField({
     const kept: File[] = [];
     for (const file of list) {
       if (file.size > maxMb * 1024 * 1024) {
-        message.error(`「${file.name}」超过 ${maxMb}MB，已跳过`);
+        message.error(`「${file.name}」超过 ${limitLabel(maxMb)}，已跳过`);
         continue;
       }
       kept.push(file);
@@ -117,7 +123,7 @@ export default function FileUploadField({
         }}
       >
         <strong>{prompt}</strong>
-        <span>{hint ?? `支持 PDF、Office、图片或 ZIP，单个文件不超过 ${maxMb}MB`}</span>
+        <span>{hint ?? `支持 PDF、Office、图片或 ZIP，单个文件不超过 ${limitLabel(maxMb)}`}</span>
         <input
           ref={inputRef}
           type="file"

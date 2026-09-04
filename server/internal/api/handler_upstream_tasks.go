@@ -28,7 +28,7 @@ func (s *Server) CreateUpstreamTask(w http.ResponseWriter, r *http.Request, proj
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
+	actor := projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)
 	task, facts, ok := s.fetchTask(w, r, projectId, taskId)
 	if !ok {
 		return
@@ -90,7 +90,7 @@ func (s *Server) CreateUpstreamTask(w http.ResponseWriter, r *http.Request, proj
 	}
 	// 通知新任务负责人（无认领确认环节；本人替自己创建不另发）。
 	if target := domain.UpstreamTaskNotifyTarget(uid, req.OwnerId); target != nil {
-		if _, err := qtx.CreateNotification(r.Context(), store.CreateNotificationParams{
+		if err := s.notify(r.Context(), qtx, store.CreateNotificationParams{
 			UserID:    *target,
 			Kind:      domain.NotifyUpstreamTaskAssigned,
 			Content:   domain.UpstreamTaskNotification(currentUser(r).DisplayName, upstream.Name, task.Name),

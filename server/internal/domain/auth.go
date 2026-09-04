@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"strings"
+	"unicode/utf8"
 	"sync"
 	"time"
 
@@ -32,7 +33,7 @@ func SessionRenewal(now, expiresAt time.Time) (time.Time, bool) {
 }
 
 // LoginThrottle 进程内登录失败限速（ADR-0001：进程内缓存替代 Redis）。
-// 计数维度是 (用户名, 来源 IP)：只按用户名计数时，任何人对着别人的账号连打几次错口令
+// 计数维度是 (用户名, 来源 IP)：只按用户名计数时，任何人对着别人的账号连打几次错密码
 // 就能把真实用户锁在门外（S3）。同一 (用户名, IP) 连续失败达上限后在锁定窗口内拒绝继续尝试；
 // 距上次失败超过锁定窗口的旧记录不再累计，并由 Sweep 清出 map。
 type LoginThrottle struct {
@@ -67,6 +68,25 @@ func (t *LoginThrottle) Allow(username, ip string, now time.Time) bool {
 		return true
 	}
 	return s.failures < MaxLoginFailures
+}
+
+// RetryAfter 被限速时距可再次尝试的剩余时长（#209）：锁定窗口减去距上次失败的时长，向上取整到秒；
+// 未被限速（无记录、未达上限或窗口已过）为 0。
+func (t *LoginThrottle) RetryAfter(username, ip string, now time.Time) time.Duration {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	s, ok := t.state[throttleKey{username: username, ip: ip}]
+	if !ok || s.failures < MaxLoginFailures {
+		return 0
+	}
+	remaining := LoginLockWindow - now.Sub(s.lastFailure)
+	if remaining <= 0 {
+		return 0
+	}
+	if rem := remaining % time.Second; rem != 0 {
+		remaining += time.Second - rem
+	}
+	return remaining
 }
 
 // RecordFailure 记录一次登录失败。
@@ -111,20 +131,41 @@ func (t *LoginThrottle) Size() int {
 	return len(t.state)
 }
 
-// MinPasswordLength 口令最小长度（S3：内网自用，只挡住明显过短的口令）。
+// MinPasswordLength 密码最小长度（S3：内网自用，只挡住明显过短的密码）。
 const MinPasswordLength = 8
 
+// MaxPasswordLength 密码最大长度（#193，按 Unicode 字符计）。
+const MaxPasswordLength = 32
+
 var (
-	ErrPasswordTooShort  = errors.New("新口令至少 8 位")
-	ErrPasswordUnchanged = errors.New("新口令不能与当前口令相同")
-	ErrPasswordWrong     = errors.New("当前口令不正确")
+	ErrPasswordTooLong   = errors.New("新密码最多 32 位")
+	ErrPasswordTooShort  = errors.New("新密码至少 8 位")
+	ErrPasswordUnchanged = errors.New("新密码不能与当前密码相同")
+	ErrPasswordWrong     = errors.New("当前密码不正确")
 )
 
-// ValidatePasswordChange 校验一次改口令（S3）：新口令至少 8 位且不能与当前口令相同。
-// 当前口令是否正确由调用方比对哈希后判定，规则本身不碰哈希。
-func ValidatePasswordChange(current, next string) error {
-	if len(strings.TrimSpace(next)) < MinPasswordLength {
+// bcryptMaxBytes bcrypt 只取前 72 字节，更长的部分会被静默截断；
+// 32 个汉字按字符计不超上限但有 96 字节，必须一并挡下（模块 PRD §5.2）。
+const bcryptMaxBytes = 72
+
+// ValidatePasswordLength 密码长度规则（#193）：8～32 位按 Unicode 字符计，
+// 且 UTF-8 不超过 72 字节。所有密码入口（改密、建号、重置、找回）共用。
+func ValidatePasswordLength(password string) error {
+	trimmed := strings.TrimSpace(password)
+	if utf8.RuneCountInString(trimmed) < MinPasswordLength {
 		return ErrPasswordTooShort
+	}
+	if utf8.RuneCountInString(password) > MaxPasswordLength || len(password) > bcryptMaxBytes {
+		return ErrPasswordTooLong
+	}
+	return nil
+}
+
+// ValidatePasswordChange 校验一次改密码（S3）：新密码满足长度规则且不能与当前密码相同。
+// 当前密码是否正确由调用方比对哈希后判定，规则本身不碰哈希。
+func ValidatePasswordChange(current, next string) error {
+	if err := ValidatePasswordLength(next); err != nil {
+		return err
 	}
 	if next == current {
 		return ErrPasswordUnchanged
@@ -141,7 +182,7 @@ func HashPassword(password string) (string, error) {
 	return string(b), nil
 }
 
-// VerifyPassword 校验明文口令与 bcrypt 哈希是否匹配。
+// VerifyPassword 校验明文密码与 bcrypt 哈希是否匹配。
 func VerifyPassword(hash, password string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }
@@ -153,4 +194,35 @@ func NewSessionToken() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// SessionFact 一条活跃会话事实（#208）。
+type SessionFact struct {
+	Token        string
+	CreatedAt    time.Time
+	LastActiveAt time.Time
+	ExpiresAt    time.Time
+}
+
+// SessionView 个人中心「登录安全」里的一行：不暴露 token，只标出是否当前会话。
+type SessionView struct {
+	CreatedAt    time.Time
+	LastActiveAt time.Time
+	ExpiresAt    time.Time
+	Current      bool
+}
+
+// SessionViews 把会话事实转成个人中心「登录安全」的展示行（#208）：保持输入顺序（最新活动在前），
+// 按 token 标出当前会话；token 本身不进入视图，避免从列表里拿到别的设备的凭据。
+func SessionViews(sessions []SessionFact, currentToken string) []SessionView {
+	out := make([]SessionView, 0, len(sessions))
+	for _, s := range sessions {
+		out = append(out, SessionView{
+			CreatedAt:    s.CreatedAt,
+			LastActiveAt: s.LastActiveAt,
+			ExpiresAt:    s.ExpiresAt,
+			Current:      s.Token == currentToken,
+		})
+	}
+	return out
 }

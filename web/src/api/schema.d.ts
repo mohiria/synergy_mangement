@@ -21,6 +21,163 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/branding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 品牌信息（免登录，#210）：登录页在拿到会话前就要显示；只含品牌字段，不暴露账号信息 */
+        get: operations["getBranding"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/branding/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 系统 logo 出图（免登录，#211）：经后端流式读取对象存储，不给直链；带 ETag 与长缓存，URL 以 ?v= 版本区分 */
+        get: operations["getBrandingLogo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 上传 logo（仅系统管理员，#211）：仅 PNG／JPG／WebP、≤512KB，按内容探测类型，不收 SVG */
+        post: operations["uploadSystemLogo"];
+        /** 删除 logo 恢复默认（仅系统管理员，#211） */
+        delete: operations["deleteSystemLogo"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/mail-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 通知设置 → 邮件通道配置（仅系统管理员，#212）；密码永不回显，只给「已设置」 */
+        get: operations["getMailSettings"];
+        /** 保存邮件通道（仅系统管理员，#212）：密码留空表示保持原值，给了则用应用密钥加密落库；进系统级审计（密码不进摘要） */
+        put: operations["updateMailSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/mail-notify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 通知设置 → 邮件通知开关（仅系统管理员，#213）：总开关 + 五个事件开关；找回密码邮件不受控制 */
+        put: operations["updateMailNotify"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me/mail-preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 个人中心 → 通知偏好（#213）：本人开关，附系统级开关供置灰 */
+        get: operations["getMyMailPreferences"];
+        /** 保存本人通知偏好（#213）；不进审计 */
+        put: operations["updateMyMailPreferences"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/mail-settings/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 发送测试邮件（仅系统管理员，#212）：发到我绑定的邮箱或手填地址；只入 outbox，立即返回 */
+        post: operations["sendTestMail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/mail-outbox": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 最近发送记录（最近 50 条，仅系统管理员，#212） */
+        get: operations["listMailOutbox"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 系统设置 → 基本信息（仅系统管理员，#210） */
+        get: operations["getSystemSettings"];
+        /** 修改基本信息（仅系统管理员，#210）；写操作自动进系统级审计 */
+        put: operations["updateSystemSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/login": {
         parameters: {
             query?: never;
@@ -32,6 +189,40 @@ export interface paths {
         put?: never;
         /** 登录，成功后通过 HttpOnly Cookie 建立会话 */
         post: operations["login"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/password-reset/request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 找回密码——请求重置邮件（免登录，#214）：输入用户名或邮箱，无论账号是否存在、是否停用都返回同一文案；挂登录限速 */
+        post: operations["requestPasswordReset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/password-reset/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 找回密码——用重置链接里的 token 设置新密码（免登录，#214）：成功后作废 token、清「须改密码」、踢掉全部会话、记系统级审计 */
+        post: operations["confirmPasswordReset"];
         delete?: never;
         options?: never;
         head?: never;
@@ -64,8 +255,59 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 修改本人登录口令（S3）；改完除当前会话外，本人其余会话全部失效 */
+        /** 修改本人登录密码（S3）；改完除当前会话外，本人其余会话全部失效 */
         post: operations["changePassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 个人中心 → 基本信息：本人修改显示名与邮箱（#207）；用户名只读；不进审计 */
+        put: operations["updateMyProfile"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 个人中心 → 登录安全：本人活跃会话（#208），最新活动在前，当前会话带标记 */
+        get: operations["listMySessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me/sessions/logout-others": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 退出其他设备（#208）：吊销本人除当前会话外的全部会话 */
+        post: operations["logoutOtherSessions"];
         delete?: never;
         options?: never;
         head?: never;
@@ -154,7 +396,7 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** 项目成员列表（含成员角色） */
+        /** 项目成员列表（含成员角色）；停用成员默认不返回（人员选择器口径，#204） */
         get: operations["listProjectMembers"];
         put?: never;
         /**
@@ -1071,6 +1313,139 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 系统设置 → 用户管理的只读用户列表（仅系统管理员，#201）
+         * @description 邮箱、状态、最近登录三列由
+         */
+        get: operations["listSystemUsers"];
+        put?: never;
+        /** 新建用户（仅系统管理员，#203）：设初始密码，新用户带「须改密码」标记 */
+        post: operations["createSystemUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/users/{userId}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 停用用户（仅系统管理员，#204）：不能登录、现有会话立即失效；不能停用自己 */
+        post: operations["disableSystemUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/audit-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 系统级操作审计（仅系统管理员，#206）：用户管理与系统设置的写操作由写路径装饰器自动记录，project 作用域为空 */
+        get: operations["listSystemAuditLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/users/{userId}/reset-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 重置密码（仅系统管理员，#205）：管理员设新密码，该用户全部会话失效并置「须改密码」 */
+        post: operations["resetSystemUserPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/users/{userId}/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 修改显示名与邮箱（仅系统管理员，#205）；邮箱仍必填、全局唯一 */
+        put: operations["updateSystemUserProfile"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/users/{userId}/system-admin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 设／撤系统管理员（仅系统管理员，#205）；不能撤销自己 */
+        put: operations["setSystemUserAdmin"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/users/{userId}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 启用用户（仅系统管理员，#204） */
+        post: operations["enableSystemUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/users": {
         parameters: {
             query?: never;
@@ -1102,12 +1477,19 @@ export interface components {
             /** @description 面向用户的错误说明 */
             message: string;
         };
+        RateLimitedError: components["schemas"]["Error"] & {
+            /** @description 距可再次尝试的剩余秒数（向上取整）；前端据此倒计时（#209） */
+            retryAfterSeconds: number;
+        };
         ChangePasswordRequest: {
-            /** Format: password */
-            currentPassword: string;
             /**
              * Format: password
-             * @description 新口令，至少 8 位且不能与当前口令相同
+             * @description 当前密码；「须改密码」为真（首次改密页）时可省略，其余情况必填且须正确（#203）
+             */
+            currentPassword?: string;
+            /**
+             * Format: password
+             * @description 新密码，8～32 位（按 Unicode 字符计）且不能与当前密码相同
              */
             newPassword: string;
         };
@@ -1121,12 +1503,219 @@ export interface components {
             id: number;
             username: string;
             displayName: string;
+            /** @description 邮箱（#202 起必填、全局唯一、大小写不敏感；存量用户回填 <用户名>@local.invalid 占位） */
+            email: string;
+            /** @description 系统管理员（#200）：对任意项目隐式视同项目管理员、可进系统设置；不进审批链、不出现在成员列表与人员选择器 */
+            isSystemAdmin: boolean;
+            /** @description 须改密码（#203，词汇表「首次改密」）：为真时除登录、登出、修改密码、读当前用户外的接口一律 403 password_change_required；前端整页引导设置新密码 */
+            mustChangePassword: boolean;
+            /**
+             * Format: date-time
+             * @description 最近登录时间（#208；本次登录之前的那一次不单独保留，取最近一次成功登录）
+             */
+            lastLoginAt?: string;
+        };
+        /** @description 系统设置 → 用户管理的一行（#201） */
+        SystemUser: {
+            /** Format: int64 */
+            id: number;
+            username: string;
+            displayName: string;
+            /** @description 邮箱（#202 起必填、全局唯一） */
+            email: string;
+            isSystemAdmin: boolean;
+            /** @description 是否已停用（#204 起） */
+            disabled?: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /**
+             * Format: date-time
+             * @description 最近登录时间（#208 起）
+             */
+            lastLoginAt?: string;
+            /** @description 须改密码（#203） */
+            mustChangePassword?: boolean;
+        };
+        ResetPasswordRequest: {
+            /**
+             * Format: password
+             * @description 管理员设定的新密码；用户下次登录强制改密
+             */
+            password: string;
+        };
+        UpdateUserProfileRequest: {
+            displayName: string;
+            email: string;
+        };
+        SetSystemAdminRequest: {
+            isSystemAdmin: boolean;
+        };
+        /** @description 本人的一条活跃会话（#208）；不暴露 token */
+        SessionInfo: {
+            /**
+             * Format: date-time
+             * @description 登录时间
+             */
+            createdAt: string;
+            /**
+             * Format: date-time
+             * @description 最近活动时间（随滑动续期更新，最多滞后 1 小时）
+             */
+            lastActiveAt: string;
+            /** Format: date-time */
+            expiresAt: string;
+            /** @description 是否当前会话 */
+            current: boolean;
+        };
+        /** @description 登录页与两套壳品牌区读取的字段（#210）；logo 与找回密码开关由 */
+        Branding: {
+            systemName: string;
+            subtitle: string;
+            /** @description 登录页提示语；为空则不显示该行 */
+            loginHint: string;
+            /** @description 邮件通道已配置时为真，登录页才显示「忘记密码」（#214） */
+            canRecoverPassword: boolean;
+            /** @description 已上传 logo 的版本号，未上传为空（#211） */
+            logoVersion?: number;
+        };
+        SystemSettings: {
+            /** @description 已上传 logo 的版本号；未上传或已删除为空（#211） */
+            logoVersion?: number;
+            systemName: string;
+            subtitle: string;
+            loginHint: string;
+            /** @description 访问地址，找回密码邮件拼链接用；为空时用请求 Host 兜底 */
+            baseUrl: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        UploadLogoRequest: {
+            /** @description 原文件名（只用于提示，类型以内容探测为准） */
+            fileName: string;
+            /** @description 文件内容的 base64（≤512KB 解码后） */
+            dataBase64: string;
+        };
+        SystemSettingsInput: {
+            /** @description ≤10 个 Unicode 字符，必填 */
+            systemName: string;
+            subtitle: string;
+            loginHint: string;
+            /** @description http:// 或 https:// 开头的完整地址，或空 */
+            baseUrl: string;
+        };
+        /** @description 邮件通道配置（#212）；密码永不回显 */
+        MailSettings: {
+            host: string;
+            port: number;
+            /** @enum {string} */
+            encryption: "none" | "starttls" | "ssl";
+            username: string;
+            fromName: string;
+            fromAddress: string;
+            /** @description 已设置密码（密文落库） */
+            passwordSet: boolean;
+            /** @description 主机与发件人地址齐全即视为已配置；找回密码入口据此显示（#214） */
+            configured: boolean;
+            notify: components["schemas"]["MailNotifySwitches"];
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        /** @description 邮件通知开关（#213）：总开关 + 五个事件开关，事件键与站内通知 kind 一致 */
+        MailNotifySwitches: {
+            enabled: boolean;
+            events: components["schemas"]["MailEventSwitch"][];
+        };
+        MailEventSwitch: {
+            /** @description discussion_mention／discussion_owner／task_invite／upstream_task_assigned／blocker_remind */
+            kind: string;
+            label: string;
+            enabled: boolean;
+            /** @description 个人偏好里附带：系统级已关的事件置灰不可用 */
+            systemEnabled?: boolean;
+        };
+        MailPreferences: {
+            enabled: boolean;
+            events: components["schemas"]["MailEventSwitch"][];
+            /** @description 系统级总开关 */
+            systemEnabled: boolean;
+        };
+        MailSettingsInput: {
+            host: string;
+            port: number;
+            /** @enum {string} */
+            encryption: "none" | "starttls" | "ssl";
+            username: string;
+            /**
+             * Format: password
+             * @description 留空或省略表示保持原值
+             */
+            password?: string;
+            fromName: string;
+            fromAddress: string;
+        };
+        TestMailRequest: {
+            /**
+             * @description me＝发到我绑定的邮箱；custom＝发到 address
+             * @enum {string}
+             */
+            target: "me" | "custom";
+            address?: string;
+        };
+        /** @description outbox 里的一封邮件（#212） */
+        MailOutboxItem: {
+            /** Format: int64 */
+            id: number;
+            toAddress: string;
+            subject: string;
+            /** @description 事件标识（test／password_reset／站内通知 kind） */
+            event: string;
+            /** @description 事件显示文案（派生字段） */
+            eventLabel: string;
+            /** @enum {string} */
+            status: "pending" | "sent" | "failed";
+            statusLabel: string;
+            /** @description 已尝试次数 */
+            attempts: number;
+            lastError?: string;
+            /** @description 正文（仅系统管理员可见的发送记录里返回，便于核对与冒烟） */
+            body?: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            sentAt?: string;
+        };
+        PasswordResetRequest: {
+            /** @description 用户名或邮箱 */
+            identifier: string;
+        };
+        PasswordResetRequested: {
+            /** @description 统一文案「若账号存在，重置邮件已发送」 */
+            message: string;
+        };
+        PasswordResetConfirm: {
+            token: string;
+            /** Format: password */
+            password: string;
+        };
+        CreateSystemUserRequest: {
+            /** @description 小写字母、数字、点、下划线、连字符 */
+            username: string;
+            displayName: string;
+            email: string;
+            /**
+             * Format: password
+             * @description 管理员设定的初始密码；新用户首次登录强制改密
+             */
+            password: string;
         };
         UserSummary: {
             /** Format: int64 */
             id: number;
             username: string;
             displayName: string;
+            email: string;
+            /** @description 账号已停用（#204）；/users 默认不返回停用用户，此处恒为 false */
+            disabled?: boolean;
         };
         /**
          * @description 项目状态（未开始／进行中／已完成／已归档），与自由文本“阶段”正交
@@ -1143,6 +1732,8 @@ export interface components {
             userId: number;
             username: string;
             displayName: string;
+            /** @description 账号已停用（#204）；成员列表默认不返回停用成员，includeDisabled=true 时带回并由此标记 */
+            disabled?: boolean;
             role: components["schemas"]["MemberRole"];
             /** @description 成员角色显示文案（派生字段；前端不按枚举拼文案） */
             roleLabel?: string;
@@ -1351,6 +1942,8 @@ export interface components {
             ownerId: number;
             /** @description 任务负责人姓名（派生字段） */
             ownerName: string;
+            /** @description 负责人账号已停用（#204，派生字段）：历史记录照常显示名字并带「已停用」 */
+            ownerDisabled?: boolean;
             /** Format: date */
             startDate: string;
             /** Format: date */
@@ -2353,13 +2946,13 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description 登录失败次数过多，暂时限速 */
+        /** @description 登录失败次数过多，暂时限速；带剩余等待秒数（#209） */
         TooManyRequests: {
             headers: {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": components["schemas"]["Error"];
+                "application/json": components["schemas"]["RateLimitedError"];
             };
         };
         /** @description 请求内容未通过校验 */
@@ -2398,6 +2991,15 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
+        /** @description 请求体超过 /api 全局上限 4 MB（#191；所有写接口通用，文件本体走对象存储不受此限） */
+        PayloadTooLarge: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
     };
     parameters: never;
     requestBodies: never;
@@ -2426,6 +3028,320 @@ export interface operations {
             };
         };
     };
+    getBranding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 品牌信息 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branding"];
+                };
+            };
+        };
+    };
+    getBrandingLogo: {
+        parameters: {
+            query?: {
+                /** @description 版本号，仅用于让浏览器在换图后拿到新图 */
+                v?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 图片 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                    "image/jpeg": string;
+                    "image/webp": string;
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    uploadSystemLogo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadLogoRequest"];
+            };
+        };
+        responses: {
+            /** @description 已上传，返回最新配置（logoVersion 递增） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    deleteSystemLogo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getMailSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 当前配置 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    updateMailSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailSettingsInput"];
+            };
+        };
+        responses: {
+            /** @description 已保存 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    updateMailNotify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailNotifySwitches"];
+            };
+        };
+        responses: {
+            /** @description 已保存 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getMyMailPreferences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 偏好 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailPreferences"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    updateMyMailPreferences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailNotifySwitches"];
+            };
+        };
+        responses: {
+            /** @description 已保存 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailPreferences"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    sendTestMail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TestMailRequest"];
+            };
+        };
+        responses: {
+            /** @description 已入队 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailOutboxItem"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    listMailOutbox: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 发送记录，最新在前 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailOutboxItem"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getSystemSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 当前配置 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    updateSystemSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SystemSettingsInput"];
+            };
+        };
+        responses: {
+            /** @description 已保存 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
     login: {
         parameters: {
             query?: never;
@@ -2449,7 +3365,66 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            /** @description 账号已停用（#204，code account_disabled；仅用户名与密码都正确时给出） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            413: components["responses"]["PayloadTooLarge"];
             429: components["responses"]["TooManyRequests"];
+        };
+    };
+    requestPasswordReset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetRequest"];
+            };
+        };
+        responses: {
+            /** @description 已受理（统一文案） */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasswordResetRequested"];
+                };
+            };
+            422: components["responses"]["ValidationError"];
+            429: components["responses"]["TooManyRequests"];
+        };
+    };
+    confirmPasswordReset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetConfirm"];
+            };
+        };
+        responses: {
+            /** @description 已重置 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: components["responses"]["ValidationError"];
         };
     };
     logout: {
@@ -2492,6 +3467,81 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             422: components["responses"]["ValidationError"];
+        };
+    };
+    updateMyProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateUserProfileRequest"];
+            };
+        };
+        responses: {
+            /** @description 已修改，返回最新的当前用户 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurrentUser"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description 邮箱已被使用（code email_taken） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    listMySessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 会话列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInfo"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    logoutOtherSessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已退出其他设备 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
         };
     };
     getCurrentUser: {
@@ -2672,7 +3722,10 @@ export interface operations {
     };
     listProjectMembers: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 是否带回已停用成员（成员管理与历史记录显示用）；缺省 false */
+                includeDisabled?: boolean;
+            };
             header?: never;
             path: {
                 projectId: number;
@@ -4115,6 +5168,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["ValidationError"];
         };
     };
@@ -4145,6 +5199,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["ValidationError"];
         };
     };
@@ -4227,6 +5282,238 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+        };
+    };
+    listSystemUsers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 全部用户，按 id 升序 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemUser"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createSystemUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSystemUserRequest"];
+            };
+        };
+        responses: {
+            /** @description 已创建 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemUser"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description 用户名或邮箱已被使用（code 为 username_taken／email_taken） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    disableSystemUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已停用 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemUser"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    listSystemAuditLogs: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 审计记录，最新在前 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditLog"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    resetSystemUserPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResetPasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description 已重置 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemUser"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    updateSystemUserProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateUserProfileRequest"];
+            };
+        };
+        responses: {
+            /** @description 已修改 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemUser"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description 邮箱已被使用（code email_taken） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    setSystemUserAdmin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetSystemAdminRequest"];
+            };
+        };
+        responses: {
+            /** @description 已更新 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemUser"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    enableSystemUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已启用 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemUser"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listUsers: {
