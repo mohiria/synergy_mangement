@@ -176,3 +176,34 @@ func NewSessionToken() (string, error) {
 	}
 	return hex.EncodeToString(b), nil
 }
+
+// SessionFact 一条活跃会话事实（#208）。
+type SessionFact struct {
+	Token        string
+	CreatedAt    time.Time
+	LastActiveAt time.Time
+	ExpiresAt    time.Time
+}
+
+// SessionView 个人中心「登录安全」里的一行：不暴露 token，只标出是否当前会话。
+type SessionView struct {
+	CreatedAt    time.Time
+	LastActiveAt time.Time
+	ExpiresAt    time.Time
+	Current      bool
+}
+
+// SessionViews 把会话事实转成个人中心「登录安全」的展示行（#208）：保持输入顺序（最新活动在前），
+// 按 token 标出当前会话；token 本身不进入视图，避免从列表里拿到别的设备的凭据。
+func SessionViews(sessions []SessionFact, currentToken string) []SessionView {
+	out := make([]SessionView, 0, len(sessions))
+	for _, s := range sessions {
+		out = append(out, SessionView{
+			CreatedAt:    s.CreatedAt,
+			LastActiveAt: s.LastActiveAt,
+			ExpiresAt:    s.ExpiresAt,
+			Current:      s.Token == currentToken,
+		})
+	}
+	return out
+}

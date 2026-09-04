@@ -130,6 +130,34 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /me/sessions:
+    get:
+      operationId: listMySessions
+      tags: [auth]
+      summary: 个人中心 → 登录安全：本人活跃会话（#208），最新活动在前，当前会话带标记
+      responses:
+        "200":
+          description: 会话列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SessionInfo"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /me/sessions/logout-others:
+    post:
+      operationId: logoutOtherSessions
+      tags: [auth]
+      summary: 退出其他设备（#208）：吊销本人除当前会话外的全部会话
+      responses:
+        "204":
+          description: 已退出其他设备
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /auth/me:
     get:
       operationId: getCurrentUser
@@ -2550,6 +2578,10 @@ components:
         mustChangePassword:
           type: boolean
           description: 须改密码（#203，词汇表「首次改密」）：为真时除登录、登出、修改密码、读当前用户外的接口一律 403 password_change_required；前端整页引导设置新密码
+        lastLoginAt:
+          type: string
+          format: date-time
+          description: 最近登录时间（#208；本次登录之前的那一次不单独保留，取最近一次成功登录）
     SystemUser:
       type: object
       description: 系统设置 → 用户管理的一行（#201）
@@ -2608,6 +2640,25 @@ components:
       properties:
         isSystemAdmin:
           type: boolean
+    SessionInfo:
+      type: object
+      description: 本人的一条活跃会话（#208）；不暴露 token
+      required: [createdAt, lastActiveAt, expiresAt, current]
+      properties:
+        createdAt:
+          type: string
+          format: date-time
+          description: 登录时间
+        lastActiveAt:
+          type: string
+          format: date-time
+          description: 最近活动时间（随滑动续期更新，最多滞后 1 小时）
+        expiresAt:
+          type: string
+          format: date-time
+        current:
+          type: boolean
+          description: 是否当前会话
     CreateSystemUserRequest:
       type: object
       required: [username, displayName, email, password]

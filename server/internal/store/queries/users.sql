@@ -10,7 +10,7 @@ SELECT id, username, display_name, email FROM users WHERE disabled_at IS NULL OR
 
 -- name: ListSystemUsers :many
 -- #201：系统设置 → 用户管理列表（仅系统管理员）。
-SELECT id, username, display_name, email, is_system_admin, must_change_password, disabled_at, created_at FROM users ORDER BY id;
+SELECT id, username, display_name, email, is_system_admin, must_change_password, disabled_at, created_at, last_login_at FROM users ORDER BY id;
 
 -- name: SetUserDisabledAt :one
 -- #204：停用（传时间）／启用（传 NULL）。

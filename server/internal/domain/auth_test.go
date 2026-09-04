@@ -227,3 +227,29 @@ func TestValidatePasswordChange(t *testing.T) {
 		})
 	}
 }
+
+// #208：登录安全的会话列表——保持输入顺序（最新活动在前），当前会话按 token 标出，token 本身不外泄。
+func TestSessionViews(t *testing.T) {
+	base := time.Date(2026, 9, 4, 10, 0, 0, 0, time.UTC)
+	in := []SessionFact{
+		{Token: "tok-b", CreatedAt: base.Add(-time.Hour), LastActiveAt: base, ExpiresAt: base.Add(6 * 24 * time.Hour)},
+		{Token: "tok-a", CreatedAt: base.Add(-48 * time.Hour), LastActiveAt: base.Add(-time.Hour), ExpiresAt: base.Add(5 * 24 * time.Hour)},
+	}
+	got := SessionViews(in, "tok-a")
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if got[0].Current || !got[1].Current {
+		t.Fatalf("应只标出 tok-a 为当前会话: %+v", got)
+	}
+	if !got[0].LastActiveAt.Equal(base) || !got[1].CreatedAt.Equal(base.Add(-48*time.Hour)) || !got[1].ExpiresAt.Equal(base.Add(5*24*time.Hour)) {
+		t.Fatalf("时间字段应原样带出: %+v", got)
+	}
+	if none := SessionViews(in, "unknown"); none[0].Current || none[1].Current {
+		t.Fatalf("token 不匹配时不标当前: %+v", none)
+	}
+	if empty := SessionViews(nil, "tok-a"); len(empty) != 0 {
+		t.Fatalf("空输入应得空切片: %+v", empty)
+	}
+}
+

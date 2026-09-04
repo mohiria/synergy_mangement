@@ -51,3 +51,25 @@ test("修改密码节：新密码可登录", async ({ page }) => {
   await page.locator('button[type="submit"]').click();
   await expect(page.getByRole("heading", { name: "项目列表" })).toBeVisible();
 });
+
+// #208：登录安全——两处登录后本处看到两条会话、当前会话有标识；退出其他设备后只剩一条（AC-78）。
+test("登录安全：两处登录、退出其他设备", async ({ page, browser }) => {
+  // 另一处登录（独立上下文即另一台设备）。
+  // 用郭婷（guoting）：本文件前一条用例已把何静的密码改掉，不能再用她。
+  const other = await browser.newContext();
+  const otherPage = await other.newPage();
+  await login(otherPage, "guoting");
+
+  await login(page, "guoting");
+  await page.goto("/me/security");
+  await expect(page.locator(".settings-panel tbody tr")).toHaveCount(2);
+  await expect(page.locator(".settings-panel").getByText("当前会话")).toHaveCount(1);
+  await page.getByRole("button", { name: /退出其他设备/ }).click();
+  await page.getByRole("button", { name: /退\s*出/ }).last().click();
+  await expect(page.locator(".settings-panel tbody tr")).toHaveCount(1);
+  // 另一处已被踢出：刷新后回到登录页。
+  await otherPage.reload();
+  await expect(otherPage.getByPlaceholder("请输入用户名")).toBeVisible();
+  await other.close();
+});
+

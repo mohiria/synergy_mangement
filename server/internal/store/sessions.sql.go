@@ -80,7 +80,7 @@ func (q *Queries) DeleteUserSessions(ctx context.Context, userID int64) (int64, 
 }
 
 const getSession = `-- name: GetSession :one
-SELECT token, user_id, expires_at, created_at FROM sessions WHERE token = $1 AND expires_at > now()
+SELECT token, user_id, expires_at, created_at, last_active_at FROM sessions WHERE token = $1 AND expires_at > now()
 `
 
 func (q *Queries) GetSession(ctx context.Context, token string) (Session, error) {
@@ -91,12 +91,13 @@ func (q *Queries) GetSession(ctx context.Context, token string) (Session, error)
 		&i.UserID,
 		&i.ExpiresAt,
 		&i.CreatedAt,
+		&i.LastActiveAt,
 	)
 	return i, err
 }
 
 const getSessionUser = `-- name: GetSessionUser :one
-SELECT u.id, u.username, u.display_name, u.password_hash, u.created_at, u.is_system_admin, u.email, u.must_change_password, u.disabled_at FROM sessions s
+SELECT u.id, u.username, u.display_name, u.password_hash, u.created_at, u.is_system_admin, u.email, u.must_change_password, u.disabled_at, u.last_login_at FROM sessions s
 JOIN users u ON u.id = s.user_id
 WHERE s.token = $1 AND s.expires_at > now()
 `
@@ -114,12 +115,52 @@ func (q *Queries) GetSessionUser(ctx context.Context, token string) (User, error
 		&i.Email,
 		&i.MustChangePassword,
 		&i.DisabledAt,
+		&i.LastLoginAt,
 	)
 	return i, err
 }
 
+const listUserSessions = `-- name: ListUserSessions :many
+SELECT token, created_at, last_active_at, expires_at FROM sessions
+WHERE user_id = $1 AND expires_at > now()
+ORDER BY last_active_at DESC, created_at DESC
+`
+
+type ListUserSessionsRow struct {
+	Token        string
+	CreatedAt    pgtype.Timestamptz
+	LastActiveAt pgtype.Timestamptz
+	ExpiresAt    pgtype.Timestamptz
+}
+
+// #208：本人活跃会话（未过期），最新活动在前。
+func (q *Queries) ListUserSessions(ctx context.Context, userID int64) ([]ListUserSessionsRow, error) {
+	rows, err := q.db.Query(ctx, listUserSessions, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUserSessionsRow
+	for rows.Next() {
+		var i ListUserSessionsRow
+		if err := rows.Scan(
+			&i.Token,
+			&i.CreatedAt,
+			&i.LastActiveAt,
+			&i.ExpiresAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateSessionExpiry = `-- name: UpdateSessionExpiry :exec
-UPDATE sessions SET expires_at = $2 WHERE token = $1
+UPDATE sessions SET expires_at = $2, last_active_at = now() WHERE token = $1
 `
 
 type UpdateSessionExpiryParams struct {
@@ -127,8 +168,24 @@ type UpdateSessionExpiryParams struct {
 	ExpiresAt pgtype.Timestamptz
 }
 
+// 滑动续期时一并记最近活动时间（#208）。
 func (q *Queries) UpdateSessionExpiry(ctx context.Context, arg UpdateSessionExpiryParams) error {
 	_, err := q.db.Exec(ctx, updateSessionExpiry, arg.Token, arg.ExpiresAt)
+	return err
+}
+
+const updateUserLastLogin = `-- name: UpdateUserLastLogin :exec
+UPDATE users SET last_login_at = $2 WHERE id = $1
+`
+
+type UpdateUserLastLoginParams struct {
+	ID          int64
+	LastLoginAt pgtype.Timestamptz
+}
+
+// #208：登录成功记录最近登录时间。
+func (q *Queries) UpdateUserLastLogin(ctx context.Context, arg UpdateUserLastLoginParams) error {
+	_, err := q.db.Exec(ctx, updateUserLastLogin, arg.ID, arg.LastLoginAt)
 	return err
 }
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
-import { Alert, Button, Form, Input, message } from "antd";
+import { Alert, Button, Form, Input, Popconfirm, Table, message } from "antd";
+import dayjs from "dayjs";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import PlainShell from "./PlainShell";
@@ -8,12 +9,14 @@ import PasswordInput from "./PasswordInput";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type UpdateUserProfileRequest = components["schemas"]["UpdateUserProfileRequest"];
+type SessionInfo = components["schemas"]["SessionInfo"];
 
 // 个人中心（模块 PRD §6；#207）：/me，不挂项目，两套壳都能进；左侧分节导航复用项目设置的形态。
-// 本版落基本信息与修改密码两节；登录安全 #208、通知偏好 #213 后续填入。
+// 基本信息、修改密码（#207）、登录安全（#208）；通知偏好 #213 后续填入。
 const SECTIONS = [
   { key: "profile", label: "基本信息" },
   { key: "password", label: "修改密码" },
+  { key: "security", label: "登录安全" },
 ] as const;
 type SectionKey = (typeof SECTIONS)[number]["key"];
 
@@ -64,6 +67,8 @@ export default function MePage({
         <section className="settings-panel">
           {section === "profile" ? (
             <ProfileSection user={user} onUserChange={onUserChange} />
+          ) : section === "security" ? (
+            <SecuritySection user={user} />
           ) : (
             <PasswordSection />
           )}
@@ -188,3 +193,71 @@ function PasswordSection() {
     </>
   );
 }
+
+const fmtTime = (v?: string) => (v ? dayjs(v).format("YYYY-MM-DD HH:mm") : "—");
+
+// SecuritySection 登录安全（#208）：最近登录时间、活跃会话列表（当前会话标识）、一键退出其他设备。
+function SecuritySection({ user }: { user: CurrentUser }) {
+  const [sessions, setSessions] = useState<SessionInfo[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = () => {
+    client.GET("/me/sessions").then(({ data, error: err }) => {
+      if (data) setSessions(data);
+      else setError(err?.message ?? "加载失败");
+    });
+  };
+  useEffect(load, []);
+  const logoutOthers = async () => {
+    const res = await client.POST("/me/sessions/logout-others");
+    if (res.response.ok) {
+      message.success("已退出其他设备");
+      load();
+    } else {
+      message.error(res.error?.message ?? "操作失败");
+    }
+  };
+  const others = (sessions ?? []).filter((x) => !x.current).length;
+  return (
+    <>
+      <div className="settings-panel-head">
+        <div>
+          <h2>登录安全</h2>
+          <span className="muted">最近登录：{fmtTime(user.lastLoginAt)}。最近活动时间随会话续期更新，最多滞后 1 小时。</span>
+        </div>
+        <Popconfirm
+          title="退出其他设备？"
+          description="除当前浏览器外，本人其余登录会话立即失效。"
+          okText="退出"
+          cancelText="取消"
+          onConfirm={logoutOthers}
+          disabled={others === 0}
+        >
+          <Button size="small" danger disabled={others === 0}>
+            退出其他设备{others > 0 ? `（${others}）` : ""}
+          </Button>
+        </Popconfirm>
+      </div>
+      <div className="settings-panel-body">
+        {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
+        <Table<SessionInfo>
+          size="small"
+          rowKey={(x) => `${x.createdAt}-${x.lastActiveAt}`}
+          pagination={false}
+          loading={sessions === null && !error}
+          dataSource={sessions ?? []}
+          columns={[
+            { title: "登录时间", key: "createdAt", render: (_, x) => fmtTime(x.createdAt) },
+            { title: "最近活动", key: "lastActiveAt", render: (_, x) => fmtTime(x.lastActiveAt) },
+            { title: "过期时间", key: "expiresAt", render: (_, x) => fmtTime(x.expiresAt) },
+            {
+              title: "",
+              key: "current",
+              render: (_, x) => (x.current ? <span className="status-pill">当前会话</span> : null),
+            },
+          ]}
+        />
+      </div>
+    </>
+  );
+}
+

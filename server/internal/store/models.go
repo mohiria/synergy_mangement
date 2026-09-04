@@ -181,10 +181,11 @@ type RemindLog struct {
 }
 
 type Session struct {
-	Token     string
-	UserID    int64
-	ExpiresAt pgtype.Timestamptz
-	CreatedAt pgtype.Timestamptz
+	Token        string
+	UserID       int64
+	ExpiresAt    pgtype.Timestamptz
+	CreatedAt    pgtype.Timestamptz
+	LastActiveAt pgtype.Timestamptz
 }
 
 type Task struct {
@@ -274,4 +275,5 @@ type User struct {
 	Email              string
 	MustChangePassword bool
 	DisabledAt         pgtype.Timestamptz
+	LastLoginAt        pgtype.Timestamptz
 }

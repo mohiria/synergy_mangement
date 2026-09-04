@@ -14,7 +14,7 @@ import (
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (username, display_name, password_hash, is_system_admin, email, must_change_password)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password, disabled_at
+RETURNING id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password, disabled_at, last_login_at
 `
 
 type CreateUserParams struct {
@@ -47,12 +47,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.Email,
 		&i.MustChangePassword,
 		&i.DisabledAt,
+		&i.LastLoginAt,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password, disabled_at FROM users WHERE lower(email) = lower($1)
+SELECT id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password, disabled_at, last_login_at FROM users WHERE lower(email) = lower($1)
 `
 
 // #202：邮箱大小写不敏感（唯一索引建在 lower(email) 上）。
@@ -69,12 +70,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, lower string) (User, error
 		&i.Email,
 		&i.MustChangePassword,
 		&i.DisabledAt,
+		&i.LastLoginAt,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password, disabled_at FROM users WHERE id = $1
+SELECT id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password, disabled_at, last_login_at FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
@@ -90,12 +92,13 @@ func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
 		&i.Email,
 		&i.MustChangePassword,
 		&i.DisabledAt,
+		&i.LastLoginAt,
 	)
 	return i, err
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password, disabled_at FROM users WHERE username = $1
+SELECT id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password, disabled_at, last_login_at FROM users WHERE username = $1
 `
 
 func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User, error) {
@@ -111,12 +114,13 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 		&i.Email,
 		&i.MustChangePassword,
 		&i.DisabledAt,
+		&i.LastLoginAt,
 	)
 	return i, err
 }
 
 const listSystemUsers = `-- name: ListSystemUsers :many
-SELECT id, username, display_name, email, is_system_admin, must_change_password, disabled_at, created_at FROM users ORDER BY id
+SELECT id, username, display_name, email, is_system_admin, must_change_password, disabled_at, created_at, last_login_at FROM users ORDER BY id
 `
 
 type ListSystemUsersRow struct {
@@ -128,6 +132,7 @@ type ListSystemUsersRow struct {
 	MustChangePassword bool
 	DisabledAt         pgtype.Timestamptz
 	CreatedAt          pgtype.Timestamptz
+	LastLoginAt        pgtype.Timestamptz
 }
 
 // #201：系统设置 → 用户管理列表（仅系统管理员）。
@@ -149,6 +154,7 @@ func (q *Queries) ListSystemUsers(ctx context.Context) ([]ListSystemUsersRow, er
 			&i.MustChangePassword,
 			&i.DisabledAt,
 			&i.CreatedAt,
+			&i.LastLoginAt,
 		); err != nil {
 			return nil, err
 		}
@@ -199,7 +205,7 @@ func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
 
 const resetUserPassword = `-- name: ResetUserPassword :one
 UPDATE users SET password_hash = $2, must_change_password = true WHERE id = $1
-RETURNING id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password, disabled_at
+RETURNING id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password, disabled_at, last_login_at
 `
 
 type ResetUserPasswordParams struct {
@@ -221,13 +227,14 @@ func (q *Queries) ResetUserPassword(ctx context.Context, arg ResetUserPasswordPa
 		&i.Email,
 		&i.MustChangePassword,
 		&i.DisabledAt,
+		&i.LastLoginAt,
 	)
 	return i, err
 }
 
 const setUserDisabledAt = `-- name: SetUserDisabledAt :one
 UPDATE users SET disabled_at = $2 WHERE id = $1
-RETURNING id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password, disabled_at
+RETURNING id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password, disabled_at, last_login_at
 `
 
 type SetUserDisabledAtParams struct {
@@ -249,6 +256,7 @@ func (q *Queries) SetUserDisabledAt(ctx context.Context, arg SetUserDisabledAtPa
 		&i.Email,
 		&i.MustChangePassword,
 		&i.DisabledAt,
+		&i.LastLoginAt,
 	)
 	return i, err
 }
@@ -270,7 +278,7 @@ func (q *Queries) SetUserMustChangePassword(ctx context.Context, arg SetUserMust
 
 const setUserSystemAdmin = `-- name: SetUserSystemAdmin :one
 UPDATE users SET is_system_admin = $2 WHERE id = $1
-RETURNING id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password, disabled_at
+RETURNING id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password, disabled_at, last_login_at
 `
 
 type SetUserSystemAdminParams struct {
@@ -292,13 +300,14 @@ func (q *Queries) SetUserSystemAdmin(ctx context.Context, arg SetUserSystemAdmin
 		&i.Email,
 		&i.MustChangePassword,
 		&i.DisabledAt,
+		&i.LastLoginAt,
 	)
 	return i, err
 }
 
 const updateUserProfile = `-- name: UpdateUserProfile :one
 UPDATE users SET display_name = $2, email = $3 WHERE id = $1
-RETURNING id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password, disabled_at
+RETURNING id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password, disabled_at, last_login_at
 `
 
 type UpdateUserProfileParams struct {
@@ -321,6 +330,7 @@ func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfilePa
 		&i.Email,
 		&i.MustChangePassword,
 		&i.DisabledAt,
+		&i.LastLoginAt,
 	)
 	return i, err
 }

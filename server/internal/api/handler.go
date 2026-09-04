@@ -233,6 +233,10 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, err)
 		return
 	}
+	// #208：记录最近登录时间；失败不影响登录。
+	if err := s.q.UpdateUserLastLogin(r.Context(), store.UpdateUserLastLoginParams{ID: user.ID, LastLoginAt: pgtype.Timestamptz{Time: now, Valid: true}}); err == nil {
+		user.LastLoginAt = pgtype.Timestamptz{Time: now, Valid: true}
+	}
 	setSessionCookie(w, token)
 	writeJSON(w, http.StatusOK, toCurrentUser(user))
 }
@@ -1029,7 +1033,11 @@ func (s *Server) validateProjectFields(w http.ResponseWriter, name, stage, statu
 }
 
 func toCurrentUser(u store.User) CurrentUser {
-	return CurrentUser{Id: u.ID, Username: u.Username, DisplayName: u.DisplayName, Email: u.Email, IsSystemAdmin: u.IsSystemAdmin, MustChangePassword: u.MustChangePassword}
+	cu := CurrentUser{Id: u.ID, Username: u.Username, DisplayName: u.DisplayName, Email: u.Email, IsSystemAdmin: u.IsSystemAdmin, MustChangePassword: u.MustChangePassword}
+	if u.LastLoginAt.Valid {
+		cu.LastLoginAt = &u.LastLoginAt.Time
+	}
+	return cu
 }
 
 func toProject(p store.Project, ownerName string, actor domain.Actor) Project {

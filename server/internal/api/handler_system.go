@@ -39,18 +39,51 @@ func (s *Server) ListSystemUsers(w http.ResponseWriter, r *http.Request) {
 		resp = append(resp, toSystemUser(store.User{
 			ID: u.ID, Username: u.Username, DisplayName: u.DisplayName, Email: u.Email,
 			IsSystemAdmin: u.IsSystemAdmin, CreatedAt: u.CreatedAt,
-			MustChangePassword: u.MustChangePassword, DisabledAt: u.DisabledAt,
+			MustChangePassword: u.MustChangePassword, DisabledAt: u.DisabledAt, LastLoginAt: u.LastLoginAt,
 		}))
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
 func toSystemUser(u store.User) SystemUser {
-	return SystemUser{
+	su := SystemUser{
 		Id: u.ID, Username: u.Username, DisplayName: u.DisplayName, Email: u.Email,
 		IsSystemAdmin: u.IsSystemAdmin, CreatedAt: u.CreatedAt.Time,
 		MustChangePassword: optBool(u.MustChangePassword), Disabled: optBool(u.DisabledAt.Valid),
 	}
+	if u.LastLoginAt.Valid {
+		su.LastLoginAt = &u.LastLoginAt.Time
+	}
+	return su
+}
+
+// ListMySessions 个人中心 → 登录安全（#208）：本人活跃会话，当前会话按 token 标出，token 不外泄。
+func (s *Server) ListMySessions(w http.ResponseWriter, r *http.Request) {
+	token, _ := r.Context().Value(ctxToken).(string)
+	rows, err := s.q.ListUserSessions(r.Context(), currentUser(r).ID)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	facts := make([]domain.SessionFact, 0, len(rows))
+	for _, x := range rows {
+		facts = append(facts, domain.SessionFact{Token: x.Token, CreatedAt: x.CreatedAt.Time, LastActiveAt: x.LastActiveAt.Time, ExpiresAt: x.ExpiresAt.Time})
+	}
+	out := make([]SessionInfo, 0, len(facts))
+	for _, v := range domain.SessionViews(facts, token) {
+		out = append(out, SessionInfo{CreatedAt: v.CreatedAt, LastActiveAt: v.LastActiveAt, ExpiresAt: v.ExpiresAt, Current: v.Current})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// LogoutOtherSessions 退出其他设备（#208）：吊销本人除当前会话外的全部会话。
+func (s *Server) LogoutOtherSessions(w http.ResponseWriter, r *http.Request) {
+	token, _ := r.Context().Value(ctxToken).(string)
+	if _, err := s.q.DeleteOtherUserSessions(r.Context(), store.DeleteOtherUserSessionsParams{UserID: currentUser(r).ID, Token: token}); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // DisableSystemUser 停用用户（#204）：不能停用自己；停用后其全部会话立即吊销。

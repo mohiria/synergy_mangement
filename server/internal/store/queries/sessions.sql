@@ -11,7 +11,18 @@ WHERE s.token = $1 AND s.expires_at > now();
 SELECT * FROM sessions WHERE token = $1 AND expires_at > now();
 
 -- name: UpdateSessionExpiry :exec
-UPDATE sessions SET expires_at = $2 WHERE token = $1;
+-- 滑动续期时一并记最近活动时间（#208）。
+UPDATE sessions SET expires_at = $2, last_active_at = now() WHERE token = $1;
+
+-- name: ListUserSessions :many
+-- #208：本人活跃会话（未过期），最新活动在前。
+SELECT token, created_at, last_active_at, expires_at FROM sessions
+WHERE user_id = $1 AND expires_at > now()
+ORDER BY last_active_at DESC, created_at DESC;
+
+-- name: UpdateUserLastLogin :exec
+-- #208：登录成功记录最近登录时间。
+UPDATE users SET last_login_at = $2 WHERE id = $1;
 
 -- name: DeleteSession :exec
 DELETE FROM sessions WHERE token = $1;

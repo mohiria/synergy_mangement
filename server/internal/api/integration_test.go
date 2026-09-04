@@ -7212,3 +7212,63 @@ func TestUpdateMyProfile(t *testing.T) {
 	}
 }
 
+// #208：两处登录后会话列表两条且当前会话有标识；「退出其他设备」后另一处 401、本处不受影响；
+// 最近登录时间在当前用户与用户管理列表可见。
+func TestLoginSecuritySessions(t *testing.T) {
+	q, pool := setupDB(t)
+	seedUser(t, q, "alice", "张三", "alice-pass")
+	rootUser := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(context.Background(), store.SetUserSystemAdminParams{ID: rootUser.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	login := func(username, password string) (*http.Client, api.CurrentUser) {
+		t.Helper()
+		c := newClient(t)
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		return c, decodeBody[api.CurrentUser](t, resp)
+	}
+	phone, _ := login("alice", "alice-pass")
+	laptop, me := login("alice", "alice-pass")
+	if me.LastLoginAt == nil {
+		t.Fatalf("登录应记录最近登录时间: %+v", me)
+	}
+
+	sessions := decodeBody[[]api.SessionInfo](t, doJSONAgain(t, laptop, http.MethodGet, base+"/me/sessions"))
+	if len(sessions) != 2 {
+		t.Fatalf("应有 2 条活跃会话: %+v", sessions)
+	}
+	current := 0
+	for _, x := range sessions {
+		if x.Current {
+			current++
+		}
+		if x.CreatedAt.IsZero() || x.LastActiveAt.IsZero() || x.ExpiresAt.IsZero() {
+			t.Fatalf("会话时间字段应齐全: %+v", x)
+		}
+	}
+	if current != 1 {
+		t.Fatalf("应恰有 1 条当前会话: %+v", sessions)
+	}
+
+	resp := doJSON(t, laptop, http.MethodPost, base+"/me/sessions/logout-others", nil)
+	wantStatus(t, resp, http.StatusNoContent)
+	resp.Body.Close()
+	resp = doJSON(t, phone, http.MethodGet, base+"/auth/me", nil)
+	wantStatus(t, resp, http.StatusUnauthorized)
+	resp.Body.Close()
+	if left := decodeBody[[]api.SessionInfo](t, doJSONAgain(t, laptop, http.MethodGet, base+"/me/sessions")); len(left) != 1 || !left[0].Current {
+		t.Fatalf("退出其他设备后只剩当前会话: %+v", left)
+	}
+
+	root, _ := login("root", "root-pass1")
+	for _, u := range decodeBody[[]api.SystemUser](t, doJSONAgain(t, root, http.MethodGet, base+"/system/users")) {
+		if u.Username == "alice" && u.LastLoginAt == nil {
+			t.Fatalf("用户管理列表应显示最近登录: %+v", u)
+		}
+	}
+}
+

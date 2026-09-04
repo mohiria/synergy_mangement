@@ -89,6 +89,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/me/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 个人中心 → 登录安全：本人活跃会话（#208），最新活动在前，当前会话带标记 */
+        get: operations["listMySessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me/sessions/logout-others": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 退出其他设备（#208）：吊销本人除当前会话外的全部会话 */
+        post: operations["logoutOtherSessions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/me": {
         parameters: {
             query?: never;
@@ -1280,6 +1314,11 @@ export interface components {
             isSystemAdmin: boolean;
             /** @description 须改密码（#203，词汇表「首次改密」）：为真时除登录、登出、修改密码、读当前用户外的接口一律 403 password_change_required；前端整页引导设置新密码 */
             mustChangePassword: boolean;
+            /**
+             * Format: date-time
+             * @description 最近登录时间（#208；本次登录之前的那一次不单独保留，取最近一次成功登录）
+             */
+            lastLoginAt?: string;
         };
         /** @description 系统设置 → 用户管理的一行（#201） */
         SystemUser: {
@@ -1315,6 +1354,23 @@ export interface components {
         };
         SetSystemAdminRequest: {
             isSystemAdmin: boolean;
+        };
+        /** @description 本人的一条活跃会话（#208）；不暴露 token */
+        SessionInfo: {
+            /**
+             * Format: date-time
+             * @description 登录时间
+             */
+            createdAt: string;
+            /**
+             * Format: date-time
+             * @description 最近活动时间（随滑动续期更新，最多滞后 1 小时）
+             */
+            lastActiveAt: string;
+            /** Format: date-time */
+            expiresAt: string;
+            /** @description 是否当前会话 */
+            current: boolean;
         };
         CreateSystemUserRequest: {
             /** @description 小写字母、数字、点、下划线、连字符 */
@@ -2758,6 +2814,46 @@ export interface operations {
                 };
             };
             422: components["responses"]["ValidationError"];
+        };
+    };
+    listMySessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 会话列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionInfo"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    logoutOtherSessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已退出其他设备 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
         };
     };
     getCurrentUser: {
