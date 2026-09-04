@@ -31,6 +31,16 @@ RETURNING *;
 -- #203：设／清「须改密码」标记。
 UPDATE users SET must_change_password = $2 WHERE id = $1;
 
+-- name: ResetUserPassword :one
+-- #205：管理员重置密码——新哈希 + 置「须改密码」，会话由调用方吊销。
+UPDATE users SET password_hash = $2, must_change_password = true WHERE id = $1
+RETURNING *;
+
+-- name: UpdateUserProfile :one
+-- #205／#207：改显示名与邮箱（邮箱已归一，重复由唯一索引兜底）。
+UPDATE users SET display_name = $2, email = $3 WHERE id = $1
+RETURNING *;
+
 -- name: SetUserSystemAdmin :one
 -- #200：设／撤系统管理员标记（CLI usermod；界面入口见 #205）。
 UPDATE users SET is_system_admin = $2 WHERE id = $1

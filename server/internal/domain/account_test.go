@@ -114,3 +114,27 @@ func TestCanDisableUser(t *testing.T) {
 		t.Fatalf("停用他人应允许: %v", err)
 	}
 }
+
+// #205：设／撤系统管理员——不能撤销自己（防锁死）；设自己（已是）与设／撤他人均允许。
+func TestCanRevokeSystemAdmin(t *testing.T) {
+	cases := []struct {
+		name      string
+		actor     int64
+		target    int64
+		makeAdmin bool
+		want      error
+	}{
+		{"撤销自己被拒", 1, 1, false, ErrCannotRevokeOwnAdmin},
+		{"设置自己允许（幂等）", 1, 1, true, nil},
+		{"撤销他人允许", 1, 2, false, nil},
+		{"设置他人允许", 1, 2, true, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := CanRevokeSystemAdmin(c.actor, c.target, c.makeAdmin); !errors.Is(got, c.want) {
+				t.Fatalf("CanRevokeSystemAdmin(%d, %d, %v) = %v, want %v", c.actor, c.target, c.makeAdmin, got, c.want)
+			}
+		})
+	}
+}
+

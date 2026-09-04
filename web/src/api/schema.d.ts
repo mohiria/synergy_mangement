@@ -1111,6 +1111,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/system/users/{userId}/reset-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 重置密码（仅系统管理员，#205）：管理员设新密码，该用户全部会话失效并置「须改密码」 */
+        post: operations["resetSystemUserPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/users/{userId}/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 修改显示名与邮箱（仅系统管理员，#205）；邮箱仍必填、全局唯一 */
+        put: operations["updateSystemUserProfile"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/system/users/{userId}/system-admin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** 设／撤系统管理员（仅系统管理员，#205）；不能撤销自己 */
+        put: operations["setSystemUserAdmin"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/system/users/{userId}/enable": {
         parameters: {
             query?: never;
@@ -1210,6 +1267,20 @@ export interface components {
             lastLoginAt?: string;
             /** @description 须改密码（#203） */
             mustChangePassword?: boolean;
+        };
+        ResetPasswordRequest: {
+            /**
+             * Format: password
+             * @description 管理员设定的新密码；用户下次登录强制改密
+             */
+            password: string;
+        };
+        UpdateUserProfileRequest: {
+            displayName: string;
+            email: string;
+        };
+        SetSystemAdminRequest: {
+            isSystemAdmin: boolean;
         };
         CreateSystemUserRequest: {
             /** @description 小写字母、数字、点、下划线、连字符 */
@@ -4430,6 +4501,105 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description 已停用 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemUser"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    resetSystemUserPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResetPasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description 已重置 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemUser"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    updateSystemUserProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateUserProfileRequest"];
+            };
+        };
+        responses: {
+            /** @description 已修改 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemUser"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description 邮箱已被使用（code email_taken） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    setSystemUserAdmin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetSystemAdminRequest"];
+            };
+        };
+        responses: {
+            /** @description 已更新 */
             200: {
                 headers: {
                     [name: string]: unknown;

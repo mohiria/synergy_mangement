@@ -2231,6 +2231,114 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /system/users/{userId}/reset-password:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    post:
+      operationId: resetSystemUserPassword
+      tags: [system]
+      summary: 重置密码（仅系统管理员，#205）：管理员设新密码，该用户全部会话失效并置「须改密码」
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordRequest"
+      responses:
+        "200":
+          description: 已重置
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /system/users/{userId}/profile:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    put:
+      operationId: updateSystemUserProfile
+      tags: [system]
+      summary: 修改显示名与邮箱（仅系统管理员，#205）；邮箱仍必填、全局唯一
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserProfileRequest"
+      responses:
+        "200":
+          description: 已修改
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: 邮箱已被使用（code email_taken）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /system/users/{userId}/system-admin:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+    put:
+      operationId: setSystemUserAdmin
+      tags: [system]
+      summary: 设／撤系统管理员（仅系统管理员，#205）；不能撤销自己
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetSystemAdminRequest"
+      responses:
+        "200":
+          description: 已更新
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
   /system/users/{userId}/enable:
     parameters:
       - name: userId
@@ -2416,6 +2524,34 @@ components:
         mustChangePassword:
           type: boolean
           description: 须改密码（#203）
+    ResetPasswordRequest:
+      type: object
+      required: [password]
+      properties:
+        password:
+          type: string
+          minLength: 8
+          maxLength: 32
+          format: password
+          description: 管理员设定的新密码；用户下次登录强制改密
+    UpdateUserProfileRequest:
+      type: object
+      required: [displayName, email]
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 50
+        email:
+          type: string
+          minLength: 3
+          maxLength: 254
+    SetSystemAdminRequest:
+      type: object
+      required: [isSystemAdmin]
+      properties:
+        isSystemAdmin:
+          type: boolean
     CreateSystemUserRequest:
       type: object
       required: [username, displayName, email, password]

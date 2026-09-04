@@ -197,6 +197,34 @@ func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
 	return items, nil
 }
 
+const resetUserPassword = `-- name: ResetUserPassword :one
+UPDATE users SET password_hash = $2, must_change_password = true WHERE id = $1
+RETURNING id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password, disabled_at
+`
+
+type ResetUserPasswordParams struct {
+	ID           int64
+	PasswordHash string
+}
+
+// #205：管理员重置密码——新哈希 + 置「须改密码」，会话由调用方吊销。
+func (q *Queries) ResetUserPassword(ctx context.Context, arg ResetUserPasswordParams) (User, error) {
+	row := q.db.QueryRow(ctx, resetUserPassword, arg.ID, arg.PasswordHash)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.DisplayName,
+		&i.PasswordHash,
+		&i.CreatedAt,
+		&i.IsSystemAdmin,
+		&i.Email,
+		&i.MustChangePassword,
+		&i.DisabledAt,
+	)
+	return i, err
+}
+
 const setUserDisabledAt = `-- name: SetUserDisabledAt :one
 UPDATE users SET disabled_at = $2 WHERE id = $1
 RETURNING id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password, disabled_at
@@ -253,6 +281,35 @@ type SetUserSystemAdminParams struct {
 // #200：设／撤系统管理员标记（CLI usermod；界面入口见 #205）。
 func (q *Queries) SetUserSystemAdmin(ctx context.Context, arg SetUserSystemAdminParams) (User, error) {
 	row := q.db.QueryRow(ctx, setUserSystemAdmin, arg.ID, arg.IsSystemAdmin)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.DisplayName,
+		&i.PasswordHash,
+		&i.CreatedAt,
+		&i.IsSystemAdmin,
+		&i.Email,
+		&i.MustChangePassword,
+		&i.DisabledAt,
+	)
+	return i, err
+}
+
+const updateUserProfile = `-- name: UpdateUserProfile :one
+UPDATE users SET display_name = $2, email = $3 WHERE id = $1
+RETURNING id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password, disabled_at
+`
+
+type UpdateUserProfileParams struct {
+	ID          int64
+	DisplayName string
+	Email       string
+}
+
+// #205／#207：改显示名与邮箱（邮箱已归一，重复由唯一索引兜底）。
+func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error) {
+	row := q.db.QueryRow(ctx, updateUserProfile, arg.ID, arg.DisplayName, arg.Email)
 	var i User
 	err := row.Scan(
 		&i.ID,

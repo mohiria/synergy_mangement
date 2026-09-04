@@ -110,3 +110,36 @@ test("停用后正确密码登录提示已停用，启用后恢复", async ({ pa
   await page.getByRole("button", { name: "登 出" }).click();
   await login(page, DEMO.outsider.username);
 });
+
+// #205：重置密码 → 该用户新密码登录被引导改密；设／撤系统管理员，撤销自己被禁用（AC-75）。
+test("重置密码后新密码登录被引导改密；设撤系统管理员且不能撤销自己", async ({ page }) => {
+  await login(page);
+  await page.goto("/system/users");
+  const row = page.locator(".settings-panel tr", { hasText: DEMO.outsider.username });
+  await row.getByRole("button", { name: `更多操作 ${DEMO.outsider.username}` }).click();
+  await page.getByRole("menuitem", { name: "重置密码" }).click();
+  await page.getByPlaceholder("新密码（8～32 位）").fill("reset-by-admin-1");
+  await page.getByRole("button", { name: /重\s*置/ }).click();
+  await expect(row).toContainText("待首次改密");
+
+  // 设为系统管理员 → 行显示「是」；再撤销。
+  await row.getByRole("button", { name: `更多操作 ${DEMO.outsider.username}` }).click();
+  await page.getByRole("menuitem", { name: "设为系统管理员" }).click();
+  await expect(row).toContainText("是");
+  await row.getByRole("button", { name: `更多操作 ${DEMO.outsider.username}` }).click();
+  await page.getByRole("menuitem", { name: "撤销系统管理员" }).click();
+  await expect(row).not.toContainText("是");
+  // 自己那一行的「撤销系统管理员」禁用。
+  await page.locator(".settings-panel tr", { hasText: DEMO.admin.username }).getByRole("button", { name: `更多操作 ${DEMO.admin.username}` }).click();
+  await expect(page.getByRole("menuitem", { name: "撤销系统管理员" })).toHaveAttribute("aria-disabled", "true");
+  await page.keyboard.press("Escape");
+
+  // 新密码登录 → 首次改密页。
+  await page.getByRole("button", { name: "当前身份" }).click();
+  await page.getByRole("button", { name: "登 出" }).click();
+  await page.getByPlaceholder("请输入用户名").fill(DEMO.outsider.username);
+  await page.getByPlaceholder("请输入密码").fill("reset-by-admin-1");
+  await page.locator('button[type="submit"]').click();
+  await expect(page.getByRole("heading", { name: "首次登录请设置新密码" })).toBeVisible();
+});
+

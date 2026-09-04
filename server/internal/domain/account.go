@@ -16,7 +16,17 @@ var (
 	ErrPasswordChangeRequired = errors.New("首次登录请先设置新密码")
 	ErrAccountDisabled        = errors.New("账号已停用，请联系管理员")
 	ErrCannotDisableSelf      = errors.New("不能停用自己")
+	ErrCannotRevokeOwnAdmin   = errors.New("不能撤销自己的系统管理员")
 )
+
+// CanRevokeSystemAdmin 设／撤系统管理员的规则（#205）：不能撤销自己，防止管理员全部锁死；
+// 应急恢复只走 CLI usermod（ADR 0003）。
+func CanRevokeSystemAdmin(actorID, targetID int64, makeAdmin bool) error {
+	if !makeAdmin && actorID == targetID {
+		return ErrCannotRevokeOwnAdmin
+	}
+	return nil
+}
 
 // LoginOutcome 登录判定结果（#204）。
 type LoginOutcome int

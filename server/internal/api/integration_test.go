@@ -6986,3 +6986,103 @@ func TestDisableAndEnableUser(t *testing.T) {
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
 }
+
+// #205：重置密码 → 旧会话 401、新密码登录被引导改密；改显示名与邮箱（重复邮箱 409）；
+// 设／撤系统管理员且不能撤销自己；三项接口仅系统管理员可调。
+func TestSystemUserResetProfileAdmin(t *testing.T) {
+	q, pool := setupDB(t)
+	aliceUser := seedUser(t, q, "alice", "张三", "alice-pass")
+	bobUser := seedUser(t, q, "bob", "李四", "bob-pass")
+	rootUser := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(context.Background(), store.SetUserSystemAdminParams{ID: rootUser.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	loginRaw := func(username, password string) (*http.Client, *http.Response) {
+		t.Helper()
+		c := newClient(t)
+		return c, doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+	}
+	alice, resp := loginRaw("alice", "alice-pass")
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	bob, resp := loginRaw("bob", "bob-pass")
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	root, resp := loginRaw("root", "root-pass1")
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	bobURL := fmt.Sprintf("%s/system/users/%d", base, bobUser.ID)
+
+	// 非系统管理员 403。
+	for _, tc := range []struct {
+		method, path string
+		body         any
+	}{
+		{http.MethodPost, bobURL + "/reset-password", api.ResetPasswordRequest{Password: "reset-pass-1"}},
+		{http.MethodPut, bobURL + "/profile", api.UpdateUserProfileRequest{DisplayName: "x", Email: "x@example.com"}},
+		{http.MethodPut, bobURL + "/system-admin", api.SetSystemAdminRequest{IsSystemAdmin: true}},
+	} {
+		resp := doJSON(t, alice, tc.method, tc.path, tc.body)
+		wantStatus(t, resp, http.StatusForbidden)
+		resp.Body.Close()
+	}
+
+	// 重置密码：过短 422；成功后 bob 旧会话 401、新密码登录带须改密码。
+	resp = doJSON(t, root, http.MethodPost, bobURL+"/reset-password", api.ResetPasswordRequest{Password: "short7x"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	resp = doJSON(t, root, http.MethodPost, bobURL+"/reset-password", api.ResetPasswordRequest{Password: "reset-pass-1"})
+	wantStatus(t, resp, http.StatusOK)
+	if u := decodeBody[api.SystemUser](t, resp); u.MustChangePassword == nil || !*u.MustChangePassword {
+		t.Fatalf("重置后应置须改密码: %+v", u)
+	}
+	resp = doJSON(t, bob, http.MethodGet, base+"/auth/me", nil)
+	wantStatus(t, resp, http.StatusUnauthorized)
+	resp.Body.Close()
+	_, resp = loginRaw("bob", "reset-pass-1")
+	wantStatus(t, resp, http.StatusOK)
+	if me := decodeBody[api.CurrentUser](t, resp); !me.MustChangePassword {
+		t.Fatalf("新密码登录应被引导改密: %+v", me)
+	}
+
+	// 改资料：显示名与邮箱；改为他人已用邮箱（大小写不同）409 email_taken。
+	resp = doJSON(t, root, http.MethodPut, bobURL+"/profile", api.UpdateUserProfileRequest{DisplayName: "李四改", Email: "Bob.New@Example.com"})
+	wantStatus(t, resp, http.StatusOK)
+	if u := decodeBody[api.SystemUser](t, resp); u.DisplayName != "李四改" || u.Email != "bob.new@example.com" {
+		t.Fatalf("改资料结果异常: %+v", u)
+	}
+	resp = doJSON(t, root, http.MethodPut, bobURL+"/profile", api.UpdateUserProfileRequest{DisplayName: "李四", Email: "ALICE@example.com"})
+	wantStatus(t, resp, http.StatusConflict)
+	if e := decodeBody[api.Error](t, resp); e.Code != "email_taken" {
+		t.Fatalf("code = %q, want email_taken", e.Code)
+	}
+	resp = doJSON(t, root, http.MethodPut, bobURL+"/profile", api.UpdateUserProfileRequest{DisplayName: " ", Email: "bob@example.com"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	_ = aliceUser
+
+	// 设／撤系统管理员：设 bob 成功；撤销自己被拒；撤 bob 成功。
+	resp = doJSON(t, root, http.MethodPut, bobURL+"/system-admin", api.SetSystemAdminRequest{IsSystemAdmin: true})
+	wantStatus(t, resp, http.StatusOK)
+	if u := decodeBody[api.SystemUser](t, resp); !u.IsSystemAdmin {
+		t.Fatalf("应已设为系统管理员: %+v", u)
+	}
+	resp = doJSON(t, root, http.MethodPut, fmt.Sprintf("%s/system/users/%d/system-admin", base, rootUser.ID), api.SetSystemAdminRequest{IsSystemAdmin: false})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	if e := decodeBody[api.Error](t, resp); e.Code != "cannot_revoke_own_admin" {
+		t.Fatalf("code = %q, want cannot_revoke_own_admin", e.Code)
+	}
+	resp = doJSON(t, root, http.MethodPut, bobURL+"/system-admin", api.SetSystemAdminRequest{IsSystemAdmin: false})
+	wantStatus(t, resp, http.StatusOK)
+	if u := decodeBody[api.SystemUser](t, resp); u.IsSystemAdmin {
+		t.Fatalf("应已撤销系统管理员: %+v", u)
+	}
+	// 不存在的用户 404。
+	resp = doJSON(t, root, http.MethodPut, fmt.Sprintf("%s/system/users/%d/system-admin", base, 99999), api.SetSystemAdminRequest{IsSystemAdmin: true})
+	wantStatus(t, resp, http.StatusNotFound)
+	resp.Body.Close()
+}
+
