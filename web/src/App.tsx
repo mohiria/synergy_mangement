@@ -15,6 +15,7 @@ import ArtifactsPage from "./ArtifactsPage";
 import ReportsPage from "./ReportsPage";
 import SystemSettingsPage from "./SystemSettingsPage";
 import ForcePasswordPage from "./ForcePasswordPage";
+import MePage from "./MePage";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 
@@ -55,6 +56,9 @@ export default function App() {
       {/* #201：系统设置不挂在项目下；/system 无分节时跳到用户管理。 */}
       <Route path="/system" element={<SystemSettingsPage user={user} onLogout={logout} />} />
       <Route path="/system/:section" element={<SystemSettingsPage user={user} onLogout={logout} />} />
+      {/* #207：个人中心不挂项目；改显示名后由 App 更新当前用户，两套壳即时刷新。 */}
+      <Route path="/me" element={<MePage user={user} onUserChange={setUser} onLogout={logout} />} />
+      <Route path="/me/:section" element={<MePage user={user} onUserChange={setUser} onLogout={logout} />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

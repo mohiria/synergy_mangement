@@ -18,7 +18,7 @@ export default function PlainShell({
   children,
 }: {
   user: CurrentUser;
-  active: "projects" | "system";
+  active: "projects" | "system" | "me";
   crumb: ReactNode;
   onLogout: () => void;
   children: ReactNode;

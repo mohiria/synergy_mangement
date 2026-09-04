@@ -1,6 +1,9 @@
 import { expect, test } from "@playwright/test";
 import { gotoPage, login } from "./fixtures";
 
+// 全链路两次登录加多步交互，单条常态 30～50s，贴着默认 45s 上限反复超时（非功能问题），放宽到 90s。
+test.setTimeout(90_000);
+
 // #116：配置了成果审核人（或签）的任务，审核人要能在抽屉「审核」Tab 看到并处理
 // 通过／退回；此前动作行漏掉了 intermediate_review 状态，按钮不渲染。
 // 种子坐标：任务「补齐适配后的回归用例并跑通两轮」负责人孙鹏（sunpeng），进行中，

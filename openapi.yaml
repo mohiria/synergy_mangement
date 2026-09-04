@@ -101,6 +101,35 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
 
+  /me/profile:
+    put:
+      operationId: updateMyProfile
+      tags: [auth]
+      summary: 个人中心 → 基本信息：本人修改显示名与邮箱（#207）；用户名只读；不进审计
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserProfileRequest"
+      responses:
+        "200":
+          description: 已修改，返回最新的当前用户
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurrentUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: 邮箱已被使用（code email_taken）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
   /auth/me:
     get:
       operationId: getCurrentUser

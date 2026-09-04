@@ -7166,3 +7166,49 @@ func TestSystemAuditLogs(t *testing.T) {
 	}
 }
 
+// #207：本人改显示名与邮箱——即时生效于当前用户；邮箱重复 409；不产生系统级审计；
+// 「须改密码」状态下不放行（仍 403）。
+func TestUpdateMyProfile(t *testing.T) {
+	q, pool := setupDB(t)
+	seedUser(t, q, "alice", "张三", "alice-pass")
+	seedUser(t, q, "bob", "李四", "bob-pass")
+	rootUser := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(context.Background(), store.SetUserSystemAdminParams{ID: rootUser.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	login := func(username, password string) *http.Client {
+		t.Helper()
+		c := newClient(t)
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		resp.Body.Close()
+		return c
+	}
+	alice := login("alice", "alice-pass")
+	root := login("root", "root-pass1")
+
+	resp := doJSON(t, alice, http.MethodPut, base+"/me/profile", api.UpdateUserProfileRequest{DisplayName: "张三丰", Email: "Alice.New@Example.com"})
+	wantStatus(t, resp, http.StatusOK)
+	if me := decodeBody[api.CurrentUser](t, resp); me.DisplayName != "张三丰" || me.Email != "alice.new@example.com" || me.Username != "alice" {
+		t.Fatalf("改资料结果异常: %+v", me)
+	}
+	if me := decodeBody[api.CurrentUser](t, doJSONAgain(t, alice, http.MethodGet, base+"/auth/me")); me.DisplayName != "张三丰" {
+		t.Fatalf("当前用户应即时更新: %+v", me)
+	}
+	resp = doJSON(t, alice, http.MethodPut, base+"/me/profile", api.UpdateUserProfileRequest{DisplayName: "张三丰", Email: "BOB@example.com"})
+	wantStatus(t, resp, http.StatusConflict)
+	if e := decodeBody[api.Error](t, resp); e.Code != "email_taken" {
+		t.Fatalf("code = %q, want email_taken", e.Code)
+	}
+	resp = doJSON(t, alice, http.MethodPut, base+"/me/profile", api.UpdateUserProfileRequest{DisplayName: "张三丰", Email: ""})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	// 本人改资料不进系统级审计。
+	if logs := decodeBody[[]api.AuditLog](t, doJSONAgain(t, root, http.MethodGet, base+"/system/audit-logs")); len(logs) != 0 {
+		t.Fatalf("本人改资料不应产生系统级审计: %+v", logs)
+	}
+}
+

@@ -292,3 +292,18 @@ func (s *Server) ListSystemAuditLogs(w http.ResponseWriter, r *http.Request, par
 	}
 	writeJSON(w, http.StatusOK, out)
 }
+
+// UpdateMyProfile 个人中心改显示名与邮箱（#207）：与管理员改资料共用写路径；本人改资料不进审计
+// （/me 不在 /system 下，写路径装饰器自然不记）。
+func (s *Server) UpdateMyProfile(w http.ResponseWriter, r *http.Request) {
+	var req UpdateUserProfileRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_request", Message: "请求内容无法解析"})
+		return
+	}
+	u, ok := s.updateUserProfile(w, r, currentUser(r).ID, req.DisplayName, req.Email)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, toCurrentUser(u))
+}
