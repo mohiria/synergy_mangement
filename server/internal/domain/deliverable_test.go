@@ -84,7 +84,7 @@ func TestValidateCandidateFileName(t *testing.T) {
 	}
 }
 
-// 上传大小上限（R4／E2）：预签名直传绕过服务端，前端的 20MB 限制改一个 fetch 即可绕过，
+// 上传大小上限（R4／E2）：预签名直传绕过服务端，前端的 1 GB 限制改一个 fetch 即可绕过，
 // 服务端在两阶段提交的确认步骤按对象存储的真实大小兜底。
 func TestValidateUploadSize(t *testing.T) {
 	cases := []struct {
@@ -95,6 +95,10 @@ func TestValidateUploadSize(t *testing.T) {
 		{"正常文件", 5 << 20, nil},
 		{"刚好到上限", MaxUploadSize, nil},
 		{"超出上限", MaxUploadSize + 1, ErrFileTooLarge},
+		// #195：上限提到 1 GB（产品裁决 2026-09-03）；恰好 1 GB 通过，多 1 字节拒绝。
+		{"恰好 1 GB", 1 << 30, nil},
+		{"1 GB 多 1 字节", (1 << 30) + 1, ErrFileTooLarge},
+		{"原 1 GB 上限之上的文件现在可上传", 512 << 20, nil},
 		{"空文件", 0, ErrFileEmpty},
 	}
 	for _, tc := range cases {
