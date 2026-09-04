@@ -12,17 +12,18 @@ import (
 )
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO users (username, display_name, password_hash, is_system_admin, email)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, username, display_name, password_hash, created_at, is_system_admin, email
+INSERT INTO users (username, display_name, password_hash, is_system_admin, email, must_change_password)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password
 `
 
 type CreateUserParams struct {
-	Username      string
-	DisplayName   string
-	PasswordHash  string
-	IsSystemAdmin bool
-	Email         string
+	Username           string
+	DisplayName        string
+	PasswordHash       string
+	IsSystemAdmin      bool
+	Email              string
+	MustChangePassword bool
 }
 
 // email 由调用方先经 domain.NormalizeEmail／ValidateEmail；重复由唯一索引兜底（#202）。
@@ -33,6 +34,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		arg.PasswordHash,
 		arg.IsSystemAdmin,
 		arg.Email,
+		arg.MustChangePassword,
 	)
 	var i User
 	err := row.Scan(
@@ -43,12 +45,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.CreatedAt,
 		&i.IsSystemAdmin,
 		&i.Email,
+		&i.MustChangePassword,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, username, display_name, password_hash, created_at, is_system_admin, email FROM users WHERE lower(email) = lower($1)
+SELECT id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password FROM users WHERE lower(email) = lower($1)
 `
 
 // #202：邮箱大小写不敏感（唯一索引建在 lower(email) 上）。
@@ -63,12 +66,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, lower string) (User, error
 		&i.CreatedAt,
 		&i.IsSystemAdmin,
 		&i.Email,
+		&i.MustChangePassword,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, username, display_name, password_hash, created_at, is_system_admin, email FROM users WHERE id = $1
+SELECT id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
@@ -82,12 +86,13 @@ func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
 		&i.CreatedAt,
 		&i.IsSystemAdmin,
 		&i.Email,
+		&i.MustChangePassword,
 	)
 	return i, err
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, username, display_name, password_hash, created_at, is_system_admin, email FROM users WHERE username = $1
+SELECT id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password FROM users WHERE username = $1
 `
 
 func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User, error) {
@@ -101,21 +106,23 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 		&i.CreatedAt,
 		&i.IsSystemAdmin,
 		&i.Email,
+		&i.MustChangePassword,
 	)
 	return i, err
 }
 
 const listSystemUsers = `-- name: ListSystemUsers :many
-SELECT id, username, display_name, email, is_system_admin, created_at FROM users ORDER BY id
+SELECT id, username, display_name, email, is_system_admin, must_change_password, created_at FROM users ORDER BY id
 `
 
 type ListSystemUsersRow struct {
-	ID            int64
-	Username      string
-	DisplayName   string
-	Email         string
-	IsSystemAdmin bool
-	CreatedAt     pgtype.Timestamptz
+	ID                 int64
+	Username           string
+	DisplayName        string
+	Email              string
+	IsSystemAdmin      bool
+	MustChangePassword bool
+	CreatedAt          pgtype.Timestamptz
 }
 
 // #201：系统设置 → 用户管理列表（仅系统管理员）。
@@ -134,6 +141,7 @@ func (q *Queries) ListSystemUsers(ctx context.Context) ([]ListSystemUsersRow, er
 			&i.DisplayName,
 			&i.Email,
 			&i.IsSystemAdmin,
+			&i.MustChangePassword,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -182,9 +190,24 @@ func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
 	return items, nil
 }
 
+const setUserMustChangePassword = `-- name: SetUserMustChangePassword :exec
+UPDATE users SET must_change_password = $2 WHERE id = $1
+`
+
+type SetUserMustChangePasswordParams struct {
+	ID                 int64
+	MustChangePassword bool
+}
+
+// #203：设／清「须改密码」标记。
+func (q *Queries) SetUserMustChangePassword(ctx context.Context, arg SetUserMustChangePasswordParams) error {
+	_, err := q.db.Exec(ctx, setUserMustChangePassword, arg.ID, arg.MustChangePassword)
+	return err
+}
+
 const setUserSystemAdmin = `-- name: SetUserSystemAdmin :one
 UPDATE users SET is_system_admin = $2 WHERE id = $1
-RETURNING id, username, display_name, password_hash, created_at, is_system_admin, email
+RETURNING id, username, display_name, password_hash, created_at, is_system_admin, email, must_change_password
 `
 
 type SetUserSystemAdminParams struct {
@@ -204,6 +227,7 @@ func (q *Queries) SetUserSystemAdmin(ctx context.Context, arg SetUserSystemAdmin
 		&i.CreatedAt,
 		&i.IsSystemAdmin,
 		&i.Email,
+		&i.MustChangePassword,
 	)
 	return i, err
 }

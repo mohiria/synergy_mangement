@@ -166,6 +166,11 @@ func (s *Server) sessionMiddleware(next http.Handler) http.Handler {
 				setSessionCookie(w, sess.Token)
 			}
 		}
+		// #203：「须改密码」为真时只放行登录、登出、修改密码、读当前用户，其余一律 403。
+		if user.MustChangePassword && !domain.PasswordChangeRequiredAllows(r.URL.Path) {
+			writeJSON(w, http.StatusForbidden, Error{Code: "password_change_required", Message: domain.ErrPasswordChangeRequired.Error()})
+			return
+		}
 		ctx = context.WithValue(ctx, ctxUser, user)
 		ctx = context.WithValue(ctx, ctxToken, sess.Token)
 		next.ServeHTTP(w, r.WithContext(ctx))
@@ -228,12 +233,22 @@ func (s *Server) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	user := currentUser(r)
 	token, _ := r.Context().Value(ctxToken).(string)
-	if !domain.VerifyPassword(user.PasswordHash, req.CurrentPassword) {
+	current := ""
+	if req.CurrentPassword != nil {
+		current = *req.CurrentPassword
+	}
+	// #203：首次改密页不要求输入旧密码（初始密码是管理员设的，用户刚用它登录过）；
+	// 其余情况当前密码必填且须正确。新密码不能与当前密码相同，两种情况都按哈希比对。
+	if !user.MustChangePassword && !domain.VerifyPassword(user.PasswordHash, current) {
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_password", Message: domain.ErrPasswordWrong.Error()})
 		return
 	}
-	if err := domain.ValidatePasswordChange(req.CurrentPassword, req.NewPassword); err != nil {
+	if err := domain.ValidatePasswordLength(req.NewPassword); err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_password", Message: err.Error()})
+		return
+	}
+	if domain.VerifyPassword(user.PasswordHash, req.NewPassword) {
+		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_password", Message: domain.ErrPasswordUnchanged.Error()})
 		return
 	}
 	hash, err := domain.HashPassword(req.NewPassword)
@@ -992,7 +1007,7 @@ func (s *Server) validateProjectFields(w http.ResponseWriter, name, stage, statu
 }
 
 func toCurrentUser(u store.User) CurrentUser {
-	return CurrentUser{Id: u.ID, Username: u.Username, DisplayName: u.DisplayName, Email: u.Email, IsSystemAdmin: u.IsSystemAdmin}
+	return CurrentUser{Id: u.ID, Username: u.Username, DisplayName: u.DisplayName, Email: u.Email, IsSystemAdmin: u.IsSystemAdmin, MustChangePassword: u.MustChangePassword}
 }
 
 func toProject(p store.Project, ownerName string, actor domain.Actor) Project {

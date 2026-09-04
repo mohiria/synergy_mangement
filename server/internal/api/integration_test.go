@@ -5591,21 +5591,21 @@ func TestChangePasswordRevokesOtherSessions(t *testing.T) {
 
 	// 当前密码不对、新密码过短、新密码与旧密码相同都要被拒
 	resp := doJSON(t, first, http.MethodPost, base+"/auth/change-password",
-		api.ChangePasswordRequest{CurrentPassword: "wrong-pass", NewPassword: "brand-new-pass"})
+		api.ChangePasswordRequest{CurrentPassword: strPtr("wrong-pass"), NewPassword: "brand-new-pass"})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 	resp = doJSON(t, first, http.MethodPost, base+"/auth/change-password",
-		api.ChangePasswordRequest{CurrentPassword: "alice-pass", NewPassword: "short7x"})
+		api.ChangePasswordRequest{CurrentPassword: strPtr("alice-pass"), NewPassword: "short7x"})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 	resp = doJSON(t, first, http.MethodPost, base+"/auth/change-password",
-		api.ChangePasswordRequest{CurrentPassword: "alice-pass", NewPassword: "alice-pass"})
+		api.ChangePasswordRequest{CurrentPassword: strPtr("alice-pass"), NewPassword: "alice-pass"})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
 
 	// 改密码成功
 	resp = doJSON(t, first, http.MethodPost, base+"/auth/change-password",
-		api.ChangePasswordRequest{CurrentPassword: "alice-pass", NewPassword: "brand-new-pass"})
+		api.ChangePasswordRequest{CurrentPassword: strPtr("alice-pass"), NewPassword: "brand-new-pass"})
 	wantStatus(t, resp, http.StatusNoContent)
 	resp.Body.Close()
 
@@ -6775,3 +6775,99 @@ func TestUserEmailRequiredAndUnique(t *testing.T) {
 		}
 	}
 }
+
+// #203：管理员建号 → 新用户带「须改密码」→ 改密前业务接口 403 → 改密（免旧密码）后进入系统；
+// 字段规则与重复用户名／邮箱；建号仅系统管理员可调。
+func TestCreateSystemUserAndForcedPasswordChange(t *testing.T) {
+	q, pool := setupDB(t)
+	seedUser(t, q, "alice", "张三", "alice-pass")
+	rootUser := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(context.Background(), store.SetUserSystemAdminParams{ID: rootUser.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	login := func(username, password string) (*http.Client, api.CurrentUser) {
+		t.Helper()
+		c := newClient(t)
+		resp := doJSON(t, c, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: username, Password: password})
+		wantStatus(t, resp, http.StatusOK)
+		return c, decodeBody[api.CurrentUser](t, resp)
+	}
+	alice, _ := login("alice", "alice-pass")
+	root, _ := login("root", "root-pass1")
+
+	newUser := api.CreateSystemUserRequest{Username: "wangwu", DisplayName: "王五", Email: "WangWu@Example.com", Password: "init-pass-1"}
+	// 非系统管理员 403。
+	resp := doJSON(t, alice, http.MethodPost, base+"/system/users", newUser)
+	wantStatus(t, resp, http.StatusForbidden)
+	resp.Body.Close()
+	// 字段规则：密码过短／过长、用户名非法、邮箱非法 → 422。
+	for name, bad := range map[string]api.CreateSystemUserRequest{
+		"密码 7 位":  {Username: "u1", DisplayName: "x", Email: "u1@example.com", Password: "abcdefg"},
+		"密码 33 位": {Username: "u2", DisplayName: "x", Email: "u2@example.com", Password: strings.Repeat("a", 33)},
+		"用户名大写":  {Username: "Bad", DisplayName: "x", Email: "u3@example.com", Password: "abcdefgh"},
+		"邮箱非法":   {Username: "user4", DisplayName: "x", Email: "nope", Password: "abcdefgh"},
+	} {
+		resp := doJSON(t, root, http.MethodPost, base+"/system/users", bad)
+		if resp.StatusCode != http.StatusUnprocessableEntity {
+			t.Fatalf("%s: status = %d, want 422", name, resp.StatusCode)
+		}
+		resp.Body.Close()
+	}
+	// 建号成功：邮箱归一小写、带须改密码。
+	resp = doJSON(t, root, http.MethodPost, base+"/system/users", newUser)
+	wantStatus(t, resp, http.StatusCreated)
+	created := decodeBody[api.SystemUser](t, resp)
+	if created.Email != "wangwu@example.com" || created.MustChangePassword == nil || !*created.MustChangePassword {
+		t.Fatalf("建号结果异常: %+v", created)
+	}
+	// 重复用户名 409 username_taken；重复邮箱（大小写不同）409 email_taken。
+	resp = doJSON(t, root, http.MethodPost, base+"/system/users", api.CreateSystemUserRequest{Username: "wangwu", DisplayName: "x", Email: "other@example.com", Password: "abcdefgh"})
+	wantStatus(t, resp, http.StatusConflict)
+	if e := decodeBody[api.Error](t, resp); e.Code != "username_taken" {
+		t.Fatalf("code = %q, want username_taken", e.Code)
+	}
+	resp = doJSON(t, root, http.MethodPost, base+"/system/users", api.CreateSystemUserRequest{Username: "wangwu2", DisplayName: "x", Email: "WANGWU@example.com", Password: "abcdefgh"})
+	wantStatus(t, resp, http.StatusConflict)
+	if e := decodeBody[api.Error](t, resp); e.Code != "email_taken" {
+		t.Fatalf("code = %q, want email_taken", e.Code)
+	}
+
+	// 新用户首登：标记为真；业务接口 403 password_change_required；读当前用户与登出放行。
+	wang, me := login("wangwu", "init-pass-1")
+	if !me.MustChangePassword {
+		t.Fatalf("新用户登录应带须改密码: %+v", me)
+	}
+	resp = doJSON(t, wang, http.MethodGet, base+"/projects", nil)
+	wantStatus(t, resp, http.StatusForbidden)
+	if e := decodeBody[api.Error](t, resp); e.Code != "password_change_required" {
+		t.Fatalf("code = %q, want password_change_required", e.Code)
+	}
+	resp = doJSON(t, wang, http.MethodGet, base+"/auth/me", nil)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	// 改密：新密码与初始密码相同被拒；不足 8 位被拒；合法则免旧密码通过并清除标记。
+	resp = doJSON(t, wang, http.MethodPost, base+"/auth/change-password", api.ChangePasswordRequest{NewPassword: "init-pass-1"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	resp = doJSON(t, wang, http.MethodPost, base+"/auth/change-password", api.ChangePasswordRequest{NewPassword: "short7x"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	resp = doJSON(t, wang, http.MethodPost, base+"/auth/change-password", api.ChangePasswordRequest{NewPassword: "my-new-pass-9"})
+	wantStatus(t, resp, http.StatusNoContent)
+	resp.Body.Close()
+	if me := decodeBody[api.CurrentUser](t, doJSONAgain(t, wang, http.MethodGet, base+"/auth/me")); me.MustChangePassword {
+		t.Fatalf("改密后标记应清除: %+v", me)
+	}
+	resp = doJSON(t, wang, http.MethodGet, base+"/projects", nil)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	// 非首次改密的用户：省略当前密码或当前密码错误 → 422。
+	resp = doJSON(t, alice, http.MethodPost, base+"/auth/change-password", api.ChangePasswordRequest{NewPassword: "another-pass-1"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+}
+
+func strPtr(v string) *string { return &v }

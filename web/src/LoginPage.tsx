@@ -4,6 +4,7 @@ import { client } from "./api/client";
 import type { components } from "./api/schema";
 import Icon from "./icons";
 import { Brand } from "./Brand";
+import PasswordInput from "./PasswordInput";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 
@@ -46,7 +47,7 @@ export default function LoginPage({ onLogin }: { onLogin: (u: CurrentUser) => vo
               label="密码"
               rules={[{ required: true, message: "请输入密码" }]}
             >
-              <Input.Password autoComplete="current-password" placeholder="请输入密码" />
+              <PasswordInput autoComplete="current-password" placeholder="请输入密码" />
             </Form.Item>
             <Button type="primary" htmlType="submit" block loading={submitting}>
               登录

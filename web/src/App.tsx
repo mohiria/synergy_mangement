@@ -14,6 +14,7 @@ import CollaborationPage from "./CollaborationPage";
 import ArtifactsPage from "./ArtifactsPage";
 import ReportsPage from "./ReportsPage";
 import SystemSettingsPage from "./SystemSettingsPage";
+import ForcePasswordPage from "./ForcePasswordPage";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 
@@ -36,6 +37,10 @@ export default function App() {
     return <LoginPage onLogin={setUser} />;
   }
   const logout = () => setUser(null);
+  // #203：「须改密码」为真时整页只有首次改密页，任何路由都回到这里；改完重读当前用户进入系统。
+  if (user.mustChangePassword) {
+    return <ForcePasswordPage user={user} onDone={setUser} onLogout={logout} />;
+  }
   return (
     <Routes>
       <Route path="/" element={<ProjectsPage user={user} onLogout={logout} />} />

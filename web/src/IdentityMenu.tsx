@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Alert, Button, Input, Modal, Popover, message } from "antd";
+import { Alert, Button, Modal, Popover, message } from "antd";
+import PasswordInput from "./PasswordInput";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import Icon from "./icons";
@@ -99,20 +100,20 @@ function ChangePasswordModal({ open, onClose }: { open: boolean; onClose: () => 
       <p className="muted" style={{ marginTop: 0 }}>
         新密码 8～32 位；修改成功后除当前浏览器外，本人其余登录会话会立即失效。
       </p>
-      <Input.Password
+      <PasswordInput
         placeholder="当前密码"
         value={current}
         onChange={(e) => setCurrent(e.target.value)}
         style={{ marginBottom: 8 }}
       />
-      <Input.Password
+      <PasswordInput
         placeholder="新密码（8～32 位）"
         value={next}
         maxLength={32}
         onChange={(e) => setNext(e.target.value)}
         style={{ marginBottom: 8 }}
       />
-      <Input.Password
+      <PasswordInput
         placeholder="再次输入新密码"
         value={confirm}
         maxLength={32}

@@ -1084,7 +1084,8 @@ export interface paths {
          */
         get: operations["listSystemUsers"];
         put?: never;
-        post?: never;
+        /** 新建用户（仅系统管理员，#203）：设初始密码，新用户带「须改密码」标记 */
+        post: operations["createSystemUser"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1123,8 +1124,11 @@ export interface components {
             message: string;
         };
         ChangePasswordRequest: {
-            /** Format: password */
-            currentPassword: string;
+            /**
+             * Format: password
+             * @description 当前密码；「须改密码」为真（首次改密页）时可省略，其余情况必填且须正确（#203）
+             */
+            currentPassword?: string;
             /**
              * Format: password
              * @description 新密码，8～32 位（按 Unicode 字符计）且不能与当前密码相同
@@ -1145,6 +1149,8 @@ export interface components {
             email: string;
             /** @description 系统管理员（#200）：对任意项目隐式视同项目管理员、可进系统设置；不进审批链、不出现在成员列表与人员选择器 */
             isSystemAdmin: boolean;
+            /** @description 须改密码（#203，词汇表「首次改密」）：为真时除登录、登出、修改密码、读当前用户外的接口一律 403 password_change_required；前端整页引导设置新密码 */
+            mustChangePassword: boolean;
         };
         /** @description 系统设置 → 用户管理的一行（#201） */
         SystemUser: {
@@ -1164,6 +1170,19 @@ export interface components {
              * @description 最近登录时间（#208 起）
              */
             lastLoginAt?: string;
+            /** @description 须改密码（#203） */
+            mustChangePassword?: boolean;
+        };
+        CreateSystemUserRequest: {
+            /** @description 小写字母、数字、点、下划线、连字符 */
+            username: string;
+            displayName: string;
+            email: string;
+            /**
+             * Format: password
+             * @description 管理员设定的初始密码；新用户首次登录强制改密
+             */
+            password: string;
         };
         UserSummary: {
             /** Format: int64 */
@@ -4305,6 +4324,42 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    createSystemUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSystemUserRequest"];
+            };
+        };
+        responses: {
+            /** @description 已创建 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemUser"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description 用户名或邮箱已被使用（code 为 username_taken／email_taken） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            422: components["responses"]["ValidationError"];
         };
     };
     listUsers: {

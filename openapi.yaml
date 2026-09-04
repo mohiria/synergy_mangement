@@ -2161,6 +2161,35 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+    post:
+      operationId: createSystemUser
+      tags: [system]
+      summary: 新建用户（仅系统管理员，#203）：设初始密码，新用户带「须改密码」标记
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSystemUserRequest"
+      responses:
+        "201":
+          description: 已创建
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: 用户名或邮箱已被使用（code 为 username_taken／email_taken）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/ValidationError"
 
   /users:
     get:
@@ -2248,12 +2277,12 @@ components:
           description: 面向用户的错误说明
     ChangePasswordRequest:
       type: object
-      required: [currentPassword, newPassword]
+      required: [newPassword]
       properties:
         currentPassword:
           type: string
-          minLength: 1
           format: password
+          description: 当前密码；「须改密码」为真（首次改密页）时可省略，其余情况必填且须正确（#203）
         newPassword:
           type: string
           minLength: 8
@@ -2273,7 +2302,7 @@ components:
           format: password
     CurrentUser:
       type: object
-      required: [id, username, displayName, email, isSystemAdmin]
+      required: [id, username, displayName, email, isSystemAdmin, mustChangePassword]
       properties:
         id:
           type: integer
@@ -2288,6 +2317,9 @@ components:
         isSystemAdmin:
           type: boolean
           description: 系统管理员（#200）：对任意项目隐式视同项目管理员、可进系统设置；不进审批链、不出现在成员列表与人员选择器
+        mustChangePassword:
+          type: boolean
+          description: 须改密码（#203，词汇表「首次改密」）：为真时除登录、登出、修改密码、读当前用户外的接口一律 403 password_change_required；前端整页引导设置新密码
     SystemUser:
       type: object
       description: 系统设置 → 用户管理的一行（#201）
@@ -2315,6 +2347,32 @@ components:
           type: string
           format: date-time
           description: 最近登录时间（#208 起）
+        mustChangePassword:
+          type: boolean
+          description: 须改密码（#203）
+    CreateSystemUserRequest:
+      type: object
+      required: [username, displayName, email, password]
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 32
+          description: 小写字母、数字、点、下划线、连字符
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 50
+        email:
+          type: string
+          minLength: 3
+          maxLength: 254
+        password:
+          type: string
+          minLength: 8
+          maxLength: 32
+          format: password
+          description: 管理员设定的初始密码；新用户首次登录强制改密
     UserSummary:
       type: object
       required: [id, username, displayName, email]

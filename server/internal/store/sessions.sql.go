@@ -83,7 +83,7 @@ func (q *Queries) GetSession(ctx context.Context, token string) (Session, error)
 }
 
 const getSessionUser = `-- name: GetSessionUser :one
-SELECT u.id, u.username, u.display_name, u.password_hash, u.created_at, u.is_system_admin, u.email FROM sessions s
+SELECT u.id, u.username, u.display_name, u.password_hash, u.created_at, u.is_system_admin, u.email, u.must_change_password FROM sessions s
 JOIN users u ON u.id = s.user_id
 WHERE s.token = $1 AND s.expires_at > now()
 `
@@ -99,6 +99,7 @@ func (q *Queries) GetSessionUser(ctx context.Context, token string) (User, error
 		&i.CreatedAt,
 		&i.IsSystemAdmin,
 		&i.Email,
+		&i.MustChangePassword,
 	)
 	return i, err
 }
@@ -118,7 +119,7 @@ func (q *Queries) UpdateSessionExpiry(ctx context.Context, arg UpdateSessionExpi
 }
 
 const updateUserPassword = `-- name: UpdateUserPassword :exec
-UPDATE users SET password_hash = $2 WHERE id = $1
+UPDATE users SET password_hash = $2, must_change_password = false WHERE id = $1
 `
 
 type UpdateUserPasswordParams struct {
@@ -126,6 +127,7 @@ type UpdateUserPasswordParams struct {
 	PasswordHash string
 }
 
+// 本人改密同时清除「须改密码」标记（#203）；管理员重置走另一条查询（置真）。
 func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
 	_, err := q.db.Exec(ctx, updateUserPassword, arg.ID, arg.PasswordHash)
 	return err

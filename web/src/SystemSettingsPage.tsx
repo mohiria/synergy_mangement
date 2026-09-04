@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
-import { Alert, Spin, Table } from "antd";
+import { Alert, Button, Form, Input, Modal, Spin, Table, message } from "antd";
 import dayjs from "dayjs";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import PlainShell from "./PlainShell";
+import PasswordInput from "./PasswordInput";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type SystemUser = components["schemas"]["SystemUser"];
+type CreateSystemUserRequest = components["schemas"]["CreateSystemUserRequest"];
 
 // 系统设置四节（模块 PRD §7）。本版只落「用户管理」只读列表（#201），其余节由后续票填入：
 // 基本信息 #210／#211，通知设置 #212／#213，操作审计 #206。
@@ -108,20 +110,33 @@ const fmtTime = (v?: string) => (v ? dayjs(v).format("YYYY-MM-DD HH:mm") : "—"
 function UsersSection() {
   const [users, setUsers] = useState<SystemUser[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
+  const [createOpen, setCreateOpen] = useState(false);
+  const load = () => {
     client.GET("/system/users").then(({ data, error: err }) => {
       if (data) setUsers(data);
       else setError(err?.message ?? "加载失败");
     });
-  }, []);
+  };
+  useEffect(load, []);
   return (
     <>
       <div className="settings-panel-head">
         <div>
           <h2>用户管理</h2>
-          <span className="muted">全部账号；建号、停用、重置密码与设撤系统管理员由后续版本提供。</span>
+          <span className="muted">全部账号；新建用户由管理员设初始密码，首次登录强制改密（#203）。</span>
         </div>
+        <Button type="primary" size="small" onClick={() => setCreateOpen(true)}>
+          新建用户
+        </Button>
       </div>
+      <CreateUserModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={() => {
+          setCreateOpen(false);
+          load();
+        }}
+      />
       <div className="settings-panel-body">
         {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
         {users === null && !error ? (
@@ -141,7 +156,11 @@ function UsersSection() {
                 key: "isSystemAdmin",
                 render: (_, u) => (u.isSystemAdmin ? <span className="status-pill">是</span> : "—"),
               },
-              { title: "状态", key: "disabled", render: (_, u) => (u.disabled ? "已停用" : "正常") },
+              {
+                title: "状态",
+                key: "disabled",
+                render: (_, u) => (u.disabled ? "已停用" : u.mustChangePassword ? "待首次改密" : "正常"),
+              },
               { title: "创建时间", key: "createdAt", render: (_, u) => fmtTime(u.createdAt) },
               { title: "最近登录", key: "lastLoginAt", render: (_, u) => fmtTime(u.lastLoginAt) },
             ]}
@@ -149,5 +168,77 @@ function UsersSection() {
         )}
       </div>
     </>
+  );
+}
+
+// CreateUserModal 管理员建号（#203）：用户名、显示名、邮箱、初始密码；规则以后端为准，
+// 这里只做必填与长度提示。初始密码框同样禁复制／剪切（共享 PasswordInput）。
+function CreateUserModal({
+  open,
+  onClose,
+  onCreated,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [form] = Form.useForm<CreateSystemUserRequest>();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (open) {
+      form.resetFields();
+      setError(null);
+    }
+  }, [open, form]);
+  const submit = async (values: CreateSystemUserRequest) => {
+    setSaving(true);
+    setError(null);
+    const res = await client.POST("/system/users", { body: values });
+    setSaving(false);
+    if (res.data) {
+      message.success(`已创建用户 ${res.data.username}，首次登录须设置新密码`);
+      onCreated();
+    } else {
+      setError(res.error?.message ?? "创建失败");
+    }
+  };
+  return (
+    <Modal
+      title="新建用户"
+      open={open}
+      okText="创建"
+      cancelText="取消"
+      confirmLoading={saving}
+      onCancel={onClose}
+      onOk={() => form.submit()}
+      destroyOnClose
+    >
+      {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
+      <Form form={form} layout="vertical" onFinish={submit} requiredMark={false}>
+        <Form.Item
+          name="username"
+          label="用户名"
+          extra="小写字母、数字、点、下划线、连字符，3～32 位"
+          rules={[{ required: true, message: "请输入用户名" }]}
+        >
+          <Input autoComplete="off" maxLength={32} placeholder="如 zhangsan" />
+        </Form.Item>
+        <Form.Item name="displayName" label="显示名" rules={[{ required: true, message: "请输入显示名" }]}>
+          <Input maxLength={50} placeholder="如 张三" />
+        </Form.Item>
+        <Form.Item name="email" label="邮箱" rules={[{ required: true, message: "请输入邮箱" }]}>
+          <Input autoComplete="off" maxLength={254} placeholder="如 zhangsan@example.com" />
+        </Form.Item>
+        <Form.Item
+          name="password"
+          label="初始密码"
+          extra="8～32 位；用户首次登录时会被要求设置新密码"
+          rules={[{ required: true, message: "请输入初始密码" }]}
+        >
+          <PasswordInput autoComplete="new-password" maxLength={32} placeholder="8～32 位" />
+        </Form.Item>
+      </Form>
+    </Modal>
   );
 }
