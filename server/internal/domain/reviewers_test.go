@@ -62,6 +62,7 @@ func TestDecideIntermediateRule(t *testing.T) {
 	facts := TaskFacts{Status: TaskInReview, CreatorID: 3, OwnerID: 5}
 	member := Actor{Role: RoleMember}
 	admin := Actor{Role: RoleAdmin}
+	sysAdmin := Actor{Role: RoleAdmin, SystemAdmin: true}
 	defaultGroup := map[int64]bool{11: true, 12: true}
 	withAdmin := map[int64]bool{9: true, 11: true}
 	onlyAdmin := map[int64]bool{9: true}
@@ -90,6 +91,9 @@ func TestDecideIntermediateRule(t *testing.T) {
 		{"组含管理员：其他审核人通过仍待终审", member, facts, withAdmin, 11, true, "", TaskInReview, CompletionPendingFinal, nil},
 		{"组含管理员：其退回仍整体退回", admin, facts, withAdmin, 9, false, "口径不一致", TaskInProgress, CompletionRejected, nil},
 		{"组只有管理员：一次通过即闭环", admin, facts, onlyAdmin, 9, true, "", TaskCompleted, CompletionApproved, nil},
+		// #215：系统管理员以显式普通成员身份进或签组时，隐式管理员身份不触发 C2 合并，只是普通审核人。
+		{"组含系统管理员（显式普通成员）：其通过仅进待终审", sysAdmin, facts, withAdmin, 9, true, "", TaskInReview, CompletionPendingFinal, nil},
+		{"组含系统管理员：其退回仍整体退回", sysAdmin, facts, withAdmin, 9, false, "口径不一致", TaskInProgress, CompletionRejected, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
