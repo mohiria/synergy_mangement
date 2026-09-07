@@ -10,6 +10,8 @@ RUN CGO_ENABLED=0 go build -o /out/server ./cmd/server
 RUN CGO_ENABLED=0 go build -o /out/migrate ./cmd/migrate
 # useradd 用来在空库上创建第一个账号：docker compose run --rm --entrypoint /useradd app ...
 RUN CGO_ENABLED=0 go build -o /out/useradd ./cmd/useradd
+# usermod 给已有账号设／撤系统管理员：存量库升级到 #200 之后没有任何系统管理员，靠它提权首个。
+RUN CGO_ENABLED=0 go build -o /out/usermod ./cmd/usermod
 # seed 重建演示数据：会先清空全部业务数据，只在演示环境手工执行（见 docs/部署.md）。
 RUN CGO_ENABLED=0 go build -o /out/seed ./cmd/seed
 
@@ -21,6 +23,7 @@ COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=build /out/server /server
 COPY --from=build /out/migrate /migrate
 COPY --from=build /out/useradd /useradd
+COPY --from=build /out/usermod /usermod
 COPY --from=build /out/seed /seed
 EXPOSE 8080
 ENTRYPOINT ["/server"]
