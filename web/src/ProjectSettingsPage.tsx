@@ -219,6 +219,9 @@ export default function ProjectSettingsPage({
     setSettingsState(s);
   };
   const enqueue = useSaveQueue();
+  // 排队中的保存要绑定发起时的项目：路由切到别的项目后 load() 会用新项目覆盖 ref，
+  // 迟到的保存不能拿新项目的字段去 PUT 旧项目，响应也不能写回（PR #220 review）。
+  const staleFor = (forId: number) => latestProject.current?.id !== forId;
 
   const load = useCallback(async () => {
     const [projectRes, membersRes, usersRes, settingsRes, auditRes, importRes] = await Promise.all([
@@ -316,6 +319,7 @@ export default function ProjectSettingsPage({
     enqueue(async () => {
       const cur = latestProject.current;
       if (!cur) return "项目尚未加载";
+      if (staleFor(projectId)) return "项目已切换，本次修改未保存";
       const res = await client.PUT("/projects/{projectId}", {
         params: { path: { projectId } },
         body: {
@@ -330,7 +334,7 @@ export default function ProjectSettingsPage({
         },
       });
       if (!res.data) return res.error?.message ?? "保存项目基础信息失败";
-      setProject(res.data);
+      if (!staleFor(projectId)) setProject(res.data);
       return null;
     });
 
@@ -339,6 +343,7 @@ export default function ProjectSettingsPage({
     enqueue(async () => {
       const cur = latestRules.current;
       if (!cur) return "规则尚未加载";
+      if (staleFor(projectId)) return "项目已切换，本次修改未保存";
       const res = await client.PUT("/projects/{projectId}/settings", {
         params: { path: { projectId } },
         body: {
@@ -349,7 +354,7 @@ export default function ProjectSettingsPage({
         },
       });
       if (!res.data) return res.error?.message ?? "保存规则设置失败";
-      setSettings(res.data);
+      if (!staleFor(projectId)) setSettings(res.data);
       return null;
     });
 
