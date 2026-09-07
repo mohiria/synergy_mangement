@@ -69,9 +69,9 @@ func (s *Server) sweepStaleBlockerResolutions(ctx context.Context, projectID int
 	}
 }
 
-// staleUploadAge 待上传记录的存活上限：预签名地址过期后客户端不会再来确认，留着只会占住
-// 「同一交付物项至多一条待上传」的名额。
-const staleUploadAge = 2 * presignExpiry
+// staleUploadAge 待上传记录的存活上限：预签名地址过期且最慢链路也传完之后客户端不会再来确认，
+// 留着只会占住「同一交付物项至多一条待上传」的名额；阈值由 domain 按 1 GB 上限推算（#215）。
+var staleUploadAge = domain.UploadStaleAge(presignExpiry)
 
 // SweepStaleUploads 清理迟迟未确认的两阶段上传（R4；#178 后输入请求机制退场，
 // 只剩候选内容与任务文件两类）：删掉过期的待上传记录与其占位对象。
