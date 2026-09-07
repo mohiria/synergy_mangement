@@ -223,8 +223,9 @@ body {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 8px; border-radius: var(--radius); cursor: pointer;
 }
-.pp-row:hover { background: #f4f6f9; }
+.pp-row:hover, .pp-row.active { background: #f4f6f9; }
 .pp-row.selected { background: #eef2ff; }
+.pp-row.selected.active { background: #e2e8ff; }
 .pp-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pp-name { color: var(--text); }
 .pp-username { color: var(--muted); font-size: var(--type-aux); }
