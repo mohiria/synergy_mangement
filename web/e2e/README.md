@@ -24,7 +24,7 @@
 | `import-csv.spec.ts` | 表格导入的读取：三种 CSV 编码、引号包裹字段、按首行判定分隔符、全空行剔除（#97）；xlsx 前端解析、导入流程不发外链请求、模板现生成（#105）；O／KR 导入器只有六个字段、模板表头被原样认出、未填负责人的行走统一指派（#106）。fixture 在 `e2e/fixtures/` |
 | `system-settings.spec.ts` | 系统设置入口与用户管理只读列表：系统管理员在两套壳侧栏底部有入口、四节顺序、主导航七项含项目设置；普通用户无入口、直访 `/system/users` 得 403 页（#201，AC-71） |
 | `me.spec.ts` | 个人中心：两套壳浮层进入、浮层无「修改密码」、改显示名后顶栏即时更新、修改密码节可用（#207，AC-77） |
-| `login.spec.ts` | 登录页体验：限速后剩余秒数倒计时与按钮禁用、密码框显隐切换、显隐两态禁复制／剪切但可粘贴（#209，AC-79） |
+| `login.spec.ts` | 登录页体验：限速后剩余秒数倒计时与按钮禁用、密码框显隐切换、显隐两态禁复制／剪切但可粘贴（#209，AC-79）；找回密码全链路：访问地址与邮件通道都配置后才有入口、重置链接从开发库取（接口不回显正文，#214／#215，AC-84） |
 
 解析层本身的口径由 vitest 单测覆盖（`cd web && npm test`，见 `src/import/parseTable.test.ts`），
 这里只验它在真实浏览器与真实上传入口下的表现。
@@ -44,6 +44,9 @@ export DATABASE_URL='postgres://<用户>:<密码>@localhost:5432/synergy?sslmode
 export SEED_PASSWORD='<自定密码>'
 npm run test:e2e
 ```
+
+`login.spec.ts` 的找回密码用例要从 `mail_outbox` 取重置链接（发送记录接口对该类邮件不回显正文），
+走 `docker compose exec postgres psql`，库名与用户取 `DATABASE_URL`；无 Docker 时该用例会失败。
 
 `global-setup.ts` 会先跑 `go run ./cmd/seed -skip-files` 重建演示数据——**该命令清空全部业务
 数据**，只在开发库上跑。断言依赖种子里的固定坐标（编号、任务名、已完成任务的分布），见

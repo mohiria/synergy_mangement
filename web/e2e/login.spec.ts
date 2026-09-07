@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { expect, test } from "@playwright/test";
 import { DEMO, login } from "./fixtures";
 
@@ -57,10 +58,15 @@ test("找回密码：入口按邮件通道显示，链接可完成重置", async
   await page.goto("/");
   await expect(page.getByRole("link", { name: "忘记密码？" })).toHaveCount(0);
 
-  // 管理员配置通道。
+  // 管理员配置访问地址与通道：入口要两者都配置才显示（#215）。
   const admin = await browser.newContext();
   const adminPage = await admin.newPage();
   await login(adminPage);
+  await adminPage.goto("/system/basic");
+  await adminPage.getByLabel("访问地址（可空）").fill("http://127.0.0.1:5173");
+  const saved = adminPage.waitForResponse((r) => r.url().includes("/system/settings") && r.request().method() === "PUT");
+  await adminPage.getByRole("button", { name: /保\s*存/ }).click();
+  expect((await saved).ok()).toBe(true);
   await adminPage.goto("/system/notifications");
   await adminPage.getByLabel("SMTP 主机").fill("smtp.invalid");
   await adminPage.getByLabel("端口").fill("2525");
@@ -74,11 +80,23 @@ test("找回密码：入口按邮件通道显示，链接可完成重置", async
   await page.getByRole("button", { name: "发送重置邮件" }).click();
   await expect(page.getByText("若账号存在，重置邮件已发送")).toBeVisible();
 
-  // 从发送记录正文里取链接。
+  // 发送记录接口对找回密码邮件不回显正文（#215），直接从开发库取：走 compose 的 postgres 容器，
+  // 库名与用户取 DATABASE_URL；首次 SMTP 失败后退避 1 分钟才重试，终态前正文仍在。
   const res = await adminPage.request.get("/api/v1/system/mail-outbox");
   const items = (await res.json()) as { toAddress: string; body?: string }[];
   const mail = items.find((x) => x.toAddress === "zhengkai@example.com");
-  const link = mail?.body?.match(/https?:\/\/\S+\/reset-password\?token=[0-9a-f]+/)?.[0];
+  expect(mail).toBeTruthy();
+  expect(mail!.body).toBeUndefined();
+  const dsn = new URL(process.env.DATABASE_URL ?? "postgres://synergy@localhost:5432/synergy");
+  const body = execFileSync(
+    "docker",
+    [
+      "compose", "exec", "-T", "postgres", "psql", "-U", decodeURIComponent(dsn.username), "-d", dsn.pathname.slice(1), "-tA",
+      "-c", "SELECT body FROM mail_outbox WHERE to_address = 'zhengkai@example.com' ORDER BY id DESC LIMIT 1",
+    ],
+    { cwd: "../", encoding: "utf8" },
+  );
+  const link = body.match(/https?:\/\/\S+\/reset-password\?token=[0-9a-f]+/)?.[0];
   expect(link).toBeTruthy();
   const url = new URL(link!);
   await page.goto(`/reset-password?token=${url.searchParams.get("token")}`);
