@@ -90,6 +90,8 @@ export default function TaskDrawer({
   const [editDraft, setEditDraft] = useState("");
   // #175：进度同口径——默认查看态，点击才出现进度条。
   const [editingProgress, setEditingProgress] = useState(false);
+  // 负责人 PersonPicker 是受控的，POST 返回前仍显示旧负责人；保存中禁用，避免再开再选被「未变化」吞掉（同项目设置页）。
+  const [ownerSaving, setOwnerSaving] = useState(false);
   const canInlineEdit = !!task?.canEditFields;
   const submitField = async (field: string, value: string) => {
     if (!task) return;
@@ -609,9 +611,18 @@ export default function TaskDrawer({
                   .map((m) => ({ userId: m.userId, displayName: m.displayName, username: m.username }))}
                 value={[task.ownerId]}
                 multiple={false}
+                disabled={ownerSaving}
                 displayText={task.ownerName}
                 placeholder="选择负责人"
-                onSave={(ids) => saveField("ownerId", String(ids[0]))}
+                onSave={async (ids) => {
+                  if (ids[0] === undefined) return;
+                  setOwnerSaving(true);
+                  try {
+                    await submitField("ownerId", String(ids[0]));
+                  } finally {
+                    setOwnerSaving(false);
+                  }
+                }}
               />
             ) : (
               <strong>{task.ownerName}</strong>
