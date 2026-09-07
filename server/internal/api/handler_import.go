@@ -54,6 +54,7 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 		failImportInternal(err)
 		return
 	}
+	members = activeProjectMembers(members)
 	roleByID := make(map[int64]string, len(members))
 	for _, m := range members {
 		roleByID[m.UserID] = m.Role
@@ -296,6 +297,7 @@ func (s *Server) ImportTasks(w http.ResponseWriter, r *http.Request, projectId i
 		failImportInternal(err)
 		return
 	}
+	members = activeProjectMembers(members)
 	roleByID := make(map[int64]string, len(members))
 	for _, m := range members {
 		roleByID[m.UserID] = m.Role

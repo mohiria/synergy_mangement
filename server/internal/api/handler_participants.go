@@ -40,6 +40,7 @@ func (s *Server) SetTaskParticipants(w http.ResponseWriter, r *http.Request, pro
 		writeInternalError(w, r, err)
 		return
 	}
+	members = activeProjectMembers(members)
 	isMember := make(map[int64]bool, len(members))
 	for _, m := range members {
 		isMember[m.UserID] = true

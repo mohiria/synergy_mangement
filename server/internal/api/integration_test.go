@@ -7010,6 +7010,16 @@ func TestDisableAndEnableUser(t *testing.T) {
 	if len(tasks) != 1 || tasks[0].OwnerName != "李四" || tasks[0].OwnerDisabled == nil || !*tasks[0].OwnerDisabled {
 		t.Fatalf("任务应保留负责人姓名并标记停用: %+v", tasks)
 	}
+	// #215：停用成员不再进入指派校验——再指派为负责人或接收方都 422。
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/projects/%d/tasks", base, project.Id), api.CreateTaskBatchRequest{Items: []api.CreateTaskItem{{
+		KeyResultId: krID, Name: "再派给李四", OwnerId: bobUser.ID, StartDate: openapiDate(t, "2026-09-01"), EndDate: openapiDate(t, "2026-09-30"),
+	}}})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodPut, fmt.Sprintf("%s/projects/%d/tasks/%d/receivers", base, project.Id, tasks[0].Id),
+		api.SetReceiversRequest{Scope: api.ReceiverScopeMembers, UserIds: &[]int64{bobUser.ID}})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
 
 	// 启用后可登录。
 	resp = doJSON(t, root, http.MethodPost, fmt.Sprintf("%s/system/users/%d/enable", base, bobUser.ID), nil)

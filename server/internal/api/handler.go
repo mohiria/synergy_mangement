@@ -1106,6 +1106,18 @@ func derefString(s *string) string {
 	return *s
 }
 
+// activeProjectMembers 去掉已停用成员：指派校验（负责人、审批人、接收方、参与者、邀请）只认在职成员，
+// 历史记录与成员管理仍用未过滤的 ListProjectMembers（#204、#215）。
+func activeProjectMembers(rows []store.ListProjectMembersRow) []store.ListProjectMembersRow {
+	out := rows[:0:0]
+	for _, m := range rows {
+		if !m.DisabledAt.Valid {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 func optString(s string) *string {
 	if s == "" {
 		return nil

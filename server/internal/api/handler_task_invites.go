@@ -60,6 +60,7 @@ func (s *Server) CreateTaskInvites(w http.ResponseWriter, r *http.Request, proje
 		writeInternalError(w, r, err)
 		return
 	}
+	members = activeProjectMembers(members)
 	roleByID := make(map[int64]string, len(members))
 	for _, m := range members {
 		roleByID[m.UserID] = m.Role

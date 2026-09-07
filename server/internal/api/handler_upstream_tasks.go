@@ -50,6 +50,7 @@ func (s *Server) CreateUpstreamTask(w http.ResponseWriter, r *http.Request, proj
 		writeInternalError(w, r, err)
 		return
 	}
+	members = activeProjectMembers(members)
 	roleByID := make(map[int64]string, len(members))
 	for _, m := range members {
 		roleByID[m.UserID] = m.Role
