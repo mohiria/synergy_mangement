@@ -379,15 +379,6 @@ body {
 }
 .task-sheet-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
 
-.row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 3px; }
-.row-actions.left { justify-content: flex-start; gap: 10px; }
-/* 文字按钮（原型 .link-btn）：表格行内动作，避免 antd link Button 的额外内边距。 */
-.link-btn {
-  padding: 0; border: 0; background: none; color: var(--accent); cursor: pointer;
-  font: inherit; font-size: var(--type-body); font-weight: 500; text-decoration: none;
-}
-.link-btn:hover { color: var(--accent-hover); text-decoration: underline; }
-
 /* 分段切换（原型 .segment，基线 §6）：高 36 灰底，激活项白底 + 微阴影。
    报告时间范围、图谱「图谱／列表」都走它，不再用实心蓝底的 antd Button。 */
 .segment {

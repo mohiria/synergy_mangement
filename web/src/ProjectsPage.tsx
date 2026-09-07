@@ -248,24 +248,6 @@ export default function ProjectsPage({
                     <span className="mono">{dayjs(v).format("YYYY-MM-DD HH:mm")}</span>
                   ),
                 },
-                {
-                  title: "操作",
-                  width: 110,
-                  render: (_, p) => (
-                    <span className="row-actions left">
-                      <Link className="link-btn" to={`/projects/${p.id}`}>
-                        进入
-                      </Link>
-                      {/* 项目基础信息的编辑入口收口到项目设置页（§7.9 首项、#85）：
-                          两处口径一致，这里只留跳转，不再另开一份表单。 */}
-                      {p.canEdit && (
-                        <Link className="link-btn" to={`/projects/${p.id}/settings`}>
-                          设置
-                        </Link>
-                      )}
-                    </span>
-                  ),
-                },
               ]}
             />
           </div>
