@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Alert, Button, Dropdown, Input, InputNumber, Modal, Select, Spin, message } from "antd";
+import { Alert, Button, Dropdown, Form, Input, InputNumber, Modal, Select, Spin, message } from "antd";
 import type { MenuProps } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import DateRangeField from "./DateRangeField";
+import SettingsNav from "./SettingsNav";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import ProjectShell from "./ProjectShell";
@@ -384,54 +385,36 @@ export default function ProjectSettingsPage({
           {/* settings-layout：左侧分节导航、右侧内容卡。原型的「进度权重」一节已随
               AC-63 裁决取消（KR 汇总固定任务等权）；导入记录另见 #68。 */}
           <div className="settings-layout">
-            <aside className="settings-nav">
-              <button
-                type="button"
-                className={tab === "basic" ? "active" : ""}
-                onClick={() => setTab("basic")}
-              >
-                项目基础信息
-              </button>
-              <button
-                type="button"
-                className={tab === "members" ? "active" : ""}
-                onClick={() => setTab("members")}
-              >
-                成员与职责
-              </button>
-              <button
-                type="button"
-                className={tab === "permissions" ? "active" : ""}
-                onClick={() => setTab("permissions")}
-              >
-                系统权限
-              </button>
-              <button
-                type="button"
-                className={tab === "rules" ? "active" : ""}
-                onClick={() => setTab("rules")}
-              >
-                规则设置
-              </button>
-              {project?.canEdit && (
-                <button
-                  type="button"
-                  className={tab === "imports" ? "active" : ""}
-                  onClick={() => setTab("imports")}
-                >
-                  导入记录
-                </button>
-              )}
-              {project?.canEdit && (
-                <button
-                  type="button"
-                  className={tab === "audit" ? "active" : ""}
-                  onClick={() => setTab("audit")}
-                >
-                  操作审计
-                </button>
-              )}
-            </aside>
+            {/* #216：分组分节导航；导入记录与操作审计仅 canEdit 可见，无权限时「记录」组整组不渲染。 */}
+            <SettingsNav
+              active={tab}
+              onSelect={setTab}
+              groups={[
+                {
+                  title: "项目配置",
+                  items: [
+                    { key: "basic", label: "项目基础信息" },
+                    { key: "rules", label: "规则设置" },
+                  ],
+                },
+                {
+                  title: "成员与权限",
+                  items: [
+                    { key: "members", label: "成员与职责" },
+                    { key: "permissions", label: "系统权限" },
+                  ],
+                },
+                {
+                  title: "记录",
+                  items: project?.canEdit
+                    ? [
+                        { key: "imports", label: "导入记录" },
+                        { key: "audit", label: "操作审计" },
+                      ]
+                    : [],
+                },
+              ]}
+            />
             <section className="settings-panel">
               {tab === "basic" ? (
                 <>
@@ -457,85 +440,70 @@ export default function ProjectSettingsPage({
                   </div>
                   {basic && (
                     <div className="settings-panel-body">
-                      <div className="property">
-                        <label>项目名称</label>
-                        <Input
-                          maxLength={100}
-                          value={basic.name}
-                          disabled={!project?.canEdit}
-                          onChange={(e) => setBasic({ ...basic, name: e.target.value })}
-                          style={{ width: 280, flex: "none" }}
-                          aria-label="项目名称"
-                        />
-                      </div>
-                      <div className="property">
-                        <label>项目负责人</label>
-                        <Select
-                          value={basic.ownerId}
-                          disabled={!project?.canEdit}
-                          showSearch
-                          optionFilterProp="label"
-                          options={users.map((u) => ({
-                            value: u.id,
-                            label: `${u.displayName}（${u.username}）`,
-                          }))}
-                          onChange={(v) => setBasic({ ...basic, ownerId: v })}
-                          style={{ width: 280, flex: "none" }}
-                          aria-label="项目负责人"
-                        />
-                      </div>
-                      <div className="property">
-                        <label>
-                          项目状态
-                          <span className="muted" style={{ display: "block" }}>
-                            与自由文本的「项目阶段」正交，由成员手工设置
-                          </span>
-                        </label>
-                        <Select
-                          value={basic.status}
-                          disabled={!project?.canEdit}
-                          options={(Object.keys(PROJECT_STATUS_LABEL) as ProjectStatus[]).map(
-                            (v) => ({ value: v, label: PROJECT_STATUS_LABEL[v] }),
-                          )}
-                          onChange={(v) => setBasic({ ...basic, status: v })}
-                          style={{ width: 160, flex: "none" }}
-                          aria-label="项目状态"
-                        />
-                      </div>
-                      <div className="property">
-                        <label>项目阶段</label>
-                        <Input
-                          maxLength={50}
-                          placeholder="业务里程碑，如：联合联调阶段（选填）"
-                          value={basic.stage}
-                          disabled={!project?.canEdit}
-                          onChange={(e) => setBasic({ ...basic, stage: e.target.value })}
-                          style={{ width: 280, flex: "none" }}
-                          aria-label="项目阶段"
-                        />
-                      </div>
-                      <div className="property">
-                        <label>
-                          项目可见性
-                          <span className="muted" style={{ display: "block" }}>
-                            公开后系统内任何登录用户都能只读本项目并下载文件，但不能做任何写动作，
-                            也不会出现在成员列表与人员选择器里
-                          </span>
-                        </label>
-                        <Select
-                          value={basic.visibility}
-                          disabled={!project?.canEdit}
-                          options={(Object.keys(PROJECT_VISIBILITY_LABEL) as ProjectVisibility[]).map(
-                            (v) => ({ value: v, label: PROJECT_VISIBILITY_LABEL[v] }),
-                          )}
-                          onChange={(v) => setBasic({ ...basic, visibility: v })}
-                          style={{ width: 160, flex: "none" }}
-                          aria-label="项目可见性"
-                        />
-                      </div>
-                      <div className="property">
-                        <label>计划周期</label>
-                        <div style={{ width: 280, flex: "none" }}>
+                      {/* #216：竖排「标签在上」表单。Form.Item 不带 name，仅作布局；值仍由 basic state 受控、整表保存。 */}
+                      <Form layout="vertical" requiredMark={false} className="settings-form">
+                        <Form.Item label="项目名称">
+                          <Input
+                            maxLength={100}
+                            value={basic.name}
+                            disabled={!project?.canEdit}
+                            onChange={(e) => setBasic({ ...basic, name: e.target.value })}
+                            aria-label="项目名称"
+                          />
+                        </Form.Item>
+                        <Form.Item label="项目负责人">
+                          <Select
+                            value={basic.ownerId}
+                            disabled={!project?.canEdit}
+                            showSearch
+                            optionFilterProp="label"
+                            options={users.map((u) => ({
+                              value: u.id,
+                              label: `${u.displayName}（${u.username}）`,
+                            }))}
+                            onChange={(v) => setBasic({ ...basic, ownerId: v })}
+                            style={{ width: "100%" }}
+                            aria-label="项目负责人"
+                          />
+                        </Form.Item>
+                        <Form.Item label="项目状态" extra="与自由文本的「项目阶段」正交，由成员手工设置">
+                          <Select
+                            value={basic.status}
+                            disabled={!project?.canEdit}
+                            options={(Object.keys(PROJECT_STATUS_LABEL) as ProjectStatus[]).map(
+                              (v) => ({ value: v, label: PROJECT_STATUS_LABEL[v] }),
+                            )}
+                            onChange={(v) => setBasic({ ...basic, status: v })}
+                            style={{ width: 240 }}
+                            aria-label="项目状态"
+                          />
+                        </Form.Item>
+                        <Form.Item label="项目阶段">
+                          <Input
+                            maxLength={50}
+                            placeholder="业务里程碑，如：联合联调阶段（选填）"
+                            value={basic.stage}
+                            disabled={!project?.canEdit}
+                            onChange={(e) => setBasic({ ...basic, stage: e.target.value })}
+                            aria-label="项目阶段"
+                          />
+                        </Form.Item>
+                        <Form.Item
+                          label="项目可见性"
+                          extra="公开后系统内任何登录用户都能只读本项目并下载文件，但不能做任何写动作，也不会出现在成员列表与人员选择器里"
+                        >
+                          <Select
+                            value={basic.visibility}
+                            disabled={!project?.canEdit}
+                            options={(Object.keys(PROJECT_VISIBILITY_LABEL) as ProjectVisibility[]).map(
+                              (v) => ({ value: v, label: PROJECT_VISIBILITY_LABEL[v] }),
+                            )}
+                            onChange={(v) => setBasic({ ...basic, visibility: v })}
+                            style={{ width: 240 }}
+                            aria-label="项目可见性"
+                          />
+                        </Form.Item>
+                        <Form.Item label="计划周期" style={{ marginBottom: 0 }}>
                           <DateRangeField
                             allowEmpty
                             value={basic.plan}
@@ -543,8 +511,8 @@ export default function ProjectSettingsPage({
                             onChange={(v) => setBasic({ ...basic, plan: v ?? undefined })}
                             aria-label="计划周期"
                           />
-                        </div>
-                      </div>
+                        </Form.Item>
+                      </Form>
                     </div>
                   )}
                 </>
@@ -675,30 +643,32 @@ export default function ProjectSettingsPage({
                     )}
                   </div>
                   <div className="settings-panel-body">
-                    {rules &&
-                      RULE_FIELDS.map((f) => (
-                        <div key={f.key} className="property">
-                          <label>
-                            {f.label}
-                            <span className="muted" style={{ display: "block" }}>
-                              {f.note}
-                            </span>
-                          </label>
-                          <InputNumber
-                            min={f.min}
-                            max={f.max}
-                            precision={0}
-                            value={rules[f.key]}
-                            disabled={!settings?.canEdit}
-                            onChange={(v) =>
-                              setRules({ ...rules, [f.key]: v ?? settings?.[f.key] ?? f.min })
-                            }
-                            addonAfter={f.suffix}
-                            style={{ width: 160, flex: "none" }}
-                            aria-label={f.label}
-                          />
-                        </div>
-                      ))}
+                    {rules && (
+                      <Form layout="vertical" requiredMark={false} className="settings-form">
+                        {RULE_FIELDS.map((f, i) => (
+                          <Form.Item
+                            key={f.key}
+                            label={f.label}
+                            extra={f.note}
+                            style={i === RULE_FIELDS.length - 1 ? { marginBottom: 0 } : undefined}
+                          >
+                            <InputNumber
+                              min={f.min}
+                              max={f.max}
+                              precision={0}
+                              value={rules[f.key]}
+                              disabled={!settings?.canEdit}
+                              onChange={(v) =>
+                                setRules({ ...rules, [f.key]: v ?? settings?.[f.key] ?? f.min })
+                              }
+                              addonAfter={f.suffix}
+                              style={{ width: 200 }}
+                              aria-label={f.label}
+                            />
+                          </Form.Item>
+                        ))}
+                      </Form>
+                    )}
                   </div>
                 </>
               ) : tab === "permissions" ? (

@@ -8,6 +8,7 @@ import { client } from "./api/client";
 import type { components } from "./api/schema";
 import PlainShell from "./PlainShell";
 import PasswordInput from "./PasswordInput";
+import SettingsNav from "./SettingsNav";
 import { logoUrl, useBranding } from "./branding";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
@@ -30,6 +31,12 @@ const SECTIONS = [
   { key: "audit", label: "操作审计", hint: "" },
 ] as const;
 type SectionKey = (typeof SECTIONS)[number]["key"];
+// #216：左栏分组分节（布局参考 ONES 设置页）。
+const NAV_GROUPS = [
+  { title: "系统配置", items: [SECTIONS[0], SECTIONS[1]] },
+  { title: "账号管理", items: [SECTIONS[2]] },
+  { title: "审计", items: [SECTIONS[3]] },
+] as const;
 
 function isSection(v: string | undefined): v is SectionKey {
   return SECTIONS.some((s) => s.key === v);
@@ -73,18 +80,7 @@ export default function SystemSettingsPage({ user, onLogout }: { user: CurrentUs
         </div>
       </div>
       <div className="settings-layout">
-        <aside className="settings-nav">
-          {SECTIONS.map((s) => (
-            <button
-              key={s.key}
-              type="button"
-              className={section === s.key ? "active" : ""}
-              onClick={() => navigate(`/system/${s.key}`)}
-            >
-              {s.label}
-            </button>
-          ))}
-        </aside>
+        <SettingsNav groups={NAV_GROUPS} active={section} onSelect={(k) => navigate(`/system/${k}`)} />
         <section className="settings-panel">
           {section === "users" ? (
             <UsersSection me={user} />
@@ -612,9 +608,12 @@ function BasicSection() {
             <Button type="primary" htmlType="submit" loading={saving}>
               保存
             </Button>
-            <div className="property" style={{ marginTop: 20, alignItems: "flex-start" }} data-testid="logo-block">
-              <label>logo</label>
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <Form.Item
+              label="logo"
+              style={{ marginTop: 20, marginBottom: 0 }}
+              extra="仅 PNG／JPG／WebP，≤512KB，建议正方形；非正方形居中裁切；兼作浏览器标签页图标。不收 SVG。"
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }} data-testid="logo-block">
                 <span className="brand-mark" style={{ width: 40, height: 40 }}>
                   {logoUrl(branding) ? <img src={logoUrl(branding)!} alt="" /> : branding.systemName.slice(0, 1)}
                 </span>
@@ -630,12 +629,9 @@ function BasicSection() {
                     </Button>
                   </Popconfirm>
                 )}
-                <span className="muted" style={{ fontSize: 12 }}>
-                  仅 PNG／JPG／WebP，≤512KB，建议正方形；非正方形居中裁切；兼作浏览器标签页图标。不收 SVG。
-                </span>
               </div>
-            </div>
-            {logoError && <Alert type="error" message={logoError} style={{ marginTop: 8, maxWidth: 520 }} data-testid="logo-error" />}
+            </Form.Item>
+            {logoError && <Alert type="error" message={logoError} style={{ marginTop: 8 }} data-testid="logo-error" />}
           </Form>
         ) : !error ? (
           <Spin />
@@ -764,23 +760,24 @@ function NotificationsSection({ me }: { me: CurrentUser }) {
               </span>
             </Form>
 
-            <div className="property" style={{ marginTop: 20, alignItems: "flex-start" }} data-testid="test-mail">
-              <label>测试邮件</label>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <Radio.Group value={target} onChange={(e) => setTarget(e.target.value)}>
-                  <Radio value="me">发到我绑定的邮箱（{me.email}）</Radio>
-                  <Radio value="custom">发到其他邮箱</Radio>
-                </Radio.Group>
-                <div style={{ display: "flex", gap: 8 }}>
-                  {target === "custom" && (
-                    <Input style={{ width: 280 }} placeholder="收件地址" value={address} onChange={(e) => setAddress(e.target.value)} />
-                  )}
-                  <Button size="small" loading={sending} disabled={!settings.configured || (target === "custom" && !address)} onClick={sendTest}>
-                    发送测试邮件
-                  </Button>
+            <Form layout="vertical" style={{ marginTop: 20, maxWidth: 560 }}>
+              <Form.Item label="测试邮件" style={{ marginBottom: 0 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }} data-testid="test-mail">
+                  <Radio.Group value={target} onChange={(e) => setTarget(e.target.value)}>
+                    <Radio value="me">发到我绑定的邮箱（{me.email}）</Radio>
+                    <Radio value="custom">发到其他邮箱</Radio>
+                  </Radio.Group>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {target === "custom" && (
+                      <Input style={{ width: 280 }} placeholder="收件地址" value={address} onChange={(e) => setAddress(e.target.value)} />
+                    )}
+                    <Button size="small" loading={sending} disabled={!settings.configured || (target === "custom" && !address)} onClick={sendTest}>
+                      发送测试邮件
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            </div>
+              </Form.Item>
+            </Form>
 
             <h3 style={{ fontSize: 14, margin: "20px 0 8px" }}>邮件通知</h3>
             <div data-testid="notify-switches" style={{ display: "grid", gap: 8, maxWidth: 560 }}>

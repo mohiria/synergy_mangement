@@ -6,6 +6,7 @@ import { client } from "./api/client";
 import type { components } from "./api/schema";
 import PlainShell from "./PlainShell";
 import PasswordInput from "./PasswordInput";
+import SettingsNav from "./SettingsNav";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type UpdateUserProfileRequest = components["schemas"]["UpdateUserProfileRequest"];
@@ -21,6 +22,12 @@ const SECTIONS = [
   { key: "notifications", label: "通知偏好" },
 ] as const;
 type SectionKey = (typeof SECTIONS)[number]["key"];
+// #216：左栏分组分节。
+const NAV_GROUPS = [
+  { title: "个人资料", items: [SECTIONS[0]] },
+  { title: "安全", items: [SECTIONS[1], SECTIONS[2]] },
+  { title: "通知", items: [SECTIONS[3]] },
+] as const;
 
 function isSection(v: string | undefined): v is SectionKey {
   return SECTIONS.some((s) => s.key === v);
@@ -54,18 +61,7 @@ export default function MePage({
         </div>
       </div>
       <div className="settings-layout">
-        <aside className="settings-nav">
-          {SECTIONS.map((s) => (
-            <button
-              key={s.key}
-              type="button"
-              className={section === s.key ? "active" : ""}
-              onClick={() => navigate(`/me/${s.key}`)}
-            >
-              {s.label}
-            </button>
-          ))}
-        </aside>
+        <SettingsNav groups={NAV_GROUPS} active={section} onSelect={(k) => navigate(`/me/${k}`)} />
         <section className="settings-panel">
           {section === "profile" ? (
             <ProfileSection user={user} onUserChange={onUserChange} />
@@ -164,35 +160,41 @@ function PasswordSection() {
           <span className="muted">新密码 8～32 位；修改成功后除当前浏览器外，本人其余登录会话会立即失效。</span>
         </div>
       </div>
-      <div className="settings-panel-body" style={{ maxWidth: 420 }}>
+      <div className="settings-panel-body">
         {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
-        <PasswordInput
-          autoComplete="current-password"
-          placeholder="当前密码"
-          value={current}
-          onChange={(e) => setCurrent(e.target.value)}
-          style={{ marginBottom: 8 }}
-        />
-        <PasswordInput
-          autoComplete="new-password"
-          placeholder="新密码（8～32 位）"
-          value={next}
-          maxLength={32}
-          onChange={(e) => setNext(e.target.value)}
-          style={{ marginBottom: 8 }}
-        />
-        <PasswordInput
-          autoComplete="new-password"
-          placeholder="再次输入新密码"
-          value={confirm}
-          maxLength={32}
-          onChange={(e) => setConfirm(e.target.value)}
-          onPressEnter={submit}
-          style={{ marginBottom: 12 }}
-        />
-        <Button type="primary" loading={saving} disabled={!current || len < 8 || len > 32 || !confirm} onClick={submit}>
-          确认修改
-        </Button>
+        {/* #216：竖排「标签在上」表单；Form.Item 不带 name，仅作布局，输入仍由本地 state 受控。 */}
+        <Form layout="vertical" requiredMark={false} style={{ maxWidth: 420 }}>
+          <Form.Item label="当前密码">
+            <PasswordInput
+              autoComplete="current-password"
+              placeholder="当前密码"
+              value={current}
+              onChange={(e) => setCurrent(e.target.value)}
+            />
+          </Form.Item>
+          <Form.Item label="新密码">
+            <PasswordInput
+              autoComplete="new-password"
+              placeholder="新密码（8～32 位）"
+              value={next}
+              maxLength={32}
+              onChange={(e) => setNext(e.target.value)}
+            />
+          </Form.Item>
+          <Form.Item label="确认新密码">
+            <PasswordInput
+              autoComplete="new-password"
+              placeholder="再次输入新密码"
+              value={confirm}
+              maxLength={32}
+              onChange={(e) => setConfirm(e.target.value)}
+              onPressEnter={submit}
+            />
+          </Form.Item>
+          <Button type="primary" loading={saving} disabled={!current || len < 8 || len > 32 || !confirm} onClick={submit}>
+            确认修改
+          </Button>
+        </Form>
       </div>
     </>
   );

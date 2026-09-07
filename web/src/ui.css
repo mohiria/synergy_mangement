@@ -1073,18 +1073,36 @@ body {
 }
 .settings-nav button:hover { background: var(--surface-2); color: var(--text); }
 .settings-nav button.active { background: var(--accent-soft); color: #3f50bd; font-weight: 600; }
+/* #216 分组分节（布局参考 ONES 设置页）：组标题为 12px 弱化文字，不可点；组间留 12px。 */
+.settings-nav-group + .settings-nav-group { margin-top: 12px; }
+.settings-nav-group-title {
+  padding: 6px 11px 4px; color: var(--muted); font-size: var(--type-aux); font-weight: 600;
+  letter-spacing: .02em; user-select: none;
+}
 .settings-panel {
   background: var(--surface); border: 1px solid var(--line);
   border-radius: var(--radius); box-shadow: var(--shadow-card);
 }
 /* 原型 card-head：最小高 48px、下边框、右侧动作。 */
 .settings-panel-head {
-  min-height: 56px; padding: 12px 16px; border-bottom: 1px solid var(--line);
+  min-height: 56px; padding: 14px 20px; border-bottom: 1px solid var(--line);
   display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
 }
 .settings-panel-head h2 { margin: 0 0 4px; font-size: var(--type-title); font-weight: 650; }
 .settings-panel-head .muted { display: block; font-size: var(--type-aux); }
-.settings-panel-body { padding: 16px; }
+.settings-panel-body { padding: 20px; }
+/* #216 竖排表单：标签在上、字段在下，整表限宽 520px 防止输入框在宽屏拉满。 */
+.settings-form { max-width: 520px; }
+.settings-form .ant-form-item-extra { font-size: var(--type-aux); }
+/* 窄屏（<960px）：导航退化为内容上方的横向分组，条目按行折行，不出横向滚动。 */
+@media (max-width: 960px) {
+  .settings-layout { grid-template-columns: minmax(0, 1fr); }
+  .settings-nav { position: static; display: flex; flex-wrap: wrap; gap: 8px 16px; }
+  .settings-nav-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+  .settings-nav-group + .settings-nav-group { margin-top: 0; }
+  .settings-nav-group-title { padding: 0 4px 0 0; }
+  .settings-nav button { width: auto; height: 32px; }
+}
 /* 成员分区（#108）：成员管理与查看项目各自成块，视觉沿用 member-grid / member-card。 */
 .member-zone + .member-zone { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
 .member-zone h3 { margin: 0 0 2px; font-size: var(--type-title); font-weight: 650; color: #364257; }

@@ -7,9 +7,9 @@ import { DEMO, gotoPage, login } from "./fixtures";
 
 type Page = import("@playwright/test").Page;
 
-// 可见性下拉在「项目基础信息」面板里，按 .property 的标签定位，不依赖控件顺序。
+// 可见性下拉在「项目基础信息」面板里，按竖排表单项（Form.Item）的标签定位，不依赖控件顺序。
 const visibilitySelect = (page: Page) =>
-  page.locator(".property", { hasText: "项目可见性" }).locator(".ant-select-selector");
+  page.locator(".ant-form-item", { hasText: "项目可见性" }).locator(".ant-select-selector");
 
 const openBasic = async (page: Page) => {
   await gotoPage(page, "/settings");
