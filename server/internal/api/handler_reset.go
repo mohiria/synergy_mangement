@@ -147,7 +147,8 @@ func (s *Server) ConfirmPasswordReset(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := s.q.WithTx(tx)
-	// #215：先原子消费 token（只更新仍未使用的行），并发重放的第二个请求在这里拿到 0 行即被拒。
+	// #215：先原子消费 token（只更新仍未使用、未过期且用户未停用的行），并发重放的第二个请求、
+	// 或预检查之后才过期／被停用的请求，在这里拿到 0 行即被拒。
 	n, err := qtx.ConsumePasswordResetToken(ctx, row.ID)
 	if err != nil {
 		writeInternalError(w, r, err)

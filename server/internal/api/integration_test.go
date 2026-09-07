@@ -7925,6 +7925,33 @@ func TestPasswordResetTokenConsumedOnceAndConcurrentIssue(t *testing.T) {
 	if n, err := q.ConsumePasswordResetToken(ctx, row.ID); err != nil || n != 0 {
 		t.Fatalf("重复消费应影响 0 行: n=%d err=%v", n, err)
 	}
+	// #215：过期与用户已停用在消费语句里再校验一次，预检查之后才发生的变化同样拦下。
+	expired, err := q.CreatePasswordResetToken(ctx, store.CreatePasswordResetTokenParams{
+		UserID: alice.ID, TokenHash: domain.HashPasswordResetToken("t-expired"),
+		ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(-time.Second), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("create expired token: %v", err)
+	}
+	if n, err := q.ConsumePasswordResetToken(ctx, expired.ID); err != nil || n != 0 {
+		t.Fatalf("过期 token 消费应影响 0 行: n=%d err=%v", n, err)
+	}
+	fresh, err := q.CreatePasswordResetToken(ctx, store.CreatePasswordResetTokenParams{
+		UserID: alice.ID, TokenHash: domain.HashPasswordResetToken("t-disabled"),
+		ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(domain.PasswordResetTTL), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("create token: %v", err)
+	}
+	if _, err := q.SetUserDisabledAt(ctx, store.SetUserDisabledAtParams{ID: alice.ID, DisabledAt: pgtype.Timestamptz{Time: time.Now(), Valid: true}}); err != nil {
+		t.Fatalf("disable user: %v", err)
+	}
+	if n, err := q.ConsumePasswordResetToken(ctx, fresh.ID); err != nil || n != 0 {
+		t.Fatalf("用户已停用时消费应影响 0 行: n=%d err=%v", n, err)
+	}
+	if _, err := q.SetUserDisabledAt(ctx, store.SetUserDisabledAtParams{ID: alice.ID}); err != nil {
+		t.Fatalf("enable user: %v", err)
+	}
 
 	root := seedUser(t, q, "root", "系统管理员", "root-pass1")
 	if _, err := q.SetUserSystemAdmin(ctx, store.SetUserSystemAdminParams{ID: root.ID, IsSystemAdmin: true}); err != nil {
