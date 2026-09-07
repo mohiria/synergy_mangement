@@ -23,3 +23,22 @@ func TestCanAccessSystemSettings(t *testing.T) {
 		})
 	}
 }
+
+// #219：SystemSettings.canEdit 只对系统管理员为 true，前端据此决定字段是否可点击编辑。
+func TestCanEditSystemSettings(t *testing.T) {
+	cases := []struct {
+		name          string
+		isSystemAdmin bool
+		want          bool
+	}{
+		{"系统管理员可编辑", true, true},
+		{"普通用户只读", false, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := CanEditSystemSettings(c.isSystemAdmin); got != c.want {
+				t.Fatalf("CanEditSystemSettings(%v) = %v, want %v", c.isSystemAdmin, got, c.want)
+			}
+		})
+	}
+}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Input, Popover } from "antd";
 import type { InputRef } from "antd";
 
@@ -6,6 +6,8 @@ import type { InputRef } from "antd";
 // 点击触发区弹出面板——顶部搜索框 + 成员列表，每行「头像 + 姓名 + 账号」，点击选中。
 // 多选保持「展开期间改草稿、收起时一次保存」的既有交互（#135 同口径）；
 // 参考图底部的「配置权限」类入口不做。搜索按姓名或账号过滤。
+// 键盘：Tab 到触发区回车打开，焦点落在搜索框；上下键在结果行间移动，回车选中／切换，Esc 收起
+// （多选收起即保存）；焦点始终在搜索框，行用 aria-activedescendant 标出（PR #220 review）。
 
 export type PickerPerson = {
   userId: number;
@@ -40,18 +42,26 @@ export function PersonAvatar({ person, size = 26 }: { person: PickerPerson; size
 }
 
 function PersonRow({
+  id,
   person,
   selected,
+  active,
   onClick,
+  onHover,
 }: {
+  id: string;
   person: PickerPerson;
   selected: boolean;
+  active: boolean;
   onClick: () => void;
+  onHover: () => void;
 }) {
   return (
     <div
-      className={`pp-row${selected ? " selected" : ""}`}
+      id={id}
+      className={`pp-row${selected ? " selected" : ""}${active ? " active" : ""}`}
       onClick={onClick}
+      onMouseEnter={onHover}
       role="option"
       aria-selected={selected}
     >
@@ -75,6 +85,8 @@ export default function PersonPicker({
   normalizeDraft,
   onSave,
   size = "small",
+  style,
+  ariaLabel,
 }: {
   people: PickerPerson[];
   value: number[];
@@ -88,11 +100,17 @@ export default function PersonPicker({
   /** 面板收起时一次保存（多选）；单选在点击行时立即触发并收起。 */
   onSave: (ids: number[]) => void;
   size?: "small" | "middle";
+  /** #217：工具栏、表格格内等处需要压尺寸，覆盖触发区的默认宽高。 */
+  style?: CSSProperties;
+  ariaLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<number[]>(value);
   const [search, setSearch] = useState("");
+  const [active, setActive] = useState(0);
   const searchRef = useRef<InputRef>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const listId = useId();
 
   // 外部刷新（保存成功）后 value 变化同步回草稿（#135 同口径）。
   useEffect(() => {
@@ -108,6 +126,15 @@ export default function PersonPicker({
         p.displayName.toLowerCase().includes(q) || (p.username ?? "").toLowerCase().includes(q),
     );
   }, [people, search]);
+
+  // 搜索词变化后高亮行回到第一行，并让高亮行滚进可视区。
+  useEffect(() => {
+    setActive(0);
+  }, [search]);
+  const activeId = filtered[active] ? `${listId}-${filtered[active].userId}` : undefined;
+  useEffect(() => {
+    if (open && activeId) document.getElementById(activeId)?.scrollIntoView({ block: "nearest" });
+  }, [open, activeId]);
 
   const byId = useMemo(() => new Map(people.map((p) => [p.userId, p])), [people]);
   const label =
@@ -136,12 +163,38 @@ export default function PersonPicker({
     if (o) {
       setDraft(value);
       setSearch("");
+      setActive(0);
       setTimeout(() => searchRef.current?.focus(), 0);
     } else {
       setSearch("");
       if (multiple && [...draft].sort().join(",") !== [...value].sort().join(",")) {
         onSave(draft);
       }
+    }
+  };
+
+  const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // 中日韩输入法组合中的 Enter／方向键是在选候选词，不当作列表操作（PR #220 review）。
+    if (e.nativeEvent.isComposing) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (filtered.length === 0) return;
+      const step = e.key === "ArrowDown" ? 1 : -1;
+      setActive((i) => (i + step + filtered.length) % filtered.length);
+      return;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const p = filtered[active];
+      if (!p) return;
+      toggle(p.userId);
+      if (!multiple) triggerRef.current?.focus();
+      return;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      handleOpenChange(false);
+      triggerRef.current?.focus();
     }
   };
 
@@ -155,7 +208,7 @@ export default function PersonPicker({
       arrow={false}
       styles={{ body: { padding: 0 } }}
       content={
-        <div className="pp-panel" role="listbox" aria-multiselectable={multiple}>
+        <div className="pp-panel">
           <div className="pp-search">
             <Input
               ref={searchRef}
@@ -164,17 +217,26 @@ export default function PersonPicker({
               placeholder="搜索姓名或账号"
               prefix={<span aria-hidden>🔍</span>}
               value={search}
+              role="combobox"
+              aria-expanded
+              aria-controls={listId}
+              aria-activedescendant={activeId}
+              aria-autocomplete="list"
               onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={onSearchKeyDown}
             />
           </div>
-          <div className="pp-list">
+          <div className="pp-list" id={listId} role="listbox" aria-multiselectable={multiple}>
             {filtered.length === 0 && <div className="pp-empty">没有匹配的成员</div>}
-            {filtered.map((p) => (
+            {filtered.map((p, i) => (
               <PersonRow
                 key={p.userId}
+                id={`${listId}-${p.userId}`}
                 person={p}
                 selected={selectedSet.has(p.userId)}
+                active={i === active}
                 onClick={() => toggle(p.userId)}
+                onHover={() => setActive(i)}
               />
             ))}
           </div>
@@ -182,9 +244,14 @@ export default function PersonPicker({
       }
     >
       <button
+        ref={triggerRef}
         type="button"
         className={`pp-trigger${disabled ? " disabled" : ""}${size === "middle" ? " middle" : ""}`}
         disabled={disabled}
+        style={style}
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={open}
       >
         {label ? (
           <span className="pp-trigger-text">{label}</span>

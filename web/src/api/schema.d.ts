@@ -1581,6 +1581,8 @@ export interface components {
         SystemSettings: {
             /** @description 已上传 logo 的版本号；未上传或已删除为空（#211） */
             logoVersion?: number;
+            /** @description 当前用户能否修改基本信息（派生字段，仅系统管理员为 true；#219 逐字段编辑据此显示控件） */
+            canEdit: boolean;
             systemName: string;
             subtitle: string;
             loginHint: string;

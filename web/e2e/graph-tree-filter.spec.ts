@@ -36,9 +36,34 @@ test.describe("层级树筛选淡化", () => {
 
   test("人员筛选按该 KR 下有无该人员的任务淡化", async ({ page }) => {
     await openTree(page);
-    await pickFilter(page, "全部人员", 1);
+    // #217：人员筛选是人员选择组件（触发区 + 面板行），第 0 行是「全部人员」哨兵。
+    await page.locator(".toolbar .pp-trigger", { hasText: "全部人员" }).click();
+    await page.locator(".pp-panel .pp-row").nth(1).click();
     // 任何一个人都不会在项目全部 KR 下都有任务：必有淡化，也必有保留。
     await expect(page.locator(".gnode-kr.dimmed").first()).toBeVisible();
     await expect(page.locator(".gnode-kr:not(.dimmed)").first()).toBeVisible();
+  });
+
+  test("人员选择组件可纯键盘操作：回车打开、方向键移动、回车选中、Esc 收起", async ({ page }) => {
+    await openTree(page);
+    const trigger = page.locator(".toolbar .pp-trigger", { hasText: "全部人员" });
+    await trigger.focus();
+    await page.keyboard.press("Enter");
+    const search = page.locator(".pp-panel input[role=combobox]");
+    await expect(search).toBeFocused();
+    // 第 0 行是「全部人员」哨兵，向下一格到第一个真人并回车选中；面板收起、焦点回到触发区。
+    await page.keyboard.press("ArrowDown");
+    await expect(page.locator(".pp-panel .pp-row.active")).toHaveCount(1);
+    const target = await page.locator(".pp-panel .pp-row.active .pp-name").textContent();
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".pp-panel")).toBeHidden();
+    await expect(page.locator(".toolbar .pp-trigger", { hasText: target! })).toBeFocused();
+    await expect(page.locator(".gnode-kr.dimmed").first()).toBeVisible();
+    // 再打开后 Esc 直接收起，不改选择。
+    await page.keyboard.press("Enter");
+    await expect(search).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".pp-panel")).toBeHidden();
+    await expect(page.locator(".toolbar .pp-trigger", { hasText: target! })).toBeVisible();
   });
 });

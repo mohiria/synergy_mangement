@@ -7,22 +7,21 @@ import { DEMO, gotoPage, login } from "./fixtures";
 
 type Page = import("@playwright/test").Page;
 
-// 可见性下拉在「项目基础信息」面板里，按 .property 的标签定位，不依赖控件顺序。
-const visibilitySelect = (page: Page) =>
-  page.locator(".property", { hasText: "项目可见性" }).locator(".ant-select-selector");
+// 可见性字段在「项目基础信息」面板里（#219 点击即编辑）：查看态是带 aria-label 的值块，点击后换成下拉。
+// 只取查看态的值块：编辑态的 antd Select 会把同一个 aria-label 同时挂在外层与内层 input 上。
+const visibilityField = (page: Page) => page.locator('.settings-value[aria-label="项目可见性"]');
 
 const openBasic = async (page: Page) => {
   await gotoPage(page, "/settings");
   await page.getByRole("button", { name: "项目基础信息" }).click();
-  await expect(visibilitySelect(page)).toBeVisible();
+  await expect(visibilityField(page)).toBeVisible();
 };
 
 const setVisibility = async (page: Page, label: string) => {
-  await visibilitySelect(page).click();
+  // 点击进入编辑态，下拉自动展开；选中即存，没有「保存」按钮。
+  await visibilityField(page).click();
   await page.locator(".ant-select-dropdown:visible .ant-select-item-option", { hasText: label }).click();
-  // antd 会在两个汉字间插空格（「保 存」），按 name 匹配不稳，取面板头上的按钮。
-  await page.locator(".settings-panel-head button").first().click();
-  await expect(visibilitySelect(page)).toContainText(label);
+  await expect(visibilityField(page)).toContainText(label);
 };
 
 const logout = async (page: Page) => {
@@ -35,7 +34,7 @@ test.describe("项目可见性", () => {
   test("项目基础信息里有可见性开关，默认私有", async ({ page }) => {
     await login(page);
     await openBasic(page);
-    await expect(visibilitySelect(page)).toContainText("私有项目");
+    await expect(visibilityField(page)).toContainText("私有项目");
   });
 
   test("切公开后，非成员在项目列表看到它并标出只读，进项目后顶部同样标出", async ({ page }) => {
@@ -59,11 +58,15 @@ test.describe("项目可见性", () => {
       .click();
     await expect(page.locator(".project-name-cell", { hasText: DEMO.projectName })).toBeVisible();
 
-    // 进项目：顶部标明只读浏览；项目设置里没有保存入口（写动作按派生字段隐藏）
+    // 进项目：顶部标明只读浏览；项目设置里只有纯文本值，没有「点击编辑」提示、控件与保存入口（写动作按派生字段隐藏）
     await row.click();
     await expect(page.locator(".breadcrumbs .status-pill")).toContainText("只读浏览");
     await gotoPage(page, "/settings");
     await page.getByRole("button", { name: "项目基础信息" }).click();
+    await expect(visibilityField(page)).toContainText("公开项目");
+    await expect(visibilityField(page)).not.toHaveAttribute("title", "点击编辑");
+    await expect(page.locator(".settings-panel .inline-editable")).toHaveCount(0);
+    await expect(page.locator(".settings-panel .ant-select, .settings-panel input")).toHaveCount(0);
     await expect(page.locator(".settings-panel-head button")).toHaveCount(0);
 
     // 收尾：换回项目负责人改回私有

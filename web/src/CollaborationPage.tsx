@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Alert, AutoComplete, Button, Input, Select, Spin, Switch, message } from "antd";
+import PersonPicker from "./PersonPicker";
 import { client } from "./api/client";
 import { formatFileSize } from "./FileUploadField";
 import type { components } from "./api/schema";
 import Icon from "./icons";
 import ProjectShell from "./ProjectShell";
 import TaskDrawerHost from "./task-drawer";
+
+// #217：人员筛选「全部人员」哨兵（用户 ID 从 1 起，0 不会与真实用户冲突）。
+const ALL_PEOPLE = 0;
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
@@ -337,6 +341,15 @@ export default function CollaborationPage({
   // 裁决 K＝A（#114，F-11）：层级视图按工具栏筛选淡化——O 筛选淡化非选中 O 及其 KR，
   // KR 筛选淡化非选中 KR，人员筛选按该 KR 下有无该人员的任务淡化；口径与另两层一致（AC-45）。
   const filtering = oFilter !== "all" || krFilter !== "all" || personFilter !== "all";
+  // 被筛选的人在 load() 刷新后已不是任何任务的负责人／参与人（改派或删除）时，
+  // 候选列表里没有这个人、选择器只能显示「全部人员」占位，而过滤仍按旧 id 生效；此时复位筛选。
+  useEffect(() => {
+    if (personFilter === "all") return;
+    const present = tasks.some(
+      (t) => t.ownerId === personFilter || (t.participants ?? []).some((p) => p.userId === personFilter),
+    );
+    if (!present) setPersonFilter("all");
+  }, [tasks, personFilter]);
   // #159：人员筛选语义＝按任务负责人或参与人过滤任务节点（图谱已无成员节点）。
   const matchesPerson = useCallback(
     (t: Task) =>
@@ -1840,13 +1853,10 @@ export default function CollaborationPage({
                   ...krList.map((k) => ({ value: k.id, label: k.code })),
                 ]}
               />
-              <Select
-                size="small"
-                style={{ width: 150 }}
-                value={personFilter}
-                onChange={setPersonFilter}
-                options={[
-                  { value: "all" as const, label: "全部人员" },
+              {/* #217：人员筛选改用人员选择组件；「全部人员」用 0 号哨兵行表示。 */}
+              <PersonPicker
+                people={[
+                  { userId: ALL_PEOPLE, displayName: "全部人员" },
                   // #159：人员筛选按任务负责人／参与人过滤任务节点，候选也覆盖两者。
                   ...[
                     ...new Map(
@@ -1857,8 +1867,15 @@ export default function CollaborationPage({
                         ),
                       ]),
                     ).entries(),
-                  ].map(([id, name]) => ({ value: id, label: name })),
+                  ].map(([id, name]) => ({ userId: id, displayName: name })),
                 ]}
+                value={[personFilter === "all" ? ALL_PEOPLE : personFilter]}
+                multiple={false}
+                size="middle"
+                style={{ width: 150, minWidth: 0, minHeight: 24 }}
+                placeholder="全部人员"
+                ariaLabel="人员筛选"
+                onSave={(ids) => setPersonFilter(ids[0] === ALL_PEOPLE ? "all" : ids[0])}
               />
               <span className="muted" style={{ fontSize: 12 }}>
                 显示已完成 <Switch size="small" checked={showCompleted} onChange={setShowCompleted} />

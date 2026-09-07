@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, DatePicker, Drawer, Input, Mentions, Modal, Select, Slider, Tabs, message } from "antd";
+import { Button, DatePicker, Drawer, Input, Mentions, Modal, Slider, Tabs, message } from "antd";
 import dayjs from "dayjs";
 import { client } from "../api/client";
 import FileUploadField, { fileTypeLabel, formatFileSize } from "../FileUploadField";
@@ -85,11 +85,13 @@ export default function TaskDrawer({
   // #138 就地编辑（裁决 E1）；#172 裁决：有编辑权限即直接保存生效，无「修改原因」弹窗、
   // 无「审批中」标签；裁决 10（#180）：编辑权限仅项目管理员（canEditFields=false 时不进入编辑态）。
   const [editingField, setEditingField] = useState<
-    "name" | "description" | "completionCriteria" | "ownerId" | "endDate" | null
+    "name" | "description" | "completionCriteria" | "endDate" | null
   >(null);
   const [editDraft, setEditDraft] = useState("");
   // #175：进度同口径——默认查看态，点击才出现进度条。
   const [editingProgress, setEditingProgress] = useState(false);
+  // 负责人 PersonPicker 是受控的，POST 返回前仍显示旧负责人；保存中禁用，避免再开再选被「未变化」吞掉（同项目设置页）。
+  const [ownerSaving, setOwnerSaving] = useState(false);
   const canInlineEdit = !!task?.canEditFields;
   const submitField = async (field: string, value: string) => {
     if (!task) return;
@@ -111,7 +113,6 @@ export default function TaskDrawer({
       name: task.name,
       description: task.description ?? "",
       completionCriteria: task.completionCriteria ?? "",
-      ownerId: String(task.ownerId),
       endDate: task.endDate,
     };
     if (f in current) {
@@ -602,36 +603,34 @@ export default function TaskDrawer({
         <div className="task-info-list">
           <div className="task-info-row">
             <span>负责人</span>
-            {editingField === "ownerId" ? (
-              <Select
-                size="small"
-                style={{ minWidth: 220 }}
-                showSearch
-                optionFilterProp="label"
-                autoFocus
-                defaultOpen
-                value={Number(editDraft)}
-                options={members
+            {/* #217：负责人改用人员选择组件（单选，点击行即保存），与参与人等同形态。 */}
+            {canInlineEdit ? (
+              <PersonPicker
+                people={members
                   .filter((m) => m.role !== "viewer")
-                  .map((m) => ({ value: m.userId, label: `${m.displayName}（${m.username}）` }))}
-                onChange={(v) => saveField("ownerId", String(v))}
-                onDropdownVisibleChange={(o) => {
-                  if (!o) setEditingField(null);
+                  .map((m) => ({ userId: m.userId, displayName: m.displayName, username: m.username }))}
+                value={[task.ownerId]}
+                multiple={false}
+                disabled={ownerSaving}
+                displayText={task.ownerName}
+                placeholder="选择负责人"
+                onSave={async (ids) => {
+                  if (ids[0] === undefined) return;
+                  setOwnerSaving(true);
+                  try {
+                    await submitField("ownerId", String(ids[0]));
+                  } finally {
+                    setOwnerSaving(false);
+                  }
                 }}
               />
             ) : (
-              <strong
-                className={canInlineEdit ? "inline-editable" : ""}
-                onClick={() => beginEditField("ownerId")}
-                title={canInlineEdit ? "点击编辑" : undefined}
-              >
-                {task.ownerName}
-                {task.ownerDisabled && (
-                  <span className="status-pill" style={{ marginLeft: 6 }}>
-                    已停用
-                  </span>
-                )}
-              </strong>
+              <strong>{task.ownerName}</strong>
+            )}
+            {task.ownerDisabled && (
+              <span className="status-pill" style={{ marginLeft: 6 }}>
+                已停用
+              </span>
             )}
           </div>
           {/* 参与人（PRD §9.2 按需字段）：空名单按 AC-50「空字段不显示」隐藏，

@@ -167,14 +167,29 @@ test("操作审计节列出系统级写操作", async ({ page }) => {
 test("改系统名称后侧栏、标签页与登录页同步，超长被拒", async ({ page }) => {
   await login(page);
   await page.goto("/system/basic");
+  // #219：默认只显示值并提示「点击编辑」，点击才出输入框；回车即存，没有「保存」按钮。
   const name = page.getByLabel("系统名称");
+  await expect(name).toHaveText("协同管理工具");
+  await expect(name).toHaveAttribute("title", "点击编辑");
+  await expect(page.locator(".settings-panel button", { hasText: /保\s*存/ })).toHaveCount(0);
+  await name.click();
   await expect(name).toHaveValue("协同管理工具");
   // 前端 maxLength 挡在 10 字，输入 12 字只留 10。
   await name.fill("一二三四五六七八九十一二");
   await expect(name).toHaveValue("一二三四五六七八九十");
+  // 清空不发请求，就地提示必填并留在编辑态。
+  await name.fill("");
+  await name.press("Enter");
+  await expect(page.locator(".inline-field-error")).toHaveText("请输入系统名称");
+  await expect(name).toHaveValue("");
   await name.fill("协同平台");
-  await page.getByLabel("登录页提示语（可空）").fill("请用工号登录");
-  await page.getByRole("button", { name: /保\s*存/ }).click();
+  await name.press("Enter");
+  await expect(name).toHaveText("协同平台");
+  const hint = page.getByLabel("登录页提示语（可空）");
+  await hint.click();
+  await hint.fill("请用工号登录");
+  await hint.press("Enter");
+  await expect(hint).toHaveText("请用工号登录");
   await expect(page.locator(".sidebar .brand-name b")).toHaveText("协同平台");
   await expect(page).toHaveTitle("协同平台");
 
@@ -186,9 +201,16 @@ test("改系统名称后侧栏、标签页与登录页同步，超长被拒", as
   // 改回默认，避免影响其他用例。
   await login(page);
   await page.goto("/system/basic");
-  await page.getByLabel("系统名称").fill("协同管理工具");
-  await page.getByLabel("登录页提示语（可空）").fill("账号由管理员分配");
-  await page.getByRole("button", { name: /保\s*存/ }).click();
+  const name2 = page.getByLabel("系统名称");
+  await name2.click();
+  await name2.fill("协同管理工具");
+  await name2.press("Enter");
+  await expect(name2).toHaveText("协同管理工具");
+  const hint2 = page.getByLabel("登录页提示语（可空）");
+  await hint2.click();
+  await hint2.fill("账号由管理员分配");
+  await hint2.press("Enter");
+  await expect(hint2).toHaveText("账号由管理员分配");
   await expect(page.locator(".sidebar .brand-name b")).toHaveText("协同管理工具");
 });
 
@@ -201,6 +223,14 @@ test("上传 logo 后品牌位与 favicon 显示图片，SVG 被拒，删除后�
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==",
     "base64",
   );
+  // #218：logo 块紧跟「系统名称」之后（第二个表单项），悬停预览框出现「点击更换」。
+  await expect(page.locator(".ant-form-item").nth(1).locator('[data-testid="logo-block"]')).toBeVisible();
+  await expect(page.locator(".ant-form-item").nth(0)).toContainText("系统名称");
+  const mask = page.locator(".logo-box .logo-mask");
+  await expect(mask).toHaveCSS("opacity", "0");
+  await page.locator(".logo-box").hover();
+  await expect(mask).toHaveText("点击更换");
+  await expect(mask).toHaveCSS("opacity", "1");
   const fileInput = page.locator('[data-testid="logo-block"] input[type="file"]');
   await fileInput.setInputFiles({ name: "bad.svg", mimeType: "image/svg+xml", buffer: Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'/>") });
   await expect(page.locator('[data-testid="logo-error"]')).toContainText("仅支持 PNG、JPG、WebP");

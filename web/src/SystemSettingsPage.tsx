@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, Dropdown, Form, Input, InputNumber, Modal, Popconfirm, Radio, Select, Spin, Switch, Table, Upload, message } from "antd";
 import type { MenuProps } from "antd";
@@ -8,6 +8,8 @@ import { client } from "./api/client";
 import type { components } from "./api/schema";
 import PlainShell from "./PlainShell";
 import PasswordInput from "./PasswordInput";
+import SettingsNav from "./SettingsNav";
+import { InlineText } from "./InlineField";
 import { logoUrl, useBranding } from "./branding";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
@@ -16,6 +18,7 @@ type CreateSystemUserRequest = components["schemas"]["CreateSystemUserRequest"];
 type UpdateUserProfileRequest = components["schemas"]["UpdateUserProfileRequest"];
 type AuditLog = components["schemas"]["AuditLog"];
 type SystemSettingsInput = components["schemas"]["SystemSettingsInput"];
+type SystemSettings = components["schemas"]["SystemSettings"];
 type MailSettings = components["schemas"]["MailSettings"];
 type MailSettingsInput = components["schemas"]["MailSettingsInput"];
 type MailOutboxItem = components["schemas"]["MailOutboxItem"];
@@ -30,6 +33,12 @@ const SECTIONS = [
   { key: "audit", label: "操作审计", hint: "" },
 ] as const;
 type SectionKey = (typeof SECTIONS)[number]["key"];
+// #216：左栏分组分节（布局参考 ONES 设置页）。
+const NAV_GROUPS = [
+  { title: "系统配置", items: [SECTIONS[0], SECTIONS[1]] },
+  { title: "账号管理", items: [SECTIONS[2]] },
+  { title: "审计", items: [SECTIONS[3]] },
+] as const;
 
 function isSection(v: string | undefined): v is SectionKey {
   return SECTIONS.some((s) => s.key === v);
@@ -73,18 +82,7 @@ export default function SystemSettingsPage({ user, onLogout }: { user: CurrentUs
         </div>
       </div>
       <div className="settings-layout">
-        <aside className="settings-nav">
-          {SECTIONS.map((s) => (
-            <button
-              key={s.key}
-              type="button"
-              className={section === s.key ? "active" : ""}
-              onClick={() => navigate(`/system/${s.key}`)}
-            >
-              {s.label}
-            </button>
-          ))}
-        </aside>
+        <SettingsNav groups={NAV_GROUPS} active={section} onSelect={(k) => navigate(`/system/${k}`)} />
         <section className="settings-panel">
           {section === "users" ? (
             <UsersSection me={user} />
@@ -518,7 +516,17 @@ function AuditSection() {
 
 // BasicSection 基本信息（#210）：系统名称、副标题、登录页提示语、访问地址；输入框显示字数与上限，
 // 规则以后端为准；保存后刷新品牌上下文，侧栏、登录页与标签页标题同步。logo 见 #211。
+// #219：任务概览同款——默认只显示值，canEdit 时点击字段才出现控件，改完即存；逐字段保存用当前值拼整表 PUT。
 const LIMITS = { systemName: 10, subtitle: 16, loginHint: 60 } as const;
+
+// 系统设置的保存队列放在模块级：失焦保存进行中切到别的分区再切回，BasicSection 会重挂载，
+// 新实例的 GET 必须排在未完成的 PUT 之后，否则读到保存前的值、下一次整体 PUT 会把先前修改回退（PR #220 review）。
+const systemSettingsQueue = { chain: Promise.resolve() as Promise<unknown> };
+const enqueueSystemSettings = <T,>(task: () => Promise<T>): Promise<T> => {
+  const run = systemSettingsQueue.chain.then(task, task);
+  systemSettingsQueue.chain = run.catch(() => undefined);
+  return run;
+};
 
 function BasicSection() {
   const { branding, reload } = useBranding();
@@ -558,33 +566,39 @@ function BasicSection() {
       message.error(res.error?.message ?? "删除失败");
     }
   };
-  const [form] = Form.useForm<SystemSettingsInput>();
-  const [loaded, setLoaded] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [settings, setSettingsState] = useState<SystemSettings | null>(null);
+  // 最新值走 ref：排队中的保存要读到前一次保存后的对象，不能读闭包里的旧快照。
+  const latest = useRef<SystemSettings | null>(null);
+  const setSettings = (s: SystemSettings) => {
+    latest.current = s;
+    setSettingsState(s);
+  };
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    client.GET("/system/settings").then(({ data, error: err }) => {
-      if (data) {
-        form.setFieldsValue({ systemName: data.systemName, subtitle: data.subtitle, loginHint: data.loginHint, baseUrl: data.baseUrl });
-        setLoaded(true);
-      } else {
-        setError(err?.message ?? "加载失败");
-      }
+    let cancelled = false;
+    enqueueSystemSettings(() => client.GET("/system/settings")).then(({ data, error: err }) => {
+      if (cancelled) return;
+      if (data) setSettings(data);
+      else setError(err?.message ?? "加载失败");
     });
-  }, [form]);
-  const submit = async (values: SystemSettingsInput) => {
-    setSaving(true);
-    setError(null);
-    const res = await client.PUT("/system/settings", { body: values });
-    setSaving(false);
-    if (res.data) {
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const patch = (p: Partial<SystemSettingsInput>): Promise<string | null> =>
+    enqueueSystemSettings(async () => {
+      const cur = latest.current;
+      if (!cur) return "尚未加载";
+      const res = await client.PUT("/system/settings", {
+        body: { systemName: cur.systemName, subtitle: cur.subtitle, loginHint: cur.loginHint, baseUrl: cur.baseUrl, ...p },
+      });
+      if (!res.data) return res.error?.message ?? "保存失败";
+      setSettings(res.data);
       message.success("已保存");
-      form.setFieldsValue({ systemName: res.data.systemName, subtitle: res.data.subtitle, loginHint: res.data.loginHint, baseUrl: res.data.baseUrl });
       await reload();
-    } else {
-      setError(res.error?.message ?? "保存失败");
-    }
-  };
+      return null;
+    });
   return (
     <>
       <div className="settings-panel-head">
@@ -595,47 +609,76 @@ function BasicSection() {
       </div>
       <div className="settings-panel-body">
         {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
-        {loaded ? (
-          <Form form={form} layout="vertical" onFinish={submit} requiredMark={false} style={{ maxWidth: 520 }}>
-            <Form.Item name="systemName" label="系统名称" rules={[{ required: true, message: "请输入系统名称" }]}>
-              <Input maxLength={LIMITS.systemName} showCount />
+        {settings ? (
+          <Form layout="vertical" requiredMark={false} className="settings-form">
+            <Form.Item label="系统名称">
+              <InlineText
+                label="系统名称"
+                canEdit={settings.canEdit}
+                value={settings.systemName}
+                maxLength={LIMITS.systemName}
+                showCount
+                validate={(v) => (v ? null : "请输入系统名称")}
+                onSave={(v) => patch({ systemName: v })}
+              />
             </Form.Item>
-            <Form.Item name="subtitle" label="副标题（可空）">
-              <Input maxLength={LIMITS.subtitle} showCount />
-            </Form.Item>
-            <Form.Item name="loginHint" label="登录页提示语（可空）">
-              <Input maxLength={LIMITS.loginHint} showCount />
-            </Form.Item>
-            <Form.Item name="baseUrl" label="访问地址（可空）" extra="http:// 或 https:// 开头的完整地址，如 http://203.0.113.10">
-              <Input maxLength={254} placeholder="http://" />
-            </Form.Item>
-            <Button type="primary" htmlType="submit" loading={saving}>
-              保存
-            </Button>
-            <div className="property" style={{ marginTop: 20, alignItems: "flex-start" }} data-testid="logo-block">
-              <label>logo</label>
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <span className="brand-mark" style={{ width: 40, height: 40 }}>
-                  {logoUrl(branding) ? <img src={logoUrl(branding)!} alt="" /> : branding.systemName.slice(0, 1)}
-                </span>
-                <Upload accept="image/png,image/jpeg,image/webp" showUploadList={false} beforeUpload={(f) => uploadLogo(f)}>
-                  <Button size="small" loading={logoBusy}>
-                    上传 logo
-                  </Button>
+            {/* #218：logo 紧跟系统名称，预览框点击即换；上传／删除接口与校验不变（#211）。 */}
+            <Form.Item label="logo">
+              <div className="logo-block" data-testid="logo-block">
+                <Upload accept="image/png,image/jpeg,image/webp" showUploadList={false} beforeUpload={(f) => uploadLogo(f)} disabled={logoBusy}>
+                  <button type="button" className="logo-box" aria-label="点击更换 logo" disabled={logoBusy}>
+                    {logoUrl(branding) ? <img src={logoUrl(branding)!} alt="" /> : <span className="logo-initial">{branding.systemName.slice(0, 1)}</span>}
+                    <span className="logo-mask">{logoBusy ? "上传中…" : "点击更换"}</span>
+                  </button>
                 </Upload>
-                {logoUrl(branding) && (
-                  <Popconfirm title="删除 logo，恢复系统名称首字？" okText="删除" cancelText="取消" onConfirm={deleteLogo}>
-                    <Button size="small" danger>
-                      删除 logo
-                    </Button>
-                  </Popconfirm>
-                )}
-                <span className="muted" style={{ fontSize: 12 }}>
-                  仅 PNG／JPG／WebP，≤512KB，建议正方形；非正方形居中裁切；兼作浏览器标签页图标。不收 SVG。
-                </span>
+                <div className="logo-aside">
+                  <span className="muted">仅 PNG／JPG／WebP，≤512KB，建议正方形；非正方形居中裁切；兼作浏览器标签页图标。不收 SVG。</span>
+                  {logoUrl(branding) && (
+                    <Popconfirm title="删除 logo，恢复系统名称首字？" okText="删除" cancelText="取消" onConfirm={deleteLogo}>
+                      <Button size="small" danger>
+                        删除 logo
+                      </Button>
+                    </Popconfirm>
+                  )}
+                </div>
               </div>
-            </div>
-            {logoError && <Alert type="error" message={logoError} style={{ marginTop: 8, maxWidth: 520 }} data-testid="logo-error" />}
+              {logoError && <Alert type="error" message={logoError} style={{ marginTop: 8 }} data-testid="logo-error" />}
+            </Form.Item>
+            <Form.Item label="副标题（可空）">
+              <InlineText
+                label="副标题（可空）"
+                canEdit={settings.canEdit}
+                value={settings.subtitle}
+                maxLength={LIMITS.subtitle}
+                showCount
+                onSave={(v) => patch({ subtitle: v })}
+              />
+            </Form.Item>
+            <Form.Item label="登录页提示语（可空）">
+              <InlineText
+                label="登录页提示语（可空）"
+                canEdit={settings.canEdit}
+                value={settings.loginHint}
+                maxLength={LIMITS.loginHint}
+                showCount
+                onSave={(v) => patch({ loginHint: v })}
+              />
+            </Form.Item>
+            <Form.Item
+              label="访问地址（可空）"
+              extra="http:// 或 https:// 开头的完整地址，如 http://203.0.113.10"
+              style={{ marginBottom: 0 }}
+            >
+              <InlineText
+                label="访问地址（可空）"
+                canEdit={settings.canEdit}
+                value={settings.baseUrl}
+                maxLength={254}
+                placeholder="http://"
+                validate={(v) => (!v || /^https?:\/\/\S+$/.test(v) ? null : "访问地址须以 http:// 或 https:// 开头")}
+                onSave={(v) => patch({ baseUrl: v })}
+              />
+            </Form.Item>
           </Form>
         ) : !error ? (
           <Spin />
@@ -764,23 +807,24 @@ function NotificationsSection({ me }: { me: CurrentUser }) {
               </span>
             </Form>
 
-            <div className="property" style={{ marginTop: 20, alignItems: "flex-start" }} data-testid="test-mail">
-              <label>测试邮件</label>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <Radio.Group value={target} onChange={(e) => setTarget(e.target.value)}>
-                  <Radio value="me">发到我绑定的邮箱（{me.email}）</Radio>
-                  <Radio value="custom">发到其他邮箱</Radio>
-                </Radio.Group>
-                <div style={{ display: "flex", gap: 8 }}>
-                  {target === "custom" && (
-                    <Input style={{ width: 280 }} placeholder="收件地址" value={address} onChange={(e) => setAddress(e.target.value)} />
-                  )}
-                  <Button size="small" loading={sending} disabled={!settings.configured || (target === "custom" && !address)} onClick={sendTest}>
-                    发送测试邮件
-                  </Button>
+            <Form layout="vertical" style={{ marginTop: 20, maxWidth: 560 }}>
+              <Form.Item label="测试邮件" style={{ marginBottom: 0 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }} data-testid="test-mail">
+                  <Radio.Group value={target} onChange={(e) => setTarget(e.target.value)}>
+                    <Radio value="me">发到我绑定的邮箱（{me.email}）</Radio>
+                    <Radio value="custom">发到其他邮箱</Radio>
+                  </Radio.Group>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {target === "custom" && (
+                      <Input style={{ width: 280 }} placeholder="收件地址" value={address} onChange={(e) => setAddress(e.target.value)} />
+                    )}
+                    <Button size="small" loading={sending} disabled={!settings.configured || (target === "custom" && !address)} onClick={sendTest}>
+                      发送测试邮件
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            </div>
+              </Form.Item>
+            </Form>
 
             <h3 style={{ fontSize: 14, margin: "20px 0 8px" }}>邮件通知</h3>
             <div data-testid="notify-switches" style={{ display: "grid", gap: 8, maxWidth: 560 }}>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Alert, Button, Form, Input, Modal, Select, Table } from "antd";
+import PersonPicker, { type PickerPerson } from "./PersonPicker";
 import dayjs, { type Dayjs } from "dayjs";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
@@ -104,10 +105,7 @@ export default function ProjectsPage({
     }
   };
 
-  const ownerOptions = users.map((u) => ({
-    value: u.id,
-    label: `${u.displayName}（${u.username}）`,
-  }));
+  const ownerPeople = users.map((u) => ({ userId: u.id, displayName: u.displayName, username: u.username }));
 
   // 搜索与筛选只作用于展示，不改变服务端返回的事实。
   // 「我参与的」排在前面：公开项目对全体登录用户可见，不先排一下会把个人列表淹掉（#111）。
@@ -270,12 +268,7 @@ export default function ProjectsPage({
             <Input maxLength={100} autoFocus placeholder="不超过 100 字" />
           </Form.Item>
           <Form.Item name="ownerId" label="项目负责人" rules={[{ required: true, message: "请选择项目负责人" }]}>
-            <Select
-              options={ownerOptions}
-              showSearch
-              optionFilterProp="label"
-              placeholder="选择负责人"
-            />
+            <OwnerField people={ownerPeople} />
           </Form.Item>
           <Form.Item name="stage" label="阶段（选填）">
             <Input maxLength={50} placeholder="业务里程碑，如：联合联调阶段" />
@@ -286,5 +279,27 @@ export default function ProjectsPage({
         </Form>
       </Modal>
     </PlainShell>
+  );
+}
+
+// OwnerField 把人员选择组件接进 antd Form（value／onChange 由 Form.Item 注入；#217）。
+function OwnerField({
+  people,
+  value,
+  onChange,
+}: {
+  people: PickerPerson[];
+  value?: number;
+  onChange?: (v: number) => void;
+}) {
+  return (
+    <PersonPicker
+      people={people}
+      value={value === undefined ? [] : [value]}
+      multiple={false}
+      size="middle"
+      placeholder="选择负责人"
+      onSave={(ids) => onChange?.(ids[0])}
+    />
   );
 }

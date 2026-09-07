@@ -47,7 +47,7 @@ func (s *Server) GetSystemSettings(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, toSystemSettings(st))
+	writeJSON(w, http.StatusOK, toSystemSettings(st, domain.CanEditSystemSettings(currentUser(r).IsSystemAdmin)))
 }
 
 // UpdateSystemSettings 修改基本信息（仅系统管理员，#210）：规则在 domain，写操作由装饰器进系统级审计。
@@ -74,13 +74,13 @@ func (s *Server) UpdateSystemSettings(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, toSystemSettings(st))
+	writeJSON(w, http.StatusOK, toSystemSettings(st, domain.CanEditSystemSettings(currentUser(r).IsSystemAdmin)))
 }
 
-func toSystemSettings(st store.SystemSetting) SystemSettings {
+func toSystemSettings(st store.SystemSetting, canEdit bool) SystemSettings {
 	out := SystemSettings{
 		SystemName: st.SystemName, Subtitle: st.Subtitle, LoginHint: st.LoginHint, BaseUrl: st.BaseUrl,
-		UpdatedAt: st.UpdatedAt.Time,
+		UpdatedAt: st.UpdatedAt.Time, CanEdit: canEdit,
 	}
 	if st.LogoKey != "" {
 		v := int(st.LogoVersion)
@@ -128,7 +128,7 @@ func (s *Server) UploadSystemLogo(w http.ResponseWriter, r *http.Request) {
 	if prev.LogoKey != "" && prev.LogoKey != key {
 		s.removeObject(r.Context(), prev.LogoKey)
 	}
-	writeJSON(w, http.StatusOK, toSystemSettings(st))
+	writeJSON(w, http.StatusOK, toSystemSettings(st, domain.CanEditSystemSettings(currentUser(r).IsSystemAdmin)))
 }
 
 // DeleteSystemLogo 删除 logo 恢复默认首字（#211）。
@@ -149,7 +149,7 @@ func (s *Server) DeleteSystemLogo(w http.ResponseWriter, r *http.Request) {
 	if prev.LogoKey != "" {
 		s.removeObject(r.Context(), prev.LogoKey)
 	}
-	writeJSON(w, http.StatusOK, toSystemSettings(st))
+	writeJSON(w, http.StatusOK, toSystemSettings(st, domain.CanEditSystemSettings(currentUser(r).IsSystemAdmin)))
 }
 
 // GetBrandingLogo 出图（免登录，#211）：经后端流式读取，不给对象存储直链（兼容 MinIO 不对外暴露）；

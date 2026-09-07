@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Alert, Button, Dropdown, Input, InputNumber, Modal, Select, Spin, message } from "antd";
+import { Alert, Button, Dropdown, Form, Modal, Select, Spin, message } from "antd";
 import type { MenuProps } from "antd";
-import dayjs, { type Dayjs } from "dayjs";
+import PersonPicker from "./PersonPicker";
+import dayjs from "dayjs";
 import DateRangeField from "./DateRangeField";
+import { InlineField, InlineNumber, InlineSelect, InlineText, useSaveQueue } from "./InlineField";
+import SettingsNav from "./SettingsNav";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import ProjectShell from "./ProjectShell";
@@ -36,31 +39,86 @@ const PROJECT_VISIBILITY_LABEL: Record<ProjectVisibility, string> = {
   public: "公开项目",
 };
 
-// 项目基础信息表单的本地草稿（§7.9 项目设置首项）。
-type BasicDraft = {
+// 项目基础信息逐字段保存的补丁（#219）：与 PUT /projects/{id} 的 body 同字段，其余取当前值拼整表。
+type ProjectPatch = Partial<{
   name: string;
-  ownerId?: number;
+  ownerId: number;
   status: ProjectStatus;
   stage: string;
   visibility: ProjectVisibility;
-  plan?: [Dayjs | null, Dayjs | null];
-};
+  plannedStartDate: string;
+  plannedEndDate: string;
+}>;
 
-function toBasicDraft(p: Project): BasicDraft {
-  return {
-    name: p.name,
-    ownerId: p.ownerId,
-    status: p.status,
-    stage: p.stage ?? "",
-    visibility: p.visibility,
-    plan:
-      p.plannedStartDate || p.plannedEndDate
-        ? [
-            p.plannedStartDate ? dayjs(p.plannedStartDate) : null,
-            p.plannedEndDate ? dayjs(p.plannedEndDate) : null,
-          ]
-        : undefined,
-  };
+// 计划周期（#219）：进入编辑态自动展开日期面板，选完即存；面板关闭而未选则退出编辑态。
+// RangePicker 允许半空时，会在面板关闭之后才把只选了一端的结果当 onChange 抛出，
+// 所以关闭后延迟一拍再判断是否退出，避免吞掉这次改动。
+function PlanField({
+  project,
+  onSave,
+}: {
+  project: Project;
+  onSave: (patch: ProjectPatch) => Promise<string | null>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // 请求期间日期区间置为 disabled，同 InlineSelect：面板收起后控件仍显示旧区间，不禁用会被再次打开。
+  const [saving, setSaving] = useState(false);
+  const pickedRef = useRef(false);
+  const display =
+    project.plannedStartDate || project.plannedEndDate
+      ? `${project.plannedStartDate ?? ""} — ${project.plannedEndDate ?? ""}`
+      : "";
+  return (
+    <InlineField
+      label="计划周期"
+      canEdit={project.canEdit}
+      value={display}
+      editing={editing}
+      onBeginEdit={() => {
+        pickedRef.current = false;
+        setError(null);
+        setOpen(true);
+        setEditing(true);
+      }}
+    >
+      <DateRangeField
+        allowEmpty
+        autoFocus
+        disabled={saving}
+        open={open}
+        value={[
+          project.plannedStartDate ? dayjs(project.plannedStartDate) : null,
+          project.plannedEndDate ? dayjs(project.plannedEndDate) : null,
+        ]}
+        aria-label="计划周期"
+        onOpenChange={(o) => {
+          setOpen(o);
+          if (o) pickedRef.current = false;
+          else
+            setTimeout(() => {
+              if (!pickedRef.current) setEditing(false);
+            }, 80);
+        }}
+        onChange={async (v) => {
+          pickedRef.current = true;
+          const start = v?.[0]?.format("YYYY-MM-DD");
+          const end = v?.[1]?.format("YYYY-MM-DD");
+          if (start === project.plannedStartDate && end === project.plannedEndDate) {
+            setEditing(false);
+            return;
+          }
+          setSaving(true);
+          const err = await onSave({ plannedStartDate: start, plannedEndDate: end });
+          setSaving(false);
+          if (err) setError(err);
+          else setEditing(false);
+        }}
+      />
+      {error && <div className="inline-field-error">{error}</div>}
+    </InlineField>
+  );
 }
 
 // 候选项文案：角色下拉要列出全部取值，此时没有对应成员可取派生字段，只能在前端枚举。
@@ -137,14 +195,11 @@ export default function ProjectSettingsPage({
   const [tab, setTab] = useState<
     "basic" | "members" | "permissions" | "rules" | "audit" | "imports"
   >("basic");
-  // 项目基础信息（§7.9 首项）：与项目列表页的「编辑项目」弹窗复用同一个 PUT /projects/{id}。
-  const [basic, setBasic] = useState<BasicDraft | null>(null);
-  const [savingBasic, setSavingBasic] = useState(false);
   // 导入记录（§7.9、AC-68）：每次表格导入的操作人、时间、文件名、影响计数与结果，只读。
   const [importRecords, setImportRecords] = useState<ImportRecord[]>([]);
   // 操作审计（§10.4）：由后端写路径装饰器统一记录，这里只读展示。
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
-  const [project, setProject] = useState<Project | null>(null);
+  const [project, setProjectState] = useState<Project | null>(null);
   const [members, setMembers] = useState<ProjectMember[]>([]);
   const [users, setUsers] = useState<UserSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -156,9 +211,24 @@ export default function ProjectSettingsPage({
   const [skipped, setSkipped] = useState<SkippedMember[]>([]);
   const [addRole, setAddRole] = useState<MemberRole>("member");
   const [saving, setSaving] = useState(false);
-  const [settings, setSettings] = useState<ProjectSettings | null>(null);
-  const [rules, setRules] = useState<ProjectSettings | null>(null);
-  const [savingRules, setSavingRules] = useState(false);
+  const [settings, setSettingsState] = useState<ProjectSettings | null>(null);
+  // #219 逐字段保存串行化：最新对象走 ref，排队中的保存读前一次保存后的值而不是闭包旧快照。
+  const latestProject = useRef<Project | null>(null);
+  const latestRules = useRef<ProjectSettings | null>(null);
+  const setProject = (p: Project) => {
+    latestProject.current = p;
+    setProjectState(p);
+  };
+  const setSettings = (s: ProjectSettings | null) => {
+    latestRules.current = s;
+    setSettingsState(s);
+  };
+  const enqueue = useSaveQueue();
+  // 负责人 PersonPicker 是受控的，PUT 返回前仍显示旧负责人；保存中禁用，避免再开再选被「未变化」吞掉。
+  const [ownerSaving, setOwnerSaving] = useState(false);
+  // 排队中的保存要绑定发起时的项目：路由切到别的项目后 load() 会用新项目覆盖 ref，
+  // 迟到的保存不能拿新项目的字段去 PUT 旧项目，响应也不能写回（PR #220 review）。
+  const staleFor = (forId: number) => latestProject.current?.id !== forId;
 
   const load = useCallback(async () => {
     const [projectRes, membersRes, usersRes, settingsRes, auditRes, importRes] = await Promise.all([
@@ -182,11 +252,9 @@ export default function ProjectSettingsPage({
       return;
     }
     setProject(projectRes.data);
-    setBasic(toBasicDraft(projectRes.data));
     setMembers(membersRes.data ?? []);
     setUsers(usersRes.data ?? []);
     setSettings(settingsRes.data ?? null);
-    setRules(settingsRes.data ?? null);
     setAuditLogs(auditRes.data ?? []);
     setImportRecords(importRes.data ?? []);
     setLoading(false);
@@ -252,73 +320,55 @@ export default function ProjectSettingsPage({
     }
   };
 
-  const saveBasic = async () => {
-    if (!basic || !basic.ownerId) return;
-    setSavingBasic(true);
-    setError(null);
-    const res = await client.PUT("/projects/{projectId}", {
-      params: { path: { projectId } },
-      body: {
-        name: basic.name.trim(),
-        ownerId: basic.ownerId,
-        status: basic.status,
-        stage: basic.stage.trim() || undefined,
-        visibility: basic.visibility,
-        plannedStartDate: basic.plan?.[0]?.format("YYYY-MM-DD"),
-        plannedEndDate: basic.plan?.[1]?.format("YYYY-MM-DD"),
-      },
-    });
-    setSavingBasic(false);
-    if (res.data) {
-      setProject(res.data);
-      setBasic(toBasicDraft(res.data));
-    } else {
-      setError(res.error?.message ?? "保存项目基础信息失败");
-    }
-  };
-
-  const saveRules = async () => {
-    if (!rules) return;
-    setSavingRules(true);
-    setError(null);
-    const res = await client.PUT("/projects/{projectId}/settings", {
-      params: { path: { projectId } },
-      body: {
-        approvalTimeoutDays: rules.approvalTimeoutDays,
-        dueSoonDays: rules.dueSoonDays,
-        remindDailyLimit: rules.remindDailyLimit,
-      },
-    });
-    setSavingRules(false);
-    if (res.data) {
-      setSettings(res.data);
-      setRules(res.data);
-    } else {
-      setError(res.error?.message ?? "保存规则设置失败");
-    }
-  };
-
-  // 与规则设置同一套「改动过才可保存」口径。
-  const basicDirty =
-    !!basic &&
-    !!project &&
-    JSON.stringify({
-      ...basic,
-      plan: basic.plan?.map((d) => d?.format("YYYY-MM-DD") ?? null),
-    }) !==
-      JSON.stringify({
-        ...toBasicDraft(project),
-        plan: toBasicDraft(project).plan?.map((d) => d?.format("YYYY-MM-DD") ?? null),
+  // #219：项目基础信息逐字段保存——用当前值拼完整 body 发整表 PUT（与项目列表页「编辑项目」同一接口）；
+  // 返回错误文案交给字段就地提示，失败留在编辑态。
+  const patchProject = (patch: ProjectPatch): Promise<string | null> =>
+    enqueue(async () => {
+      const cur = latestProject.current;
+      if (!cur) return "项目尚未加载";
+      if (staleFor(projectId)) return "项目已切换，本次修改未保存";
+      const res = await client.PUT("/projects/{projectId}", {
+        params: { path: { projectId } },
+        body: {
+          name: cur.name,
+          ownerId: cur.ownerId,
+          status: cur.status,
+          stage: cur.stage || undefined,
+          visibility: cur.visibility,
+          plannedStartDate: cur.plannedStartDate || undefined,
+          plannedEndDate: cur.plannedEndDate || undefined,
+          ...patch,
+        },
       });
+      if (!res.data) return res.error?.message ?? "保存项目基础信息失败";
+      if (!staleFor(projectId)) setProject(res.data);
+      return null;
+    });
 
-  const rulesDirty =
-    !!rules &&
-    !!settings &&
-    RULE_FIELDS.some((f) => rules[f.key] !== settings[f.key]);
+  // #219：规则设置逐字段保存，同上。
+  const patchRules = (key: (typeof RULE_FIELDS)[number]["key"], value: number): Promise<string | null> =>
+    enqueue(async () => {
+      const cur = latestRules.current;
+      if (!cur) return "规则尚未加载";
+      if (staleFor(projectId)) return "项目已切换，本次修改未保存";
+      const res = await client.PUT("/projects/{projectId}/settings", {
+        params: { path: { projectId } },
+        body: {
+          approvalTimeoutDays: cur.approvalTimeoutDays,
+          dueSoonDays: cur.dueSoonDays,
+          remindDailyLimit: cur.remindDailyLimit,
+          [key]: value,
+        },
+      });
+      if (!res.data) return res.error?.message ?? "保存规则设置失败";
+      if (!staleFor(projectId)) setSettings(res.data);
+      return null;
+    });
 
-  const candidateOptions = users
-    .filter((u) => !members.some((m) => m.userId === u.id))
-    .map((u) => ({ value: u.id, label: `${u.displayName}（${u.username}）` }));
+  // #217：负责人与邀请都走人员选择组件；邀请候选剔除已是成员的人。
+  // 负责人触发区显示后端派生的 ownerName：负责人账号被停用后不在 /users 里，按 id 反查会显示成占位符。
+  const userPeople = users.map((u) => ({ userId: u.id, displayName: u.displayName, username: u.username }));
+  const candidatePeople = userPeople.filter((u) => !members.some((m) => m.userId === u.userId));
 
   // 两区各自排序：成员管理区按 管理员 → 项目成员，查看项目区只有访客（#108）。
   const workingMembers = members
@@ -384,167 +434,125 @@ export default function ProjectSettingsPage({
           {/* settings-layout：左侧分节导航、右侧内容卡。原型的「进度权重」一节已随
               AC-63 裁决取消（KR 汇总固定任务等权）；导入记录另见 #68。 */}
           <div className="settings-layout">
-            <aside className="settings-nav">
-              <button
-                type="button"
-                className={tab === "basic" ? "active" : ""}
-                onClick={() => setTab("basic")}
-              >
-                项目基础信息
-              </button>
-              <button
-                type="button"
-                className={tab === "members" ? "active" : ""}
-                onClick={() => setTab("members")}
-              >
-                成员与职责
-              </button>
-              <button
-                type="button"
-                className={tab === "permissions" ? "active" : ""}
-                onClick={() => setTab("permissions")}
-              >
-                系统权限
-              </button>
-              <button
-                type="button"
-                className={tab === "rules" ? "active" : ""}
-                onClick={() => setTab("rules")}
-              >
-                规则设置
-              </button>
-              {project?.canEdit && (
-                <button
-                  type="button"
-                  className={tab === "imports" ? "active" : ""}
-                  onClick={() => setTab("imports")}
-                >
-                  导入记录
-                </button>
-              )}
-              {project?.canEdit && (
-                <button
-                  type="button"
-                  className={tab === "audit" ? "active" : ""}
-                  onClick={() => setTab("audit")}
-                >
-                  操作审计
-                </button>
-              )}
-            </aside>
+            {/* #216：分组分节导航；导入记录与操作审计仅 canEdit 可见，无权限时「记录」组整组不渲染。 */}
+            <SettingsNav
+              active={tab}
+              onSelect={setTab}
+              groups={[
+                {
+                  title: "项目配置",
+                  items: [
+                    { key: "basic", label: "项目基础信息" },
+                    { key: "rules", label: "规则设置" },
+                  ],
+                },
+                {
+                  title: "成员与权限",
+                  items: [
+                    { key: "members", label: "成员与职责" },
+                    { key: "permissions", label: "系统权限" },
+                  ],
+                },
+                {
+                  title: "记录",
+                  items: project?.canEdit
+                    ? [
+                        { key: "imports", label: "导入记录" },
+                        { key: "audit", label: "操作审计" },
+                      ]
+                    : [],
+                },
+              ]}
+            />
             <section className="settings-panel">
               {tab === "basic" ? (
                 <>
                   <div className="settings-panel-head">
                     <div>
                       <h2>项目基础信息</h2>
-                      <span className="muted">
-                        项目名称、负责人、状态、阶段与计划周期（§7.9 项目设置首项）。
-                        {project && !project.canEdit && "（你没有配置权限，以下为只读展示）"}
-                      </span>
+                      <span className="muted">项目名称、负责人、状态、阶段与计划周期（§7.9 项目设置首项）。</span>
                     </div>
-                    {project?.canEdit && (
-                      <Button
-                        size="small"
-                        type="primary"
-                        loading={savingBasic}
-                        disabled={!basicDirty}
-                        onClick={saveBasic}
-                      >
-                        保存
-                      </Button>
-                    )}
                   </div>
-                  {basic && (
+                  {project && (
                     <div className="settings-panel-body">
-                      <div className="property">
-                        <label>项目名称</label>
-                        <Input
-                          maxLength={100}
-                          value={basic.name}
-                          disabled={!project?.canEdit}
-                          onChange={(e) => setBasic({ ...basic, name: e.target.value })}
-                          style={{ width: 280, flex: "none" }}
-                          aria-label="项目名称"
-                        />
-                      </div>
-                      <div className="property">
-                        <label>项目负责人</label>
-                        <Select
-                          value={basic.ownerId}
-                          disabled={!project?.canEdit}
-                          showSearch
-                          optionFilterProp="label"
-                          options={users.map((u) => ({
-                            value: u.id,
-                            label: `${u.displayName}（${u.username}）`,
-                          }))}
-                          onChange={(v) => setBasic({ ...basic, ownerId: v })}
-                          style={{ width: 280, flex: "none" }}
-                          aria-label="项目负责人"
-                        />
-                      </div>
-                      <div className="property">
-                        <label>
-                          项目状态
-                          <span className="muted" style={{ display: "block" }}>
-                            与自由文本的「项目阶段」正交，由成员手工设置
-                          </span>
-                        </label>
-                        <Select
-                          value={basic.status}
-                          disabled={!project?.canEdit}
-                          options={(Object.keys(PROJECT_STATUS_LABEL) as ProjectStatus[]).map(
-                            (v) => ({ value: v, label: PROJECT_STATUS_LABEL[v] }),
-                          )}
-                          onChange={(v) => setBasic({ ...basic, status: v })}
-                          style={{ width: 160, flex: "none" }}
-                          aria-label="项目状态"
-                        />
-                      </div>
-                      <div className="property">
-                        <label>项目阶段</label>
-                        <Input
-                          maxLength={50}
-                          placeholder="业务里程碑，如：联合联调阶段（选填）"
-                          value={basic.stage}
-                          disabled={!project?.canEdit}
-                          onChange={(e) => setBasic({ ...basic, stage: e.target.value })}
-                          style={{ width: 280, flex: "none" }}
-                          aria-label="项目阶段"
-                        />
-                      </div>
-                      <div className="property">
-                        <label>
-                          项目可见性
-                          <span className="muted" style={{ display: "block" }}>
-                            公开后系统内任何登录用户都能只读本项目并下载文件，但不能做任何写动作，
-                            也不会出现在成员列表与人员选择器里
-                          </span>
-                        </label>
-                        <Select
-                          value={basic.visibility}
-                          disabled={!project?.canEdit}
-                          options={(Object.keys(PROJECT_VISIBILITY_LABEL) as ProjectVisibility[]).map(
-                            (v) => ({ value: v, label: PROJECT_VISIBILITY_LABEL[v] }),
-                          )}
-                          onChange={(v) => setBasic({ ...basic, visibility: v })}
-                          style={{ width: 160, flex: "none" }}
-                          aria-label="项目可见性"
-                        />
-                      </div>
-                      <div className="property">
-                        <label>计划周期</label>
-                        <div style={{ width: 280, flex: "none" }}>
-                          <DateRangeField
-                            allowEmpty
-                            value={basic.plan}
-                            disabled={!project?.canEdit}
-                            onChange={(v) => setBasic({ ...basic, plan: v ?? undefined })}
-                            aria-label="计划周期"
+                      {/* #216 竖排「标签在上」布局；#219 任务概览同款：默认只显示值，有权限点击字段才出现控件，改完即存。
+                          key=projectId：路由切到别的项目时各字段的编辑态／草稿／错误随之重置，不把上个项目的草稿带过来。 */}
+                      <Form key={projectId} layout="vertical" requiredMark={false} className="settings-form">
+                        <Form.Item label="项目名称">
+                          <InlineText
+                            label="项目名称"
+                            canEdit={project.canEdit}
+                            value={project.name}
+                            maxLength={100}
+                            validate={(v) => (v ? null : "请输入项目名称")}
+                            onSave={(v) => patchProject({ name: v })}
                           />
-                        </div>
-                      </div>
+                        </Form.Item>
+                        <Form.Item label="项目负责人">
+                          {project.canEdit ? (
+                            <PersonPicker
+                              people={userPeople}
+                              value={[project.ownerId]}
+                              multiple={false}
+                              disabled={ownerSaving}
+                              placeholder="选择负责人"
+                              displayText={project.ownerName}
+                              ariaLabel="项目负责人"
+                              onSave={async (ids) => {
+                                if (ids[0] === undefined) return;
+                                setOwnerSaving(true);
+                                const err = await patchProject({ ownerId: ids[0] });
+                                setOwnerSaving(false);
+                                if (err) message.error(err);
+                              }}
+                            />
+                          ) : (
+                            <div className="settings-value" aria-label="项目负责人">
+                              {project.ownerName}
+                            </div>
+                          )}
+                        </Form.Item>
+                        <Form.Item label="项目状态" extra="与自由文本的「项目阶段」正交，由成员手工设置">
+                          <InlineSelect
+                            label="项目状态"
+                            canEdit={project.canEdit}
+                            value={project.status}
+                            display={project.statusLabel ?? PROJECT_STATUS_LABEL[project.status]}
+                            options={(Object.keys(PROJECT_STATUS_LABEL) as ProjectStatus[]).map(
+                              (v) => ({ value: v, label: PROJECT_STATUS_LABEL[v] }),
+                            )}
+                            onSave={(v) => patchProject({ status: v })}
+                          />
+                        </Form.Item>
+                        <Form.Item label="项目阶段">
+                          <InlineText
+                            label="项目阶段"
+                            canEdit={project.canEdit}
+                            value={project.stage ?? ""}
+                            maxLength={50}
+                            placeholder="业务里程碑，如：联合联调阶段（选填）"
+                            onSave={(v) => patchProject({ stage: v || undefined })}
+                          />
+                        </Form.Item>
+                        <Form.Item
+                          label="项目可见性"
+                          extra="公开后系统内任何登录用户都能只读本项目并下载文件，但不能做任何写动作，也不会出现在成员列表与人员选择器里"
+                        >
+                          <InlineSelect
+                            label="项目可见性"
+                            canEdit={project.canEdit}
+                            value={project.visibility}
+                            display={project.visibilityLabel}
+                            options={(Object.keys(PROJECT_VISIBILITY_LABEL) as ProjectVisibility[]).map(
+                              (v) => ({ value: v, label: PROJECT_VISIBILITY_LABEL[v] }),
+                            )}
+                            onSave={(v) => patchProject({ visibility: v })}
+                          />
+                        </Form.Item>
+                        <Form.Item label="计划周期" style={{ marginBottom: 0 }}>
+                          <PlanField project={project} onSave={patchProject} />
+                        </Form.Item>
+                      </Form>
                     </div>
                   )}
                 </>
@@ -657,48 +665,32 @@ export default function ProjectSettingsPage({
                   <div className="settings-panel-head">
                     <div>
                       <h2>规则设置</h2>
-                      <span className="muted">
-                        按项目生效，均有默认值；卡点派生、我的工作与一键提醒读同一份值。
-                        {settings && !settings.canEdit && "（你没有配置权限，以下为只读展示）"}
-                      </span>
+                      <span className="muted">按项目生效，均有默认值；卡点派生、我的工作与一键提醒读同一份值。</span>
                     </div>
-                    {settings?.canEdit && (
-                      <Button
-                        size="small"
-                        type="primary"
-                        loading={savingRules}
-                        disabled={!rulesDirty}
-                        onClick={saveRules}
-                      >
-                        保存
-                      </Button>
-                    )}
                   </div>
                   <div className="settings-panel-body">
-                    {rules &&
-                      RULE_FIELDS.map((f) => (
-                        <div key={f.key} className="property">
-                          <label>
-                            {f.label}
-                            <span className="muted" style={{ display: "block" }}>
-                              {f.note}
-                            </span>
-                          </label>
-                          <InputNumber
-                            min={f.min}
-                            max={f.max}
-                            precision={0}
-                            value={rules[f.key]}
-                            disabled={!settings?.canEdit}
-                            onChange={(v) =>
-                              setRules({ ...rules, [f.key]: v ?? settings?.[f.key] ?? f.min })
-                            }
-                            addonAfter={f.suffix}
-                            style={{ width: 160, flex: "none" }}
-                            aria-label={f.label}
-                          />
-                        </div>
-                      ))}
+                    {settings && (
+                      <Form key={projectId} layout="vertical" requiredMark={false} className="settings-form">
+                        {RULE_FIELDS.map((f, i) => (
+                          <Form.Item
+                            key={f.key}
+                            label={f.label}
+                            extra={f.note}
+                            style={i === RULE_FIELDS.length - 1 ? { marginBottom: 0 } : undefined}
+                          >
+                            <InlineNumber
+                              label={f.label}
+                              canEdit={settings.canEdit}
+                              value={settings[f.key]}
+                              min={f.min}
+                              max={f.max}
+                              suffix={f.suffix}
+                              onSave={(v) => patchRules(f.key, v)}
+                            />
+                          </Form.Item>
+                        ))}
+                      </Form>
+                    )}
                   </div>
                 </>
               ) : tab === "permissions" ? (
@@ -824,17 +816,12 @@ export default function ProjectSettingsPage({
             <div className="form-stack">
               <label>
                 <span>选择用户（可多选）</span>
-                <Select
-                  mode="multiple"
-                  style={{ width: "100%" }}
-                  options={candidateOptions}
+                <PersonPicker
+                  people={candidatePeople}
                   value={addUserIds}
-                  onChange={setAddUserIds}
-                  showSearch
-                  optionFilterProp="label"
-                  placeholder="搜索姓名或用户名"
-                  notFoundContent="没有可加入的用户"
-                  maxTagCount="responsive"
+                  size="middle"
+                  placeholder="选择用户"
+                  onSave={setAddUserIds}
                 />
               </label>
               <label>
