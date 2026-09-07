@@ -160,8 +160,9 @@ function UsersSection({ me }: { me: CurrentUser }) {
       message.error(res.error?.message ?? "操作失败");
     }
   };
+  // #215：重置密码会清掉目标用户的全部会话，对自己操作会当场失去登录态却停在这页；改自己的密码走个人中心。
   const rowMenu = (u: SystemUser): MenuProps["items"] => [
-    { key: "reset", label: "重置密码", onClick: () => setResetTarget(u) },
+    { key: "reset", label: "重置密码", disabled: u.id === me.id, onClick: () => setResetTarget(u) },
     { key: "profile", label: "修改显示名与邮箱", onClick: () => setProfileTarget(u) },
     { type: "divider" },
     u.isSystemAdmin
