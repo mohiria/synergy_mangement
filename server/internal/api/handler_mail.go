@@ -64,26 +64,41 @@ func (s *Server) UpdateMailSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "invalid_mail_settings", Message: err.Error()})
 		return
 	}
+	var enc string
 	if req.Password != nil && *req.Password != "" {
 		if len(s.secretKey) == 0 {
 			writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "secret_key_missing", Message: secrets.ErrKeyMissing.Error()})
 			return
 		}
-		enc, err := secrets.Encrypt(s.secretKey, []byte(*req.Password))
-		if err != nil {
-			writeInternalError(w, r, err)
-			return
-		}
-		if err := s.q.SetMailPassword(r.Context(), enc); err != nil {
+		if enc, err = secrets.Encrypt(s.secretKey, []byte(*req.Password)); err != nil {
 			writeInternalError(w, r, err)
 			return
 		}
 	}
-	ms, err := s.q.UpdateMailSettings(r.Context(), store.UpdateMailSettingsParams{
+	// #215：密码与连接参数同一事务落库，两位管理员并发保存也不会拼出「甲的服务器 + 乙的密码」，
+	// 后半步失败也不会只留下换过的密码。
+	tx, err := s.db.Begin(r.Context())
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	qtx := s.q.WithTx(tx)
+	if enc != "" {
+		if err := qtx.SetMailPassword(r.Context(), enc); err != nil {
+			writeInternalError(w, r, err)
+			return
+		}
+	}
+	ms, err := qtx.UpdateMailSettings(r.Context(), store.UpdateMailSettingsParams{
 		Host: in.Host, Port: int32(in.Port), Encryption: in.Encryption, Username: in.Username,
 		FromName: in.FromName, FromAddress: in.FromAddress,
 	})
 	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
