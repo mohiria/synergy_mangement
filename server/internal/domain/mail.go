@@ -37,6 +37,7 @@ var (
 	ErrMailFromNameTooLong   = errors.New("发件人显示名不能超过 50 字")
 	ErrMailNotConfigured     = errors.New("邮件通道尚未配置")
 	ErrMailTestTargetInvalid = errors.New("测试邮件收件地址格式不正确")
+	ErrMailAuthRequiresTLS   = errors.New("填写认证账号时加密方式不能为「无」")
 )
 
 // MailSettingsInput 通道配置（不含密码；密码单独处理，永不回显）。
@@ -70,10 +71,19 @@ func ValidateMailSettings(in MailSettingsInput) (MailSettingsInput, error) {
 	if err := ValidateEmail(out.FromAddress); err != nil {
 		return out, ErrMailFromInvalid
 	}
+	// #215：net/smtp 的 PlainAuth 拒绝在非 TLS 连接上发凭据（本机除外），配置阶段就拦下，免得队列反复失败。
+	if out.Encryption == MailEncryptionNone && out.Username != "" && !smtpLocalhost(out.Host) {
+		return out, ErrMailAuthRequiresTLS
+	}
 	if utf8.RuneCountInString(out.FromName) > 50 {
 		return out, ErrMailFromNameTooLong
 	}
 	return out, nil
+}
+
+// smtpLocalhost 与 net/smtp 允许明文 PLAIN 认证的本机判定一致。
+func smtpLocalhost(host string) bool {
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
 // MailChannelConfigured 主机与发件人地址齐全即视为已配置：找回密码入口与邮件通知据此判定。

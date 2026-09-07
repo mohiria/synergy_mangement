@@ -23,6 +23,10 @@ func TestValidateMailSettings(t *testing.T) {
 		{"端口 65536", MailSettingsInput{Host: "h", Port: 65536, Encryption: MailEncryptionNone, FromAddress: "a@b.co"}, ErrMailPortInvalid},
 		{"加密方式非法", MailSettingsInput{Host: "h", Port: 25, Encryption: "tls", FromAddress: "a@b.co"}, ErrMailEncryptionInvalid},
 		{"发件人地址非法", MailSettingsInput{Host: "h", Port: 25, Encryption: MailEncryptionNone, FromAddress: "nope"}, ErrMailFromInvalid},
+		// #215：Go smtp.PlainAuth 拒绝在非 TLS 连接上发凭据（本机除外），配置阶段就拦下。
+		{"无加密带认证账号拒绝", MailSettingsInput{Host: "smtp.example.com", Port: 25, Encryption: MailEncryptionNone, Username: "bot", FromAddress: "a@b.co"}, ErrMailAuthRequiresTLS},
+		{"无加密带认证账号但主机为本机合法", MailSettingsInput{Host: "localhost", Port: 25, Encryption: MailEncryptionNone, Username: "bot", FromAddress: "a@b.co"}, nil},
+		{"无加密带认证账号但主机为 127.0.0.1 合法", MailSettingsInput{Host: "127.0.0.1", Port: 25, Encryption: MailEncryptionNone, Username: "bot", FromAddress: "a@b.co"}, nil},
 		{"显示名过长", MailSettingsInput{Host: "h", Port: 25, Encryption: MailEncryptionNone, FromAddress: "a@b.co", FromName: strings.Repeat("名", 51)}, ErrMailFromNameTooLong},
 	}
 	for _, c := range cases {
