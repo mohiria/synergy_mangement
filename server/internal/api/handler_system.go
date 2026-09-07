@@ -162,12 +162,25 @@ func (s *Server) ResetSystemUserPassword(w http.ResponseWriter, r *http.Request,
 		writeInternalError(w, r, err)
 		return
 	}
-	u, err := s.q.ResetUserPassword(r.Context(), store.ResetUserPasswordParams{ID: userId, PasswordHash: hash})
+	// #215：改密与踢会话同一事务，避免密码已换但旧会话仍在线的半成品。
+	ctx := r.Context()
+	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
-	if _, err := s.q.DeleteUserSessions(r.Context(), userId); err != nil {
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := s.q.WithTx(tx)
+	u, err := qtx.ResetUserPassword(ctx, store.ResetUserPasswordParams{ID: userId, PasswordHash: hash})
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if _, err := qtx.DeleteUserSessions(ctx, userId); err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
