@@ -9,7 +9,7 @@ import type { components } from "./api/schema";
 import PlainShell from "./PlainShell";
 import PasswordInput from "./PasswordInput";
 import SettingsNav from "./SettingsNav";
-import { InlineText, useSaveQueue } from "./InlineField";
+import { InlineText } from "./InlineField";
 import { logoUrl, useBranding } from "./branding";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
@@ -519,6 +519,15 @@ function AuditSection() {
 // #219：任务概览同款——默认只显示值，canEdit 时点击字段才出现控件，改完即存；逐字段保存用当前值拼整表 PUT。
 const LIMITS = { systemName: 10, subtitle: 16, loginHint: 60 } as const;
 
+// 系统设置的保存队列放在模块级：失焦保存进行中切到别的分区再切回，BasicSection 会重挂载，
+// 新实例的 GET 必须排在未完成的 PUT 之后，否则读到保存前的值、下一次整体 PUT 会把先前修改回退（PR #220 review）。
+const systemSettingsQueue = { chain: Promise.resolve() as Promise<unknown> };
+const enqueueSystemSettings = <T,>(task: () => Promise<T>): Promise<T> => {
+  const run = systemSettingsQueue.chain.then(task, task);
+  systemSettingsQueue.chain = run.catch(() => undefined);
+  return run;
+};
+
 function BasicSection() {
   const { branding, reload } = useBranding();
   const [logoBusy, setLogoBusy] = useState(false);
@@ -564,17 +573,21 @@ function BasicSection() {
     latest.current = s;
     setSettingsState(s);
   };
-  const enqueue = useSaveQueue();
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    client.GET("/system/settings").then(({ data, error: err }) => {
+    let cancelled = false;
+    enqueueSystemSettings(() => client.GET("/system/settings")).then(({ data, error: err }) => {
+      if (cancelled) return;
       if (data) setSettings(data);
       else setError(err?.message ?? "加载失败");
     });
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const patch = (p: Partial<SystemSettingsInput>): Promise<string | null> =>
-    enqueue(async () => {
+    enqueueSystemSettings(async () => {
       const cur = latest.current;
       if (!cur) return "尚未加载";
       const res = await client.PUT("/system/settings", {
