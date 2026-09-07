@@ -138,7 +138,11 @@ export function InlineText({
           setDraft(e.target.value);
           if (error) setError(null);
         }}
-        onPressEnter={(e) => (e.target as HTMLInputElement).blur()}
+        onPressEnter={(e) => {
+          // 中日韩输入法用 Enter 确认候选词，组合中不能失焦提交（PR #220 review）。
+          if (e.nativeEvent.isComposing) return;
+          (e.target as HTMLInputElement).blur();
+        }}
         onBlur={commit}
         onKeyDown={(e) => {
           if (e.key === "Escape") {
@@ -291,7 +295,11 @@ export function InlineNumber({
           setDraft(v);
           if (error) setError(null);
         }}
-        onPressEnter={(e) => (e.target as HTMLInputElement).blur()}
+        onPressEnter={(e) => {
+          // 中日韩输入法用 Enter 确认候选词，组合中不能失焦提交（PR #220 review）。
+          if (e.nativeEvent.isComposing) return;
+          (e.target as HTMLInputElement).blur();
+        }}
         onBlur={commit}
         onKeyDown={(e) => {
           if (e.key === "Escape") {
