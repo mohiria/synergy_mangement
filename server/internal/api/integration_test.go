@@ -6745,7 +6745,8 @@ func TestUserEmailRequiredAndUnique(t *testing.T) {
 	if err := goose.DownTo(migDB, "../../migrations", 50); err != nil {
 		t.Fatalf("goose down: %v", err)
 	}
-	if _, err := migDB.Exec(`INSERT INTO users (username, display_name, password_hash) VALUES ('legacy', '存量用户', 'x')`); err != nil {
+	// #215：用户名大小写不同的存量账号，回填占位邮箱不能因 lower(email) 唯一索引而让迁移失败。
+	if _, err := migDB.Exec(`INSERT INTO users (username, display_name, password_hash) VALUES ('legacy', '存量用户', 'x'), ('Legacy', '存量用户 2', 'x')`); err != nil {
 		t.Fatalf("insert legacy: %v", err)
 	}
 	if err := goose.Up(migDB, "../../migrations"); err != nil {
@@ -6757,6 +6758,13 @@ func TestUserEmailRequiredAndUnique(t *testing.T) {
 	}
 	if legacy.Email != "legacy@local.invalid" {
 		t.Fatalf("存量用户应回填占位邮箱，得到 %q", legacy.Email)
+	}
+	legacy2, err := q.GetUserByUsername(context.Background(), "Legacy")
+	if err != nil {
+		t.Fatalf("Legacy: %v", err)
+	}
+	if strings.EqualFold(legacy2.Email, legacy.Email) || !strings.HasSuffix(legacy2.Email, "@local.invalid") {
+		t.Fatalf("冲突的存量用户应回填不同的占位邮箱，得到 %q", legacy2.Email)
 	}
 
 	// 重复邮箱（含大小写差异）被唯一索引拒绝。
