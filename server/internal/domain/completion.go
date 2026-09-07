@@ -60,7 +60,8 @@ func DecideCompletionRule(a Actor, t TaskFacts, approve bool, opinion string) (s
 	if t.Status != TaskInReview && !inResultUpdate {
 		return "", ErrCompletionNotPending
 	}
-	if !CanEditProject(a) {
+	// 系统管理员的隐式管理员身份不进审批链（#200；FinalReviewers 同口径，#215）。
+	if !CanEditProject(a) || a.SystemAdmin {
 		return "", ErrNotFinalReviewer
 	}
 	if approve {
