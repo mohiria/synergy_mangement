@@ -354,6 +354,7 @@ export default function ProjectSettingsPage({
     });
 
   // #217：负责人与邀请都走人员选择组件；邀请候选剔除已是成员的人。
+  // 负责人触发区显示后端派生的 ownerName：负责人账号被停用后不在 /users 里，按 id 反查会显示成占位符。
   const userPeople = users.map((u) => ({ userId: u.id, displayName: u.displayName, username: u.username }));
   const candidatePeople = userPeople.filter((u) => !members.some((m) => m.userId === u.userId));
 
@@ -481,6 +482,7 @@ export default function ProjectSettingsPage({
                               value={[project.ownerId]}
                               multiple={false}
                               placeholder="选择负责人"
+                              displayText={project.ownerName}
                               ariaLabel="项目负责人"
                               onSave={async (ids) => {
                                 if (ids[0] === undefined) return;
