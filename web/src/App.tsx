@@ -67,6 +67,8 @@ export default function App() {
       {/* #207：个人中心不挂项目；改显示名后由 App 更新当前用户，两套壳即时刷新。 */}
       <Route path="/me" element={<MePage user={user} onUserChange={setUser} onLogout={logout} />} />
       <Route path="/me/:section" element={<MePage user={user} onUserChange={setUser} onLogout={logout} />} />
+      {/* #215：邮件里的重置链接在已登录（含别的账号）的浏览器里也要能打开，不能被兜底路由吞掉。 */}
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

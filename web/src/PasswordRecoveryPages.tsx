@@ -103,7 +103,8 @@ export function ResetPasswordPage() {
               message="密码已重置"
               description={
                 <>
-                  请用新密码<Link to="/">登录</Link>。
+                  {/* 整页跳转让 App 重读登录态：本账号旧会话已失效会回到登录页（#215）。 */}
+                  请用新密码<a href="/">登录</a>。
                 </>
               }
             />
