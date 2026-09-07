@@ -1091,6 +1091,23 @@ body {
 .settings-panel-head h2 { margin: 0 0 4px; font-size: var(--type-title); font-weight: 650; }
 .settings-panel-head .muted { display: block; font-size: var(--type-aux); }
 .settings-panel-body { padding: 20px; }
+/* #218：系统设置 logo 预览框——64px 方形、悬停出「点击更换」遮罩；占位为系统名称首字。 */
+.logo-block { display: flex; align-items: flex-start; gap: 12px; }
+.logo-box {
+  position: relative; width: 64px; height: 64px; flex: none; padding: 0; overflow: hidden;
+  border: 1px solid var(--line); border-radius: var(--radius); background: #fff; cursor: pointer;
+  display: grid; place-items: center; font: inherit;
+}
+.logo-box:disabled { cursor: default; }
+.logo-box img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.logo-initial { width: 100%; height: 100%; display: grid; place-items: center; background: var(--navy); color: #fff; font-size: var(--type-title); font-weight: 600; }
+.logo-mask {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  background: rgba(23, 42, 73, .6); color: #fff; font-size: var(--type-aux);
+  opacity: 0; transition: opacity .15s;
+}
+.logo-box:hover .logo-mask, .logo-box:focus-visible .logo-mask, .logo-box:disabled .logo-mask { opacity: 1; }
+.logo-aside { display: grid; gap: 8px; justify-items: start; font-size: var(--type-aux); line-height: 1.6; padding-top: 2px; }
 /* #216 竖排表单：标签在上、字段在下，整表限宽 520px 防止输入框在宽屏拉满。 */
 .settings-form { max-width: 520px; }
 .settings-form .ant-form-item-extra { font-size: var(--type-aux); }

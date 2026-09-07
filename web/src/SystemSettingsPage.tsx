@@ -596,6 +596,28 @@ function BasicSection() {
             <Form.Item name="systemName" label="系统名称" rules={[{ required: true, message: "请输入系统名称" }]}>
               <Input maxLength={LIMITS.systemName} showCount />
             </Form.Item>
+            {/* #218：logo 紧跟系统名称，预览框点击即换；上传／删除接口与校验不变（#211）。 */}
+            <Form.Item label="logo">
+              <div className="logo-block" data-testid="logo-block">
+                <Upload accept="image/png,image/jpeg,image/webp" showUploadList={false} beforeUpload={(f) => uploadLogo(f)} disabled={logoBusy}>
+                  <button type="button" className="logo-box" aria-label="点击更换 logo" disabled={logoBusy}>
+                    {logoUrl(branding) ? <img src={logoUrl(branding)!} alt="" /> : <span className="logo-initial">{branding.systemName.slice(0, 1)}</span>}
+                    <span className="logo-mask">{logoBusy ? "上传中…" : "点击更换"}</span>
+                  </button>
+                </Upload>
+                <div className="logo-aside">
+                  <span className="muted">仅 PNG／JPG／WebP，≤512KB，建议正方形；非正方形居中裁切；兼作浏览器标签页图标。不收 SVG。</span>
+                  {logoUrl(branding) && (
+                    <Popconfirm title="删除 logo，恢复系统名称首字？" okText="删除" cancelText="取消" onConfirm={deleteLogo}>
+                      <Button size="small" danger>
+                        删除 logo
+                      </Button>
+                    </Popconfirm>
+                  )}
+                </div>
+              </div>
+              {logoError && <Alert type="error" message={logoError} style={{ marginTop: 8 }} data-testid="logo-error" />}
+            </Form.Item>
             <Form.Item name="subtitle" label="副标题（可空）">
               <Input maxLength={LIMITS.subtitle} showCount />
             </Form.Item>
@@ -608,30 +630,6 @@ function BasicSection() {
             <Button type="primary" htmlType="submit" loading={saving}>
               保存
             </Button>
-            <Form.Item
-              label="logo"
-              style={{ marginTop: 20, marginBottom: 0 }}
-              extra="仅 PNG／JPG／WebP，≤512KB，建议正方形；非正方形居中裁切；兼作浏览器标签页图标。不收 SVG。"
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }} data-testid="logo-block">
-                <span className="brand-mark" style={{ width: 40, height: 40 }}>
-                  {logoUrl(branding) ? <img src={logoUrl(branding)!} alt="" /> : branding.systemName.slice(0, 1)}
-                </span>
-                <Upload accept="image/png,image/jpeg,image/webp" showUploadList={false} beforeUpload={(f) => uploadLogo(f)}>
-                  <Button size="small" loading={logoBusy}>
-                    上传 logo
-                  </Button>
-                </Upload>
-                {logoUrl(branding) && (
-                  <Popconfirm title="删除 logo，恢复系统名称首字？" okText="删除" cancelText="取消" onConfirm={deleteLogo}>
-                    <Button size="small" danger>
-                      删除 logo
-                    </Button>
-                  </Popconfirm>
-                )}
-              </div>
-            </Form.Item>
-            {logoError && <Alert type="error" message={logoError} style={{ marginTop: 8 }} data-testid="logo-error" />}
           </Form>
         ) : !error ? (
           <Spin />

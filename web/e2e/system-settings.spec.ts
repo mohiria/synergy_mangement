@@ -201,6 +201,14 @@ test("上传 logo 后品牌位与 favicon 显示图片，SVG 被拒，删除后�
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==",
     "base64",
   );
+  // #218：logo 块紧跟「系统名称」之后（第二个表单项），悬停预览框出现「点击更换」。
+  await expect(page.locator(".ant-form-item").nth(1).locator('[data-testid="logo-block"]')).toBeVisible();
+  await expect(page.locator(".ant-form-item").nth(0)).toContainText("系统名称");
+  const mask = page.locator(".logo-box .logo-mask");
+  await expect(mask).toHaveCSS("opacity", "0");
+  await page.locator(".logo-box").hover();
+  await expect(mask).toHaveText("点击更换");
+  await expect(mask).toHaveCSS("opacity", "1");
   const fileInput = page.locator('[data-testid="logo-block"] input[type="file"]');
   await fileInput.setInputFiles({ name: "bad.svg", mimeType: "image/svg+xml", buffer: Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'/>") });
   await expect(page.locator('[data-testid="logo-error"]')).toContainText("仅支持 PNG、JPG、WebP");
