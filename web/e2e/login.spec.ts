@@ -63,10 +63,14 @@ test("找回密码：入口按邮件通道显示，链接可完成重置", async
   const adminPage = await admin.newPage();
   await login(adminPage);
   await adminPage.goto("/system/basic");
-  await adminPage.getByLabel("访问地址（可空）").fill("http://127.0.0.1:5173");
+  // #219：点击字段进入编辑态，回车即存，没有「保存」按钮。
+  const baseUrl = adminPage.getByLabel("访问地址（可空）");
+  await baseUrl.click();
+  await baseUrl.fill("http://127.0.0.1:5173");
   const saved = adminPage.waitForResponse((r) => r.url().includes("/system/settings") && r.request().method() === "PUT");
-  await adminPage.getByRole("button", { name: /保\s*存/ }).click();
+  await baseUrl.press("Enter");
   expect((await saved).ok()).toBe(true);
+  await expect(baseUrl).toHaveText("http://127.0.0.1:5173");
   await adminPage.goto("/system/notifications");
   await adminPage.getByLabel("SMTP 主机").fill("smtp.invalid");
   await adminPage.getByLabel("端口").fill("2525");

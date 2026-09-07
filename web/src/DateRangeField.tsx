@@ -11,12 +11,19 @@ export default function DateRangeField({
   onChange,
   allowEmpty = false,
   disabled,
+  open,
+  onOpenChange,
+  autoFocus,
   "aria-label": ariaLabel,
 }: {
   value?: DateRange;
   onChange?: (value: DateRange) => void;
   allowEmpty?: boolean;
   disabled?: boolean;
+  // #219：设置页「点击即编辑」需要进入编辑态就展开面板、面板关闭时退出编辑态。
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  autoFocus?: boolean;
   "aria-label"?: string;
 }) {
   return (
@@ -27,6 +34,9 @@ export default function DateRangeField({
       onChange={(v) => onChange?.(v ?? null)}
       allowEmpty={allowEmpty ? [true, true] : undefined}
       disabled={disabled}
+      open={open}
+      onOpenChange={onOpenChange}
+      autoFocus={autoFocus}
       aria-label={ariaLabel}
       separator="—"
       placeholder={["年-月-日", "年-月-日"]}

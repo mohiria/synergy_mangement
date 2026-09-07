@@ -2996,11 +2996,14 @@ components:
           description: 已上传 logo 的版本号，未上传为空（#211）
     SystemSettings:
       type: object
-      required: [systemName, subtitle, loginHint, baseUrl, updatedAt]
+      required: [systemName, subtitle, loginHint, baseUrl, updatedAt, canEdit]
       properties:
         logoVersion:
           type: integer
           description: 已上传 logo 的版本号；未上传或已删除为空（#211）
+        canEdit:
+          type: boolean
+          description: 当前用户能否修改基本信息（派生字段，仅系统管理员为 true；#219 逐字段编辑据此显示控件）
         systemName:
           type: string
         subtitle:

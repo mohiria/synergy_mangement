@@ -1111,6 +1111,9 @@ body {
 /* #216 竖排表单：标签在上、字段在下，整表限宽 520px 防止输入框在宽屏拉满。 */
 .settings-form { max-width: 520px; }
 .settings-form .ant-form-item-extra { font-size: var(--type-aux); }
+/* #219：设置页字段的查看态——与控件同高；有权限时复用 .inline-editable 的悬停虚线；校验／保存错误就地显示。 */
+.settings-value { display: inline-flex; align-items: center; min-height: 32px; max-width: 100%; }
+.inline-field-error { color: var(--red); font-size: var(--type-aux); margin-top: 4px; }
 /* 窄屏（<960px）：导航退化为内容上方的横向分组，条目按行折行，不出横向滚动。 */
 @media (max-width: 960px) {
   .settings-layout { grid-template-columns: minmax(0, 1fr); }

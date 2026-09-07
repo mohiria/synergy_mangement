@@ -7375,7 +7375,7 @@ func TestSystemSettingsBranding(t *testing.T) {
 	resp.Body.Close()
 	resp = doJSON(t, root, http.MethodPut, base+"/system/settings", body)
 	wantStatus(t, resp, http.StatusOK)
-	if st := decodeBody[api.SystemSettings](t, resp); st.SystemName != "新名称" || st.BaseUrl != "http://203.0.113.10" {
+	if st := decodeBody[api.SystemSettings](t, resp); st.SystemName != "新名称" || st.BaseUrl != "http://203.0.113.10" || !st.CanEdit {
 		t.Fatalf("保存结果异常: %+v", st)
 	}
 	resp, _ = http.Get(base + "/branding")

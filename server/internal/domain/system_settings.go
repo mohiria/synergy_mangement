@@ -13,3 +13,9 @@ func CanAccessSystemSettings(isSystemAdmin bool) error {
 	}
 	return nil
 }
+
+// CanEditSystemSettings 系统设置基本信息能否逐字段编辑（#219）：派生字段 SystemSettings.canEdit，
+// 只看系统管理员标记；前端只消费该字段，不判断角色。
+func CanEditSystemSettings(isSystemAdmin bool) bool {
+	return isSystemAdmin
+}
