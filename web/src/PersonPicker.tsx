@@ -174,6 +174,8 @@ export default function PersonPicker({
   };
 
   const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // 中日韩输入法组合中的 Enter／方向键是在选候选词，不当作列表操作（PR #220 review）。
+    if (e.nativeEvent.isComposing) return;
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       if (filtered.length === 0) return;
