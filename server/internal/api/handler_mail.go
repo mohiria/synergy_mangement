@@ -141,10 +141,15 @@ func (s *Server) ListMailOutbox(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]MailOutboxItem, 0, len(rows))
 	for _, x := range rows {
+		// #215：找回密码邮件正文含一次性 token，发送记录不回显。
+		body := optString(x.Body)
+		if domain.MailBodyRedacted(x.Event) {
+			body = nil
+		}
 		out = append(out, MailOutboxItem{
 			Id: x.ID, ToAddress: x.ToAddress, Subject: x.Subject, Event: x.Event, EventLabel: domain.MailEventLabel(x.Event),
 			Status: MailOutboxItemStatus(x.Status), StatusLabel: domain.MailStatusLabel(x.Status), Attempts: int(x.Attempts),
-			LastError: optString(x.LastError), Body: optString(x.Body), CreatedAt: x.CreatedAt.Time, SentAt: fromPgTime(x.SentAt),
+			LastError: optString(x.LastError), Body: body, CreatedAt: x.CreatedAt.Time, SentAt: fromPgTime(x.SentAt),
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -161,6 +166,16 @@ func (s *Server) enqueueMail(ctx context.Context, to, subject, body, event strin
 		Status: MailOutboxItemStatus(x.Status), StatusLabel: domain.MailStatusLabel(x.Status), Attempts: int(x.Attempts),
 		CreatedAt: x.CreatedAt.Time,
 	}, nil
+}
+
+// scrubMailBody 含一次性凭据的邮件到终态（已发送／失败）后清空正文（#215）。
+func (s *Server) scrubMailBody(ctx context.Context, qtx *store.Queries, item store.MailOutbox) {
+	if !domain.MailBodyRedacted(item.Event) {
+		return
+	}
+	if err := qtx.ScrubMailBody(ctx, item.ID); err != nil {
+		log.Printf("mail outbox: scrub body %d failed: %v", item.ID, err)
+	}
 }
 
 // ProcessMailOutbox 处理一轮到期待发件，返回处理条数。发送失败按 domain.MailRetry 退避或标记失败。
@@ -200,6 +215,7 @@ func (s *Server) ProcessMailOutbox(ctx context.Context) int {
 			if err := qtx.MarkMailSent(ctx, item.ID); err != nil {
 				log.Printf("mail outbox: mark sent %d failed: %v", item.ID, err)
 			}
+			s.scrubMailBody(ctx, qtx, item)
 			continue
 		}
 		msg := sendErr.Error()
@@ -209,6 +225,7 @@ func (s *Server) ProcessMailOutbox(ctx context.Context) int {
 		next, failed := domain.MailRetry(int(item.Attempts)+1, s.now())
 		if failed {
 			err = qtx.MarkMailFailed(ctx, store.MarkMailFailedParams{ID: item.ID, LastError: msg})
+			s.scrubMailBody(ctx, qtx, item)
 		} else {
 			err = qtx.MarkMailRetry(ctx, store.MarkMailRetryParams{ID: item.ID, LastError: msg, NextAttemptAt: pgtype.Timestamptz{Time: next, Valid: true}})
 		}

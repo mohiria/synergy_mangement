@@ -36,6 +36,10 @@ UPDATE mail_outbox SET status = 'sent', attempts = attempts + 1, last_error = ''
 -- name: MarkMailRetry :exec
 UPDATE mail_outbox SET attempts = attempts + 1, last_error = $2, next_attempt_at = $3 WHERE id = $1;
 
+-- name: ScrubMailBody :exec
+-- #215：含一次性凭据的邮件到终态后清空正文。
+UPDATE mail_outbox SET body = '' WHERE id = $1;
+
 -- name: MarkMailFailed :exec
 UPDATE mail_outbox SET status = 'failed', attempts = attempts + 1, last_error = $2 WHERE id = $1;
 

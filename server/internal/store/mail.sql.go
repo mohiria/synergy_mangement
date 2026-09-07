@@ -236,6 +236,16 @@ func (q *Queries) MarkMailSent(ctx context.Context, id int64) error {
 	return err
 }
 
+const scrubMailBody = `-- name: ScrubMailBody :exec
+UPDATE mail_outbox SET body = '' WHERE id = $1
+`
+
+// #215：含一次性凭据的邮件到终态后清空正文。
+func (q *Queries) ScrubMailBody(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, scrubMailBody, id)
+	return err
+}
+
 const setMailPassword = `-- name: SetMailPassword :exec
 UPDATE mail_settings SET password_enc = $1, updated_at = now() WHERE id = 1
 `

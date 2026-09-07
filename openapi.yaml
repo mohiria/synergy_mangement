@@ -3176,7 +3176,7 @@ components:
           type: string
         body:
           type: string
-          description: 正文（仅系统管理员可见的发送记录里返回，便于核对与冒烟）
+          description: 正文（仅系统管理员可见的发送记录里返回，便于核对与冒烟）；找回密码邮件正文含一次性 token，不返回且发送终态后清空（#215）
         createdAt:
           type: string
           format: date-time

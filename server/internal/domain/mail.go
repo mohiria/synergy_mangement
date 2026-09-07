@@ -91,6 +91,9 @@ func MailChannelConfigured(host, fromAddress string) bool {
 	return strings.TrimSpace(host) != "" && strings.TrimSpace(fromAddress) != ""
 }
 
+// MailBodyRedacted 该事件的邮件正文是否含一次性凭据：发送记录不返回正文、发送终态后清空（#215）。
+func MailBodyRedacted(event string) bool { return event == MailEventPasswordReset }
+
 // MailRetryDelays 失败退避：第 1、2、3 次失败后分别等 1、5、15 分钟再试，第 4 次失败标记失败。
 var MailRetryDelays = []time.Duration{time.Minute, 5 * time.Minute, 15 * time.Minute}
 

@@ -1677,7 +1677,7 @@ export interface components {
             /** @description 已尝试次数 */
             attempts: number;
             lastError?: string;
-            /** @description 正文（仅系统管理员可见的发送记录里返回，便于核对与冒烟） */
+            /** @description 正文（仅系统管理员可见的发送记录里返回，便于核对与冒烟）；找回密码邮件正文含一次性 token，不返回且发送终态后清空（#215） */
             body?: string;
             /** Format: date-time */
             createdAt: string;

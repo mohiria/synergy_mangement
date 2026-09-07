@@ -51,6 +51,18 @@ func TestMailChannelConfigured(t *testing.T) {
 	}
 }
 
+// #215：找回密码邮件正文含一次性 token，发送记录不回显、发完即清；其余事件正文照常保留。
+func TestMailBodyRedacted(t *testing.T) {
+	if !MailBodyRedacted(MailEventPasswordReset) {
+		t.Fatal("找回密码邮件正文应脱敏")
+	}
+	for _, ev := range []string{MailEventTest, "task_assigned", ""} {
+		if MailBodyRedacted(ev) {
+			t.Fatalf("事件 %q 的正文不应脱敏", ev)
+		}
+	}
+}
+
 // 失败退避：第 1／2／3 次失败后 1／5／15 分钟再试；第 4 次失败标记失败不再重试。
 func TestMailRetry(t *testing.T) {
 	now := time.Date(2026, 9, 4, 10, 0, 0, 0, time.UTC)

@@ -7766,12 +7766,20 @@ func TestPasswordRecovery(t *testing.T) {
 		}
 	}
 	outbox := decodeBody[[]api.MailOutboxItem](t, doJSONAgain(t, root, http.MethodGet, base+"/system/mail-outbox"))
-	if len(outbox) != 1 || outbox[0].ToAddress != "alice@example.com" || outbox[0].EventLabel != "找回密码" || outbox[0].Body == nil {
-		t.Fatalf("outbox 应只有 alice 的重置邮件: %+v", outbox)
+	// #215：正文含一次性 token，发送记录接口不回显；测试直接从库里取正文。
+	if len(outbox) != 1 || outbox[0].ToAddress != "alice@example.com" || outbox[0].EventLabel != "找回密码" || outbox[0].Body != nil {
+		t.Fatalf("outbox 应只有 alice 的重置邮件且不回显正文: %+v", outbox)
 	}
-	link := regexp.MustCompile(`http://203\.0\.113\.10/reset-password\?token=([0-9a-f]{64})`).FindStringSubmatch(*outbox[0].Body)
+	latestBody := func() string {
+		var b string
+		if err := pool.QueryRow(context.Background(), "SELECT body FROM mail_outbox ORDER BY id DESC LIMIT 1").Scan(&b); err != nil {
+			t.Fatalf("read outbox body: %v", err)
+		}
+		return b
+	}
+	link := regexp.MustCompile(`http://203\.0\.113\.10/reset-password\?token=([0-9a-f]{64})`).FindStringSubmatch(latestBody())
 	if link == nil {
-		t.Fatalf("邮件正文应含重置链接: %q", *outbox[0].Body)
+		t.Fatalf("邮件正文应含重置链接: %q", latestBody())
 	}
 	token := link[1]
 	// 库里只有哈希。
@@ -7803,8 +7811,7 @@ func TestPasswordRecovery(t *testing.T) {
 	resp = doJSON(t, anon(), http.MethodPost, base+"/auth/password-reset/confirm", api.PasswordResetConfirm{Token: token, Password: "brand-new-pass-1"})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
-	outbox = decodeBody[[]api.MailOutboxItem](t, doJSONAgain(t, root, http.MethodGet, base+"/system/mail-outbox"))
-	token = regexp.MustCompile(`token=([0-9a-f]{64})`).FindStringSubmatch(*outbox[0].Body)[1]
+	token = regexp.MustCompile(`token=([0-9a-f]{64})`).FindStringSubmatch(latestBody())[1]
 	// 成功重置。
 	resp = doJSON(t, anon(), http.MethodPost, base+"/auth/password-reset/confirm", api.PasswordResetConfirm{Token: token, Password: "brand-new-pass-1"})
 	wantStatus(t, resp, http.StatusNoContent)
@@ -7834,8 +7841,17 @@ func TestPasswordRecovery(t *testing.T) {
 	if _, err := pool.Exec(context.Background(), "UPDATE password_reset_tokens SET expires_at = now() - interval '1 minute' WHERE used_at IS NULL"); err != nil {
 		t.Fatalf("expire: %v", err)
 	}
-	outbox = decodeBody[[]api.MailOutboxItem](t, doJSONAgain(t, root, http.MethodGet, base+"/system/mail-outbox"))
-	expired := regexp.MustCompile(`token=([0-9a-f]{64})`).FindStringSubmatch(*outbox[0].Body)[1]
+	expired := regexp.MustCompile(`token=([0-9a-f]{64})`).FindStringSubmatch(latestBody())[1]
+	// #215：发送终态后正文清空；测试邮件（无凭据）正文保留。
+	mailRecorder.Err = nil
+	testServer.ProcessMailOutbox(context.Background())
+	var scrubbed int
+	if err := pool.QueryRow(context.Background(), "SELECT count(*) FROM mail_outbox WHERE event = 'password_reset' AND status = 'sent' AND body <> ''").Scan(&scrubbed); err != nil {
+		t.Fatalf("count scrubbed: %v", err)
+	}
+	if scrubbed != 0 {
+		t.Fatalf("已发送的找回密码邮件仍有 %d 封保留正文", scrubbed)
+	}
 	resp = doJSON(t, anon(), http.MethodPost, base+"/auth/password-reset/confirm", api.PasswordResetConfirm{Token: expired, Password: "yet-another-3"})
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
 	resp.Body.Close()
