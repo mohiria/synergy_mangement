@@ -11,6 +11,19 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const consumePasswordResetToken = `-- name: ConsumePasswordResetToken :execrows
+UPDATE password_reset_tokens SET used_at = now() WHERE id = $1 AND used_at IS NULL
+`
+
+// #215：原子消费，只有仍未使用的行才会被标记；返回 0 行表示已被并发请求抢先用掉。
+func (q *Queries) ConsumePasswordResetToken(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, consumePasswordResetToken, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const createPasswordResetToken = `-- name: CreatePasswordResetToken :one
 INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
 VALUES ($1, $2, $3)
@@ -88,11 +101,14 @@ func (q *Queries) InvalidatePasswordResetTokens(ctx context.Context, userID int6
 	return err
 }
 
-const markPasswordResetTokenUsed = `-- name: MarkPasswordResetTokenUsed :exec
-UPDATE password_reset_tokens SET used_at = now() WHERE id = $1
+const lockUserForPasswordReset = `-- name: LockUserForPasswordReset :one
+SELECT id FROM users WHERE id = $1 FOR UPDATE
 `
 
-func (q *Queries) MarkPasswordResetTokenUsed(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, markPasswordResetTokenUsed, id)
-	return err
+// #215：签发重置 token 时按用户加行锁，串行化同一账号的并发请求。
+func (q *Queries) LockUserForPasswordReset(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRow(ctx, lockUserForPasswordReset, id)
+	var id_2 int64
+	err := row.Scan(&id_2)
+	return id_2, err
 }

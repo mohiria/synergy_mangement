@@ -7852,3 +7852,71 @@ func TestPasswordRecovery(t *testing.T) {
 	last.Body.Close()
 }
 
+// #215：token 消费必须原子——同一 token 只有第一次标记生效；同一账号并发请求签发后只剩一个有效 token，
+// 且每次请求各入一封 outbox（作废、写新 token、入队同一事务）。
+func TestPasswordResetTokenConsumedOnceAndConcurrentIssue(t *testing.T) {
+	q, pool := setupDB(t)
+	alice := seedUser(t, q, "alice", "张三", "alice-pass")
+	ctx := context.Background()
+	row, err := q.CreatePasswordResetToken(ctx, store.CreatePasswordResetTokenParams{
+		UserID: alice.ID, TokenHash: domain.HashPasswordResetToken("t1"),
+		ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(domain.PasswordResetTTL), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("create token: %v", err)
+	}
+	if n, err := q.ConsumePasswordResetToken(ctx, row.ID); err != nil || n != 1 {
+		t.Fatalf("首次消费应影响 1 行: n=%d err=%v", n, err)
+	}
+	if n, err := q.ConsumePasswordResetToken(ctx, row.ID); err != nil || n != 0 {
+		t.Fatalf("重复消费应影响 0 行: n=%d err=%v", n, err)
+	}
+
+	root := seedUser(t, q, "root", "系统管理员", "root-pass1")
+	if _, err := q.SetUserSystemAdmin(ctx, store.SetUserSystemAdminParams{ID: root.ID, IsSystemAdmin: true}); err != nil {
+		t.Fatalf("set system admin: %v", err)
+	}
+	ts := httptest.NewServer(newTestHandler(t, pool))
+	defer ts.Close()
+	base := ts.URL + "/api/v1"
+	rootC := newClient(t)
+	resp := doJSON(t, rootC, http.MethodPost, base+"/auth/login", api.LoginRequest{Username: "root", Password: "root-pass1"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, rootC, http.MethodPut, base+"/system/mail-settings", api.MailSettingsInput{Host: "smtp.example.com", Port: 25, Encryption: api.MailSettingsInputEncryptionNone, FromAddress: "bot@example.com"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, rootC, http.MethodPut, base+"/system/settings", api.SystemSettingsInput{SystemName: "协同", BaseUrl: "http://203.0.113.10"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+
+	const n = domain.MaxLoginFailures
+	var wg sync.WaitGroup
+	codes := make([]int, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			r := doJSON(t, newClient(t), http.MethodPost, base+"/auth/password-reset/request", api.PasswordResetRequest{Identifier: "alice"})
+			codes[i] = r.StatusCode
+			r.Body.Close()
+		}(i)
+	}
+	wg.Wait()
+	for _, c := range codes {
+		if c != http.StatusAccepted {
+			t.Fatalf("并发请求状态码 = %v", codes)
+		}
+	}
+	var active, queued int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM password_reset_tokens WHERE user_id = $1 AND used_at IS NULL", alice.ID).Scan(&active); err != nil {
+		t.Fatalf("count active: %v", err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM mail_outbox WHERE event = 'password_reset'").Scan(&queued); err != nil {
+		t.Fatalf("count outbox: %v", err)
+	}
+	if active != 1 || queued != n {
+		t.Fatalf("并发签发后有效 token = %d（应为 1），outbox = %d（应为 %d）", active, queued, n)
+	}
+}
+

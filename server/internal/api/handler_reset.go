@@ -73,23 +73,36 @@ func (s *Server) issuePasswordReset(r *http.Request, user store.User) error {
 	if err != nil {
 		return err
 	}
-	if err := s.q.InvalidatePasswordResetTokens(ctx, user.ID); err != nil {
+	// #215：同一账号的并发请求按用户行锁串行化，作废旧 token、写新 token、入 outbox 同一事务提交，
+	// 不会出现两个有效 token 或「作废了却没发出」的半成品。
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
 		return err
 	}
-	if _, err := s.q.CreatePasswordResetToken(ctx, store.CreatePasswordResetTokenParams{
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := s.q.WithTx(tx)
+	if _, err := qtx.LockUserForPasswordReset(ctx, user.ID); err != nil {
+		return err
+	}
+	if err := qtx.InvalidatePasswordResetTokens(ctx, user.ID); err != nil {
+		return err
+	}
+	if _, err := qtx.CreatePasswordResetToken(ctx, store.CreatePasswordResetTokenParams{
 		UserID: user.ID, TokenHash: domain.HashPasswordResetToken(token),
 		ExpiresAt: pgtype.Timestamptz{Time: s.now().Add(domain.PasswordResetTTL), Valid: true},
 	}); err != nil {
 		return err
 	}
-	st, err := s.q.GetSystemSettings(ctx)
+	st, err := qtx.GetSystemSettings(ctx)
 	if err != nil {
 		return err
 	}
 	link := domain.PasswordResetLink(st.BaseUrl, token)
 	body := user.DisplayName + "（" + user.Username + "），你好：\n\n请在 30 分钟内打开以下链接设置新密码；链接只能使用一次，若非本人操作请忽略。\n\n" + link
-	_, err = s.enqueueMail(ctx, user.Email, "["+st.SystemName+"] 找回密码", body, domain.MailEventPasswordReset)
-	return err
+	if _, err := qtx.EnqueueMail(ctx, store.EnqueueMailParams{ToAddress: user.Email, Subject: "[" + st.SystemName + "] 找回密码", Body: body, Event: domain.MailEventPasswordReset}); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // ConfirmPasswordReset 用 token 设置新密码。
@@ -134,12 +147,18 @@ func (s *Server) ConfirmPasswordReset(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := s.q.WithTx(tx)
-	// UpdateUserPassword 同时清除「须改密码」标记（#203）。
-	if err := qtx.UpdateUserPassword(ctx, store.UpdateUserPasswordParams{ID: user.ID, PasswordHash: hash}); err != nil {
+	// #215：先原子消费 token（只更新仍未使用的行），并发重放的第二个请求在这里拿到 0 行即被拒。
+	n, err := qtx.ConsumePasswordResetToken(ctx, row.ID)
+	if err != nil {
 		writeInternalError(w, r, err)
 		return
 	}
-	if err := qtx.MarkPasswordResetTokenUsed(ctx, row.ID); err != nil {
+	if n != 1 {
+		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "reset_token_invalid", Message: domain.ErrResetTokenInvalid.Error()})
+		return
+	}
+	// UpdateUserPassword 同时清除「须改密码」标记（#203）。
+	if err := qtx.UpdateUserPassword(ctx, store.UpdateUserPasswordParams{ID: user.ID, PasswordHash: hash}); err != nil {
 		writeInternalError(w, r, err)
 		return
 	}

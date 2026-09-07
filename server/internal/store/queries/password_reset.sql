@@ -10,8 +10,13 @@ RETURNING *;
 -- name: GetPasswordResetToken :one
 SELECT * FROM password_reset_tokens WHERE token_hash = $1;
 
--- name: MarkPasswordResetTokenUsed :exec
-UPDATE password_reset_tokens SET used_at = now() WHERE id = $1;
+-- name: ConsumePasswordResetToken :execrows
+-- #215：原子消费，只有仍未使用的行才会被标记；返回 0 行表示已被并发请求抢先用掉。
+UPDATE password_reset_tokens SET used_at = now() WHERE id = $1 AND used_at IS NULL;
+
+-- name: LockUserForPasswordReset :one
+-- #215：签发重置 token 时按用户加行锁，串行化同一账号的并发请求。
+SELECT id FROM users WHERE id = $1 FOR UPDATE;
 
 -- name: GetUserByUsernameOrEmail :one
 -- 找回密码按用户名或邮箱定位账号（邮箱大小写不敏感）。
