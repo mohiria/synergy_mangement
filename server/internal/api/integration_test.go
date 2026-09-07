@@ -7197,6 +7197,20 @@ func TestSystemAuditLogs(t *testing.T) {
 	if logs[3].ObjectType == nil || *logs[3].ObjectType != "users" || logs[0].ObjectId == nil || *logs[0].ObjectId != carol.Id {
 		t.Fatalf("对象应指向用户: %+v %+v", logs[3], logs[0])
 	}
+	// #215：摘要记脱敏后的前后值——新建列字段、密码只记「已更新」、布尔记旧 → 新。
+	wantSummaries := []string{"系统管理员：否 → 是", "密码：已更新", "", "账号：carol；显示名：王五；邮箱：carol@example.com；密码：已更新"}
+	for i, a := range logs {
+		got := ""
+		if a.Summary != nil {
+			got = *a.Summary
+		}
+		if got != wantSummaries[i] {
+			t.Fatalf("第 %d 条摘要 = %q, want %q", i, got, wantSummaries[i])
+		}
+		if strings.Contains(got, "init-pass") || strings.Contains(got, "reset-pass") {
+			t.Fatalf("密码不应进入摘要: %q", got)
+		}
+	}
 	// 系统级记录不混入任何项目的审计（项目域查询按 project_id 过滤，直接查库确认作用域为空）。
 	rows, err := q.ListSystemAuditLogs(context.Background(), 10)
 	if err != nil {
@@ -7371,6 +7385,9 @@ func TestSystemSettingsBranding(t *testing.T) {
 	logs := decodeBody[[]api.AuditLog](t, doJSONAgain(t, root, http.MethodGet, base+"/system/audit-logs"))
 	if len(logs) != 1 || logs[0].Action != "修改系统基本信息" {
 		t.Fatalf("应有一条系统级审计: %+v", logs)
+	}
+	if logs[0].Summary == nil || !strings.Contains(*logs[0].Summary, "系统名称：协同管理工具 → 新名称") || !strings.HasSuffix(*logs[0].Summary, "访问地址：（空） → http://203.0.113.10") {
+		t.Fatalf("摘要应记归一后的前后值（不带尾部斜杠）: %v", *logs[0].Summary)
 	}
 }
 
@@ -7592,9 +7609,12 @@ func TestMailChannel(t *testing.T) {
 		t.Fatalf("审计条数 = %d, want 5: %+v", len(logs), logs)
 	}
 	for _, a := range logs {
-		if strings.Contains(a.Action, pw) || strings.Contains(a.Route, pw) {
+		if strings.Contains(a.Action, pw) || strings.Contains(a.Route, pw) || (a.Summary != nil && strings.Contains(*a.Summary, pw)) {
 			t.Fatalf("密码不应进入审计: %+v", a)
 		}
+	}
+	if logs[4].Summary == nil || !strings.Contains(*logs[4].Summary, "SMTP 主机：（空） → ") || !strings.Contains(*logs[4].Summary, "密码：已更新") {
+		t.Fatalf("通道配置摘要应记主机与「密码：已更新」: %+v", logs[4].Summary)
 	}
 }
 

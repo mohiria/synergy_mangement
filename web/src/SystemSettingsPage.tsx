@@ -492,8 +492,9 @@ function AuditSection() {
               <tr>
                 <th style={{ width: 170 }}>时间</th>
                 <th style={{ width: 110 }}>操作人</th>
-                <th>动作</th>
+                <th style={{ width: 160 }}>动作</th>
                 <th style={{ width: 160 }}>对象</th>
+                <th>变更</th>
               </tr>
             </thead>
             <tbody>
@@ -503,6 +504,7 @@ function AuditSection() {
                   <td title={a.actorName ?? "系统"}>{a.actorName ?? "系统"}</td>
                   <td title={a.action}>{a.action}</td>
                   <td className="muted">{a.objectType ? `${a.objectType}${a.objectId ? ` #${a.objectId}` : ""}` : "—"}</td>
+                  <td className="muted" title={a.summary || undefined}>{a.summary || "—"}</td>
                 </tr>
               ))}
             </tbody>

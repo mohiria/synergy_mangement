@@ -2655,6 +2655,8 @@ export interface components {
             actorName?: string;
             /** Format: date-time */
             occurredAt: string;
+            /** @description 变更摘要（系统级审计，#215）：脱敏后的前后值，形如「系统名称：旧 → 新」；密码类字段只记「已更新」 */
+            summary?: string;
         };
         /** @description 结构化卡点（词汇表）；由四类结构化事实读时派生，不落库、无人工上报与手动解除，触发条件消失即消失 */
         Blocker: {

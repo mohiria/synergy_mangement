@@ -46,10 +46,14 @@ func (s *Server) writePathMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// #206：系统级写路径（/system/…）只落审计、不比对卡点；project 作用域为空。
 		if sysRest, ok := systemScope(r.URL.Path); ok && domain.SystemAuditable(r.Method, routeTemplate(sysRest)) {
+			// #215：摘要要记前后值——写前先取快照、留一份请求体，写成功后再拼。
+			before := s.systemAuditSnapshot(r.Context(), sysRest)
+			body := systemAuditBody(r)
 			rec := &statusRecorder{ResponseWriter: w}
 			next.ServeHTTP(rec, r)
 			if rec.status >= 200 && rec.status < 300 {
-				s.recordSystemAudit(context.WithoutCancel(r.Context()), r, sysRest)
+				ctx := context.WithoutCancel(r.Context())
+				s.recordSystemAudit(ctx, r, sysRest, domain.SystemAuditSummary(before, s.systemAuditAfter(ctx, sysRest, body)))
 			}
 			return
 		}
@@ -87,8 +91,8 @@ func systemScope(path string) (string, bool) {
 }
 
 // recordSystemAudit 落一条系统级审计（#206）：project_id 为空，操作者为当前系统管理员；
-// 密码类字段从不进入摘要（summary 留空）。
-func (s *Server) recordSystemAudit(ctx context.Context, r *http.Request, rest string) {
+// 摘要由 domain.SystemAuditSummary 拼出，密码类字段只记「已更新」（#215）。
+func (s *Server) recordSystemAudit(ctx context.Context, r *http.Request, rest string, summary string) {
 	route := routeTemplate(rest)
 	actor := currentUser(r)
 	objectType, objectID := systemAuditObject(route, rest)
@@ -99,6 +103,7 @@ func (s *Server) recordSystemAudit(ctx context.Context, r *http.Request, rest st
 		Route:      route,
 		ObjectType: objectType,
 		ObjectID:   toPgInt8(objectID),
+		Summary:    summary,
 	}); err != nil {
 		log.Printf("record system audit failed: route=%s err=%v", route, err)
 	}
@@ -266,6 +271,7 @@ func (s *Server) ListAuditLogs(w http.ResponseWriter, r *http.Request, projectId
 			ObjectType: optString(a.ObjectType),
 			ActorName:  fromPgText(a.ActorName),
 			OccurredAt: a.CreatedAt.Time,
+			Summary:    optString(a.Summary),
 		}
 		if a.ObjectID.Valid {
 			item.ObjectId = &a.ObjectID.Int64

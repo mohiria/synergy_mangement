@@ -330,6 +330,7 @@ func (s *Server) ListSystemAuditLogs(w http.ResponseWriter, r *http.Request, par
 		item := AuditLog{
 			Id: a.ID, Action: a.Action, Method: a.Method, Route: a.Route,
 			ObjectType: optString(a.ObjectType), ActorName: fromPgText(a.ActorName), OccurredAt: a.CreatedAt.Time,
+			Summary:    optString(a.Summary),
 		}
 		if a.ObjectID.Valid {
 			item.ObjectId = &a.ObjectID.Int64
