@@ -88,7 +88,9 @@ export function InlineText({
   const [error, setError] = useState<string | null>(null);
   const draftRef = useRef(value);
   const skipBlurRef = useRef(false);
-  const savingRef = useRef(false);
+  // 请求期间输入框置为 disabled：失焦后控件仍挂着，不禁用的话用户可以再点进去改草稿，
+  // 而前一次保存成功会无条件退出编辑态，把新草稿静默丢掉（PR #220 review）。
+  const [saving, setSaving] = useState(false);
 
   const begin = () => {
     draftRef.current = value;
@@ -103,7 +105,7 @@ export function InlineText({
       skipBlurRef.current = false;
       return;
     }
-    if (savingRef.current) return;
+    if (saving) return;
     const next = draftRef.current.trim();
     if (next === value) {
       setEditing(false);
@@ -114,9 +116,9 @@ export function InlineText({
       setError(invalid);
       return;
     }
-    savingRef.current = true;
+    setSaving(true);
     const err = await onSave(next);
-    savingRef.current = false;
+    setSaving(false);
     if (err) setError(err);
     else setEditing(false);
   };
@@ -124,6 +126,7 @@ export function InlineText({
     <InlineField label={label} canEdit={canEdit} value={value} editing={editing} onBeginEdit={begin}>
       <Input
         autoFocus
+        disabled={saving}
         value={draft}
         maxLength={maxLength}
         placeholder={placeholder}
@@ -226,7 +229,9 @@ export function InlineNumber({
   const [error, setError] = useState<string | null>(null);
   const draftRef = useRef<number | null>(value);
   const skipBlurRef = useRef(false);
-  const savingRef = useRef(false);
+  // 请求期间输入框置为 disabled：失焦后控件仍挂着，不禁用的话用户可以再点进去改草稿，
+  // 而前一次保存成功会无条件退出编辑态，把新草稿静默丢掉（PR #220 review）。
+  const [saving, setSaving] = useState(false);
   const begin = () => {
     draftRef.current = value;
     setDraft(value);
@@ -240,7 +245,7 @@ export function InlineNumber({
       skipBlurRef.current = false;
       return;
     }
-    if (savingRef.current) return;
+    if (saving) return;
     const next = draftRef.current;
     if (next === value) {
       setEditing(false);
@@ -250,9 +255,9 @@ export function InlineNumber({
       setError(`请输入 ${min}～${max} 之间的整数`);
       return;
     }
-    savingRef.current = true;
+    setSaving(true);
     const err = await onSave(next);
-    savingRef.current = false;
+    setSaving(false);
     if (err) setError(err);
     else setEditing(false);
   };
@@ -266,6 +271,7 @@ export function InlineNumber({
     >
       <InputNumber
         autoFocus
+        disabled={saving}
         min={min}
         max={max}
         precision={0}
