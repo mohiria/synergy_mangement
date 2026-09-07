@@ -224,6 +224,8 @@ export default function ProjectSettingsPage({
     setSettingsState(s);
   };
   const enqueue = useSaveQueue();
+  // 负责人 PersonPicker 是受控的，PUT 返回前仍显示旧负责人；保存中禁用，避免再开再选被「未变化」吞掉。
+  const [ownerSaving, setOwnerSaving] = useState(false);
   // 排队中的保存要绑定发起时的项目：路由切到别的项目后 load() 会用新项目覆盖 ref，
   // 迟到的保存不能拿新项目的字段去 PUT 旧项目，响应也不能写回（PR #220 review）。
   const staleFor = (forId: number) => latestProject.current?.id !== forId;
@@ -492,12 +494,15 @@ export default function ProjectSettingsPage({
                               people={userPeople}
                               value={[project.ownerId]}
                               multiple={false}
+                              disabled={ownerSaving}
                               placeholder="选择负责人"
                               displayText={project.ownerName}
                               ariaLabel="项目负责人"
                               onSave={async (ids) => {
                                 if (ids[0] === undefined) return;
+                                setOwnerSaving(true);
                                 const err = await patchProject({ ownerId: ids[0] });
+                                setOwnerSaving(false);
                                 if (err) message.error(err);
                               }}
                             />
