@@ -473,8 +473,9 @@ export default function ProjectSettingsPage({
                   </div>
                   {project && (
                     <div className="settings-panel-body">
-                      {/* #216 竖排「标签在上」布局；#219 任务概览同款：默认只显示值，有权限点击字段才出现控件，改完即存。 */}
-                      <Form layout="vertical" requiredMark={false} className="settings-form">
+                      {/* #216 竖排「标签在上」布局；#219 任务概览同款：默认只显示值，有权限点击字段才出现控件，改完即存。
+                          key=projectId：路由切到别的项目时各字段的编辑态／草稿／错误随之重置，不把上个项目的草稿带过来。 */}
+                      <Form key={projectId} layout="vertical" requiredMark={false} className="settings-form">
                         <Form.Item label="项目名称">
                           <InlineText
                             label="项目名称"
@@ -664,7 +665,7 @@ export default function ProjectSettingsPage({
                   </div>
                   <div className="settings-panel-body">
                     {settings && (
-                      <Form layout="vertical" requiredMark={false} className="settings-form">
+                      <Form key={projectId} layout="vertical" requiredMark={false} className="settings-form">
                         {RULE_FIELDS.map((f, i) => (
                           <Form.Item
                             key={f.key}
