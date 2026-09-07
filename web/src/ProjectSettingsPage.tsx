@@ -63,6 +63,8 @@ function PlanField({
   const [editing, setEditing] = useState(false);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 请求期间日期区间置为 disabled，同 InlineSelect：面板收起后控件仍显示旧区间，不禁用会被再次打开。
+  const [saving, setSaving] = useState(false);
   const pickedRef = useRef(false);
   const display =
     project.plannedStartDate || project.plannedEndDate
@@ -84,6 +86,7 @@ function PlanField({
       <DateRangeField
         allowEmpty
         autoFocus
+        disabled={saving}
         open={open}
         value={[
           project.plannedStartDate ? dayjs(project.plannedStartDate) : null,
@@ -106,7 +109,9 @@ function PlanField({
             setEditing(false);
             return;
           }
+          setSaving(true);
           const err = await onSave({ plannedStartDate: start, plannedEndDate: end });
+          setSaving(false);
           if (err) setError(err);
           else setEditing(false);
         }}

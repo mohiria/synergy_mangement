@@ -171,6 +171,9 @@ export function InlineSelect<T extends string>({
 }) {
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 请求期间下拉置为 disabled：受控 Select 在 onSave 返回前仍显示旧值，不禁用的话用户可以再开再选，
+  // 「改回原值」会被相等分支吞掉、而前一次请求随后把新值落库（PR #220 review）。
+  const [saving, setSaving] = useState(false);
   const pickedRef = useRef(false);
   const begin = () => {
     pickedRef.current = false;
@@ -182,6 +185,7 @@ export function InlineSelect<T extends string>({
       <Select<T>
         autoFocus
         defaultOpen
+        disabled={saving}
         value={value}
         options={options}
         status={error ? "error" : undefined}
@@ -193,7 +197,9 @@ export function InlineSelect<T extends string>({
             setEditing(false);
             return;
           }
+          setSaving(true);
           const err = await onSave(v);
+          setSaving(false);
           if (err) setError(err);
           else setEditing(false);
         }}
