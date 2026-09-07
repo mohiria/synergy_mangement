@@ -35,7 +35,12 @@ func (s *Server) RequestPasswordReset(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, err)
 		return
 	}
-	if !domain.CanRecoverPassword(domain.MailChannelConfigured(ms.Host, ms.FromAddress)) {
+	st, err := s.q.GetSystemSettings(r.Context())
+	if err != nil {
+		writeInternalError(w, r, err)
+		return
+	}
+	if !domain.CanRecoverPassword(domain.MailChannelConfigured(ms.Host, ms.FromAddress), st.BaseUrl != "") {
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "reset_not_available", Message: domain.ErrResetNotAvailable.Error()})
 		return
 	}
@@ -81,7 +86,7 @@ func (s *Server) issuePasswordReset(r *http.Request, user store.User) error {
 	if err != nil {
 		return err
 	}
-	link := domain.PasswordResetLink(st.BaseUrl, r.Host, token)
+	link := domain.PasswordResetLink(st.BaseUrl, token)
 	body := user.DisplayName + "（" + user.Username + "），你好：\n\n请在 30 分钟内打开以下链接设置新密码；链接只能使用一次，若非本人操作请忽略。\n\n" + link
 	_, err = s.enqueueMail(ctx, user.Email, "["+st.SystemName+"] 找回密码", body, domain.MailEventPasswordReset)
 	return err

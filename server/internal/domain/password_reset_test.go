@@ -33,16 +33,26 @@ func TestValidatePasswordResetToken(t *testing.T) {
 	}
 }
 
-// 重置链接：有访问地址用访问地址，否则用请求 Host 兜底（http）；token 进查询串。
+// 重置链接只从系统设置的访问地址拼出（#215：不再用请求 Host 兜底，Host 可被未登录请求伪造）；token 进查询串。
 func TestPasswordResetLink(t *testing.T) {
-	if got := PasswordResetLink("http://203.0.113.10", "ignored:8080", "abc"); got != "http://203.0.113.10/reset-password?token=abc" {
+	if got := PasswordResetLink("http://203.0.113.10", "abc"); got != "http://203.0.113.10/reset-password?token=abc" {
 		t.Fatalf("got %q", got)
 	}
-	if got := PasswordResetLink("", "203.0.113.10:80", "abc"); got != "http://203.0.113.10:80/reset-password?token=abc" {
+	if got := PasswordResetLink(" https://x.example/ ", "t"); got != "https://x.example/reset-password?token=t" {
 		t.Fatalf("got %q", got)
 	}
-	if got := PasswordResetLink("https://x.example/app/", "h", "t"); got != "https://x.example/app/reset-password?token=t" {
-		t.Fatalf("got %q", got)
+}
+
+// 找回密码入口：邮件通道与访问地址都已配置才开通（#215：没有访问地址就拼不出可信链接）。
+func TestCanRecoverPassword(t *testing.T) {
+	if !CanRecoverPassword(true, true) {
+		t.Fatal("通道与访问地址齐全应开通")
+	}
+	if CanRecoverPassword(false, true) {
+		t.Fatal("通道未配置不应开通")
+	}
+	if CanRecoverPassword(true, false) {
+		t.Fatal("访问地址未配置不应开通")
 	}
 }
 

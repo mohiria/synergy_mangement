@@ -27,8 +27,8 @@ func (s *Server) GetBranding(w http.ResponseWriter, r *http.Request) {
 	}
 	b := Branding{
 		SystemName: st.SystemName, Subtitle: st.Subtitle, LoginHint: st.LoginHint,
-		// #214：邮件通道已配置才显示「忘记密码」。
-		CanRecoverPassword: domain.CanRecoverPassword(domain.MailChannelConfigured(ms.Host, ms.FromAddress)),
+		// #214：邮件通道与访问地址都已配置才显示「忘记密码」（#215）。
+		CanRecoverPassword: domain.CanRecoverPassword(domain.MailChannelConfigured(ms.Host, ms.FromAddress), st.BaseUrl != ""),
 	}
 	if st.LogoKey != "" {
 		v := int(st.LogoVersion)

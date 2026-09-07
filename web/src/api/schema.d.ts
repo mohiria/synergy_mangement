@@ -1573,7 +1573,7 @@ export interface components {
             subtitle: string;
             /** @description 登录页提示语；为空则不显示该行 */
             loginHint: string;
-            /** @description 邮件通道已配置时为真，登录页才显示「忘记密码」（#214） */
+            /** @description 邮件通道与访问地址均已配置时为真，登录页才显示「忘记密码」（#214；重置链接只从访问地址拼出，#215） */
             canRecoverPassword: boolean;
             /** @description 已上传 logo 的版本号，未上传为空（#211） */
             logoVersion?: number;

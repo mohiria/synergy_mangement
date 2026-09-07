@@ -7737,6 +7737,13 @@ func TestPasswordRecovery(t *testing.T) {
 	resp = doJSON(t, root, http.MethodPut, base+"/system/mail-settings", api.MailSettingsInput{Host: "smtp.example.com", Port: 25, Encryption: api.MailSettingsInputEncryptionNone, FromAddress: "bot@example.com"})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
+	// #215：只配邮件通道、未配访问地址仍不开通（重置链接不再用请求 Host 兜底）。
+	if branding().CanRecoverPassword {
+		t.Fatal("访问地址未配置时不应可找回密码")
+	}
+	resp = doJSON(t, anon(), http.MethodPost, base+"/auth/password-reset/request", api.PasswordResetRequest{Identifier: "alice"})
+	wantStatus(t, resp, http.StatusUnprocessableEntity)
+	resp.Body.Close()
 	resp = doJSON(t, root, http.MethodPut, base+"/system/settings", api.SystemSettingsInput{SystemName: "协同", Subtitle: "", LoginHint: "", BaseUrl: "http://203.0.113.10"})
 	wantStatus(t, resp, http.StatusOK)
 	resp.Body.Close()

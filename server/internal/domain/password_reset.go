@@ -46,15 +46,13 @@ func ValidatePasswordResetToken(found bool, expiresAt time.Time, used bool, user
 	return nil
 }
 
-// PasswordResetLink 重置链接：系统设置的访问地址优先（去尾部斜杠），为空时用请求 Host 兜底（HTTP 明文，
-// 与密码明文同级风险，ADR 0001 修订）。
-func PasswordResetLink(baseURL, requestHost, token string) string {
-	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if base == "" {
-		base = "http://" + requestHost
-	}
-	return base + "/reset-password?token=" + token
+// PasswordResetLink 重置链接只从系统设置的访问地址拼出（去尾部斜杠）。#215：不再用请求 Host 兜底——
+// 请求阶段免登录，Host 可被伪造成攻击者域名，收件人点开就把 token 泄给对方。
+func PasswordResetLink(baseURL, token string) string {
+	return strings.TrimRight(strings.TrimSpace(baseURL), "/") + "/reset-password?token=" + token
 }
 
-// CanRecoverPassword 找回密码入口是否可用：邮件通道已配置才显示（模块 PRD §4.1）。
-func CanRecoverPassword(mailConfigured bool) bool { return mailConfigured }
+// CanRecoverPassword 找回密码入口是否可用：邮件通道与访问地址都已配置才显示（模块 PRD §4.1；#215）。
+func CanRecoverPassword(mailConfigured, baseURLConfigured bool) bool {
+	return mailConfigured && baseURLConfigured
+}
