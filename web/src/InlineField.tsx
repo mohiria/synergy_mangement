@@ -94,6 +94,8 @@ export function InlineText({
     draftRef.current = value;
     setDraft(value);
     setError(null);
+    // Esc 后被移除的输入框未必再触发 blur，标记要在进入编辑态时清掉，否则下次首个回车／失焦会被吞掉。
+    skipBlurRef.current = false;
     setEditing(true);
   };
   const commit = async () => {
@@ -229,6 +231,8 @@ export function InlineNumber({
     draftRef.current = value;
     setDraft(value);
     setError(null);
+    // Esc 后被移除的输入框未必再触发 blur，标记要在进入编辑态时清掉，否则下次首个回车／失焦会被吞掉。
+    skipBlurRef.current = false;
     setEditing(true);
   };
   const commit = async () => {
