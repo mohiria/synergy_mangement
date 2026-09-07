@@ -341,6 +341,15 @@ export default function CollaborationPage({
   // 裁决 K＝A（#114，F-11）：层级视图按工具栏筛选淡化——O 筛选淡化非选中 O 及其 KR，
   // KR 筛选淡化非选中 KR，人员筛选按该 KR 下有无该人员的任务淡化；口径与另两层一致（AC-45）。
   const filtering = oFilter !== "all" || krFilter !== "all" || personFilter !== "all";
+  // 被筛选的人在 load() 刷新后已不是任何任务的负责人／参与人（改派或删除）时，
+  // 候选列表里没有这个人、选择器只能显示「全部人员」占位，而过滤仍按旧 id 生效；此时复位筛选。
+  useEffect(() => {
+    if (personFilter === "all" || tasks.length === 0) return;
+    const present = tasks.some(
+      (t) => t.ownerId === personFilter || (t.participants ?? []).some((p) => p.userId === personFilter),
+    );
+    if (!present) setPersonFilter("all");
+  }, [tasks, personFilter]);
   // #159：人员筛选语义＝按任务负责人或参与人过滤任务节点（图谱已无成员节点）。
   const matchesPerson = useCallback(
     (t: Task) =>
