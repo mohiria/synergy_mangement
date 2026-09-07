@@ -344,7 +344,7 @@ export default function CollaborationPage({
   // 被筛选的人在 load() 刷新后已不是任何任务的负责人／参与人（改派或删除）时，
   // 候选列表里没有这个人、选择器只能显示「全部人员」占位，而过滤仍按旧 id 生效；此时复位筛选。
   useEffect(() => {
-    if (personFilter === "all" || tasks.length === 0) return;
+    if (personFilter === "all") return;
     const present = tasks.some(
       (t) => t.ownerId === personFilter || (t.participants ?? []).some((p) => p.userId === personFilter),
     );
