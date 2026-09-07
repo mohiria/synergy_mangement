@@ -24,7 +24,12 @@ func TestValidateSystemSettings(t *testing.T) {
 		{"提示语恰好 60 字", SystemSettingsInput{SystemName: "x", LoginHint: strings.Repeat("提", 60)}, nil},
 		{"提示语 61 字过长", SystemSettingsInput{SystemName: "x", LoginHint: strings.Repeat("提", 61)}, ErrLoginHintTooLong},
 		{"副标题与提示语可空", SystemSettingsInput{SystemName: "x"}, nil},
-		{"访问地址 https 合法", SystemSettingsInput{SystemName: "x", BaseURL: "https://example.com/app"}, nil},
+		{"访问地址 https 合法", SystemSettingsInput{SystemName: "x", BaseURL: "https://example.com"}, nil},
+		{"访问地址仅根斜杠合法", SystemSettingsInput{SystemName: "x", BaseURL: "https://example.com/"}, nil},
+		// #215：SPA 只挂在根路径，带路径／查询串／片段的地址拼不出可路由的重置链接。
+		{"访问地址带路径拒绝", SystemSettingsInput{SystemName: "x", BaseURL: "https://example.com/app"}, ErrBaseURLInvalid},
+		{"访问地址带查询串拒绝", SystemSettingsInput{SystemName: "x", BaseURL: "https://example.com/?x=1"}, ErrBaseURLInvalid},
+		{"访问地址带片段拒绝", SystemSettingsInput{SystemName: "x", BaseURL: "https://example.com#top"}, ErrBaseURLInvalid},
 		{"访问地址缺协议", SystemSettingsInput{SystemName: "x", BaseURL: "example.com"}, ErrBaseURLInvalid},
 		{"访问地址协议不对", SystemSettingsInput{SystemName: "x", BaseURL: "ftp://example.com"}, ErrBaseURLInvalid},
 		{"访问地址无主机", SystemSettingsInput{SystemName: "x", BaseURL: "http://"}, ErrBaseURLInvalid},

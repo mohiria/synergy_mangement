@@ -37,7 +37,8 @@ type SystemSettingsInput struct {
 }
 
 // ValidateSystemSettings 校验并归一基本信息四项（#210）：去首尾空白；名称必填且不超上限；
-// 副标题、提示语可空但有上限；访问地址为空或 http(s):// 开头且带主机的完整地址，去尾部斜杠。
+// 副标题、提示语可空但有上限；访问地址为空或 http(s):// 开头且带主机的站点根地址（不带路径、查询串、片段，
+// SPA 只挂在根路径，#215），去尾部斜杠。
 func ValidateSystemSettings(in SystemSettingsInput) (SystemSettingsInput, error) {
 	out := SystemSettingsInput{
 		SystemName: strings.TrimSpace(in.SystemName),
@@ -59,7 +60,8 @@ func ValidateSystemSettings(in SystemSettingsInput) (SystemSettingsInput, error)
 	}
 	if out.BaseURL != "" {
 		u, err := url.Parse(out.BaseURL)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || len(out.BaseURL) > MaxBaseURLLength {
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || len(out.BaseURL) > MaxBaseURLLength ||
+			u.Path != "" || u.RawQuery != "" || u.Fragment != "" || strings.ContainsAny(out.BaseURL, "?#") {
 			return out, ErrBaseURLInvalid
 		}
 	}
