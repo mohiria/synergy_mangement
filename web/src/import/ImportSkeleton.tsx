@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Alert, Button, Input, Modal, Select, Steps, message } from "antd";
+import PersonPicker from "../PersonPicker";
 import type { components } from "../api/schema";
 import FileUploadField from "../FileUploadField";
 import { parseDelimited, parseFile } from "./parseTable";
@@ -206,9 +207,10 @@ export default function ImportSkeleton<K extends string, S>({
     onDone();
   };
 
-  const memberOptions = members
+  // #217：人员匹配用人员选择组件。
+  const memberPeople = members
     .filter((m) => m.role !== "viewer")
-    .map((m) => ({ value: m.userId, label: `${m.displayName}（${m.username}）` }));
+    .map((m) => ({ userId: m.userId, displayName: m.displayName, username: m.username }));
 
   return (
     <Modal
@@ -322,14 +324,14 @@ export default function ImportSkeleton<K extends string, S>({
                 <b>{fallbackPersonSlot.label.replace("{n}", String(missingPersons))}</b>
                 <small>{fallbackPersonSlot.hint}</small>
               </div>
-              <Select
-                style={{ width: 240 }}
-                showSearch
-                optionFilterProp="label"
+              <PersonPicker
+                people={memberPeople}
+                value={fallbackPerson === undefined ? [] : [fallbackPerson]}
+                multiple={false}
+                size="middle"
+                style={{ width: 240, minWidth: 0 }}
                 placeholder="统一指派项目成员"
-                value={fallbackPerson}
-                onChange={setFallbackPerson}
-                options={memberOptions}
+                onSave={(ids) => setFallbackPerson(ids[0])}
               />
             </div>
           )}
@@ -339,14 +341,14 @@ export default function ImportSkeleton<K extends string, S>({
                 <b>{n}</b>
                 <small>{memberByName.has(n) ? "已按姓名精确匹配" : "未匹配，请指定项目成员"}</small>
               </div>
-              <Select
-                style={{ width: 240 }}
-                showSearch
-                optionFilterProp="label"
+              <PersonPicker
+                people={memberPeople}
+                value={resolvePerson(n) === undefined ? [] : [resolvePerson(n) as number]}
+                multiple={false}
+                size="middle"
+                style={{ width: 240, minWidth: 0 }}
                 placeholder="选择项目成员"
-                value={resolvePerson(n)}
-                onChange={(v) => setNameOverrides((o) => ({ ...o, [n]: v }))}
-                options={memberOptions}
+                onSave={(ids) => setNameOverrides((o) => ({ ...o, [n]: ids[0] }))}
               />
             </div>
           ))}

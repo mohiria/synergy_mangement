@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Input, Popover } from "antd";
 import type { InputRef } from "antd";
 
@@ -75,6 +75,8 @@ export default function PersonPicker({
   normalizeDraft,
   onSave,
   size = "small",
+  style,
+  ariaLabel,
 }: {
   people: PickerPerson[];
   value: number[];
@@ -88,6 +90,9 @@ export default function PersonPicker({
   /** 面板收起时一次保存（多选）；单选在点击行时立即触发并收起。 */
   onSave: (ids: number[]) => void;
   size?: "small" | "middle";
+  /** #217：工具栏、表格格内等处需要压尺寸，覆盖触发区的默认宽高。 */
+  style?: CSSProperties;
+  ariaLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<number[]>(value);
@@ -185,6 +190,8 @@ export default function PersonPicker({
         type="button"
         className={`pp-trigger${disabled ? " disabled" : ""}${size === "middle" ? " middle" : ""}`}
         disabled={disabled}
+        style={style}
+        aria-label={ariaLabel}
       >
         {label ? (
           <span className="pp-trigger-text">{label}</span>

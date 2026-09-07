@@ -499,11 +499,11 @@ function CreateTaskModal({
     setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)));
 
   const krOptions = krList.map((k) => ({ value: k.id, label: `${k.code} · ${k.description}` }));
-  // 负责人列按约 4 个汉字的基础输入宽度（PRD §7.3、AC-54），因此选项只显示姓名；
-  // 账号名不进标签但仍参与姓名匹配（同名成员靠账号名区分）。
-  const ownerOptions = members
+  // 负责人列按约 4 个汉字的基础输入宽度（PRD §7.3、AC-54）：触发区只显示姓名，
+  // 面板内仍带账号名（同名成员靠账号名区分）。#217：改用人员选择组件。
+  const ownerPeople = members
     .filter((m) => m.role !== "viewer")
-    .map((m) => ({ value: m.userId, label: m.displayName, username: m.username }));
+    .map((m) => ({ userId: m.userId, displayName: m.displayName, username: m.username }));
 
   const save = async () => {
     if (rows.length === 0) {
@@ -625,18 +625,14 @@ function CreateTaskModal({
                 />
               </div>
               <div className="task-sheet-cell">
-                <Select
-                  style={{ width: "100%" }}
-                  options={ownerOptions}
-                  value={r.ownerId}
-                  onChange={(v) => patch(r.key, { ownerId: v })}
-                  showSearch
-                  filterOption={(input, option) =>
-                    `${option?.label ?? ""}${option?.username ?? ""}`
-                      .toLowerCase()
-                      .includes(input.toLowerCase())
-                  }
+                <PersonPicker
+                  people={ownerPeople}
+                  value={r.ownerId === undefined ? [] : [r.ownerId]}
+                  multiple={false}
+                  size="middle"
                   placeholder="负责人"
+                  style={{ minWidth: 0 }}
+                  onSave={(ids) => patch(r.key, { ownerId: ids[0] })}
                 />
               </div>
               <div className="task-sheet-cell">

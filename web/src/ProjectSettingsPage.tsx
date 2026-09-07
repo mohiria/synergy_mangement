@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Alert, Button, Dropdown, Form, Input, InputNumber, Modal, Select, Spin, message } from "antd";
 import type { MenuProps } from "antd";
+import PersonPicker from "./PersonPicker";
 import dayjs, { type Dayjs } from "dayjs";
 import DateRangeField from "./DateRangeField";
 import SettingsNav from "./SettingsNav";
@@ -317,9 +318,9 @@ export default function ProjectSettingsPage({
     !!settings &&
     RULE_FIELDS.some((f) => rules[f.key] !== settings[f.key]);
 
-  const candidateOptions = users
-    .filter((u) => !members.some((m) => m.userId === u.id))
-    .map((u) => ({ value: u.id, label: `${u.displayName}（${u.username}）` }));
+  // #217：负责人与邀请都走人员选择组件；邀请候选剔除已是成员的人。
+  const userPeople = users.map((u) => ({ userId: u.id, displayName: u.displayName, username: u.username }));
+  const candidatePeople = userPeople.filter((u) => !members.some((m) => m.userId === u.userId));
 
   // 两区各自排序：成员管理区按 管理员 → 项目成员，查看项目区只有访客（#108）。
   const workingMembers = members
@@ -452,18 +453,15 @@ export default function ProjectSettingsPage({
                           />
                         </Form.Item>
                         <Form.Item label="项目负责人">
-                          <Select
-                            value={basic.ownerId}
+                          <PersonPicker
+                            people={userPeople}
+                            value={basic.ownerId === undefined ? [] : [basic.ownerId]}
+                            multiple={false}
+                            size="middle"
                             disabled={!project?.canEdit}
-                            showSearch
-                            optionFilterProp="label"
-                            options={users.map((u) => ({
-                              value: u.id,
-                              label: `${u.displayName}（${u.username}）`,
-                            }))}
-                            onChange={(v) => setBasic({ ...basic, ownerId: v })}
-                            style={{ width: "100%" }}
-                            aria-label="项目负责人"
+                            placeholder="选择负责人"
+                            ariaLabel="项目负责人"
+                            onSave={(ids) => setBasic({ ...basic, ownerId: ids[0] })}
                           />
                         </Form.Item>
                         <Form.Item label="项目状态" extra="与自由文本的「项目阶段」正交，由成员手工设置">
@@ -794,17 +792,12 @@ export default function ProjectSettingsPage({
             <div className="form-stack">
               <label>
                 <span>选择用户（可多选）</span>
-                <Select
-                  mode="multiple"
-                  style={{ width: "100%" }}
-                  options={candidateOptions}
+                <PersonPicker
+                  people={candidatePeople}
                   value={addUserIds}
-                  onChange={setAddUserIds}
-                  showSearch
-                  optionFilterProp="label"
-                  placeholder="搜索姓名或用户名"
-                  notFoundContent="没有可加入的用户"
-                  maxTagCount="responsive"
+                  size="middle"
+                  placeholder="选择用户"
+                  onSave={setAddUserIds}
                 />
               </label>
               <label>

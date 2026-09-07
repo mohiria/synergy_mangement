@@ -36,7 +36,9 @@ test.describe("层级树筛选淡化", () => {
 
   test("人员筛选按该 KR 下有无该人员的任务淡化", async ({ page }) => {
     await openTree(page);
-    await pickFilter(page, "全部人员", 1);
+    // #217：人员筛选是人员选择组件（触发区 + 面板行），第 0 行是「全部人员」哨兵。
+    await page.locator(".toolbar .pp-trigger", { hasText: "全部人员" }).click();
+    await page.locator(".pp-panel .pp-row").nth(1).click();
     // 任何一个人都不会在项目全部 KR 下都有任务：必有淡化，也必有保留。
     await expect(page.locator(".gnode-kr.dimmed").first()).toBeVisible();
     await expect(page.locator(".gnode-kr:not(.dimmed)").first()).toBeVisible();
