@@ -5,7 +5,7 @@ import type { MenuProps } from "antd";
 import PersonPicker from "./PersonPicker";
 import dayjs from "dayjs";
 import DateRangeField from "./DateRangeField";
-import { InlineField, InlineNumber, InlineSelect, InlineText } from "./InlineField";
+import { InlineField, InlineNumber, InlineSelect, InlineText, useSaveQueue } from "./InlineField";
 import SettingsNav from "./SettingsNav";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
@@ -194,7 +194,7 @@ export default function ProjectSettingsPage({
   const [importRecords, setImportRecords] = useState<ImportRecord[]>([]);
   // 操作审计（§10.4）：由后端写路径装饰器统一记录，这里只读展示。
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
-  const [project, setProject] = useState<Project | null>(null);
+  const [project, setProjectState] = useState<Project | null>(null);
   const [members, setMembers] = useState<ProjectMember[]>([]);
   const [users, setUsers] = useState<UserSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -206,7 +206,19 @@ export default function ProjectSettingsPage({
   const [skipped, setSkipped] = useState<SkippedMember[]>([]);
   const [addRole, setAddRole] = useState<MemberRole>("member");
   const [saving, setSaving] = useState(false);
-  const [settings, setSettings] = useState<ProjectSettings | null>(null);
+  const [settings, setSettingsState] = useState<ProjectSettings | null>(null);
+  // #219 逐字段保存串行化：最新对象走 ref，排队中的保存读前一次保存后的值而不是闭包旧快照。
+  const latestProject = useRef<Project | null>(null);
+  const latestRules = useRef<ProjectSettings | null>(null);
+  const setProject = (p: Project) => {
+    latestProject.current = p;
+    setProjectState(p);
+  };
+  const setSettings = (s: ProjectSettings | null) => {
+    latestRules.current = s;
+    setSettingsState(s);
+  };
+  const enqueue = useSaveQueue();
 
   const load = useCallback(async () => {
     const [projectRes, membersRes, usersRes, settingsRes, auditRes, importRes] = await Promise.all([
@@ -300,42 +312,46 @@ export default function ProjectSettingsPage({
 
   // #219：项目基础信息逐字段保存——用当前值拼完整 body 发整表 PUT（与项目列表页「编辑项目」同一接口）；
   // 返回错误文案交给字段就地提示，失败留在编辑态。
-  const patchProject = async (patch: ProjectPatch): Promise<string | null> => {
-    if (!project) return "项目尚未加载";
-    const res = await client.PUT("/projects/{projectId}", {
-      params: { path: { projectId } },
-      body: {
-        name: project.name,
-        ownerId: project.ownerId,
-        status: project.status,
-        stage: project.stage || undefined,
-        visibility: project.visibility,
-        plannedStartDate: project.plannedStartDate || undefined,
-        plannedEndDate: project.plannedEndDate || undefined,
-        ...patch,
-      },
+  const patchProject = (patch: ProjectPatch): Promise<string | null> =>
+    enqueue(async () => {
+      const cur = latestProject.current;
+      if (!cur) return "项目尚未加载";
+      const res = await client.PUT("/projects/{projectId}", {
+        params: { path: { projectId } },
+        body: {
+          name: cur.name,
+          ownerId: cur.ownerId,
+          status: cur.status,
+          stage: cur.stage || undefined,
+          visibility: cur.visibility,
+          plannedStartDate: cur.plannedStartDate || undefined,
+          plannedEndDate: cur.plannedEndDate || undefined,
+          ...patch,
+        },
+      });
+      if (!res.data) return res.error?.message ?? "保存项目基础信息失败";
+      setProject(res.data);
+      return null;
     });
-    if (!res.data) return res.error?.message ?? "保存项目基础信息失败";
-    setProject(res.data);
-    return null;
-  };
 
   // #219：规则设置逐字段保存，同上。
-  const patchRules = async (key: (typeof RULE_FIELDS)[number]["key"], value: number): Promise<string | null> => {
-    if (!settings) return "规则尚未加载";
-    const res = await client.PUT("/projects/{projectId}/settings", {
-      params: { path: { projectId } },
-      body: {
-        approvalTimeoutDays: settings.approvalTimeoutDays,
-        dueSoonDays: settings.dueSoonDays,
-        remindDailyLimit: settings.remindDailyLimit,
-        [key]: value,
-      },
+  const patchRules = (key: (typeof RULE_FIELDS)[number]["key"], value: number): Promise<string | null> =>
+    enqueue(async () => {
+      const cur = latestRules.current;
+      if (!cur) return "规则尚未加载";
+      const res = await client.PUT("/projects/{projectId}/settings", {
+        params: { path: { projectId } },
+        body: {
+          approvalTimeoutDays: cur.approvalTimeoutDays,
+          dueSoonDays: cur.dueSoonDays,
+          remindDailyLimit: cur.remindDailyLimit,
+          [key]: value,
+        },
+      });
+      if (!res.data) return res.error?.message ?? "保存规则设置失败";
+      setSettings(res.data);
+      return null;
     });
-    if (!res.data) return res.error?.message ?? "保存规则设置失败";
-    setSettings(res.data);
-    return null;
-  };
 
   // #217：负责人与邀请都走人员选择组件；邀请候选剔除已是成员的人。
   const userPeople = users.map((u) => ({ userId: u.id, displayName: u.displayName, username: u.username }));

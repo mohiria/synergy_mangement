@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, Dropdown, Form, Input, InputNumber, Modal, Popconfirm, Radio, Select, Spin, Switch, Table, Upload, message } from "antd";
 import type { MenuProps } from "antd";
@@ -9,7 +9,7 @@ import type { components } from "./api/schema";
 import PlainShell from "./PlainShell";
 import PasswordInput from "./PasswordInput";
 import SettingsNav from "./SettingsNav";
-import { InlineText } from "./InlineField";
+import { InlineText, useSaveQueue } from "./InlineField";
 import { logoUrl, useBranding } from "./branding";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
@@ -557,25 +557,35 @@ function BasicSection() {
       message.error(res.error?.message ?? "删除失败");
     }
   };
-  const [settings, setSettings] = useState<SystemSettings | null>(null);
+  const [settings, setSettingsState] = useState<SystemSettings | null>(null);
+  // 最新值走 ref：排队中的保存要读到前一次保存后的对象，不能读闭包里的旧快照。
+  const latest = useRef<SystemSettings | null>(null);
+  const setSettings = (s: SystemSettings) => {
+    latest.current = s;
+    setSettingsState(s);
+  };
+  const enqueue = useSaveQueue();
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     client.GET("/system/settings").then(({ data, error: err }) => {
       if (data) setSettings(data);
       else setError(err?.message ?? "加载失败");
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const patch = async (p: Partial<SystemSettingsInput>): Promise<string | null> => {
-    if (!settings) return "尚未加载";
-    const res = await client.PUT("/system/settings", {
-      body: { systemName: settings.systemName, subtitle: settings.subtitle, loginHint: settings.loginHint, baseUrl: settings.baseUrl, ...p },
+  const patch = (p: Partial<SystemSettingsInput>): Promise<string | null> =>
+    enqueue(async () => {
+      const cur = latest.current;
+      if (!cur) return "尚未加载";
+      const res = await client.PUT("/system/settings", {
+        body: { systemName: cur.systemName, subtitle: cur.subtitle, loginHint: cur.loginHint, baseUrl: cur.baseUrl, ...p },
+      });
+      if (!res.data) return res.error?.message ?? "保存失败";
+      setSettings(res.data);
+      message.success("已保存");
+      await reload();
+      return null;
     });
-    if (!res.data) return res.error?.message ?? "保存失败";
-    setSettings(res.data);
-    message.success("已保存");
-    await reload();
-    return null;
-  };
   return (
     <>
       <div className="settings-panel-head">

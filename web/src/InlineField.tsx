@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { Input, InputNumber, Select } from "antd";
 
 // 设置页字段的「查看／编辑」外壳（#219）：与任务抽屉「任务概览」同一套机制——默认只显示值，
@@ -7,6 +7,18 @@ import { Input, InputNumber, Select } from "antd";
 // 权限只消费后端派生字段（canEdit），这里不判断角色。
 
 export type InlineSave<T> = (value: T) => Promise<string | null>;
+
+// 逐字段保存是整表 PUT，连续改两个字段时第二次请求必须等第一次返回、再从最新对象拼 body，
+// 否则会用旧快照把前一次改动冲掉（PR #220 review）。调用方把保存动作交给这里排队；
+// 前一次失败不影响后一次执行。
+export function useSaveQueue() {
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  return useCallback(<T,>(task: () => Promise<T>): Promise<T> => {
+    const run = queue.current.then(task, task);
+    queue.current = run.catch(() => undefined);
+    return run;
+  }, []);
+}
 
 export function InlineField({
   label,
