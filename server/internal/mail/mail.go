@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/smtp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -53,7 +54,7 @@ func (s SMTPSender) Send(ctx context.Context, cfg Config, msg Message) error {
 	if timeout == 0 {
 		timeout = 15 * time.Second
 	}
-	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
+	addr := smtpAddr(cfg.Host, cfg.Port)
 	dialer := &net.Dialer{Timeout: timeout}
 	var conn net.Conn
 	var err error
@@ -140,4 +141,9 @@ func (r *Recorder) Messages() []Message {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return append([]Message(nil), r.Sent...)
+}
+
+// smtpAddr 拼 SMTP 端点；IPv6 字面量主机要带方括号（#215）。
+func smtpAddr(host string, port int) string {
+	return net.JoinHostPort(host, strconv.Itoa(port))
 }
