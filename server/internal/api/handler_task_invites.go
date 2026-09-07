@@ -22,7 +22,7 @@ func (s *Server) ListTaskInvites(w http.ResponseWriter, r *http.Request, project
 		return
 	}
 	uid := currentUser(r).ID
-	resp, err := s.taskInviteList(r.Context(), projectId, uid, projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility))
+	resp, err := s.taskInviteList(r.Context(), projectId, uid, projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility))
 	if err != nil {
 		writeInternalError(w, r, err)
 		return
@@ -41,7 +41,7 @@ func (s *Server) CreateTaskInvites(w http.ResponseWriter, r *http.Request, proje
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
+	actor := projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)
 	kr, err := s.q.GetKeyResultInProject(r.Context(), store.GetKeyResultInProjectParams{ID: req.KeyResultId, ProjectID: projectId})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -60,6 +60,7 @@ func (s *Server) CreateTaskInvites(w http.ResponseWriter, r *http.Request, proje
 		writeInternalError(w, r, err)
 		return
 	}
+	members = activeProjectMembers(members)
 	roleByID := make(map[int64]string, len(members))
 	for _, m := range members {
 		roleByID[m.UserID] = m.Role
@@ -102,7 +103,7 @@ func (s *Server) CreateTaskInvites(w http.ResponseWriter, r *http.Request, proje
 			writeInternalError(w, r, err)
 			return
 		}
-		if _, err := qtx.CreateNotification(r.Context(), store.CreateNotificationParams{
+		if err := s.notify(r.Context(), qtx, store.CreateNotificationParams{
 			UserID:    inviteeID,
 			Kind:      domain.NotifyTaskInvite,
 			Content:   inviteContent,
@@ -130,7 +131,7 @@ func (s *Server) RevokeTaskInvite(w http.ResponseWriter, r *http.Request, projec
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
+	actor := projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)
 	invite, err := s.q.GetTaskInviteInProject(r.Context(), store.GetTaskInviteInProjectParams{ID: inviteId, ProjectID: projectId})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

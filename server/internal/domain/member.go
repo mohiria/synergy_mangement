@@ -17,6 +17,8 @@ type Actor struct {
 	IsOwner  bool
 	Role     string
 	Implicit bool
+	// SystemAdmin 标记这份管理员权限来自系统管理员标记（#200），不是成员表里的显式身份。
+	SystemAdmin bool
 }
 
 var memberRoles = map[string]struct{}{

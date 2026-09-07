@@ -163,7 +163,8 @@ export default function ProjectSettingsPage({
   const load = useCallback(async () => {
     const [projectRes, membersRes, usersRes, settingsRes, auditRes, importRes] = await Promise.all([
       client.GET("/projects/{projectId}", { params: { path: { projectId } } }),
-      client.GET("/projects/{projectId}/members", { params: { path: { projectId } } }),
+      // #204：成员管理要看到停用成员并打「已停用」标签（人员选择器默认不带回）。
+      client.GET("/projects/{projectId}/members", { params: { path: { projectId }, query: { includeDisabled: true } } }),
       client.GET("/users"),
       client.GET("/projects/{projectId}/settings", { params: { path: { projectId } } }),
       // 只有项目管理员能读审计；非管理员会拿到 403，此时留空即可（导航里也不显示这一节）。
@@ -330,7 +331,14 @@ export default function ProjectSettingsPage({
     <div key={m.userId} className="member-card">
       <span className="avatar">{m.displayName.slice(0, 1)}</span>
       <div className="member-card-text">
-        <b title={m.displayName}>{m.displayName}</b>
+        <b title={m.displayName}>
+          {m.displayName}
+          {m.disabled && (
+            <span className="status-pill" style={{ marginLeft: 6 }}>
+              已停用
+            </span>
+          )}
+        </b>
         <span title={`${m.roleLabel ?? ""} · ${m.username}`}>
           {m.roleLabel ?? ""} · {m.username}
         </span>

@@ -38,7 +38,7 @@ OVERRIDING SYSTEM VALUE VALUES
      now() - interval '21 days',  8,  now() - interval '19 days',  NULL, NULL, ''),
 (17, 56, 9,  '23 项高危配置全部整改并通过复扫。',                             'approved', '',
      now() - interval '191 days', 11, now() - interval '189 days', NULL, NULL, ''),
-(18, 57, 4,  '6 个业务系统的口令策略、双因素和操作审计均已满足要求。',       'approved', '',
+(18, 57, 4,  '6 个业务系统的密码策略、双因素和操作审计均已满足要求。',       'approved', '',
      now() - interval '171 days', 11, now() - interval '169 days', NULL, NULL, ''),
 (19, 58, 11, '测评机构复测通过，46 项问题全部闭环，无遗留高危。',            'approved', '',
      now() - interval '141 days', 11, now() - interval '139 days', NULL, NULL, ''),

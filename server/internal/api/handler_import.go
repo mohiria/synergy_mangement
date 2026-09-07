@@ -29,7 +29,7 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
+	actor := projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)
 	if !domain.CanEditProject(actor) {
 		writeForbidden(w)
 		return
@@ -54,6 +54,7 @@ func (s *Server) ImportTable(w http.ResponseWriter, r *http.Request, projectId i
 		failImportInternal(err)
 		return
 	}
+	members = activeProjectMembers(members)
 	roleByID := make(map[int64]string, len(members))
 	for _, m := range members {
 		roleByID[m.UserID] = m.Role
@@ -231,8 +232,7 @@ func (s *Server) ListImportRecords(w http.ResponseWriter, r *http.Request, proje
 	if !ok {
 		return
 	}
-	uid := currentUser(r).ID
-	if !domain.CanEditProject(projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)) {
+	if !domain.CanEditProject(projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)) {
 		writeForbidden(w)
 		return
 	}
@@ -275,7 +275,7 @@ func (s *Server) ImportTasks(w http.ResponseWriter, r *http.Request, projectId i
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
+	actor := projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)
 	if !domain.CanImportTasks(actor) {
 		writeForbidden(w)
 		return
@@ -297,6 +297,7 @@ func (s *Server) ImportTasks(w http.ResponseWriter, r *http.Request, projectId i
 		failImportInternal(err)
 		return
 	}
+	members = activeProjectMembers(members)
 	roleByID := make(map[int64]string, len(members))
 	for _, m := range members {
 		roleByID[m.UserID] = m.Role

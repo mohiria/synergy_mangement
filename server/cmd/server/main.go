@@ -11,6 +11,8 @@ import (
 
 	"synergy/server/internal/api"
 	"synergy/server/internal/filestore"
+	"synergy/server/internal/mail"
+	"synergy/server/internal/secrets"
 )
 
 func main() {
@@ -45,7 +47,17 @@ func main() {
 		log.Printf("warning: minio 不可达，文件上传下载暂不可用: %v", err)
 	}
 
+	// #212：应用密钥缺失时拒绝启动——SMTP 密码只能以密文落库（ADR 0003）。
+	secretKey, err := secrets.KeyFromEnv()
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+
 	srv := api.NewServer(pool, files)
+	srv.ConfigureMail(secretKey, mail.SMTPSender{})
+	// 邮件 outbox：进程内单协程按间隔取出发送（模块 PRD §10.2）。
+	stopMail := srv.StartMailOutboxWorker(context.Background(), api.MailOutboxInterval)
+	defer stopMail()
 	// 时间型卡点的动态留痕（ADR 0001）：进程内单 ticker 每小时扫描活跃项目补记，无外部定时设施。
 	stopSweep := srv.StartBlockerActivityTicker(context.Background(), api.BlockerSweepInterval)
 	defer stopSweep()

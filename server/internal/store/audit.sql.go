@@ -17,7 +17,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
 type CreateAuditLogParams struct {
-	ProjectID  int64
+	ProjectID  pgtype.Int8
 	ActorID    pgtype.Int8
 	Action     string
 	Method     string
@@ -52,13 +52,13 @@ LIMIT $2
 `
 
 type ListAuditLogsByProjectParams struct {
-	ProjectID int64
+	ProjectID pgtype.Int8
 	Limit     int32
 }
 
 type ListAuditLogsByProjectRow struct {
 	ID         int64
-	ProjectID  int64
+	ProjectID  pgtype.Int8
 	ActorID    pgtype.Int8
 	Action     string
 	Method     string
@@ -79,6 +79,62 @@ func (q *Queries) ListAuditLogsByProject(ctx context.Context, arg ListAuditLogsB
 	var items []ListAuditLogsByProjectRow
 	for rows.Next() {
 		var i ListAuditLogsByProjectRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.ActorID,
+			&i.Action,
+			&i.Method,
+			&i.Route,
+			&i.ObjectType,
+			&i.ObjectID,
+			&i.Summary,
+			&i.CreatedAt,
+			&i.ActorName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSystemAuditLogs = `-- name: ListSystemAuditLogs :many
+SELECT a.id, a.project_id, a.actor_id, a.action, a.method, a.route, a.object_type, a.object_id, a.summary, a.created_at, u.display_name AS actor_name
+FROM audit_logs a
+LEFT JOIN users u ON u.id = a.actor_id
+WHERE a.project_id IS NULL
+ORDER BY a.id DESC
+LIMIT $1
+`
+
+type ListSystemAuditLogsRow struct {
+	ID         int64
+	ProjectID  pgtype.Int8
+	ActorID    pgtype.Int8
+	Action     string
+	Method     string
+	Route      string
+	ObjectType string
+	ObjectID   pgtype.Int8
+	Summary    string
+	CreatedAt  pgtype.Timestamptz
+	ActorName  pgtype.Text
+}
+
+// #206：系统级审计（project_id 为空），最新在前。
+func (q *Queries) ListSystemAuditLogs(ctx context.Context, limit int32) ([]ListSystemAuditLogsRow, error) {
+	rows, err := q.db.Query(ctx, listSystemAuditLogs, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSystemAuditLogsRow
+	for rows.Next() {
+		var i ListSystemAuditLogsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ProjectID,

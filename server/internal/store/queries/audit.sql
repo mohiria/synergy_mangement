@@ -3,6 +3,15 @@
 INSERT INTO audit_logs (project_id, actor_id, action, method, route, object_type, object_id, summary)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
 
+-- name: ListSystemAuditLogs :many
+-- #206：系统级审计（project_id 为空），最新在前。
+SELECT a.*, u.display_name AS actor_name
+FROM audit_logs a
+LEFT JOIN users u ON u.id = a.actor_id
+WHERE a.project_id IS NULL
+ORDER BY a.id DESC
+LIMIT $1;
+
 -- name: ListAuditLogsByProject :many
 SELECT a.*, u.display_name AS actor_name
 FROM audit_logs a

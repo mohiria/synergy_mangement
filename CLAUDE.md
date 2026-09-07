@@ -1,10 +1,10 @@
 # 协同管理工具
 
-单团队自用（约 100 人、内网单机部署）的项目协作系统：O／KR／任务三级模型、交付物边、三道审批、我的工作、关系图谱。
+单团队自用（约 100 人、公有云单机部署，公网 IP:80、HTTP 明文）的项目协作系统：O／KR／任务三级模型、交付物边、三道审批、我的工作、关系图谱。
 
 ## 文档指针（唯一事实源，不在本文件重复）
 
-- 需求：`docs/协同管理工具_详细PRD_V4.5.md`（含 §0.3～0.5 继承修订与 §0.6 参考稿取舍说明）+ `docs/我的工作模块_详细PRD_V1.1.md`、`docs/协作关系模块_详细PRD_V1.1.md`
+- 需求：`docs/协同管理工具_详细PRD_V4.5.md`（含 §0.3～0.5 继承修订与 §0.6 参考稿取舍说明）+ `docs/我的工作模块_详细PRD_V1.1.md`、`docs/协作关系模块_详细PRD_V1.1.md`、`docs/系统设置与账号模块_详细PRD_V1.0.md`（登录页、找回密码、个人中心、系统设置、系统管理员、邮件；AC-70～AC-85）
 - 技术选型与依据：`docs/adr/0001-tech-stack.md`
 - 领域词汇：`docs/CONTEXT.md` —— 代码命名、API 字段用词必须与词汇表一致，含义冲突时先改词汇表再写代码
 
@@ -18,7 +18,7 @@
 
 ## Coding 流程（每个功能循环）
 
-1. 从 PRD 验收场景（AC-01～AC-68，主 PRD §12）出发，先改 `openapi.yaml`；
+1. 从 PRD 验收场景（AC-01～AC-69 在主 PRD §12，AC-70～AC-85 在系统设置与账号模块 PRD §14）出发，先改 `openapi.yaml`；
 2. 重新生成代码：后端 oapi-codegen，前端 openapi-typescript + openapi-fetch；生成物不手改；
 3. 业务规则（状态派生、卡点、互锁、审批链、权限、进度、五组归类）只写 `server/internal/domain/`；严格 red-green-refactor：先写覆盖对应 AC 的表驱动单测；若编译不过，先补最小桩（空实现／零值返回）让测试可编译运行，再真实跑一次、确认**断言级失败**（红 = 断言失败，编译失败只是中间过程、不算红），然后实现转绿，最后按需重构；从未见断言红的测试不算数，「先写后跑直接全绿」不满足本条；
 4. API handler 保持薄层；集成测试用 httptest + Docker 真 Postgres；
@@ -43,8 +43,8 @@
 
 - 契约生成：`go tool oapi-codegen -config oapi-codegen.yaml ..\openapi.yaml` → `internal/api/api.gen.go`
 - 查询生成：`go tool sqlc generate`（schema 读 `migrations/`，查询在 `internal/store/queries/`）
-- 迁移：先 `$env:DATABASE_URL = "postgres://<用户>:<口令>@localhost:5432/synergy?sslmode=disable"`（口令取本机 `.env`，不写进文档与命令历史），再 `go tool goose -dir migrations postgres $env:DATABASE_URL up`（`status` 查看状态）
-- 重置演示数据：`$env:SEED_PASSWORD = "<自定口令>"; go run ./cmd/seed`（清空含用户在内的全部业务数据后重建，数据在 `cmd/seed/sql/`；演示账号口令统一取 `SEED_PASSWORD`，必填、不入库；`-skip-files` 跳过 MinIO 占位文件）
+- 迁移：先 `$env:DATABASE_URL = "postgres://<用户>:<密码>@localhost:5432/synergy?sslmode=disable"`（密码取本机 `.env`，不写进文档与命令历史），再 `go tool goose -dir migrations postgres $env:DATABASE_URL up`（`status` 查看状态）
+- 重置演示数据：`$env:SEED_PASSWORD = "<自定密码>"; go run ./cmd/seed`（清空含用户在内的全部业务数据后重建，数据在 `cmd/seed/sql/`；演示账号密码统一取 `SEED_PASSWORD`，必填、不入库；`-skip-files` 跳过 MinIO 占位文件）
 
 `web/` 目录下：
 
@@ -53,9 +53,9 @@
 - 纯函数单测：`npm test`（vitest，只跑 `src/**/*.test.ts`；e2e 归 Playwright）
 - SheetJS（xlsx 解析与模板生成）走仓库内的 `web/vendor/xlsx-0.20.3.tgz`：npm 上的 xlsx 停在 0.18.5 且有两条未修复的高危公告，官方新版只从 cdn.sheetjs.com 分发，内网离线构建因此把 tarball 入库
 
-仓库根（先 `cp .env.example .env` 填好口令，compose 对口令类变量不设默认值）：
+仓库根（先 `cp .env.example .env` 填好密码，compose 对密码类变量不设默认值）：
 
-- 开发只起数据库：`docker compose up -d postgres`（用户名与库名默认 synergy，口令取 `.env`）；跑集成测试还需 `docker compose up -d minio`（上传走两阶段提交，候选内容必须真的落进对象存储）
+- 开发只起数据库：`docker compose up -d postgres`（用户名与库名默认 synergy，密码取 `.env`）；跑集成测试还需 `docker compose up -d minio`（上传走两阶段提交，候选内容必须真的落进对象存储）
 - 全量启动（本地构建镜像）：`docker compose up -d --build`
 - 部署见 `docs/部署.md`（服务器上 clone + `docker compose up -d --build`，镜像本地构建，不走镜像仓库）
 - Playwright 冒烟：`cd web && npm run test:e2e`（需要 postgres 与 minio；会先跑 `cmd/seed` 重建演示数据，**清空全部业务数据**，只在开发库上跑）。覆盖范围与前置见 `web/e2e/README.md`

@@ -74,3 +74,56 @@ func TestStaleBlockerResolutions(t *testing.T) {
 		t.Fatalf("无悬空出现事件时不应补记: %+v", got)
 	}
 }
+
+// #206：系统级写操作（/system 下的用户管理与系统设置）自动落系统级审计；
+// 认证类与个人中心的本人改密、改资料不落。动作名按路由映射，未登记的 /system 写路由退化为通用词。
+func TestSystemAuditable(t *testing.T) {
+	cases := []struct {
+		method, route string
+		want          bool
+	}{
+		{"POST", "/system/users", true},
+		{"POST", "/system/users/{userId}/disable", true},
+		{"POST", "/system/users/{userId}/enable", true},
+		{"POST", "/system/users/{userId}/reset-password", true},
+		{"PUT", "/system/users/{userId}/profile", true},
+		{"PUT", "/system/users/{userId}/system-admin", true},
+		{"PUT", "/system/settings", true},
+		{"GET", "/system/users", false},
+		{"GET", "/system/audit-logs", false},
+		{"POST", "/auth/change-password", false},
+		{"POST", "/auth/login", false},
+		{"PUT", "/me/profile", false},
+		{"POST", "/projects", false},
+	}
+	for _, c := range cases {
+		t.Run(c.method+" "+c.route, func(t *testing.T) {
+			if got := SystemAuditable(c.method, c.route); got != c.want {
+				t.Fatalf("SystemAuditable(%s, %s) = %v, want %v", c.method, c.route, got, c.want)
+			}
+		})
+	}
+}
+
+func TestSystemAuditActionLabel(t *testing.T) {
+	cases := []struct {
+		method, route, want string
+	}{
+		{"POST", "/system/users", "新建用户"},
+		{"POST", "/system/users/{userId}/disable", "停用用户"},
+		{"POST", "/system/users/{userId}/enable", "启用用户"},
+		{"POST", "/system/users/{userId}/reset-password", "重置用户密码"},
+		{"PUT", "/system/users/{userId}/profile", "修改用户资料"},
+		{"PUT", "/system/users/{userId}/system-admin", "设／撤系统管理员"},
+		{"PUT", "/system/settings", "修改系统基本信息"},
+		{"PUT", "/system/whatever", "系统设置写操作"},
+	}
+	for _, c := range cases {
+		t.Run(c.route, func(t *testing.T) {
+			if got := AuditActionLabel(c.method, c.route); got != c.want {
+				t.Fatalf("AuditActionLabel(%s, %s) = %q, want %q", c.method, c.route, got, c.want)
+			}
+		})
+	}
+}
+

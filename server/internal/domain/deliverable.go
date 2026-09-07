@@ -3,6 +3,7 @@ package domain
 import (
 	"errors"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -19,7 +20,7 @@ var (
 	ErrDeliverableNameTooLong = errors.New("交付物名称不能超过 100 字")
 	// ErrDeliverableNameDuplicate 同一任务下已有同名交付物项：新增要挡下，更新内容请走已有项（裁决 G1）。
 	ErrDeliverableNameDuplicate = errors.New("同名交付物项已存在，请在该项上更新内容")
-	ErrFileTooLarge           = errors.New("单个文件不能超过 20MB")
+	ErrFileTooLarge           = errors.New("单个文件不能超过 1 GB")
 	ErrFileEmpty              = errors.New("文件内容为空")
 	ErrFileNameEmpty          = errors.New("文件名不能为空")
 	ErrFileNameTooLong        = errors.New("文件名不能超过 200 字")
@@ -68,8 +69,18 @@ func CanUploadCandidate(a Actor, userID int64, t TaskFacts) bool {
 	return userID == t.OwnerID || CanEditProject(a)
 }
 
-// MaxUploadSize 单个上传文件的大小上限（与前端提示一致的 20MB）。
-const MaxUploadSize int64 = 20 << 20
+// MaxUploadSize 单个上传文件的大小上限：1 GB（产品裁决 2026-09-03，#195；与前端提示、Caddy 桶名路径的
+// 请求体上限一致，恰好 1 GB 两边都能过）。按对象存储里的真实大小在提交阶段校验。
+const MaxUploadSize int64 = 1 << 30
+
+// MaxUploadTransferDuration 单次上传允许的最长传输时长：1 GB 在约 1.2 Mbps 的链路上要传近两小时，
+// 按此兜底（#215）。预签名地址只要求 PUT 在过期前开始，传输本身可以越过过期时刻继续。
+const MaxUploadTransferDuration = 2 * time.Hour
+
+// UploadStaleAge 待上传记录的存活上限：过期前最后一刻开始的上传也要能传完，才允许清理记录与占位对象。
+func UploadStaleAge(presignExpiry time.Duration) time.Duration {
+	return presignExpiry + MaxUploadTransferDuration
+}
 
 // ValidateUploadSize 校验对象存储中的真实文件大小。
 func ValidateUploadSize(size int64) error {

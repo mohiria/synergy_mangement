@@ -52,10 +52,45 @@ var auditActions = map[string]string{
 // AuditActionLabel 一次写请求对应的动作名（派生字段）。
 // 未登记的路由退化为通用词——宁可动作名笼统，也不让新增写路径完全没有留痕。
 func AuditActionLabel(method, route string) string {
-	if label, ok := auditActions[strings.ToUpper(method)+" "+route]; ok {
+	key := strings.ToUpper(method) + " " + route
+	if label, ok := auditActions[key]; ok {
 		return label
 	}
+	if label, ok := systemAuditActions[key]; ok {
+		return label
+	}
+	if strings.HasPrefix(route, "/system/") {
+		return "系统设置写操作"
+	}
 	return "项目内写操作"
+}
+
+// systemAuditActions 系统级写路由到动作名的映射（#206）；未登记的 /system 写路由退化为通用词。
+var systemAuditActions = map[string]string{
+	"POST /system/users":                         "新建用户",
+	"POST /system/users/{userId}/disable":        "停用用户",
+	"POST /system/users/{userId}/enable":         "启用用户",
+	"POST /system/users/{userId}/reset-password": "重置用户密码",
+	"PUT /system/users/{userId}/profile":         "修改用户资料",
+	"PUT /system/users/{userId}/system-admin":    "设／撤系统管理员",
+	"PUT /system/settings":                       "修改系统基本信息",
+	"POST /system/logo":                          "上传系统 logo",
+	"DELETE /system/logo":                        "删除系统 logo",
+	"PUT /system/mail-settings":                  "修改邮件通道",
+	"POST /system/mail-settings/test":            "发送测试邮件",
+	"PUT /system/mail-notify":                    "修改邮件通知开关",
+}
+
+// SystemAuditable 判定一次请求是否进系统级审计（#206）：/system 下的写请求才记。
+// 认证类（/auth）与个人中心（/me）的本人改密、改资料不记（模块 PRD §7.4）；找回密码成功重置
+// 由 #214 显式落一条。
+func SystemAuditable(method, route string) bool {
+	switch strings.ToUpper(method) {
+	case "POST", "PUT", "PATCH", "DELETE":
+	default:
+		return false
+	}
+	return strings.HasPrefix(route, "/system/")
 }
 
 // Auditable 判定一次请求是否进项目审计：项目域内的写请求才记。

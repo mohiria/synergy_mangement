@@ -21,8 +21,7 @@ func (s *Server) GetProjectSettings(w http.ResponseWriter, r *http.Request, proj
 	if !ok {
 		return
 	}
-	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
+	actor := projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)
 	writeJSON(w, http.StatusOK, toProjectSettings(projectSettingsOf(proj), actor))
 }
 
@@ -37,8 +36,7 @@ func (s *Server) UpdateProjectSettings(w http.ResponseWriter, r *http.Request, p
 	if !ok {
 		return
 	}
-	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
+	actor := projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)
 	if !domain.CanEditProjectSettings(actor) {
 		writeForbidden(w)
 		return

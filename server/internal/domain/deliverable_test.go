@@ -3,6 +3,7 @@ package domain
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 // 交付物项名称校验（PRD §9.1 预期交付物为选填；建立时非空）。
@@ -84,7 +85,7 @@ func TestValidateCandidateFileName(t *testing.T) {
 	}
 }
 
-// 上传大小上限（R4／E2）：预签名直传绕过服务端，前端的 20MB 限制改一个 fetch 即可绕过，
+// 上传大小上限（R4／E2）：预签名直传绕过服务端，前端的 1 GB 限制改一个 fetch 即可绕过，
 // 服务端在两阶段提交的确认步骤按对象存储的真实大小兜底。
 func TestValidateUploadSize(t *testing.T) {
 	cases := []struct {
@@ -95,6 +96,10 @@ func TestValidateUploadSize(t *testing.T) {
 		{"正常文件", 5 << 20, nil},
 		{"刚好到上限", MaxUploadSize, nil},
 		{"超出上限", MaxUploadSize + 1, ErrFileTooLarge},
+		// #195：上限提到 1 GB（产品裁决 2026-09-03）；恰好 1 GB 通过，多 1 字节拒绝。
+		{"恰好 1 GB", 1 << 30, nil},
+		{"1 GB 多 1 字节", (1 << 30) + 1, ErrFileTooLarge},
+		{"原 1 GB 上限之上的文件现在可上传", 512 << 20, nil},
 		{"空文件", 0, ErrFileEmpty},
 	}
 	for _, tc := range cases {
@@ -103,6 +108,30 @@ func TestValidateUploadSize(t *testing.T) {
 				t.Fatalf("ValidateUploadSize(%d) = %v, want %v", tc.size, got, tc.wantErr)
 			}
 		})
+	}
+}
+
+// 待上传记录的存活上限（#215）：预签名地址只要求 PUT 在过期前开始，1 GB 的传输本身可以持续更久；
+// 清理阈值须覆盖「过期前最后一刻开始 + 最慢链路传完」，否则传到一半记录就被扫掉、确认步骤找不到上传。
+func TestUploadStaleAge(t *testing.T) {
+	cases := []struct {
+		name          string
+		presignExpiry time.Duration
+		want          time.Duration
+	}{
+		{"15 分钟预签名", 15 * time.Minute, 15*time.Minute + MaxUploadTransferDuration},
+		{"1 小时预签名", time.Hour, time.Hour + MaxUploadTransferDuration},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := UploadStaleAge(tc.presignExpiry); got != tc.want {
+				t.Fatalf("UploadStaleAge(%v) = %v, want %v", tc.presignExpiry, got, tc.want)
+			}
+		})
+	}
+	// 1 GB 在约 1.2 Mbps 的链路上要传近两小时；阈值按此兜底，不再是 2 倍预签名有效期。
+	if MaxUploadTransferDuration < 2*time.Hour {
+		t.Fatalf("MaxUploadTransferDuration = %v，应至少 2 小时", MaxUploadTransferDuration)
 	}
 }
 

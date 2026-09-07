@@ -73,6 +73,8 @@ func TestDecideCompletionRule(t *testing.T) {
 		{"普通成员不可终审", member, pending, true, "", "", ErrNotFinalReviewer},
 		{"任务负责人不可自审", member, pending, true, "", "", ErrNotFinalReviewer},
 		{"访客不可终审", Actor{Role: RoleViewer}, pending, true, "", "", ErrNotFinalReviewer},
+		// #200／#215：系统管理员的隐式管理员身份不进审批链，与 FinalReviewers 口径一致。
+		{"隐式系统管理员不可终审", Actor{Role: RoleAdmin, SystemAdmin: true}, pending, true, "", "", ErrNotFinalReviewer},
 		{"非待终审状态冲突", admin, TaskFacts{Status: TaskInProgress}, true, "", "", ErrCompletionNotPending},
 	}
 	for _, tc := range cases {

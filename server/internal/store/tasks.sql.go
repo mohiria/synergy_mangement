@@ -228,7 +228,7 @@ func (q *Queries) GetTaskInProject(ctx context.Context, arg GetTaskInProjectPara
 }
 
 const listProjectTasks = `-- name: ListProjectTasks :many
-SELECT t.id, t.key_result_id, t.name, t.owner_id, t.start_date, t.end_date, t.status, t.created_by, t.created_at, t.progress, t.cancel_reason, t.description, t.completion_criteria, t.updated_at, t.receiver_scope, t.code_seq, t.result_update, u.display_name AS owner_name, cu.display_name AS creator_name,
+SELECT t.id, t.key_result_id, t.name, t.owner_id, t.start_date, t.end_date, t.status, t.created_by, t.created_at, t.progress, t.cancel_reason, t.description, t.completion_criteria, t.updated_at, t.receiver_scope, t.code_seq, t.result_update, u.display_name AS owner_name, u.disabled_at AS owner_disabled_at, cu.display_name AS creator_name,
     k.code_seq AS kr_code_seq, o.code_seq AS objective_code_seq
 FROM tasks t
 JOIN key_results k ON k.id = t.key_result_id
@@ -258,6 +258,7 @@ type ListProjectTasksRow struct {
 	CodeSeq            int32
 	ResultUpdate       string
 	OwnerName          string
+	OwnerDisabledAt    pgtype.Timestamptz
 	CreatorName        string
 	KrCodeSeq          int32
 	ObjectiveCodeSeq   int32
@@ -292,6 +293,7 @@ func (q *Queries) ListProjectTasks(ctx context.Context, projectID int64) ([]List
 			&i.CodeSeq,
 			&i.ResultUpdate,
 			&i.OwnerName,
+			&i.OwnerDisabledAt,
 			&i.CreatorName,
 			&i.KrCodeSeq,
 			&i.ObjectiveCodeSeq,

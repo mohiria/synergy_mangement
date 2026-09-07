@@ -11,7 +11,7 @@ const OVERVIEW_BLOCKS = ["basic", "inputs", "deliverables", "receipts", "blocker
 
 // F-07：侧边栏七项此前有两项被缩写成「成果」「报告」，与 §6 和原型不一致。
 test.describe("侧边栏导航", () => {
-  // #125：「OKR 管理」并入项目总览，主导航剩六项。
+  // #125：「OKR 管理」并入项目总览；#201：「项目设置」移入主导航末项，共七项。
   const NAV_LABELS = [
     "项目总览",
     "全部任务",
@@ -19,13 +19,14 @@ test.describe("侧边栏导航", () => {
     "我的工作",
     "成果归档",
     "项目报告",
+    "项目设置",
   ];
 
-  test("六项导航文案与 §6 一致", async ({ page }) => {
+  test("七项导航文案与 §6 一致", async ({ page }) => {
     await login(page);
     await gotoPage(page, "/tasks");
     await expect(page.locator(".page h1").first()).toHaveText("全部任务");
-    // 主导航七项在 <nav> 里；项目设置与项目列表在 sidebar-foot，另算。
+    // 主导航七项在 <nav> 里；sidebar-foot 只放「系统设置」（仅系统管理员），另算。
     const labels = await page.locator(".sidebar nav .nav-row span").allInnerTexts();
     expect(labels.map((l) => l.trim())).toEqual(NAV_LABELS);
   });

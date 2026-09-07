@@ -25,7 +25,7 @@ func (s *Server) CloseTask(w http.ResponseWriter, r *http.Request, projectId int
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
+	actor := projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)
 	reason := strings.TrimSpace(req.Reason)
 	if err := domain.ValidateCancelReason(reason); err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, Error{Code: "cancel_reason_required", Message: err.Error()})

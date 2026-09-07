@@ -62,7 +62,9 @@ func DecideIntermediateRule(a Actor, t TaskFacts, actorID int64, isReviewer func
 	if approve {
 		// 裁决 C2（#136；裁决 11 #181 改写）：或签组内含任一项目管理员时，管理员通过即
 		// 视同终审通过、一次点击闭环（handler 同时落 intermediateBy 与 decidedBy）。
-		if CanEditProject(a) {
+		// 系统管理员的隐式管理员身份不进审批链（#200；#215）：其以显式普通成员进组时只是普通审核人，
+		// 终审仍留给项目负责人或显式项目管理员，与 DecideCompletionRule 同口径。
+		if CanEditProject(a) && !a.SystemAdmin {
 			return TaskCompleted, CompletionApproved, nil
 		}
 		if inResultUpdate {

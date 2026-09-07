@@ -18,7 +18,7 @@ func (s *Server) StartResultUpdate(w http.ResponseWriter, r *http.Request, proje
 		return
 	}
 	uid := currentUser(r).ID
-	actor := projectActor(uid, proj.OwnerID, proj.MyRole, proj.Visibility)
+	actor := projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)
 
 	// 先锁任务行再判定，避免两个并发请求各自看到「没有在途更新」（R2／R3）。
 	tx, err := s.db.Begin(r.Context())
