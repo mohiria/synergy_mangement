@@ -958,7 +958,11 @@ body {
 .task-group-label { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .task-group-label > span:first-child { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .task-group-label b { color: var(--navy); font-weight: 700; }
-.task-title-link { color: #34445f; font-weight: 620; text-align: left; }
+/* 任务名超长时在列宽处省略：antd 按钮是 inline-flex，td 的 ellipsis 管不到它，
+   所以按钮不超出单元格、由内层 span 截断；单元格右侧多留白，避免贴住负责人列。 */
+.task-table td:nth-child(2) { padding-right: 24px; }
+.task-title-link { color: #34445f; font-weight: 620; text-align: left; max-width: 100%; }
+.task-table .task-title-link > span { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-progress-cell { display: flex; align-items: center; gap: 8px; }
 .task-progress-cell .progress { width: 72px; min-width: 72px; }
 /* 百分比不参与压缩：列宽固定后先让进度条让位，再截断（#91）。 */
