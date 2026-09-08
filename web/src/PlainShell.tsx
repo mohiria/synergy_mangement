@@ -46,15 +46,16 @@ export default function PlainShell({
         )}
       </aside>
       <section className="workspace">
-        {subNav && <aside className="subnav">{subNav}</aside>}
-        <div className="workspace-main">
-          <header className="topbar">
-            <div className="breadcrumbs">{crumb}</div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <NotificationBell />
-              <IdentityMenu user={user} onLogout={onLogout} />
-            </div>
-          </header>
+        <header className="topbar">
+          <div className="breadcrumbs">{crumb}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <NotificationBell />
+            <IdentityMenu user={user} onLogout={onLogout} />
+          </div>
+        </header>
+        {/* 顶栏下方分两列：设置类页面的二级导航列（可选）+ 内容区。 */}
+        <div className="workspace-body">
+          {subNav && <aside className="subnav">{subNav}</aside>}
           <main className="page">{children}</main>
         </div>
       </section>

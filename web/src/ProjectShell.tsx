@@ -182,27 +182,28 @@ export default function ProjectShell({
         )}
       </aside>
       <section className="workspace">
-        {subNav && <aside className="subnav">{subNav}</aside>}
-        <div className="workspace-main">
-          <header className="topbar">
-            <div className="breadcrumbs">
-              <Link to="/">项目列表</Link>
-              <span className="sep">/</span>
-              <span>{project?.name ?? "…"}</span>
-              <span className="sep">/</span>
-              <b>{pageLabel}</b>
-              {/* 隐式访客：说清「为什么这里什么都点不了」，派生字段直接消费（#111）。 */}
-              {project?.implicitViewer && (
-                <span className="status-pill" style={{ marginLeft: 8 }} title="公开项目：系统内任何登录用户都可只读浏览与下载，但不能编辑、审批或讨论">
-                  {project.visibilityLabel} · 只读浏览
-                </span>
-              )}
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <NotificationBell />
-              <IdentityMenu user={user} onLogout={logout} />
-            </div>
-          </header>
+        <header className="topbar">
+          <div className="breadcrumbs">
+            <Link to="/">项目列表</Link>
+            <span className="sep">/</span>
+            <span>{project?.name ?? "…"}</span>
+            <span className="sep">/</span>
+            <b>{pageLabel}</b>
+            {/* 隐式访客：说清「为什么这里什么都点不了」，派生字段直接消费（#111）。 */}
+            {project?.implicitViewer && (
+              <span className="status-pill" style={{ marginLeft: 8 }} title="公开项目：系统内任何登录用户都可只读浏览与下载，但不能编辑、审批或讨论">
+                {project.visibilityLabel} · 只读浏览
+              </span>
+            )}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <NotificationBell />
+            <IdentityMenu user={user} onLogout={logout} />
+          </div>
+        </header>
+        {/* 顶栏下方分两列：设置类页面的二级导航列（可选）+ 内容区。 */}
+        <div className="workspace-body">
+          {subNav && <aside className="subnav">{subNav}</aside>}
           <main className={`page${pageWidth ? ` page-${pageWidth}` : ""}`}>{children}</main>
         </div>
       </section>

@@ -149,17 +149,19 @@ body {
 }
 .project-menu-foot:hover { color: var(--accent-hover); }
 
-.workspace { flex: 1; min-width: 0; display: flex; }
-.workspace-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-/* 二级导航列（设置类页面）：紧贴主导航的通高第二列，底色略浅于侧栏、无卡片边框；
-   顶栏与内容区在其右，内容区靠左不再居中，避免主导航与二级导航之间出现大段空白。 */
+.workspace { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/* 顶栏下方的两列：设置类页面的二级导航列（可选）+ 内容区。 */
+.workspace-body { flex: 1; min-width: 0; display: flex; align-items: flex-start; }
+.workspace-body > .page { min-width: 0; }
+/* 二级导航列（设置类页面，参考 ONES 配置中心）：顶栏之下、紧贴主导航的通高第二列，
+   底色略浅于侧栏、无卡片边框；内容区在其右并靠左，避免主导航与二级导航之间出现大段空白。 */
 .subnav {
-  flex: none; width: 208px; padding: 16px 8px;
+  flex: none; width: 208px; padding: 20px 8px 16px;
   background: #f7f8fb; border-right: 1px solid var(--line);
-  position: sticky; top: 0; height: 100vh; overflow-y: auto; align-self: flex-start;
+  position: sticky; top: 64px; height: calc(100vh - 64px); overflow-y: auto;
 }
 .subnav .settings-nav { padding: 0; background: transparent; border: 0; box-shadow: none; position: static; }
-.subnav + .workspace-main > .page { margin: 0; max-width: 1240px; }
+.subnav + .page { margin: 0; max-width: 1240px; }
 .topbar {
   position: sticky; top: 0; z-index: 30;
   height: 64px; padding: 0 28px;
@@ -1127,10 +1129,8 @@ body {
 .inline-field-error { color: var(--red); font-size: var(--type-aux); margin-top: 4px; }
 /* 窄屏（<960px）：二级导航列退化为顶栏下方的横向分组，条目按行折行，不出横向滚动。 */
 @media (max-width: 960px) {
-  .workspace { flex-direction: column; }
-  .subnav { order: 1; align-self: stretch; width: auto; height: auto; position: static; padding: 12px 20px; border-right: 0; border-bottom: 1px solid var(--line); }
-  .subnav + .workspace-main { display: contents; }
-  .subnav + .workspace-main > .page { order: 2; }
+  .workspace-body { flex-direction: column; align-items: stretch; }
+  .subnav { width: auto; height: auto; position: static; padding: 12px 20px; border-right: 0; border-bottom: 1px solid var(--line); }
   .settings-nav { position: static; display: flex; flex-wrap: wrap; gap: 8px 16px; }
   .settings-nav-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
   .settings-nav-group + .settings-nav-group { margin-top: 0; }
