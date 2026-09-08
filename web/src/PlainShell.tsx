@@ -14,12 +14,15 @@ export default function PlainShell({
   user,
   active,
   crumb,
+  subNav,
   onLogout,
   children,
 }: {
   user: CurrentUser;
   active: "projects" | "system" | "me";
   crumb: ReactNode;
+  // 二级导航插槽（设置类页面）：作为主导航右侧紧贴的通高第二列，顶栏与内容区在其右。
+  subNav?: ReactNode;
   onLogout: () => void;
   children: ReactNode;
 }) {
@@ -43,14 +46,17 @@ export default function PlainShell({
         )}
       </aside>
       <section className="workspace">
-        <header className="topbar">
-          <div className="breadcrumbs">{crumb}</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <NotificationBell />
-            <IdentityMenu user={user} onLogout={onLogout} />
-          </div>
-        </header>
-        <main className="page">{children}</main>
+        {subNav && <aside className="subnav">{subNav}</aside>}
+        <div className="workspace-main">
+          <header className="topbar">
+            <div className="breadcrumbs">{crumb}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <NotificationBell />
+              <IdentityMenu user={user} onLogout={onLogout} />
+            </div>
+          </header>
+          <main className="page">{children}</main>
+        </div>
       </section>
     </div>
   );

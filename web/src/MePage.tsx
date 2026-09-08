@@ -53,7 +53,15 @@ export default function MePage({
     return <Navigate to="/me/profile" replace />;
   }
   return (
-    <PlainShell user={user} onLogout={logout} active="me" crumb={<b>个人中心</b>}>
+    <PlainShell
+      user={user}
+      onLogout={logout}
+      active="me"
+      crumb={<b>个人中心</b>}
+      subNav={
+        <SettingsNav groups={NAV_GROUPS} active={section} onSelect={(k) => navigate(`/me/${k}`)} />
+      }
+    >
       <div className="page-head">
         <div>
           <h1>个人中心</h1>
@@ -61,7 +69,6 @@ export default function MePage({
         </div>
       </div>
       <div className="settings-layout">
-        <SettingsNav groups={NAV_GROUPS} active={section} onSelect={(k) => navigate(`/me/${k}`)} />
         <section className="settings-panel">
           {section === "profile" ? (
             <ProfileSection user={user} onUserChange={onUserChange} />
