@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@ant-design/v5-patch-for-react-19": "^1.0.3",
     "antd": "^5.27.0",
     "openapi-fetch": "^0.17.0",
     "react": "^19.2.8",

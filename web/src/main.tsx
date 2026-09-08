@@ -1,3 +1,5 @@
+// React 19 下 antd v5 的静态方法（Modal.confirm、message.*）会静默失效，须先打官方补丁。
+import "@ant-design/v5-patch-for-react-19";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
