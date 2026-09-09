@@ -718,7 +718,12 @@ body {
 .fact-card b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fact-card small { display: block; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fact-card-top b, .fact-card-top small { white-space: normal; }
-.fact-card .file-link { color: var(--accent); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; font-size: var(--type-aux); }
+/* 文件链接：可预览／下载的文件名统一用它（抽屉、归档表、审核记录、图谱检视器），
+   强调色＋下划线让人一眼认出是附件，悬停加深。作主行时挂在 b 上，字号随主行。 */
+.file-link { color: var(--accent); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.file-link:hover { color: var(--accent-hover); text-decoration-thickness: 2px; }
+.fact-card .file-link { font-size: var(--type-aux); }
+.fact-card b.file-link { font-size: inherit; }
 .fact-card-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 /* 紧凑正文（输入、卡点等一行事实）。 */
 .fact-card-aux { padding: 9px 12px; font-size: var(--type-aux); }

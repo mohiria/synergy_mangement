@@ -193,11 +193,9 @@ export default function ReportsPage({
             {report.completedDeliverables.map((d, i) => (
               <div key={i} className="fact-card fact-card-aux">
                 <div>
-                  <b>
-                    {d.taskName} / {d.deliverableName}
-                  </b>
+                  <b title={d.fileName}>{d.fileName}</b>
                   <small>
-                    {d.fileName}
+                    {d.taskName}
                     {d.effectiveAt ? ` · 生效于 ${fmtTime(d.effectiveAt)}` : ""}
                   </small>
                 </div>

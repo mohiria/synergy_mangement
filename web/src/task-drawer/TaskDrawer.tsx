@@ -895,12 +895,13 @@ export default function TaskDrawer({
           {deliverables.map((d) => (
             <article key={d.id} className="fact-card">
               <div style={{ minWidth: 0 }}>
-                <b>{d.name}</b>
+                {/* 有当前文件时只显示带后缀的文件名（PRD §7.4 交付物块）：项名不另行显示，
+                    它仍是项的身份与重名判定依据（裁决 G），没有文件可显示时退回项名。 */}
                 {d.current ? (
                   <>
-                    <span className="file-link" onClick={() => openFile(d.current!.id)}>
+                    <b className="file-link" title={d.current.fileName} onClick={() => openFile(d.current!.id)}>
                       {d.current.fileName}
-                    </span>
+                    </b>
                     <div className="muted" style={{ fontSize: 12 }}>
                       {fileTypeLabel(d.current.fileName)}
                       {d.current.fileSize ? ` · ${formatFileSize(d.current.fileSize)}` : ""}
@@ -908,9 +909,12 @@ export default function TaskDrawer({
                     </div>
                   </>
                 ) : (
-                  <div className="muted" style={{ fontSize: 12 }}>
-                    尚未提交交付物
-                  </div>
+                  <>
+                    <b title={d.name}>{d.name}</b>
+                    <div className="muted" style={{ fontSize: 12 }}>
+                      尚未提交交付物
+                    </div>
+                  </>
                 )}
                 {d.candidate && (
                   <div className="muted" style={{ fontSize: 12 }}>
@@ -1265,7 +1269,6 @@ export default function TaskDrawer({
             )}
             {cr.items.map((it) => (
               <div key={cr.id + "-" + it.deliverableId} style={{ marginTop: 4 }}>
-                <b>{it.deliverableName}</b>：
                 {it.fileId ? (
                   <span className="file-link" onClick={() => openFile(it.fileId!)}>
                     {it.fileName}

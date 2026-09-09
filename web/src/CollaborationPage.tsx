@@ -1324,7 +1324,12 @@ export default function CollaborationPage({
             (selectedEdgeObj.sourceCurrentFiles ?? []).map((f) => (
               <div key={f.fileId} className="gi-file">
                 <span title={f.fileName}>
-                  <b>{f.fileName}</b>
+                  <b
+                    className="file-link"
+                    onClick={() => openEdgeFile(f.fileId, f.fileName, previewable(f.fileName))}
+                  >
+                    {f.fileName}
+                  </b>
                   <small>
                     {f.fileTypeLabel}
                     {f.fileSize > 0 ? ` · ${formatFileSize(f.fileSize)}` : ""}
@@ -1493,8 +1498,17 @@ export default function CollaborationPage({
             </div>
             {inspectorDetail.deliverables.map((d) => (
               <div key={d.id} className="gi-file">
-                <span title={`${d.name} · ${d.contentStateLabel}`}>
-                  <b>{d.name}</b>
+                <span title={`${d.current?.fileName ?? d.name} · ${d.contentStateLabel}`}>
+                  {d.current ? (
+                    <b
+                      className="file-link"
+                      onClick={() => openEdgeFile(d.current!.id, d.current!.fileName, previewable(d.current!.fileName))}
+                    >
+                      {d.current.fileName}
+                    </b>
+                  ) : (
+                    <b>{d.name}</b>
+                  )}
                   <small>
                     {d.contentStateLabel}
                     {d.current?.fileSize ? ` · ${formatFileSize(d.current.fileSize)}` : ""}
