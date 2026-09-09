@@ -167,11 +167,9 @@ export default function ProjectTasksPage({
             <span className="cell-text">{kr.description}</span>
             <span className="muted">{list.length} 项</span>
           </span>
-          {kr.progressSummary && kr.progressSummary.totalTasks > 0 && (
+          {kr.progressSummary?.averageProgress != null && (
             <span className="muted" style={{ fontWeight: 400 }}>
-              {kr.progressSummary.averageProgress != null &&
-                `平均 ${kr.progressSummary.averageProgress}%　·　`}
-              其中 {kr.progressSummary.filledTasks}／{kr.progressSummary.totalTasks} 个任务由负责人填写，未填按 0 计入
+              平均 {kr.progressSummary.averageProgress}%
             </span>
           )}
         </div>

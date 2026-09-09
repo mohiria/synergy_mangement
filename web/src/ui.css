@@ -150,6 +150,18 @@ body {
 .project-menu-foot:hover { color: var(--accent-hover); }
 
 .workspace { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/* 顶栏下方的两列：设置类页面的二级导航列（可选）+ 内容区。 */
+.workspace-body { flex: 1; min-width: 0; display: flex; align-items: flex-start; }
+.workspace-body > .page { min-width: 0; }
+/* 二级导航列（设置类页面，参考 ONES 配置中心）：顶栏之下、紧贴主导航的通高第二列，
+   底色略浅于侧栏、无卡片边框；内容区在其右并靠左，避免主导航与二级导航之间出现大段空白。 */
+.subnav {
+  flex: none; width: 208px; padding: 20px 8px 16px;
+  background: #f7f8fb; border-right: 1px solid var(--line);
+  position: sticky; top: 64px; height: calc(100vh - 64px); overflow-y: auto;
+}
+.subnav .settings-nav { padding: 0; background: transparent; border: 0; box-shadow: none; position: static; }
+.subnav + .page { margin: 0; max-width: 1240px; }
 .topbar {
   position: sticky; top: 0; z-index: 30;
   height: 64px; padding: 0 28px;
@@ -946,7 +958,11 @@ body {
 .task-group-label { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .task-group-label > span:first-child { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .task-group-label b { color: var(--navy); font-weight: 700; }
-.task-title-link { color: #34445f; font-weight: 620; text-align: left; }
+/* 任务名超长时在列宽处省略：antd 按钮是 inline-flex，td 的 ellipsis 管不到它，
+   所以按钮不超出单元格、由内层 span 截断；单元格右侧多留白，避免贴住负责人列。 */
+.task-table td:nth-child(2) { padding-right: 24px; }
+.task-title-link { color: #34445f; font-weight: 620; text-align: left; max-width: 100%; }
+.task-table .task-title-link > span { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-progress-cell { display: flex; align-items: center; gap: 8px; }
 .task-progress-cell .progress { width: 72px; min-width: 72px; }
 /* 百分比不参与压缩：列宽固定后先让进度条让位，再截断（#91）。 */
@@ -1062,7 +1078,7 @@ body {
 .report-section h3 { margin: 0 0 12px; color: #2c3950; font-size: var(--type-title); font-weight: 650; }
 
 /* 项目设置 settings-layout（原型 renderSettings）：左侧分节导航、右侧内容卡、成员卡网格。 */
-.settings-layout { display: grid; grid-template-columns: 208px minmax(0, 1fr); gap: 16px; align-items: start; }
+.settings-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
 .settings-nav {
   padding: 8px; background: var(--surface); border: 1px solid var(--line);
   border-radius: var(--radius); box-shadow: var(--shadow-card); position: sticky; top: 84px;
@@ -1115,9 +1131,10 @@ body {
 /* #219：设置页字段的查看态——与控件同高；有权限时复用 .inline-editable 的悬停虚线；校验／保存错误就地显示。 */
 .settings-value { display: inline-flex; align-items: center; min-height: 32px; max-width: 100%; }
 .inline-field-error { color: var(--red); font-size: var(--type-aux); margin-top: 4px; }
-/* 窄屏（<960px）：导航退化为内容上方的横向分组，条目按行折行，不出横向滚动。 */
+/* 窄屏（<960px）：二级导航列退化为顶栏下方的横向分组，条目按行折行，不出横向滚动。 */
 @media (max-width: 960px) {
-  .settings-layout { grid-template-columns: minmax(0, 1fr); }
+  .workspace-body { flex-direction: column; align-items: stretch; }
+  .subnav { width: auto; height: auto; position: static; padding: 12px 20px; border-right: 0; border-bottom: 1px solid var(--line); }
   .settings-nav { position: static; display: flex; flex-wrap: wrap; gap: 8px 16px; }
   .settings-nav-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
   .settings-nav-group + .settings-nav-group { margin-top: 0; }

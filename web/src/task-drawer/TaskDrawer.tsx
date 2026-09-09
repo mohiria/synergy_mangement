@@ -933,8 +933,9 @@ export default function TaskDrawer({
                     重传交付物
                   </Button>
                 )}
-                {/* 裁决 #165：退回后候选保留，负责人可逐个删除；新增内容走上传入口。 */}
-                {d.candidate && d.canDeleteCandidate && (
+                {/* 裁决 #165：退回后候选保留，负责人可逐个删除；新增内容走上传入口。
+                    项上没有生效文件时删候选只剩空壳，此时只给「删除」整项一个入口。 */}
+                {d.current && d.candidate && d.canDeleteCandidate && (
                   <Button size="small" danger onClick={() => deleteCandidate(d)}>
                     删除候选
                   </Button>

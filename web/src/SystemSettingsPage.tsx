@@ -74,7 +74,15 @@ export default function SystemSettingsPage({ user, onLogout }: { user: CurrentUs
   }
 
   return (
-    <PlainShell user={user} onLogout={logout} active="system" crumb={<b>系统设置</b>}>
+    <PlainShell
+      user={user}
+      onLogout={logout}
+      active="system"
+      crumb={<b>系统设置</b>}
+      subNav={
+        <SettingsNav groups={NAV_GROUPS} active={section} onSelect={(k) => navigate(`/system/${k}`)} />
+      }
+    >
       <div className="page-head">
         <div>
           <h1>系统设置</h1>
@@ -82,7 +90,6 @@ export default function SystemSettingsPage({ user, onLogout }: { user: CurrentUs
         </div>
       </div>
       <div className="settings-layout">
-        <SettingsNav groups={NAV_GROUPS} active={section} onSelect={(k) => navigate(`/system/${k}`)} />
         <section className="settings-panel">
           {section === "users" ? (
             <UsersSection me={user} />

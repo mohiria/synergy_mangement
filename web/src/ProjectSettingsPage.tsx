@@ -407,12 +407,46 @@ export default function ProjectSettingsPage({
     </div>
   );
 
+  // #216：分组分节导航；导入记录与操作审计仅 canEdit 可见，无权限时「记录」组整组不渲染。
+  const settingsNav = notFound ? undefined : (
+    <SettingsNav
+      active={tab}
+      onSelect={setTab}
+      groups={[
+        {
+          title: "项目配置",
+          items: [
+            { key: "basic", label: "项目基础信息" },
+            { key: "rules", label: "规则设置" },
+          ],
+        },
+        {
+          title: "成员与权限",
+          items: [
+            { key: "members", label: "成员与职责" },
+            { key: "permissions", label: "系统权限" },
+          ],
+        },
+        {
+          title: "记录",
+          items: project?.canEdit
+            ? [
+                { key: "imports", label: "导入记录" },
+                { key: "audit", label: "操作审计" },
+              ]
+            : [],
+        },
+      ]}
+    />
+  );
+
   return (
     <ProjectShell
       user={user}
       project={project}
       projectId={projectId}
       pageLabel="项目设置"
+      subNav={settingsNav}
       onLogout={onLogout}
     >
       {notFound ? (
@@ -431,39 +465,9 @@ export default function ProjectSettingsPage({
             </div>
           </div>
           {error && <Alert type="error" message={error} style={{ marginBottom: 16 }} />}
-          {/* settings-layout：左侧分节导航、右侧内容卡。原型的「进度权重」一节已随
+          {/* settings-layout：内容卡；分节导航已并入壳层二级导航列（subNav）。原型的「进度权重」一节已随
               AC-63 裁决取消（KR 汇总固定任务等权）；导入记录另见 #68。 */}
           <div className="settings-layout">
-            {/* #216：分组分节导航；导入记录与操作审计仅 canEdit 可见，无权限时「记录」组整组不渲染。 */}
-            <SettingsNav
-              active={tab}
-              onSelect={setTab}
-              groups={[
-                {
-                  title: "项目配置",
-                  items: [
-                    { key: "basic", label: "项目基础信息" },
-                    { key: "rules", label: "规则设置" },
-                  ],
-                },
-                {
-                  title: "成员与权限",
-                  items: [
-                    { key: "members", label: "成员与职责" },
-                    { key: "permissions", label: "系统权限" },
-                  ],
-                },
-                {
-                  title: "记录",
-                  items: project?.canEdit
-                    ? [
-                        { key: "imports", label: "导入记录" },
-                        { key: "audit", label: "操作审计" },
-                      ]
-                    : [],
-                },
-              ]}
-            />
             <section className="settings-panel">
               {tab === "basic" ? (
                 <>

@@ -94,6 +94,7 @@ export default function ProjectShell({
   projectId,
   pageLabel,
   pageWidth,
+  subNav,
   onLogout,
   children,
 }: {
@@ -103,6 +104,8 @@ export default function ProjectShell({
   pageLabel: string;
   // 内容区最大宽度分档（基线 §5）：默认 1480，我的工作 1240，图谱 1680。
   pageWidth?: "narrow" | "wide";
+  // 二级导航插槽（设置类页面）：作为主导航右侧紧贴的通高第二列，顶栏与内容区在其右。
+  subNav?: ReactNode;
   onLogout: () => void;
   children: ReactNode;
 }) {
@@ -198,7 +201,11 @@ export default function ProjectShell({
             <IdentityMenu user={user} onLogout={logout} />
           </div>
         </header>
-        <main className={`page${pageWidth ? ` page-${pageWidth}` : ""}`}>{children}</main>
+        {/* 顶栏下方分两列：设置类页面的二级导航列（可选）+ 内容区。 */}
+        <div className="workspace-body">
+          {subNav && <aside className="subnav">{subNav}</aside>}
+          <main className={`page${pageWidth ? ` page-${pageWidth}` : ""}`}>{children}</main>
+        </div>
       </section>
     </div>
   );
