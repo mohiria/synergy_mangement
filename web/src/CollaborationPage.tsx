@@ -1498,20 +1498,24 @@ export default function CollaborationPage({
             </div>
             {inspectorDetail.deliverables.map((d) => (
               <div key={d.id} className="gi-file">
-                <span title={`${d.current?.fileName ?? d.name} · ${d.contentStateLabel}`}>
-                  {d.current ? (
-                    <b
-                      className="file-link"
-                      onClick={() => openEdgeFile(d.current!.id, d.current!.fileName, previewable(d.current!.fileName))}
-                    >
-                      {d.current.fileName}
-                    </b>
-                  ) : (
-                    <b>{d.name}</b>
-                  )}
+                <span title={`${(d.current ?? d.candidate)?.fileName ?? d.name} · ${d.contentStateLabel}`}>
+                  {(() => {
+                    // 与任务抽屉同一规则：有当前文件显示当前文件，只有候选时显示候选文件，都没有才退回项名。
+                    const shown = d.current ?? d.candidate;
+                    return shown ? (
+                      <b
+                        className="file-link"
+                        onClick={() => openEdgeFile(shown.id, shown.fileName, previewable(shown.fileName))}
+                      >
+                        {shown.fileName}
+                      </b>
+                    ) : (
+                      <b>{d.name}</b>
+                    );
+                  })()}
                   <small>
                     {d.contentStateLabel}
-                    {d.current?.fileSize ? ` · ${formatFileSize(d.current.fileSize)}` : ""}
+                    {(d.current ?? d.candidate)?.fileSize ? ` · ${formatFileSize((d.current ?? d.candidate)!.fileSize!)}` : ""}
                   </small>
                 </span>
                 {d.current && (

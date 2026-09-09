@@ -895,32 +895,35 @@ export default function TaskDrawer({
           {deliverables.map((d) => (
             <article key={d.id} className="fact-card">
               <div style={{ minWidth: 0 }}>
-                {/* 有当前文件时只显示带后缀的文件名（PRD §7.4 交付物块）：项名不另行显示，
-                    它仍是项的身份与重名判定依据（裁决 G），没有文件可显示时退回项名。 */}
-                {d.current ? (
-                  <>
-                    <b className="file-link" title={d.current.fileName} onClick={() => openFile(d.current!.id)}>
-                      {d.current.fileName}
-                    </b>
-                    <div className="muted" style={{ fontSize: 12 }}>
-                      {fileTypeLabel(d.current.fileName)}
-                      {d.current.fileSize ? ` · ${formatFileSize(d.current.fileSize)}` : ""}
-                      {d.current.effectiveAt ? ` · 更新于 ${fmtTime(d.current.effectiveAt)}` : ""}
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <b title={d.name}>{d.name}</b>
-                    <div className="muted" style={{ fontSize: 12 }}>
-                      尚未提交交付物
-                    </div>
-                  </>
-                )}
-                {d.candidate && (
-                  <div className="muted" style={{ fontSize: 12 }}>
-                    候选「{d.candidate.fileName}」{d.contentStateLabel}
-                  </div>
-                )}
+                {/* 只显示带后缀的文件名（PRD §7.4 交付物块）：有当前文件显示当前文件，只有候选时显示候选文件；
+                    项名不另行显示，它仍是项的身份与重名判定依据（裁决 G），两种文件都没有时才退回项名。
+                    状态不再单独成行，并入元信息行；在审的候选文件名到“审核”Tab 查看。 */}
+                {(() => {
+                  const shown = d.current ?? d.candidate;
+                  if (!shown) {
+                    return (
+                      <>
+                        <b title={d.name}>{d.name}</b>
+                        <div className="muted" style={{ fontSize: 12 }}>
+                          尚未提交交付物
+                        </div>
+                      </>
+                    );
+                  }
+                  return (
+                    <>
+                      <b className="file-link" title={shown.fileName} onClick={() => openFile(shown.id)}>
+                        {shown.fileName}
+                      </b>
+                      <div className="muted" style={{ fontSize: 12 }}>
+                        {fileTypeLabel(shown.fileName)}
+                        {shown.fileSize ? ` · ${formatFileSize(shown.fileSize)}` : ""}
+                        {d.current?.effectiveAt ? ` · 更新于 ${fmtTime(d.current.effectiveAt)}` : ""}
+                        {d.contentState !== "effective" ? ` · ${d.contentStateLabel}` : ""}
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
               <div className="fact-card-actions">
                 {d.current && (
