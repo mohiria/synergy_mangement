@@ -55,7 +55,7 @@ for (const vp of VIEWPORTS) {
       test(`${heading}：行高恒定、字段不换行、页面无横向滚动`, async ({ page }) => {
         await login(page);
         await gotoPage(page, path);
-        await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+        await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
         await openList(page, path);
 
         const heights = (await page.evaluate(ROW_HEIGHTS)) as number[][];

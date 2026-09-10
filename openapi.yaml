@@ -4571,11 +4571,14 @@ components:
       enum: [today, week, month, all]
     ReportKrProgress:
       type: object
-      required: [keyResultId, description, riskLevel, totalTasks, filledTasks, completedInRange]
+      required: [keyResultId, code, description, riskLevel, totalTasks, filledTasks, completedInRange]
       properties:
         keyResultId:
           type: integer
           format: int64
+        code:
+          type: string
+          description: KR 展示编号（AC-64）
         description:
           type: string
         riskLevel:
@@ -4589,12 +4592,27 @@ components:
         completedInRange:
           type: integer
           description: 范围内终审通过的任务数
-    ReportDeliverable:
+    ReportObjectiveProgress:
       type: object
-      required: [taskName, deliverableName, fileName]
+      description: 附录「O／KR 进展」的一组：目标及其 KR 行
+      required: [objectiveId, code, title, keyResults]
       properties:
-        taskName:
+        objectiveId:
+          type: integer
+          format: int64
+        code:
           type: string
+        title:
+          type: string
+        keyResults:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportKrProgress"
+    ReportFile:
+      type: object
+      description: 本期生效的一份交付内容文件
+      required: [deliverableName, fileName, effectiveAt]
+      properties:
         deliverableName:
           type: string
         fileName:
@@ -4602,10 +4620,98 @@ components:
         effectiveAt:
           type: string
           format: date-time
+    ReportDeliveryTask:
+      type: object
+      description: 本期成果里的一条任务：范围内终审通过，或范围内有当前交付内容生效
+      required: [taskId, code, name, ownerName, status, statusLabel, files]
+      properties:
+        taskId:
+          type: integer
+          format: int64
+        code:
+          type: string
+        name:
+          type: string
+        ownerName:
+          type: string
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        statusLabel:
+          type: string
+          description: 状态显示文案（AC-04；派生字段）
+        completedAt:
+          type: string
+          format: date-time
+          description: 终审通过时刻；未完成的任务不返回
+        progress:
+          type: integer
+          description: 未完成任务的当前进度；已完成不返回
+        files:
+          type: array
+          description: 范围内生效的当前交付内容（按生效时间升序）
+          items:
+            $ref: "#/components/schemas/ReportFile"
+    ReportDeliveryKr:
+      type: object
+      required: [keyResultId, code, description, tasks]
+      properties:
+        keyResultId:
+          type: integer
+          format: int64
+        code:
+          type: string
+        description:
+          type: string
+        averageProgress:
+          type: integer
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportDeliveryTask"
+    ReportDeliveryObjective:
+      type: object
+      required: [objectiveId, code, title, keyResults]
+      properties:
+        objectiveId:
+          type: integer
+          format: int64
+        code:
+          type: string
+        title:
+          type: string
+        keyResults:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportDeliveryKr"
+    ReportDeliveries:
+      type: object
+      description: 一、本期成果：按 O → KR → 任务归组，只含有成果的分支
+      required: [completedTasks, effectiveFiles, objectives]
+      properties:
+        completedTasks:
+          type: integer
+          description: 范围内终审通过的任务数
+        effectiveFiles:
+          type: integer
+          description: 范围内生效的当前交付内容份数
+        objectives:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportDeliveryObjective"
+    ReportBlockerPhase:
+      type: string
+      description: 开放卡点相对统计范围的阶段：new＝本期新出现，carried＝上期遗留；项目整体范围不区分、不返回
+      enum: [new, carried]
     ReportBlocker:
       type: object
-      required: [taskName, kind, kindLabel, missing, reason, level]
+      description: 当前开放的卡点（按出现时间升序）
+      required: [taskId, code, taskName, kind, kindLabel, missing, reason, level, stayDays]
       properties:
+        taskId:
+          type: integer
+          format: int64
+        code:
+          type: string
         taskName:
           type: string
         kind:
@@ -4624,11 +4730,78 @@ components:
         since:
           type: string
           format: date-time
+        stayDays:
+          type: integer
+          description: 已停留天数（按项目时区自然日差，派生字段）
+        phase:
+          $ref: "#/components/schemas/ReportBlockerPhase"
+        phaseLabel:
+          type: string
+          description: 「本期新出现」／「上期遗留」；与 phase 同时返回或同时缺省
+    ReportResolvedBlocker:
+      type: object
+      description: 范围内解除的卡点（来自卡点出现／解除动态，按解除时间升序）
+      required: [taskId, code, taskName, kind, kindLabel, missing, openedAt, resolvedAt, durationDays]
+      properties:
+        taskId:
+          type: integer
+          format: int64
+        code:
+          type: string
+        taskName:
+          type: string
+        kind:
+          $ref: "#/components/schemas/BlockerKind"
+        kindLabel:
+          type: string
+        missing:
+          type: string
+        openedAt:
+          type: string
+          format: date-time
+        resolvedAt:
+          type: string
+          format: date-time
+        durationDays:
+          type: integer
+          description: 持续天数（自然日差，派生字段）
+    ReportBlockers:
+      type: object
+      description: 二、风险与卡点
+      required: [open, resolved, newInRange, resolvedInRange, pendingCompletions]
+      properties:
+        open:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportBlocker"
+        resolved:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportResolvedBlocker"
+        newInRange:
+          type: integer
+          description: open 中 phase＝new 的条数；项目整体范围为 0
+        resolvedInRange:
+          type: integer
+          description: resolved 的条数
+        pendingCompletions:
+          type: integer
+          description: 停留在审批队列中的完成审核件数（PRD「待决策」，以一句注记呈现）
     ReportNextStep:
       type: object
-      required: [taskName, ownerName, status, statusLabel]
+      description: 下一步窗口内到期或已超期的未完成任务
+      required: [taskId, code, taskName, ownerName, status, statusLabel, endDate]
       properties:
+        taskId:
+          type: integer
+          format: int64
+        code:
+          type: string
         taskName:
+          type: string
+        keyResultCode:
+          type: string
+        keyResultDescription:
           type: string
         ownerName:
           type: string
@@ -4640,48 +4813,84 @@ components:
         endDate:
           type: string
           format: date
-        overdue:
-          type: boolean
+        overdueDays:
+          type: integer
+          description: 已超期天数（截止次日零点起算）；未超期不返回
+        dueInDays:
+          type: integer
+          description: 距截止天数（0＝今天到期）；已超期不返回
         unreadyNote:
           type: string
           description: 「上游未就绪：缺 XX」注记（派生字段，与我的工作同一口径）；状态为「等待输入」时说清缺哪一项，输入齐备时不返回
+    ReportUpcomingTask:
+      type: object
+      description: 即将启动：计划开始日在明天至窗口末、尚未开始的任务（按开始日升序）
+      required: [taskId, code, taskName, ownerName, status, statusLabel, startDate]
+      properties:
+        taskId:
+          type: integer
+          format: int64
+        code:
+          type: string
+        taskName:
+          type: string
+        keyResultCode:
+          type: string
+        keyResultDescription:
+          type: string
+        ownerName:
+          type: string
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        statusLabel:
+          type: string
+        startDate:
+          type: string
+          format: date
+        unreadyNote:
+          type: string
+    ReportNextSteps:
+      type: object
+      description: 三、下一步
+      required: [horizonDays, due, upcoming]
+      properties:
+        horizonDays:
+          type: integer
+          description: 窗口天数：今天＝1、近 7 天＝7、近 30 天与项目整体＝30
+        due:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportNextStep"
+        upcoming:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportUpcomingTask"
     Report:
       type: object
-      description: 项目报告（AC-19）：从同一份项目事实生成，不要求成员重复填报
-      required:
-        [range, generatedAt, krProgress, completedDeliverables, blockers, pendingApprovals, nextSteps]
+      description: 项目报告（AC-19；PRD §7.8）：从同一份项目事实实时生成，正文为本期成果／风险与卡点／下一步三段，O／KR 进展作附录
+      required: [range, generatedAt, deliveries, blockers, nextSteps, okrProgress]
       properties:
         range:
           $ref: "#/components/schemas/ReportRange"
+        from:
+          type: string
+          format: date-time
+          description: 统计范围起点；项目整体不返回
         generatedAt:
           type: string
           format: date-time
-        krProgress:
-          type: array
-          items:
-            $ref: "#/components/schemas/ReportKrProgress"
-        completedDeliverables:
-          type: array
-          description: 范围内生效的当前成果
-          items:
-            $ref: "#/components/schemas/ReportDeliverable"
+          description: 生成时刻，也是统计范围终点
+        deliveries:
+          $ref: "#/components/schemas/ReportDeliveries"
         blockers:
-          type: array
-          description: 开放中的卡点 + 范围内解除的卡点
-          items:
-            $ref: "#/components/schemas/ReportBlocker"
-        pendingApprovals:
-          type: object
-          description: 待决策：停留在审批队列中的事项数（裁决 10 后只剩完成审核一类）
-          required: [completions]
-          properties:
-            completions:
-              type: integer
+          $ref: "#/components/schemas/ReportBlockers"
         nextSteps:
+          $ref: "#/components/schemas/ReportNextSteps"
+        okrProgress:
           type: array
-          description: 下一步：临近截止或已超期的未完成任务（按截止时间升序）
+          description: 附、O／KR 进展
           items:
-            $ref: "#/components/schemas/ReportNextStep"
+            $ref: "#/components/schemas/ReportObjectiveProgress"
     ArtifactTask:
       type: object
       description: 归档视角的任务节点（AC-17）：当前成果、候选状态与审批记录数，无历史版本入口

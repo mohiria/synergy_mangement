@@ -143,6 +143,72 @@ func (q *Queries) ListOpenBlockerActivities(ctx context.Context, projectID int64
 	return items, nil
 }
 
+const listResolvedBlockerActivitiesByProject = `-- name: ListResolvedBlockerActivitiesByProject :many
+SELECT r.task_id, r.blocker_key, r.summary, r.occurred_at AS resolved_at,
+       (SELECT o2.occurred_at FROM task_activities o2
+         WHERE o2.task_id = r.task_id AND o2.blocker_key = r.blocker_key
+           AND o2.kind = 'blocker_opened' AND o2.id < r.id
+         ORDER BY o2.id DESC LIMIT 1) AS opened_at,
+       t.name AS task_name, t.code_seq, k.code_seq AS kr_code_seq, o.code_seq AS objective_code_seq
+FROM task_activities r
+JOIN tasks t ON t.id = r.task_id
+JOIN key_results k ON k.id = t.key_result_id
+JOIN objectives o ON o.id = k.objective_id
+WHERE r.kind = 'blocker_resolved' AND r.blocker_key IS NOT NULL
+  AND o.project_id = $1
+  AND ($2::timestamptz IS NULL OR r.occurred_at >= $2::timestamptz)
+ORDER BY r.occurred_at, r.id
+`
+
+type ListResolvedBlockerActivitiesByProjectParams struct {
+	ProjectID int64
+	Since     pgtype.Timestamptz
+}
+
+type ListResolvedBlockerActivitiesByProjectRow struct {
+	TaskID           int64
+	BlockerKey       pgtype.Text
+	Summary          string
+	ResolvedAt       pgtype.Timestamptz
+	OpenedAt         pgtype.Timestamptz
+	TaskName         string
+	CodeSeq          int32
+	KrCodeSeq        int32
+	ObjectiveCodeSeq int32
+}
+
+// 项目内范围内解除的卡点动态（报告「本期已解除」，PRD §7.8），连同该次解除之前最近一条出现的时刻；
+// since 为空＝项目整体。按解除时间升序。
+func (q *Queries) ListResolvedBlockerActivitiesByProject(ctx context.Context, arg ListResolvedBlockerActivitiesByProjectParams) ([]ListResolvedBlockerActivitiesByProjectRow, error) {
+	rows, err := q.db.Query(ctx, listResolvedBlockerActivitiesByProject, arg.ProjectID, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListResolvedBlockerActivitiesByProjectRow
+	for rows.Next() {
+		var i ListResolvedBlockerActivitiesByProjectRow
+		if err := rows.Scan(
+			&i.TaskID,
+			&i.BlockerKey,
+			&i.Summary,
+			&i.ResolvedAt,
+			&i.OpenedAt,
+			&i.TaskName,
+			&i.CodeSeq,
+			&i.KrCodeSeq,
+			&i.ObjectiveCodeSeq,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTaskActivitiesByTask = `-- name: ListTaskActivitiesByTask :many
 SELECT a.id, a.task_id, a.kind, a.actor_id, a.summary, a.occurred_at, a.blocker_key, u.display_name AS actor_name
 FROM task_activities a

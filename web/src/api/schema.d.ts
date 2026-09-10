@@ -2473,6 +2473,8 @@ export interface components {
         ReportKrProgress: {
             /** Format: int64 */
             keyResultId: number;
+            /** @description KR 展示编号（AC-64） */
+            code: string;
             description: string;
             riskLevel: components["schemas"]["RiskLevel"];
             totalTasks: number;
@@ -2481,14 +2483,74 @@ export interface components {
             /** @description 范围内终审通过的任务数 */
             completedInRange: number;
         };
-        ReportDeliverable: {
-            taskName: string;
+        /** @description 附录「O／KR 进展」的一组：目标及其 KR 行 */
+        ReportObjectiveProgress: {
+            /** Format: int64 */
+            objectiveId: number;
+            code: string;
+            title: string;
+            keyResults: components["schemas"]["ReportKrProgress"][];
+        };
+        /** @description 本期生效的一份交付内容文件 */
+        ReportFile: {
             deliverableName: string;
             fileName: string;
             /** Format: date-time */
-            effectiveAt?: string;
+            effectiveAt: string;
         };
+        /** @description 本期成果里的一条任务：范围内终审通过，或范围内有当前交付内容生效 */
+        ReportDeliveryTask: {
+            /** Format: int64 */
+            taskId: number;
+            code: string;
+            name: string;
+            ownerName: string;
+            status: components["schemas"]["TaskStatus"];
+            /** @description 状态显示文案（AC-04；派生字段） */
+            statusLabel: string;
+            /**
+             * Format: date-time
+             * @description 终审通过时刻；未完成的任务不返回
+             */
+            completedAt?: string;
+            /** @description 未完成任务的当前进度；已完成不返回 */
+            progress?: number;
+            /** @description 范围内生效的当前交付内容（按生效时间升序） */
+            files: components["schemas"]["ReportFile"][];
+        };
+        ReportDeliveryKr: {
+            /** Format: int64 */
+            keyResultId: number;
+            code: string;
+            description: string;
+            averageProgress?: number;
+            tasks: components["schemas"]["ReportDeliveryTask"][];
+        };
+        ReportDeliveryObjective: {
+            /** Format: int64 */
+            objectiveId: number;
+            code: string;
+            title: string;
+            keyResults: components["schemas"]["ReportDeliveryKr"][];
+        };
+        /** @description 一、本期成果：按 O → KR → 任务归组，只含有成果的分支 */
+        ReportDeliveries: {
+            /** @description 范围内终审通过的任务数 */
+            completedTasks: number;
+            /** @description 范围内生效的当前交付内容份数 */
+            effectiveFiles: number;
+            objectives: components["schemas"]["ReportDeliveryObjective"][];
+        };
+        /**
+         * @description 开放卡点相对统计范围的阶段：new＝本期新出现，carried＝上期遗留；项目整体范围不区分、不返回
+         * @enum {string}
+         */
+        ReportBlockerPhase: "new" | "carried";
+        /** @description 当前开放的卡点（按出现时间升序） */
         ReportBlocker: {
+            /** Format: int64 */
+            taskId: number;
+            code: string;
             taskName: string;
             kind: components["schemas"]["BlockerKind"];
             /** @description 四类卡点的中文类型名（派生字段） */
@@ -2499,35 +2561,100 @@ export interface components {
             actionOwnerName?: string;
             /** Format: date-time */
             since?: string;
+            /** @description 已停留天数（按项目时区自然日差，派生字段） */
+            stayDays: number;
+            phase?: components["schemas"]["ReportBlockerPhase"];
+            /** @description 「本期新出现」／「上期遗留」；与 phase 同时返回或同时缺省 */
+            phaseLabel?: string;
         };
-        ReportNextStep: {
+        /** @description 范围内解除的卡点（来自卡点出现／解除动态，按解除时间升序） */
+        ReportResolvedBlocker: {
+            /** Format: int64 */
+            taskId: number;
+            code: string;
             taskName: string;
+            kind: components["schemas"]["BlockerKind"];
+            kindLabel: string;
+            missing: string;
+            /** Format: date-time */
+            openedAt: string;
+            /** Format: date-time */
+            resolvedAt: string;
+            /** @description 持续天数（自然日差，派生字段） */
+            durationDays: number;
+        };
+        /** @description 二、风险与卡点 */
+        ReportBlockers: {
+            open: components["schemas"]["ReportBlocker"][];
+            resolved: components["schemas"]["ReportResolvedBlocker"][];
+            /** @description open 中 phase＝new 的条数；项目整体范围为 0 */
+            newInRange: number;
+            /** @description resolved 的条数 */
+            resolvedInRange: number;
+            /** @description 停留在审批队列中的完成审核件数（PRD「待决策」，以一句注记呈现） */
+            pendingCompletions: number;
+        };
+        /** @description 下一步窗口内到期或已超期的未完成任务 */
+        ReportNextStep: {
+            /** Format: int64 */
+            taskId: number;
+            code: string;
+            taskName: string;
+            keyResultCode?: string;
+            keyResultDescription?: string;
             ownerName: string;
             status: components["schemas"]["TaskStatus"];
             /** @description 状态显示文案（AC-04；派生字段） */
             statusLabel: string;
             /** Format: date */
-            endDate?: string;
-            overdue?: boolean;
+            endDate: string;
+            /** @description 已超期天数（截止次日零点起算）；未超期不返回 */
+            overdueDays?: number;
+            /** @description 距截止天数（0＝今天到期）；已超期不返回 */
+            dueInDays?: number;
             /** @description 「上游未就绪：缺 XX」注记（派生字段，与我的工作同一口径）；状态为「等待输入」时说清缺哪一项，输入齐备时不返回 */
             unreadyNote?: string;
         };
-        /** @description 项目报告（AC-19）：从同一份项目事实生成，不要求成员重复填报 */
+        /** @description 即将启动：计划开始日在明天至窗口末、尚未开始的任务（按开始日升序） */
+        ReportUpcomingTask: {
+            /** Format: int64 */
+            taskId: number;
+            code: string;
+            taskName: string;
+            keyResultCode?: string;
+            keyResultDescription?: string;
+            ownerName: string;
+            status: components["schemas"]["TaskStatus"];
+            statusLabel: string;
+            /** Format: date */
+            startDate: string;
+            unreadyNote?: string;
+        };
+        /** @description 三、下一步 */
+        ReportNextSteps: {
+            /** @description 窗口天数：今天＝1、近 7 天＝7、近 30 天与项目整体＝30 */
+            horizonDays: number;
+            due: components["schemas"]["ReportNextStep"][];
+            upcoming: components["schemas"]["ReportUpcomingTask"][];
+        };
+        /** @description 项目报告（AC-19；PRD §7.8）：从同一份项目事实实时生成，正文为本期成果／风险与卡点／下一步三段，O／KR 进展作附录 */
         Report: {
             range: components["schemas"]["ReportRange"];
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description 统计范围起点；项目整体不返回
+             */
+            from?: string;
+            /**
+             * Format: date-time
+             * @description 生成时刻，也是统计范围终点
+             */
             generatedAt: string;
-            krProgress: components["schemas"]["ReportKrProgress"][];
-            /** @description 范围内生效的当前成果 */
-            completedDeliverables: components["schemas"]["ReportDeliverable"][];
-            /** @description 开放中的卡点 + 范围内解除的卡点 */
-            blockers: components["schemas"]["ReportBlocker"][];
-            /** @description 待决策：停留在审批队列中的事项数（裁决 10 后只剩完成审核一类） */
-            pendingApprovals: {
-                completions: number;
-            };
-            /** @description 下一步：临近截止或已超期的未完成任务（按截止时间升序） */
-            nextSteps: components["schemas"]["ReportNextStep"][];
+            deliveries: components["schemas"]["ReportDeliveries"];
+            blockers: components["schemas"]["ReportBlockers"];
+            nextSteps: components["schemas"]["ReportNextSteps"];
+            /** @description 附、O／KR 进展 */
+            okrProgress: components["schemas"]["ReportObjectiveProgress"][];
         };
         /** @description 归档视角的任务节点（AC-17）：当前成果、候选状态与审批记录数，无历史版本入口 */
         ArtifactTask: {

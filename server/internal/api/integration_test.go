@@ -2944,9 +2944,9 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 
 	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/report?range=all", base, created.Id), nil)
 	wantStatus(t, resp, http.StatusOK)
-	reportKrs := decodeBody[api.Report](t, resp).KrProgress
-	if len(reportKrs) != 1 || reportKrs[0].RiskLevel != derivedKr.RiskLevel {
-		t.Fatalf("报告的 KR 风险等级应与总览同源: %+v", reportKrs)
+	reportOkr := decodeBody[api.Report](t, resp).OkrProgress
+	if len(reportOkr) != 1 || len(reportOkr[0].KeyResults) != 1 || reportOkr[0].KeyResults[0].RiskLevel != derivedKr.RiskLevel {
+		t.Fatalf("报告的 KR 风险等级应与总览同源: %+v", reportOkr)
 	}
 
 	// 任务列表按派生结果给出卡点计数（下游两条：上游未就绪 + 超期）。
@@ -3623,37 +3623,57 @@ func TestProjectReport(t *testing.T) {
 	resp.Body.Close()
 
 	reportURL := fmt.Sprintf("%s/projects/%d/report", base, created.Id)
-	// 今天范围：完成成果与 completedInRange 均可见（刚刚发生）
+	// 今天范围：本期成果与 completedInRange 均可见（刚刚发生）
 	resp = doJSON(t, alice, http.MethodGet, reportURL+"?range=today", nil)
 	wantStatus(t, resp, http.StatusOK)
 	rep := decodeBody[api.Report](t, resp)
-	if rep.Range != api.ReportRangeToday || len(rep.KrProgress) != 1 {
+	if rep.Range != api.ReportRangeToday || rep.From == nil || len(rep.OkrProgress) != 1 || len(rep.OkrProgress[0].KeyResults) != 1 {
 		t.Fatalf("报告基本结构异常: %+v", rep.Range)
 	}
-	if rep.KrProgress[0].CompletedInRange != 1 {
-		t.Fatalf("范围内完成任务数异常: %+v", rep.KrProgress[0])
+	if kr := rep.OkrProgress[0].KeyResults[0]; kr.CompletedInRange != 1 || kr.Code != "KR1.1" {
+		t.Fatalf("范围内完成任务数异常: %+v", kr)
 	}
-	if len(rep.CompletedDeliverables) != 1 || rep.CompletedDeliverables[0].FileName != "验收方案V1.docx" {
-		t.Fatalf("完成成果异常: %+v", rep.CompletedDeliverables)
+	// 一、本期成果：按 O → KR → 任务归组，只含有成果的分支；A 终审通过且其交付内容在范围内生效。
+	if rep.Deliveries.CompletedTasks != 1 || rep.Deliveries.EffectiveFiles != 1 ||
+		len(rep.Deliveries.Objectives) != 1 || len(rep.Deliveries.Objectives[0].KeyResults) != 1 ||
+		len(rep.Deliveries.Objectives[0].KeyResults[0].Tasks) != 1 {
+		t.Fatalf("本期成果归组异常: %+v", rep.Deliveries)
 	}
-	// B 的必要输入未就绪且已到开始时间 ⇒ 派生一条上游未就绪卡点（AC-11）。
-	if len(rep.Blockers) != 1 || rep.Blockers[0].Kind != api.UpstreamUnready ||
-		rep.Blockers[0].ActionOwnerName == nil || *rep.Blockers[0].ActionOwnerName != "李四" {
-		t.Fatalf("卡点异常: %+v", rep.Blockers)
+	delivered := rep.Deliveries.Objectives[0].KeyResults[0].Tasks[0]
+	if delivered.Name != "输出验收方案" || delivered.Code != "T1.1.1" || delivered.CompletedAt == nil || delivered.Progress != nil ||
+		len(delivered.Files) != 1 || delivered.Files[0].FileName != "验收方案V1.docx" || delivered.Files[0].DeliverableName != "验收方案" {
+		t.Fatalf("本期成果任务异常: %+v", delivered)
 	}
-	if len(rep.NextSteps) == 0 {
-		t.Fatalf("下一步为空: %+v", rep.NextSteps)
+	// 二、风险与卡点：B 的必要输入未就绪且已到开始时间 ⇒ 派生一条上游未就绪卡点（AC-11），
+	// 出现时刻取 B 的计划开始日（8 月 1 日），早于今天范围起点 ⇒ 上期遗留，停留天数按自然日差。
+	if len(rep.Blockers.Open) != 1 || rep.Blockers.Open[0].Kind != api.UpstreamUnready || rep.Blockers.Open[0].KindLabel != "上游未就绪" ||
+		rep.Blockers.Open[0].ActionOwnerName == nil || *rep.Blockers.Open[0].ActionOwnerName != "李四" {
+		t.Fatalf("卡点异常: %+v", rep.Blockers.Open)
+	}
+	if b := rep.Blockers.Open[0]; b.Code != "T1.1.2" || b.Phase == nil || *b.Phase != api.Carried || b.PhaseLabel == nil || *b.PhaseLabel != "上期遗留" ||
+		b.Since == nil || b.StayDays != domain.DaysBetween(*b.Since, time.Now()) || b.StayDays < 1 {
+		t.Fatalf("卡点阶段异常: %+v", b)
+	}
+	if rep.Blockers.NewInRange != 0 || rep.Blockers.ResolvedInRange != 0 || len(rep.Blockers.Resolved) != 0 || rep.Blockers.PendingCompletions != 0 {
+		t.Fatalf("卡点计数异常: %+v", rep.Blockers)
+	}
+	// 三、下一步：今天范围窗口 1 天，B 两天后截止不入窗口；近 7 天窗口应含 B。
+	if rep.NextSteps.HorizonDays != 1 || len(rep.NextSteps.Due) != 0 {
+		t.Fatalf("今天范围的下一步窗口异常: %+v", rep.NextSteps)
+	}
+	resp = doJSON(t, alice, http.MethodGet, reportURL+"?range=week", nil)
+	wantStatus(t, resp, http.StatusOK)
+	week := decodeBody[api.Report](t, resp)
+	if week.NextSteps.HorizonDays != 7 || len(week.NextSteps.Due) != 1 {
+		t.Fatalf("近 7 天的下一步异常: %+v", week.NextSteps)
 	}
 	// AC-04 + §5.1：下一步条目输出面向用户的状态文案，且与任务列表同口径——
 	// B 的必要输入未就绪，存储态仍是未开始，报告须显示「等待输入」。
-	var nextB *api.ReportNextStep
-	for i := range rep.NextSteps {
-		if rep.NextSteps[i].TaskName == "临近截止任务" {
-			nextB = &rep.NextSteps[i]
-		}
-	}
-	if nextB == nil || nextB.Status != api.TaskStatusWaitingInput || nextB.StatusLabel != "等待输入" {
-		t.Fatalf("下一步显示状态异常: %+v", rep.NextSteps)
+	nextB := week.NextSteps.Due[0]
+	if nextB.TaskName != "临近截止任务" || nextB.Status != api.TaskStatusWaitingInput || nextB.StatusLabel != "等待输入" ||
+		nextB.OverdueDays != nil || nextB.DueInDays == nil || *nextB.DueInDays != 2 ||
+		nextB.KeyResultCode == nil || *nextB.KeyResultCode != "KR1.1" {
+		t.Fatalf("下一步显示状态异常: %+v", nextB)
 	}
 	// 「等待输入」还要说清缺哪一项（与我的工作同一口径）。
 	if nextB.UnreadyNote == nil || *nextB.UnreadyNote != "上游未就绪：缺 上游未完成任务" {
@@ -3663,8 +3683,9 @@ func TestProjectReport(t *testing.T) {
 	// 项目整体（默认 all）与非法范围
 	resp = doJSON(t, alice, http.MethodGet, reportURL, nil)
 	wantStatus(t, resp, http.StatusOK)
-	if rep := decodeBody[api.Report](t, resp); rep.Range != api.ReportRangeAll {
-		t.Fatalf("默认范围应为 all: %+v", rep.Range)
+	if rep := decodeBody[api.Report](t, resp); rep.Range != api.ReportRangeAll || rep.From != nil ||
+		len(rep.Blockers.Open) != 1 || rep.Blockers.Open[0].Phase != nil || rep.Blockers.NewInRange != 0 || rep.NextSteps.HorizonDays != 30 {
+		t.Fatalf("默认范围应为 all 且不区分卡点阶段: %+v", rep)
 	}
 	resp = doJSON(t, alice, http.MethodGet, reportURL+"?range=year", nil)
 	wantStatus(t, resp, http.StatusUnprocessableEntity)

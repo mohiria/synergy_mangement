@@ -6,12 +6,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	"synergy/server/internal/domain"
+	"synergy/server/internal/store"
 )
 
-// 项目报告（AC-19）：从同一份项目事实生成；范围解析在 domain，聚合在此。
+// 项目报告（AC-19；PRD §7.8）：从同一份项目事实实时生成；范围与窗口判定在 domain，聚合在此。
 
 func (s *Server) GetReport(w http.ResponseWriter, r *http.Request, projectId int64, params GetReportParams) {
 	if _, ok := s.fetchProject(w, r, projectId); !ok {
@@ -37,6 +39,7 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 		return Report{}, false
 	}
 	inRange := func(t time.Time) bool { return from == nil || !t.Before(*from) }
+	horizon := domain.ReportHorizonDays(rangeName)
 	ctx := r.Context()
 	proj, ok := s.fetchProject(w, r, projectId)
 	if !ok {
@@ -45,7 +48,6 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 	uid := currentUser(r).ID
 	actor := projectActor(currentUser(r), proj.OwnerID, proj.MyRole, proj.Visibility)
 
-	// KR 进展：覆盖度 + 范围内终审通过任务数。
 	objectives, err := s.okrList(ctx, projectId, actor, uid)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -61,11 +63,22 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 		writeInternalError(w, r, err)
 		return Report{}, false
 	}
-	krByTask := map[int64]int64{}
-	taskNameByID := map[int64]string{}
+	sort.SliceStable(taskRows, func(i, j int) bool { return taskRows[i].CodeSeq < taskRows[j].CodeSeq })
+	taskByID := map[int64]store.ListProjectTasksRow{}
 	for _, t := range taskRows {
-		krByTask[t.ID] = t.KeyResultID
-		taskNameByID[t.ID] = t.Name
+		taskByID[t.ID] = t
+	}
+	taskCode := func(t store.ListProjectTasksRow) string {
+		return domain.TaskCode(int(t.ObjectiveCodeSeq), int(t.KrCodeSeq), int(t.CodeSeq))
+	}
+	krCode := func(t store.ListProjectTasksRow) string {
+		return domain.KeyResultCode(int(t.ObjectiveCodeSeq), int(t.KrCodeSeq))
+	}
+	krDescription := map[int64]string{}
+	for _, o := range objectives {
+		for _, k := range o.KeyResults {
+			krDescription[k.Id] = k.Description
+		}
 	}
 	// 终审人集合（裁决 11，#181）：待终审的显示文案取项目管理员姓名。
 	finalIDs, finalNames, err := s.projectFinalReviewers(ctx, projectId)
@@ -86,37 +99,30 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 		writeInternalError(w, r, err)
 		return Report{}, false
 	}
-	// 下一步的状态显示文案（AC-04）：或签中任务取审核组。
+	// 状态显示文案（AC-04）：或签中任务取审核组。
 	reviewersByTask, err := s.intermediateReviewersByTask(ctx, projectId)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return Report{}, false
 	}
-	completedByKr := map[int64]int{}
-	for _, cr := range completionRows {
-		if cr.State == domain.CompletionApproved && cr.DecidedAt.Valid && inRange(cr.DecidedAt.Time) {
-			completedByKr[krByTask[cr.TaskID]]++
-		}
-	}
-	krProgress := []ReportKrProgress{}
-	for _, o := range objectives {
-		for _, k := range o.KeyResults {
-			item := ReportKrProgress{
-				KeyResultId:      k.Id,
-				Description:      k.Description,
-				RiskLevel:        k.RiskLevel,
-				CompletedInRange: completedByKr[k.Id],
-			}
-			if k.ProgressSummary != nil {
-				item.TotalTasks = k.ProgressSummary.TotalTasks
-				item.FilledTasks = k.ProgressSummary.FilledTasks
-				item.AverageProgress = k.ProgressSummary.AverageProgress
-			}
-			krProgress = append(krProgress, item)
-		}
+	displayOf := func(t store.ListProjectTasksRow) (TaskStatus, string) {
+		display := domain.DeriveDisplayStatus(t.Status, unreadyNoteByTask[t.ID] != "")
+		return TaskStatus(display), domain.StatusLabel(display, reviewStageByTask[t.ID], uid, finalReviewers, reviewersByTask[t.ID])
 	}
 
-	// 完成成果：范围内生效的当前内容。
+	// 一、本期成果：范围内终审通过的任务 ∪ 范围内有当前交付内容生效的任务，按 O → KR → 任务归组。
+	completedAt := map[int64]time.Time{}
+	completedByKr := map[int64]int{}
+	pendingCompletions := 0
+	for _, cr := range completionRows {
+		switch {
+		case cr.State == domain.CompletionApproved && cr.DecidedAt.Valid && inRange(cr.DecidedAt.Time):
+			completedAt[cr.TaskID] = cr.DecidedAt.Time
+			completedByKr[taskByID[cr.TaskID].KeyResultID]++
+		case cr.State == domain.CompletionIntermediate || cr.State == domain.CompletionPendingFinal:
+			pendingCompletions++
+		}
+	}
 	files, err := s.q.ListDeliverableFilesByProject(ctx, projectId)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -133,29 +139,95 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 		deliverableName[d.ID] = d.Name
 		deliverableTask[d.ID] = d.TaskID
 	}
-	completedDeliverables := []ReportDeliverable{}
+	filesByTask := map[int64][]ReportFile{}
+	effectiveFiles := 0
 	for _, f := range files {
-		if f.State == domain.DeliverableCurrent && f.EffectiveAt.Valid && inRange(f.EffectiveAt.Time) {
-			item := ReportDeliverable{
-				TaskName:        taskNameByID[deliverableTask[f.DeliverableID]],
-				DeliverableName: deliverableName[f.DeliverableID],
-				FileName:        f.FileName,
-			}
-			eff := f.EffectiveAt.Time
-			item.EffectiveAt = &eff
-			completedDeliverables = append(completedDeliverables, item)
+		if f.State != domain.DeliverableCurrent || !f.EffectiveAt.Valid || !inRange(f.EffectiveAt.Time) {
+			continue
 		}
+		tid := deliverableTask[f.DeliverableID]
+		filesByTask[tid] = append(filesByTask[tid], ReportFile{
+			DeliverableName: deliverableName[f.DeliverableID],
+			FileName:        f.FileName,
+			EffectiveAt:     f.EffectiveAt.Time,
+		})
+		effectiveFiles++
+	}
+	deliveryByKr := map[int64][]ReportDeliveryTask{}
+	for _, t := range taskRows {
+		done, isDone := completedAt[t.ID]
+		fs := filesByTask[t.ID]
+		if !isDone && len(fs) == 0 {
+			continue
+		}
+		sort.SliceStable(fs, func(i, j int) bool { return fs[i].EffectiveAt.Before(fs[j].EffectiveAt) })
+		status, label := displayOf(t)
+		item := ReportDeliveryTask{
+			TaskId:      t.ID,
+			Code:        taskCode(t),
+			Name:        t.Name,
+			OwnerName:   t.OwnerName,
+			Status:      status,
+			StatusLabel: label,
+			Files:       append([]ReportFile{}, fs...),
+		}
+		if isDone {
+			d := done
+			item.CompletedAt = &d
+		} else if t.Progress.Valid {
+			p := int(t.Progress.Int32)
+			item.Progress = &p
+		}
+		deliveryByKr[t.KeyResultID] = append(deliveryByKr[t.KeyResultID], item)
+	}
+	deliveryObjectives := []ReportDeliveryObjective{}
+	okrProgress := []ReportObjectiveProgress{}
+	for _, o := range objectives {
+		dObj := ReportDeliveryObjective{ObjectiveId: o.Id, Code: o.Code, Title: o.Title, KeyResults: []ReportDeliveryKr{}}
+		pObj := ReportObjectiveProgress{ObjectiveId: o.Id, Code: o.Code, Title: o.Title, KeyResults: []ReportKrProgress{}}
+		for _, k := range o.KeyResults {
+			progress := ReportKrProgress{
+				KeyResultId:      k.Id,
+				Code:             k.Code,
+				Description:      k.Description,
+				RiskLevel:        k.RiskLevel,
+				CompletedInRange: completedByKr[k.Id],
+			}
+			if k.ProgressSummary != nil {
+				progress.TotalTasks = k.ProgressSummary.TotalTasks
+				progress.FilledTasks = k.ProgressSummary.FilledTasks
+				progress.AverageProgress = k.ProgressSummary.AverageProgress
+			}
+			pObj.KeyResults = append(pObj.KeyResults, progress)
+			if tasks := deliveryByKr[k.Id]; len(tasks) > 0 {
+				dObj.KeyResults = append(dObj.KeyResults, ReportDeliveryKr{
+					KeyResultId:     k.Id,
+					Code:            k.Code,
+					Description:     k.Description,
+					AverageProgress: progress.AverageProgress,
+					Tasks:           tasks,
+				})
+			}
+		}
+		if len(dObj.KeyResults) > 0 {
+			deliveryObjectives = append(deliveryObjectives, dObj)
+		}
+		okrProgress = append(okrProgress, pObj)
 	}
 
-	// 风险卡点：当前派生的全部卡点（触发条件消失即自动解除，没有历史态可汇总）。
+	// 二、风险与卡点：当前开放卡点（按出现时间升序，标本期新出现／上期遗留）＋ 范围内解除的卡点（来自动态）。
 	derived, err := s.projectBlockers(ctx, projectId)
 	if err != nil {
 		writeInternalError(w, r, err)
 		return Report{}, false
 	}
-	blockers := []ReportBlocker{}
+	sort.SliceStable(derived, func(i, j int) bool { return derived[i].Since.Before(derived[j].Since) })
+	open := []ReportBlocker{}
+	newInRange := 0
 	for _, b := range derived {
 		item := ReportBlocker{
+			TaskId:          b.TaskID,
+			Code:            taskCode(taskByID[b.TaskID]),
 			TaskName:        b.TaskName,
 			Kind:            BlockerKind(b.Kind),
 			KindLabel:       domain.BlockerKindLabel(b.Kind),
@@ -163,62 +235,123 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 			Reason:          b.Reason,
 			Level:           RiskLevel(b.Level),
 			ActionOwnerName: optString(strings.Join(b.ActionOwnerNames, "、")),
+			StayDays:        domain.DaysBetween(b.Since, now),
 		}
 		since := b.Since
 		item.Since = &since
-		blockers = append(blockers, item)
-	}
-
-	// 待决策：停留在审批队列中的事项数（裁决 10 后只剩完成审核）。
-	pending := struct {
-		Completions int `json:"completions"`
-	}{}
-	for _, cr := range completionRows {
-		if cr.State == domain.CompletionIntermediate || cr.State == domain.CompletionPendingFinal {
-			pending.Completions++
+		if phase, label := domain.ReportBlockerPhase(b.Since, from); phase != "" {
+			p := ReportBlockerPhase(phase)
+			item.Phase = &p
+			item.PhaseLabel = optString(label)
+			if phase == domain.ReportPhaseNew {
+				newInRange++
+			}
 		}
+		open = append(open, item)
+	}
+	var since pgtype.Timestamptz
+	if from != nil {
+		since = pgtype.Timestamptz{Time: *from, Valid: true}
+	}
+	resolvedRows, err := s.q.ListResolvedBlockerActivitiesByProject(ctx, store.ListResolvedBlockerActivitiesByProjectParams{ProjectID: projectId, Since: since})
+	if err != nil {
+		writeInternalError(w, r, err)
+		return Report{}, false
+	}
+	resolved := []ReportResolvedBlocker{}
+	for _, row := range resolvedRows {
+		kind, missing := domain.ParseBlockerActivity(row.BlockerKey.String, row.Summary)
+		openedAt := row.ResolvedAt.Time
+		if row.OpenedAt.Valid {
+			openedAt = row.OpenedAt.Time
+		}
+		resolved = append(resolved, ReportResolvedBlocker{
+			TaskId:       row.TaskID,
+			Code:         domain.TaskCode(int(row.ObjectiveCodeSeq), int(row.KrCodeSeq), int(row.CodeSeq)),
+			TaskName:     row.TaskName,
+			Kind:         BlockerKind(kind),
+			KindLabel:    domain.BlockerKindLabel(kind),
+			Missing:      missing,
+			OpenedAt:     openedAt,
+			ResolvedAt:   row.ResolvedAt.Time,
+			DurationDays: domain.DaysBetween(openedAt, row.ResolvedAt.Time),
+		})
 	}
 
-	// 下一步：未完成任务中临近截止或已超期者（截止升序，前 10）。
-	nextSteps := []ReportNextStep{}
-	horizon := now.AddDate(0, 0, 7)
+	// 三、下一步：窗口内到期或已超期的未完成任务（截止升序）＋ 即将启动（开始日升序）。
+	due := []ReportNextStep{}
+	upcoming := []ReportUpcomingTask{}
 	for _, t := range taskRows {
 		switch t.Status {
 		case domain.TaskCompleted, domain.TaskCancelled:
 			continue
 		}
-		if !t.EndDate.Valid || t.EndDate.Time.After(horizon) {
-			continue
+		var end, start *time.Time
+		if t.EndDate.Valid {
+			v := t.EndDate.Time
+			end = &v
 		}
-		display := domain.DeriveDisplayStatus(t.Status, unreadyNoteByTask[t.ID] != "")
-		item := ReportNextStep{
-			TaskName:    t.Name,
-			OwnerName:   t.OwnerName,
-			Status:      TaskStatus(display),
-			StatusLabel: domain.StatusLabel(display, reviewStageByTask[t.ID], uid, finalReviewers, reviewersByTask[t.ID]),
+		if t.StartDate.Valid {
+			v := t.StartDate.Time
+			start = &v
 		}
-		d := openapi_types.Date{Time: t.EndDate.Time}
-		item.EndDate = &d
-		overdue := now.After(t.EndDate.Time.AddDate(0, 0, 1))
-		item.Overdue = &overdue
-		// 「等待输入」要说清缺哪一项（与我的工作同一口径）。
-		item.UnreadyNote = optString(unreadyNoteByTask[t.ID])
-		nextSteps = append(nextSteps, item)
+		if in, overdueDays, dueInDays := domain.ReportDueWindow(end, now, horizon); in {
+			status, label := displayOf(t)
+			item := ReportNextStep{
+				TaskId:               t.ID,
+				Code:                 taskCode(t),
+				TaskName:             t.Name,
+				KeyResultCode:        optString(krCode(t)),
+				KeyResultDescription: optString(krDescription[t.KeyResultID]),
+				OwnerName:            t.OwnerName,
+				Status:               status,
+				StatusLabel:          label,
+				EndDate:              openapi_types.Date{Time: *end},
+				UnreadyNote:          optString(unreadyNoteByTask[t.ID]),
+			}
+			if overdueDays > 0 {
+				item.OverdueDays = &overdueDays
+			} else {
+				item.DueInDays = &dueInDays
+			}
+			due = append(due, item)
+		}
+		if domain.ReportUpcomingStart(start, t.Status, now, horizon) {
+			status, label := displayOf(t)
+			upcoming = append(upcoming, ReportUpcomingTask{
+				TaskId:               t.ID,
+				Code:                 taskCode(t),
+				TaskName:             t.Name,
+				KeyResultCode:        optString(krCode(t)),
+				KeyResultDescription: optString(krDescription[t.KeyResultID]),
+				OwnerName:            t.OwnerName,
+				Status:               status,
+				StatusLabel:          label,
+				StartDate:            openapi_types.Date{Time: *start},
+				UnreadyNote:          optString(unreadyNoteByTask[t.ID]),
+			})
+		}
 	}
-	sort.Slice(nextSteps, func(i, j int) bool {
-		return nextSteps[i].EndDate.Time.Before(nextSteps[j].EndDate.Time)
-	})
-	if len(nextSteps) > 10 {
-		nextSteps = nextSteps[:10]
-	}
+	sort.SliceStable(due, func(i, j int) bool { return due[i].EndDate.Time.Before(due[j].EndDate.Time) })
+	sort.SliceStable(upcoming, func(i, j int) bool { return upcoming[i].StartDate.Time.Before(upcoming[j].StartDate.Time) })
 
 	return Report{
-		Range:                 ReportRange(rangeName),
-		GeneratedAt:           now,
-		KrProgress:            krProgress,
-		CompletedDeliverables: completedDeliverables,
-		Blockers:              blockers,
-		PendingApprovals:      pending,
-		NextSteps:             nextSteps,
+		Range:       ReportRange(rangeName),
+		From:        from,
+		GeneratedAt: now,
+		Deliveries: ReportDeliveries{
+			CompletedTasks: len(completedAt),
+			EffectiveFiles: effectiveFiles,
+			Objectives:     deliveryObjectives,
+		},
+		Blockers: ReportBlockers{
+			Open:               open,
+			Resolved:           resolved,
+			NewInRange:         newInRange,
+			ResolvedInRange:    len(resolved),
+			PendingCompletions: pendingCompletions,
+		},
+		NextSteps:   ReportNextSteps{HorizonDays: horizon, Due: due, Upcoming: upcoming},
+		OkrProgress: okrProgress,
 	}, true
 }
