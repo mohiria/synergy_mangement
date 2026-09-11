@@ -3,7 +3,6 @@ import { Link, useParams } from "react-router-dom";
 import { Alert, Button, Spin, message } from "antd";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
-import Icon from "./icons";
 import ProjectShell from "./ProjectShell";
 import { STATUS_CLASS, fmtTime } from "./task-drawer/shared";
 
@@ -13,7 +12,6 @@ type Report = components["schemas"]["Report"];
 type ReportRange = components["schemas"]["ReportRange"];
 type RiskLevel = components["schemas"]["RiskLevel"];
 type ReportBlocker = components["schemas"]["ReportBlocker"];
-type ReportResolvedBlocker = components["schemas"]["ReportResolvedBlocker"];
 
 const RANGE_LABEL: Record<ReportRange, string> = {
   today: "今天",
@@ -34,8 +32,18 @@ const RiskPill = ({ level }: { level: RiskLevel }) => (
   <span className={`status-pill risk-${level}`}>{RISK_LABEL[level]}</span>
 );
 
+// 报告纸内统一的四列表格：任务／负责人／状态／日期，固定列宽让表头永不换行。
+const ReportTableCols = () => (
+  <colgroup>
+    <col />
+    <col style={{ width: 84 }} />
+    <col style={{ width: 92 }} />
+    <col style={{ width: 118 }} />
+  </colgroup>
+);
+
 // 项目报告（AC-19；PRD §7.8）：正文为本期成果／风险与卡点／下一步三段，O／KR 进展作附录；
-// 全部内容由后端从同一份项目事实实时派生，前端只负责排版。
+// 全部内容由后端从同一份项目事实实时派生，前端只负责排版。面向领导阅读，只保留结论级字段。
 export default function ReportsPage({
   user,
   onLogout,
@@ -110,42 +118,28 @@ export default function ReportsPage({
   };
 
   const renderOpenBlocker = (b: ReportBlocker) => (
-    <div key={`${b.taskId}-${b.kind}`} className={`rp-blocker ${b.phase === "carried" ? "carry" : ""}`}>
+    <div key={`${b.taskId}-${b.kind}`} className="rp-blk">
       {b.phase ? (
         <span className={`rp-tag ${b.phase === "new" ? "new" : "carry"}`}>{b.phaseLabel}</span>
       ) : (
         <RiskPill level={b.level} />
       )}
-      <div>
-        <div className="rp-b-title">
-          <span className="rp-code">{b.code}</span> {b.taskName}{" "}
-          <span className="rp-tag gray">{b.kindLabel}</span>
-          {b.phase && <RiskPill level={b.level} />}
-        </div>
-        <div className="rp-b-reason">
-          {b.reason} · 缺 {b.missing}
-        </div>
+      <div className="rp-blk-main">
+        <span className="rp-code">{b.code}</span> <b>{b.taskName}</b>{" "}
+        <span className="rp-tag gray">{b.kindLabel}</span>
       </div>
-      <div className="rp-b-side">
-        <b>{b.actionOwnerName ?? "—"}</b>
-        待行动人 · 已停留 {b.stayDays} 天
+      <div className="rp-blk-actor">
+        {b.actionOwnerName ? (
+          <>
+            <small>待行动</small>
+            {b.actionOwnerName}
+          </>
+        ) : (
+          "—"
+        )}
       </div>
-    </div>
-  );
-
-  const renderResolvedBlocker = (b: ReportResolvedBlocker) => (
-    <div key={`${b.taskId}-${b.kind}-${b.resolvedAt}`} className="rp-blocker resolved">
-      <span className="rp-tag resolved">本期解除</span>
-      <div>
-        <div className="rp-b-title">
-          <span className="rp-code">{b.code}</span> {b.taskName}{" "}
-          <span className="rp-tag gray">{b.kindLabel}</span>
-        </div>
-        <div className="rp-b-reason">缺 {b.missing}</div>
-      </div>
-      <div className="rp-b-side">
-        <b>{md(b.resolvedAt)} 解除</b>
-        出现 {md(b.openedAt)} · 持续 {b.durationDays} 天
+      <div className="rp-blk-stay">
+        <b>{b.stayDays}</b> 天
       </div>
     </div>
   );
@@ -209,138 +203,150 @@ export default function ReportsPage({
               </p>
             </div>
 
-            <section className="report-section">
-              <h3>
-                一、本期成果
-                <span className="rp-count">
-                  {report.deliveries.completedTasks} 项任务完成 · {report.deliveries.effectiveFiles} 份交付物生效
+            {/* 摘要条：四个数字先给结论，读者不必往下翻就知道本期状况。 */}
+            <div className="rp-summary">
+              <div>
+                <small>本期成果</small>
+                <b>{report.deliveries.completedTasks} 项</b>
+                <span>任务完成 · {report.deliveries.effectiveFiles} 份交付物生效</span>
+              </div>
+              <div>
+                <small>开放卡点</small>
+                <b className={report.blockers.open.length > 0 ? "warn" : ""}>{report.blockers.open.length} 项</b>
+                <span>
+                  {report.from
+                    ? `本期新增 ${report.blockers.newInRange} · 解除 ${report.blockers.resolvedInRange}`
+                    : "项目整体累计"}
                 </span>
-                <span className="rp-sub">按 O → KR → 任务归组</span>
-              </h3>
-              {report.deliveries.objectives.length === 0 && (
+              </div>
+              <div>
+                <small>到期／超期</small>
+                <b className={report.nextSteps.due.some((n) => n.overdueDays != null) ? "warn" : ""}>
+                  {report.nextSteps.due.length} 项
+                </b>
+                <span>其中超期 {report.nextSteps.due.filter((n) => n.overdueDays != null).length} 项</span>
+              </div>
+              <div>
+                <small>即将启动</small>
+                <b>{report.nextSteps.upcoming.length} 项</b>
+                <span>未来 {report.nextSteps.horizonDays} 天内</span>
+              </div>
+            </div>
+
+            <section className="report-section">
+              <h3>一、本期成果</h3>
+              {report.deliveries.objectives.length === 0 ? (
                 <div className="empty compact-empty">该范围内没有完成的任务，也没有新生效的交付物</div>
-              )}
-              {report.deliveries.objectives.map((o) => (
-                <div key={o.objectiveId} className="rp-o">
-                  <div className="rp-o-head">
-                    <span className="objective-code">{o.code}</span>
-                    <b>{o.title}</b>
-                  </div>
-                  {o.keyResults.map((k) => (
-                    <div key={k.keyResultId} className="rp-kr">
-                      <div className="rp-kr-head">
-                        <span className="kr-code">{k.code}</span>
-                        <span>{k.description}</span>
-                        {k.averageProgress != null && (
-                          <span className="rp-muted">· {k.averageProgress}%</span>
+              ) : (
+                <table className="rp-table">
+                  <ReportTableCols />
+                  <thead>
+                    <tr>
+                      <th>任务</th>
+                      <th>负责人</th>
+                      <th>状态</th>
+                      <th>完成日期</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {report.deliveries.objectives.map((o) => (
+                      <Fragment key={o.objectiveId}>
+                        <tr className="group">
+                          <td colSpan={4}>
+                            <span className="objective-code">{o.code}</span> {o.title}
+                          </td>
+                        </tr>
+                        {o.keyResults.flatMap((k) =>
+                          k.tasks.map((t) => (
+                            <tr key={t.taskId}>
+                              <td className="c-task">
+                                <span className="rp-code">{t.code}</span> {t.name}
+                                {t.files.length > 0 && (
+                                  <div className="rp-files">
+                                    交付物：{t.files.map((f) => f.fileName).join("、")}
+                                  </div>
+                                )}
+                              </td>
+                              <td>{t.ownerName}</td>
+                              <td>
+                                <span className={`status-pill ${STATUS_CLASS[t.status]}`}>{t.statusLabel}</span>
+                              </td>
+                              <td className="c-date">
+                                {t.completedAt ? md(t.completedAt) : t.progress != null ? `进度 ${t.progress}%` : "—"}
+                              </td>
+                            </tr>
+                          )),
                         )}
-                      </div>
-                      {k.tasks.map((t) => (
-                        <div key={t.taskId} className="rp-task">
-                          <div className="rp-task-name">
-                            <span className="rp-code">{t.code}</span>
-                            {t.name}
-                          </div>
-                          <div className="rp-task-meta">
-                            {t.ownerName} ·
-                            <span className={`status-pill ${STATUS_CLASS[t.status]}`}>{t.statusLabel}</span>
-                            {t.completedAt ? md(t.completedAt) : t.progress != null ? `进度 ${t.progress}%` : ""}
-                          </div>
-                          {t.files.length > 0 && (
-                            <div className="rp-files">
-                              {t.files.map((f) => (
-                                <span key={`${f.fileName}-${f.effectiveAt}`} className="rp-file" title={f.deliverableName}>
-                                  <Icon name="archive" size={14} />
-                                  {f.fileName}
-                                  <small>生效 {md(f.effectiveAt)}</small>
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              ))}
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </section>
 
             <section className="report-section">
               <h3>
                 二、风险与卡点
-                <span className="rp-count">
-                  {report.blockers.open.length} 项开放
-                  {report.from &&
-                    ` · 本期新增 ${report.blockers.newInRange} · 本期解除 ${report.blockers.resolvedInRange}`}
-                </span>
                 {report.blockers.pendingCompletions > 0 && (
-                  <span className="rp-sub">
-                    完成审核 {report.blockers.pendingCompletions} 件仍停留在审批队列
-                  </span>
+                  <span className="rp-sub">另有 {report.blockers.pendingCompletions} 件完成审核仍在审批队列</span>
                 )}
               </h3>
               {report.blockers.open.length === 0 ? (
                 <div className="empty compact-empty">当前没有开放的卡点</div>
               ) : (
-                <div className="rp-blockers">{report.blockers.open.map(renderOpenBlocker)}</div>
+                <div className="rp-blk-list">{report.blockers.open.map(renderOpenBlocker)}</div>
               )}
               {report.blockers.resolved.length > 0 && (
-                <>
-                  <div className="rp-resolved-head">本期已解除</div>
-                  <div className="rp-blockers">{report.blockers.resolved.map(renderResolvedBlocker)}</div>
-                </>
+                <div className="rp-blk-resolved">
+                  <b>本期解除 {report.blockers.resolved.length} 项</b>{" "}
+                  {report.blockers.resolved.map((b, i) => (
+                    <Fragment key={`${b.taskId}-${b.kind}-${b.resolvedAt}`}>
+                      {i > 0 && "；"}
+                      <span className="rp-code">{b.code}</span> {b.taskName}（{b.kindLabel}，{md(b.resolvedAt)} 解除）
+                    </Fragment>
+                  ))}
+                </div>
               )}
             </section>
 
-            <section className="report-section rp-next">
+            <section className="report-section">
               <h3>
-                三、下一步
-                <span className="rp-count">
-                  {report.nextSteps.due.length} 项到期／超期 · {report.nextSteps.upcoming.length} 项即将启动
-                </span>
-                <span className="rp-sub">未来 {report.nextSteps.horizonDays} 天</span>
+                三、下一步<span className="rp-sub">未来 {report.nextSteps.horizonDays} 天</span>
               </h3>
+              <div className="rp-sub-title">到期／超期</div>
               {report.nextSteps.due.length === 0 ? (
                 <div className="empty compact-empty">
                   未来 {report.nextSteps.horizonDays} 天内没有到期的任务，也没有已超期的任务
                 </div>
               ) : (
-                <table>
+                <table className="rp-table">
+                  <ReportTableCols />
                   <thead>
                     <tr>
-                      <th>编号</th>
                       <th>任务</th>
                       <th>负责人</th>
                       <th>状态</th>
-                      <th>截止</th>
+                      <th>截止日期</th>
                     </tr>
                   </thead>
                   <tbody>
                     {report.nextSteps.due.map((n) => (
                       <tr key={n.taskId} className={n.overdueDays != null ? "overdue" : ""}>
-                        <td>
-                          <span className="rp-code">{n.code}</span>
-                        </td>
-                        <td>
-                          {n.taskName}
-                          {n.keyResultCode && (
-                            <div className="rp-muted">
-                              {n.keyResultCode} · {n.keyResultDescription}
-                            </div>
-                          )}
+                        <td className="c-task">
+                          <span className="rp-code">{n.code}</span> {n.taskName}
                         </td>
                         <td>{n.ownerName}</td>
                         <td>
                           <span className={`status-pill ${STATUS_CLASS[n.status]}`}>{n.statusLabel}</span>
-                          {n.unreadyNote && <div className="rp-muted">{n.unreadyNote}</div>}
                         </td>
-                        <td className={`rp-due ${n.overdueDays != null ? "overdue" : ""}`}>
-                          {md(n.endDate)}
-                          {n.overdueDays != null
-                            ? `（超期 ${n.overdueDays} 天）`
-                            : n.dueInDays === 0
-                              ? "（今天）"
-                              : `（${n.dueInDays} 天后）`}
+                        <td className="c-date">
+                          {n.overdueDays != null ? (
+                            <span className="rp-red">
+                              {md(n.endDate)} 超期 {n.overdueDays} 天
+                            </span>
+                          ) : (
+                            `${md(n.endDate)}${n.dueInDays === 0 ? " 今天" : ""}`
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -349,28 +355,28 @@ export default function ReportsPage({
               )}
               {report.nextSteps.upcoming.length > 0 && (
                 <>
-                  <div className="rp-next-sub">即将启动</div>
-                  <table>
+                  <div className="rp-sub-title">即将启动</div>
+                  <table className="rp-table">
+                    <ReportTableCols />
+                    <thead>
+                      <tr>
+                        <th>任务</th>
+                        <th>负责人</th>
+                        <th>状态</th>
+                        <th>计划启动</th>
+                      </tr>
+                    </thead>
                     <tbody>
                       {report.nextSteps.upcoming.map((u) => (
                         <tr key={u.taskId}>
-                          <td>
-                            <span className="rp-code">{u.code}</span>
-                          </td>
-                          <td>
-                            {u.taskName}
-                            {u.keyResultCode && (
-                              <div className="rp-muted">
-                                {u.keyResultCode} · {u.keyResultDescription}
-                              </div>
-                            )}
+                          <td className="c-task">
+                            <span className="rp-code">{u.code}</span> {u.taskName}
                           </td>
                           <td>{u.ownerName}</td>
                           <td>
                             <span className={`status-pill ${STATUS_CLASS[u.status]}`}>{u.statusLabel}</span>
-                            {u.unreadyNote && <div className="rp-muted">{u.unreadyNote}</div>}
                           </td>
-                          <td className="rp-due">计划 {md(u.startDate)} 启动</td>
+                          <td className="c-date">{md(u.startDate)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -381,28 +387,31 @@ export default function ReportsPage({
 
             <section className="report-section">
               <h3>附、O／KR 进展</h3>
-              {report.okrProgress.length === 0 && (
+              {report.okrProgress.length === 0 ? (
                 <div className="empty compact-empty">项目还没有 O／KR</div>
-              )}
-              {report.okrProgress.length > 0 && (
-                <table className="rp-okr-compact">
+              ) : (
+                <table className="rp-table rp-okr">
+                  <colgroup>
+                    <col />
+                    <col style={{ width: 64 }} />
+                    <col style={{ width: 160 }} />
+                    <col style={{ width: 52 }} />
+                  </colgroup>
                   <tbody>
                     {report.okrProgress.map((o) => (
                       <Fragment key={o.objectiveId}>
-                        <tr className="o">
+                        <tr className="group">
                           <td colSpan={4}>
-                            {o.code} {o.title}
+                            <span className="objective-code">{o.code}</span> {o.title}
                           </td>
                         </tr>
                         {o.keyResults.map((k) => (
                           <tr key={k.keyResultId}>
                             <td>
-                              <span className="kr-code">{k.code}</span> {k.description}{" "}
+                              <span className="kr-code">{k.code}</span> {k.description}
+                            </td>
+                            <td>
                               <RiskPill level={k.riskLevel} />
-                              <span className="rp-muted">
-                                · {k.filledTasks}／{k.totalTasks} 已填
-                                {report.from ? ` · 本期完成 ${k.completedInRange} 项` : ` · 已完成 ${k.completedInRange} 项`}
-                              </span>
                             </td>
                             <td className="rp-bar">
                               <div className="progress">
