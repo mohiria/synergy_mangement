@@ -1,6 +1,6 @@
 package api_test
 
-// 集成测试：httptest + 真实 Postgres（docker compose up -d postgres）。
+// 集成测试：httptest + 真实 Postgres（本地开发经 SSH 隧道用腾讯云开发库，载入仓库根 .env.tunnel 即可，见 CLAUDE.md「本地中间件」）。
 // 每次运行建独立数据库并用 goose 跑迁移，结束后删除。
 // 无 Postgres 环境用 go test -short ./... 跳过。
 
@@ -68,7 +68,7 @@ var (
 	testServer    *api.Server
 )
 
-// putObject 直传对象；MinIO 与 Postgres 一样是集成测试的前置依赖（docker compose up -d minio）。
+// putObject 直传对象；MinIO 与 Postgres 一样是集成测试的前置依赖（同样经隧道，凭据取 .env.tunnel 的 MINIO_ROOT_USER／MINIO_ROOT_PASSWORD）。
 func putObject(t *testing.T, url, content string) {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodPut, url, strings.NewReader(content))
@@ -77,7 +77,7 @@ func putObject(t *testing.T, url, content string) {
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		t.Fatalf("MinIO 不可达（docker compose up -d minio）: %v", err)
+		t.Fatalf("MinIO 不可达（隧道在？已载入 .env.tunnel？）: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
@@ -160,7 +160,7 @@ func setupDB(t *testing.T) (*store.Queries, *pgxpool.Pool) {
 		t.Fatalf("open admin db: %v", err)
 	}
 	if err := adminDB.Ping(); err != nil {
-		t.Fatalf("Postgres 不可达（docker compose up -d postgres）: %v", err)
+		t.Fatalf("Postgres 不可达（隧道在？已载入 .env.tunnel？）: %v", err)
 	}
 
 	dbName := fmt.Sprintf("synergy_test_%d", time.Now().UnixNano())
@@ -3703,7 +3703,7 @@ func TestReportExport(t *testing.T) {
 		gt = "http://localhost:3000"
 	}
 	if resp, err := http.Get(gt + "/health"); err != nil {
-		t.Skipf("Gotenberg 不可达（docker compose up -d gotenberg）: %v", err)
+		t.Skipf("Gotenberg 不可达（隧道未转发 3000 或未载入 .env.tunnel）: %v", err)
 	} else {
 		resp.Body.Close()
 	}

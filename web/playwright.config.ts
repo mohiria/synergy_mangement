@@ -1,12 +1,24 @@
+import { existsSync, readFileSync } from "node:fs";
 import { defineConfig, devices } from "@playwright/test";
 
 // Playwright 冒烟（#71）：只覆盖可精确断言的视觉与结构契约，不复刻业务规则。
 //
-// 前置：postgres 与 minio 已起，DATABASE_URL 指向可写的开发库，SEED_PASSWORD 已设。
+// 前置：postgres 与 minio 可达（本地开发经 SSH 隧道用腾讯云开发库，见根目录 CLAUDE.md「本地中间件」），
+// DATABASE_URL 指向可写的开发库，SEED_PASSWORD 已设。
 // global-setup.ts 会先跑一次 `go run ./cmd/seed` 重建演示数据——**该命令清空全部业务数据**，
 // 所以只在开发库上跑；已经手工准备好数据时用 E2E_SKIP_SEED=1 跳过。
 //
 // 本机（macOS 12）只能用 Playwright 1.47 的 chromium：更新的版本不再提供 mac12 的浏览器包。
+
+// 没显式设 DATABASE_URL 时从仓库根 .env.tunnel 载入后端所需的全部变量（已设的环境变量优先），
+// 让 webServer 起的 go run ./cmd/server 与 global-setup 的 seed 都连到同一套中间件。
+if (!process.env.DATABASE_URL && existsSync("../.env.tunnel")) {
+  for (const line of readFileSync("../.env.tunnel", "utf8").split(/\r?\n/)) {
+    const m = line.match(/^([A-Z_]+)=(.*)$/);
+    if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2];
+  }
+}
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,

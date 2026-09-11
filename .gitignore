@@ -8,6 +8,7 @@ dist/
 .env
 .env.*
 !.env.example
+!.env.tunnel.example
 *.log
 
 # 本地素材（非项目事实源）

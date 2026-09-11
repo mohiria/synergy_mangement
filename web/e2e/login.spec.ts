@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
 import { expect, test } from "@playwright/test";
+import pg from "pg";
 import { DEMO, login } from "./fixtures";
 
 // 登录页体验（#209，AC-79）：限速后显示剩余秒数并倒计时、按钮禁用；密码框显隐切换；
@@ -84,22 +84,25 @@ test("找回密码：入口按邮件通道显示，链接可完成重置", async
   await page.getByRole("button", { name: "发送重置邮件" }).click();
   await expect(page.getByText("若账号存在，重置邮件已发送")).toBeVisible();
 
-  // 发送记录接口对找回密码邮件不回显正文（#215），直接从开发库取：走 compose 的 postgres 容器，
-  // 库名与用户取 DATABASE_URL；首次 SMTP 失败后退避 1 分钟才重试，终态前正文仍在。
+  // 发送记录接口对找回密码邮件不回显正文（#215），直接从开发库取：用 DATABASE_URL 连库查
+  // mail_outbox（经 SSH 隧道也可达，不依赖本地 Docker）；首次 SMTP 失败后退避 1 分钟才重试，终态前正文仍在。
   const res = await adminPage.request.get("/api/v1/system/mail-outbox");
   const items = (await res.json()) as { toAddress: string; body?: string }[];
   const mail = items.find((x) => x.toAddress === "zhengkai@example.com");
   expect(mail).toBeTruthy();
   expect(mail!.body).toBeUndefined();
-  const dsn = new URL(process.env.DATABASE_URL ?? "postgres://synergy@localhost:5432/synergy");
-  const body = execFileSync(
-    "docker",
-    [
-      "compose", "exec", "-T", "postgres", "psql", "-U", decodeURIComponent(dsn.username), "-d", dsn.pathname.slice(1), "-tA",
-      "-c", "SELECT body FROM mail_outbox WHERE to_address = 'zhengkai@example.com' ORDER BY id DESC LIMIT 1",
-    ],
-    { cwd: "../", encoding: "utf8" },
-  );
+  const db = new pg.Client({ connectionString: process.env.DATABASE_URL });
+  await db.connect();
+  let body: string;
+  try {
+    const row = await db.query<{ body: string }>(
+      "SELECT body FROM mail_outbox WHERE to_address = $1 ORDER BY id DESC LIMIT 1",
+      ["zhengkai@example.com"],
+    );
+    body = row.rows[0]?.body ?? "";
+  } finally {
+    await db.end();
+  }
   const link = body.match(/https?:\/\/\S+\/reset-password\?token=[0-9a-f]+/)?.[0];
   expect(link).toBeTruthy();
   const url = new URL(link!);

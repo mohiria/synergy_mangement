@@ -31,22 +31,28 @@
 
 ## 跑之前
 
-需要 postgres 与 minio 起着，且库已迁移到最新版本：
+需要 postgres 与 minio 可达，且库已迁移到最新版本。本地开发不跑 Docker：经 SSH 隧道用腾讯云的
+开发库 `synergy_dev` 与开发桶 `synergy-dev`，变量放仓库根 `.env.tunnel`（模板 `.env.tunnel.example`，
+隧道命令与载入方式见根目录 `CLAUDE.md`「本地中间件」）：
 
 ```sh
-docker compose up -d postgres minio      # 无 Docker 时手工起对应服务
+ssh -N -L 5432:127.0.0.1:5432 -L 9000:127.0.0.1:9000 -L 3000:127.0.0.1:3000 ubuntu@<服务器IP>   # 另开一个终端挂着
+set -a; . ./.env.tunnel; set +a
 cd server && go tool goose -dir migrations postgres "$DATABASE_URL" up
 ```
 
 ```sh
 cd web
-export DATABASE_URL='postgres://<用户>:<密码>@localhost:5432/synergy?sslmode=disable'
 export SEED_PASSWORD='<自定密码>'
 npm run test:e2e
 ```
 
+`playwright.config.ts` 在没设 `DATABASE_URL` 时会自己读仓库根 `.env.tunnel`（已设的环境变量优先），
+所以 `webServer` 拉起的后端、`global-setup` 的 seed 与用例都连同一套中间件；不想用隧道时显式导出
+`DATABASE_URL` 等变量即可。
+
 `login.spec.ts` 的找回密码用例要从 `mail_outbox` 取重置链接（发送记录接口对该类邮件不回显正文），
-走 `docker compose exec postgres psql`，库名与用户取 `DATABASE_URL`；无 Docker 时该用例会失败。
+用 `pg` 按 `DATABASE_URL` 直连开发库查询，不依赖本地 Docker。
 
 `global-setup.ts` 会先跑 `go run ./cmd/seed -skip-files` 重建演示数据——**该命令清空全部业务
 数据**，只在开发库上跑。断言依赖种子里的固定坐标（编号、任务名、已完成任务的分布），见
