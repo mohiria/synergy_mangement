@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Alert, Button, Spin, message } from "antd";
 import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import ProjectShell from "./ProjectShell";
@@ -27,11 +28,13 @@ const RISK_LABEL: Record<RiskLevel, string> = {
 };
 
 // 月-日短格式：报告纸内的日期都以 MM-DD 呈现，年份由眉题的完整时间给出。
-// md 只用于纯日期（YYYY-MM-DD，无时区）；带时区的时间戳须经 dayjs 转成本地时间再格式化，
-// 直接截 UTC 串会把晚间的时刻显示成前一天／差 8 小时。
+// md 只用于纯日期（YYYY-MM-DD，无时区）；带时区的时间戳一律换算到项目时区（UTC+8）再格式化：
+// 直接截 UTC 串会把晚间的时刻显示成前一天，按浏览器本地时区又会让异地查看者与服务端「当日」口径不一致。
+dayjs.extend(utc);
+const PROJECT_UTC_OFFSET = 8;
 const md = (s?: string) => (s ? s.slice(5, 10) : "");
-const mdTime = (s?: string) => (s ? dayjs(s).format("MM-DD") : "");
-const fmtTime = (s?: string) => (s ? dayjs(s).format("YYYY-MM-DD HH:mm") : "");
+const mdTime = (s?: string) => (s ? dayjs(s).utcOffset(PROJECT_UTC_OFFSET).format("MM-DD") : "");
+const fmtTime = (s?: string) => (s ? dayjs(s).utcOffset(PROJECT_UTC_OFFSET).format("YYYY-MM-DD HH:mm") : "");
 
 const RiskPill = ({ level }: { level: RiskLevel }) => (
   <span className={`status-pill risk-${level}`}>{RISK_LABEL[level]}</span>
