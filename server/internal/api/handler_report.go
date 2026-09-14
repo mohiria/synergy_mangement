@@ -117,11 +117,18 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 
 	// 一、本期成果：范围内终审通过的任务 ∪ 范围内有当前交付内容生效的任务，按 O → KR → 任务归组。
 	// 完成时刻取首次终审通过：成果更新（AC-66）再次通过不算新完成，退回也不撤销原完成。
-	completedAt := map[int64]time.Time{}
+	// 只有首次通过落在范围内才计本期完成；范围前已完成的任务若因成果更新在范围内有文件生效，
+	// 仍进本期成果，行上照常显示原完成时刻而不是进度。
+	firstApprovedAt := map[int64]time.Time{}
+	completedInRange := map[int64]struct{}{}
 	completedByKr := map[int64]int{}
 	for _, cr := range firstApproved {
-		if cr.DecidedAt.Valid && inRange(cr.DecidedAt.Time) {
-			completedAt[cr.TaskID] = cr.DecidedAt.Time
+		if !cr.DecidedAt.Valid {
+			continue
+		}
+		firstApprovedAt[cr.TaskID] = cr.DecidedAt.Time
+		if inRange(cr.DecidedAt.Time) {
+			completedInRange[cr.TaskID] = struct{}{}
 			completedByKr[taskByID[cr.TaskID].KeyResultID]++
 		}
 	}
@@ -163,9 +170,9 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 	}
 	deliveryByKr := map[int64][]ReportDeliveryTask{}
 	for _, t := range taskRows {
-		done, isDone := completedAt[t.ID]
+		_, doneInRange := completedInRange[t.ID]
 		fs := filesByTask[t.ID]
-		if !isDone && len(fs) == 0 {
+		if !doneInRange && len(fs) == 0 {
 			continue
 		}
 		sort.SliceStable(fs, func(i, j int) bool { return fs[i].EffectiveAt.Before(fs[j].EffectiveAt) })
@@ -179,7 +186,7 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 			StatusLabel: label,
 			Files:       append([]ReportFile{}, fs...),
 		}
-		if isDone {
+		if done, ok := firstApprovedAt[t.ID]; ok {
 			d := done
 			item.CompletedAt = &d
 		} else if t.Progress.Valid {
@@ -373,7 +380,7 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 		From:        from,
 		GeneratedAt: now,
 		Deliveries: ReportDeliveries{
-			CompletedTasks: len(completedAt),
+			CompletedTasks: len(completedInRange),
 			EffectiveFiles: effectiveFiles,
 			Objectives:     deliveryObjectives,
 		},

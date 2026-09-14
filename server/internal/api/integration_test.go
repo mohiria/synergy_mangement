@@ -3732,6 +3732,24 @@ func TestProjectReport(t *testing.T) {
 		t.Fatalf("成果更新退回不应撤销原完成: %+v / %+v", afterReject.Deliveries, afterReject.Blockers)
 	}
 
+	// 完成时刻不受范围限制：A 的首次终审通过若发生在范围之前，而成果更新的文件在范围内生效，
+	// A 仍因文件进入本期成果，但不计本期完成，且行上仍显示原完成时刻，不能退回成进度。
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE completion_reviews SET decided_at = decided_at - interval '2 days'
+		 WHERE id = (SELECT id FROM completion_reviews WHERE task_id = $1 AND state = 'approved' ORDER BY id LIMIT 1)`, taskA.Id); err != nil {
+		t.Fatalf("模拟首次完成早于范围失败: %v", err)
+	}
+	resp = doJSON(t, alice, http.MethodGet, reportURL+"?range=today", nil)
+	wantStatus(t, resp, http.StatusOK)
+	earlier := decodeBody[api.Report](t, resp)
+	if earlier.Deliveries.CompletedTasks != 0 || earlier.OkrProgress[0].KeyResults[0].CompletedInRange != 0 ||
+		len(earlier.Deliveries.Objectives) != 1 || len(earlier.Deliveries.Objectives[0].KeyResults[0].Tasks) != 1 {
+		t.Fatalf("首次完成早于范围时不应计入本期完成: %+v", earlier.Deliveries)
+	}
+	if got := earlier.Deliveries.Objectives[0].KeyResults[0].Tasks[0]; got.CompletedAt == nil || !got.CompletedAt.Equal(firstCompletedAt.AddDate(0, 0, -2)) || got.Progress != nil {
+		t.Fatalf("已完成任务因文件进入本期成果时仍应显示完成时刻: %+v", got)
+	}
+
 	// 项目整体（默认 all）与非法范围
 	resp = doJSON(t, alice, http.MethodGet, reportURL, nil)
 	wantStatus(t, resp, http.StatusOK)
