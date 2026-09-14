@@ -3574,7 +3574,7 @@ func TestProjectReport(t *testing.T) {
 	kr1 := okr[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start := openapiDate(t, "2026-08-01")
-	soon := openapiDate(t, time.Now().AddDate(0, 0, 2).Format("2006-01-02"))
+	soon := openapiDate(t, time.Now().In(domain.ProjectLocation).AddDate(0, 0, 2).Format("2006-01-02"))
 
 	// 任务 A：走完整链路到完成（产生完成成果与 completedInRange）；任务 B：临近截止（下一步）；
 	// 任务 C：B 的上游，始终不完成，用于让 B 的必要输入未就绪。
