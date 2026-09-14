@@ -3650,7 +3650,7 @@ func TestProjectReport(t *testing.T) {
 		rep.Blockers.Open[0].ActionOwnerName == nil || *rep.Blockers.Open[0].ActionOwnerName != "李四" {
 		t.Fatalf("卡点异常: %+v", rep.Blockers.Open)
 	}
-	if b := rep.Blockers.Open[0]; b.Code != "T1.1.2" || b.Phase == nil || *b.Phase != api.Carried || b.PhaseLabel == nil || *b.PhaseLabel != "上期遗留" ||
+	if b := rep.Blockers.Open[0]; !strings.HasPrefix(b.Key, "upstream_unready:edge:") || b.Code != "T1.1.2" || b.Phase == nil || *b.Phase != api.Carried || b.PhaseLabel == nil || *b.PhaseLabel != "上期遗留" ||
 		b.Since == nil || b.StayDays != domain.DaysBetween(*b.Since, time.Now()) || b.StayDays < 1 {
 		t.Fatalf("卡点阶段异常: %+v", b)
 	}

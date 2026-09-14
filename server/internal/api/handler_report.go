@@ -221,11 +221,36 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 		writeInternalError(w, r, err)
 		return Report{}, false
 	}
+	// 出现时刻优先取留痕里的「出现」动态：派生的 Since 对审批超时是进入环节时间、对互锁是本次派生时间，
+	// 直接用会高估审批超时的停留天数、并让互锁永远显示 0 天且「本期新出现」。
+	openedRows, err := s.q.ListOpenBlockerActivities(ctx, projectId)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return Report{}, false
+	}
+	type blockerRef struct {
+		taskID int64
+		key    string
+	}
+	openedAt := make(map[blockerRef]time.Time, len(openedRows))
+	for _, row := range openedRows {
+		if row.Kind == domain.ActivityBlockerOpened && row.OccurredAt.Valid {
+			openedAt[blockerRef{row.TaskID, row.BlockerKey.String}] = row.OccurredAt.Time
+		}
+	}
+	derived = append([]domain.Blocker(nil), derived...) // projectBlockers 可能返回请求内缓存，不改写共享切片
+	for i := range derived {
+		derived[i].Since = derived[i].OccurredAt
+		if t, ok := openedAt[blockerRef{derived[i].TaskID, derived[i].Key}]; ok {
+			derived[i].Since = t
+		}
+	}
 	sort.SliceStable(derived, func(i, j int) bool { return derived[i].Since.Before(derived[j].Since) })
 	open := []ReportBlocker{}
 	newInRange := 0
 	for _, b := range derived {
 		item := ReportBlocker{
+			Key:             b.Key,
 			TaskId:          b.TaskID,
 			Code:            taskCode(taskByID[b.TaskID]),
 			TaskName:        b.TaskName,

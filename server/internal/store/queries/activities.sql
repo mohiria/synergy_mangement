@@ -29,7 +29,7 @@ SELECT COALESCE(
 
 -- name: ListOpenBlockerActivities :many
 -- 全库仍处于「出现未解除」的卡点动态（ticker 补偿扫描解除事件用，R9）。
-SELECT DISTINCT ON (a.task_id, a.blocker_key) a.task_id, a.blocker_key, a.summary, a.kind
+SELECT DISTINCT ON (a.task_id, a.blocker_key) a.task_id, a.blocker_key, a.summary, a.kind, a.occurred_at
 FROM task_activities a
 JOIN tasks t ON t.id = a.task_id
 JOIN key_results k ON k.id = t.key_result_id

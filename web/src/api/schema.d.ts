@@ -2548,6 +2548,8 @@ export interface components {
         ReportBlockerPhase: "new" | "carried";
         /** @description 当前开放的卡点（按出现时间升序） */
         ReportBlocker: {
+            /** @description 卡点键（与 Blocker.key 同一口径，同一任务同类卡点可有多条，如每条未就绪输入各一条） */
+            key: string;
             /** Format: int64 */
             taskId: number;
             code: string;
@@ -2559,9 +2561,12 @@ export interface components {
             reason: string;
             level: components["schemas"]["RiskLevel"];
             actionOwnerName?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description 卡点出现时刻：优先取留痕里该卡点最近一条「出现」动态的时间，没有留痕时取派生的发生时刻
+             */
             since?: string;
-            /** @description 已停留天数（按项目时区自然日差，派生字段） */
+            /** @description 已停留天数（自 since 起按项目时区自然日差，派生字段） */
             stayDays: number;
             phase?: components["schemas"]["ReportBlockerPhase"];
             /** @description 「本期新出现」／「上期遗留」；与 phase 同时返回或同时缺省 */

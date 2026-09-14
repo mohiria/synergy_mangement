@@ -141,7 +141,7 @@ export default function ReportsPage({
   // 卡点行：任务在首列（不加粗，只是定位），卡点本身加粗是重点；阶段标签（本期新出现／上期遗留）跟在卡点之后，
   // 项目整体范围不分阶段时改放风险等级。
   const renderOpenBlocker = (b: ReportBlocker) => (
-    <tr key={`${b.taskId}-${b.kind}`} className={b.level === "high_risk" ? "overdue" : ""}>
+    <tr key={b.key} className={b.level === "high_risk" ? "overdue" : ""}>
       <td className="c-task">
         <span className="rp-code">{b.code}</span> {b.taskName}
       </td>

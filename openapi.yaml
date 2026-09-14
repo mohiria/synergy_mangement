@@ -4705,8 +4705,11 @@ components:
     ReportBlocker:
       type: object
       description: 当前开放的卡点（按出现时间升序）
-      required: [taskId, code, taskName, kind, kindLabel, missing, reason, level, stayDays]
+      required: [key, taskId, code, taskName, kind, kindLabel, missing, reason, level, stayDays]
       properties:
+        key:
+          type: string
+          description: 卡点键（与 Blocker.key 同一口径，同一任务同类卡点可有多条，如每条未就绪输入各一条）
         taskId:
           type: integer
           format: int64
@@ -4730,9 +4733,10 @@ components:
         since:
           type: string
           format: date-time
+          description: 卡点出现时刻：优先取留痕里该卡点最近一条「出现」动态的时间，没有留痕时取派生的发生时刻
         stayDays:
           type: integer
-          description: 已停留天数（按项目时区自然日差，派生字段）
+          description: 已停留天数（自 since 起按项目时区自然日差，派生字段）
         phase:
           $ref: "#/components/schemas/ReportBlockerPhase"
         phaseLabel:
