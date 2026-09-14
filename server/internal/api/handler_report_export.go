@@ -117,6 +117,8 @@ func (s *Server) ExportReport(w http.ResponseWriter, r *http.Request, projectId 
 
 // 模板结构与前端报告页一致（PRD §7.8）：摘要条 + 正文三段 本期成果／风险与卡点／下一步，O／KR 进展作附录；
 // 面向领导阅读，只保留结论级字段（不列文件生效日期、卡点原因与缺失项、KR 行与未就绪注记）。
+// 本期成果以交付物为首列，任务只作简写出处；卡点表任务在首列、卡点加粗、阶段标签随后；
+// 截止日与「超期 N 天」分两行，长图 480px 宽也不溢出列宽。
 const reportTemplateText = `<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <style>
@@ -148,18 +150,18 @@ td.date { white-space: nowrap; }
 .normal { background: #ebf7f0; color: #377d5b; }
 .empty { color: #6b778c; font-size: 12px; margin-left: 12px; }
 .muted { color: #6b7588; font-size: 12px; }
-.files { margin-top: 2px; font-size: 12px; color: #6b7588; }
-.blk-list { border-top: 1px solid #e2e6ed; }
-.blk { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 7px 10px; border-bottom: 1px solid #eceff4; }
-.blk .actor { white-space: nowrap; }
-.blk .actor small { color: #6b7588; margin-right: 4px; }
-.blk .stay { min-width: 60px; text-align: right; font-size: 12px; color: #6b7588; white-space: nowrap; }
-.blk .stay b { font-size: 14px; color: #1f2937; }
+td.files { font-weight: 600; color: #1f2a44; }
+td.files > div + div { margin-top: 2px; }
+td.brief { font-size: 12px; color: #6b7588; }
+td.kind b { display: block; font-weight: 650; color: #1f2a44; }
+td.kind .tag, td.kind .pill { display: inline-block; margin-top: 3px; }
+td.date b { font-weight: 650; }
 .resolved-line { margin-top: 8px; padding: 6px 10px; border-radius: 4px; background: #f4faf7; font-size: 13px; line-height: 1.7; }
 .resolved-line > b { color: #247a5a; }
 .section-sub { margin: 12px 0 4px; font-weight: 650; font-size: 12px; color: #6b7588; }
-tr.overdue td:first-child { box-shadow: inset 3px 0 #c83f50; }
+tr.overdue td:first-child, tr.high_risk td:first-child { box-shadow: inset 3px 0 #c83f50; }
 .red { color: #c83f50; font-weight: 600; }
+.today { color: #ad6e13; font-weight: 600; }
 .bar { display: inline-block; width: 100px; height: 6px; background: #eef1f5; border-radius: 3px; vertical-align: middle; }
 .bar i { display: block; height: 100%; background: #5267df; border-radius: 3px; }
 </style></head><body>
@@ -175,34 +177,36 @@ tr.overdue td:first-child { box-shadow: inset 3px 0 #c83f50; }
 
 <h2>一、本期成果</h2>
 {{if not .Report.Deliveries.Objectives}}<div class="empty">该范围内没有终审通过的任务，也没有新生效的交付内容</div>{{else}}
-<table><colgroup><col><col style="width:80px"><col style="width:76px"><col style="width:96px"></colgroup>
-<tr><th>任务</th><th>负责人</th><th>状态</th><th>完成日期</th></tr>
+<table><colgroup><col><col style="width:150px"><col style="width:64px"><col style="width:90px"></colgroup>
+<tr><th>交付物</th><th>任务</th><th>负责人</th><th>状态／日期</th></tr>
 {{range .Report.Deliveries.Objectives}}<tr class="group"><td colspan="4"><span class="code">{{.Code}}</span> {{.Title}}</td></tr>
-{{range .KeyResults}}{{range .Tasks}}<tr><td><span class="code">{{.Code}}</span> {{.Name}}{{if .Files}}<div class="files">交付物：{{range $i, $f := .Files}}{{if $i}}、{{end}}{{$f.FileName}}{{end}}</div>{{end}}</td>
-<td>{{.OwnerName}}</td><td>{{.StatusLabel}}</td>
-<td class="date">{{if .CompletedAt}}{{date .CompletedAt}}{{else if .Progress}}进度 {{.Progress}}%{{else}}—{{end}}</td></tr>{{end}}{{end}}{{end}}
+{{range .KeyResults}}{{range .Tasks}}<tr><td class="files">{{if .Files}}{{range .Files}}<div>{{.FileName}}</div>{{end}}{{else}}<span class="muted">无交付物文件</span>{{end}}</td>
+<td class="brief"><span class="code">{{.Code}}</span> {{.Name}}</td><td>{{.OwnerName}}</td>
+<td class="date">{{.StatusLabel}}<div class="muted">{{if .CompletedAt}}{{date .CompletedAt}}{{else if .Progress}}进度 {{.Progress}}%{{else}}—{{end}}</div></td></tr>{{end}}{{end}}{{end}}
 </table>{{end}}
 
 <h2>二、风险与卡点{{if .Report.Blockers.PendingCompletions}}<span class="sub">另有 {{.Report.Blockers.PendingCompletions}} 件完成审核仍在审批队列</span>{{end}}</h2>
-{{if not .Report.Blockers.Open}}<div class="empty">当前没有开放的卡点</div>{{else}}<div class="blk-list">
-{{range .Report.Blockers.Open}}<div class="blk">{{if .PhaseLabel}}<span class="tag {{.Phase}}">{{.PhaseLabel}}</span>{{else}}<span class="pill {{.Level}}">{{riskLabel .Level}}</span>{{end}}
-<div><span class="code">{{.Code}}</span> <b>{{.TaskName}}</b> <span class="tag gray">{{.KindLabel}}</span></div>
-<div class="actor">{{if .ActionOwnerName}}<small>待行动</small>{{.ActionOwnerName}}{{else}}—{{end}}</div>
-<div class="stay"><b>{{.StayDays}}</b> 天</div></div>{{end}}
-</div>{{end}}
+{{if not .Report.Blockers.Open}}<div class="empty">当前没有开放的卡点</div>{{else}}
+<table><colgroup><col><col style="width:140px"><col style="width:84px"><col style="width:56px"></colgroup>
+<tr><th>任务</th><th>卡点</th><th>待行动</th><th>已停留</th></tr>
+{{range .Report.Blockers.Open}}<tr{{if eq .Level "high_risk"}} class="high_risk"{{end}}><td><span class="code">{{.Code}}</span> {{.TaskName}}</td>
+<td class="kind"><b>{{.KindLabel}}</b>{{if .PhaseLabel}}<span class="tag {{.Phase}}">{{.PhaseLabel}}</span>{{else}}<span class="pill {{.Level}}">{{riskLabel .Level}}</span>{{end}}</td>
+<td>{{if .ActionOwnerName}}{{.ActionOwnerName}}{{else}}—{{end}}</td>
+<td class="date"><b>{{.StayDays}}</b> 天</td></tr>{{end}}
+</table>{{end}}
 {{if .Report.Blockers.Resolved}}<div class="resolved-line"><b>本期解除 {{len .Report.Blockers.Resolved}} 项</b> {{range $i, $b := .Report.Blockers.Resolved}}{{if $i}}；{{end}}<span class="code">{{$b.Code}}</span> {{$b.TaskName}}（{{$b.KindLabel}}，{{date $b.ResolvedAt}} 解除）{{end}}</div>{{end}}
 
 <h2>三、下一步<span class="sub">未来 {{.Report.NextSteps.HorizonDays}} 天</span></h2>
 <div class="section-sub">到期／超期</div>
 {{if not .Report.NextSteps.Due}}<div class="empty">窗口内没有到期或超期的任务</div>{{else}}
-<table><colgroup><col><col style="width:80px"><col style="width:76px"><col style="width:120px"></colgroup>
+<table><colgroup><col><col style="width:64px"><col style="width:92px"><col style="width:90px"></colgroup>
 <tr><th>任务</th><th>负责人</th><th>状态</th><th>截止日期</th></tr>
 {{range .Report.NextSteps.Due}}<tr{{if .OverdueDays}} class="overdue"{{end}}><td><span class="code">{{.Code}}</span> {{.TaskName}}</td>
 <td>{{.OwnerName}}</td><td>{{.StatusLabel}}</td>
-<td class="date">{{if .OverdueDays}}<span class="red">{{date .EndDate}} 超期 {{.OverdueDays}} 天</span>{{else}}{{date .EndDate}}{{if eq (intv .DueInDays) 0}} 今天{{end}}{{end}}</td></tr>{{end}}
+<td class="date"><div>{{date .EndDate}}</div>{{if .OverdueDays}}<div class="red">超期 {{.OverdueDays}} 天</div>{{else if eq (intv .DueInDays) 0}}<div class="today">今天</div>{{end}}</td></tr>{{end}}
 </table>{{end}}
 {{if .Report.NextSteps.Upcoming}}<div class="section-sub">即将启动</div>
-<table><colgroup><col><col style="width:80px"><col style="width:76px"><col style="width:120px"></colgroup>
+<table><colgroup><col><col style="width:64px"><col style="width:92px"><col style="width:90px"></colgroup>
 <tr><th>任务</th><th>负责人</th><th>状态</th><th>计划启动</th></tr>
 {{range .Report.NextSteps.Upcoming}}<tr><td><span class="code">{{.Code}}</span> {{.TaskName}}</td>
 <td>{{.OwnerName}}</td><td>{{.StatusLabel}}</td><td class="date">{{date .StartDate}}</td></tr>{{end}}

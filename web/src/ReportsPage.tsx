@@ -32,14 +32,35 @@ const RiskPill = ({ level }: { level: RiskLevel }) => (
   <span className={`status-pill risk-${level}`}>{RISK_LABEL[level]}</span>
 );
 
-// 报告纸内统一的四列表格：任务／负责人／状态／日期，固定列宽让表头永不换行。
+// 报告纸内统一的四列表格：任务／负责人／状态／日期，固定列宽让表头永不换行；
+// 状态列放得下最长的显示状态（「待××等 N 人审批」），日期列只放日期本身，超期／今天另起一行。
 const ReportTableCols = () => (
   <colgroup>
     <col />
     <col style={{ width: 84 }} />
-    <col style={{ width: 92 }} />
-    <col style={{ width: 118 }} />
+    <col style={{ width: 112 }} />
+    <col style={{ width: 96 }} />
   </colgroup>
+);
+
+// 到期／超期表的日期格：日期与「超期 N 天」／「今天」分两行，互不挤占，导出成长图时也不会溢出列宽。
+const DueDate = ({
+  endDate,
+  overdueDays,
+  dueInDays,
+}: {
+  endDate: string;
+  overdueDays?: number;
+  dueInDays?: number;
+}) => (
+  <>
+    <div>{md(endDate)}</div>
+    {overdueDays != null ? (
+      <div className="rp-red">超期 {overdueDays} 天</div>
+    ) : dueInDays === 0 ? (
+      <div className="rp-today">今天</div>
+    ) : null}
+  </>
 );
 
 // 项目报告（AC-19；PRD §7.8）：正文为本期成果／风险与卡点／下一步三段，O／KR 进展作附录；
@@ -117,31 +138,28 @@ export default function ReportsPage({
     }
   };
 
+  // 卡点行：任务在首列（不加粗，只是定位），卡点本身加粗是重点；阶段标签（本期新出现／上期遗留）跟在卡点之后，
+  // 项目整体范围不分阶段时改放风险等级。
   const renderOpenBlocker = (b: ReportBlocker) => (
-    <div key={`${b.taskId}-${b.kind}`} className="rp-blk">
-      {b.phase ? (
-        <span className={`rp-tag ${b.phase === "new" ? "new" : "carry"}`}>{b.phaseLabel}</span>
-      ) : (
-        <RiskPill level={b.level} />
-      )}
-      <div className="rp-blk-main">
-        <span className="rp-code">{b.code}</span> <b>{b.taskName}</b>{" "}
-        <span className="rp-tag gray">{b.kindLabel}</span>
-      </div>
-      <div className="rp-blk-actor">
-        {b.actionOwnerName ? (
-          <>
-            <small>待行动</small>
-            {b.actionOwnerName}
-          </>
-        ) : (
-          "—"
-        )}
-      </div>
-      <div className="rp-blk-stay">
+    <tr key={`${b.taskId}-${b.kind}`} className={b.level === "high_risk" ? "overdue" : ""}>
+      <td className="c-task">
+        <span className="rp-code">{b.code}</span> {b.taskName}
+      </td>
+      <td>
+        <div className="rp-blk-kind">
+          <b>{b.kindLabel}</b>
+          {b.phase ? (
+            <span className={`rp-tag ${b.phase === "new" ? "new" : "carry"}`}>{b.phaseLabel}</span>
+          ) : (
+            <RiskPill level={b.level} />
+          )}
+        </div>
+      </td>
+      <td>{b.actionOwnerName ?? "—"}</td>
+      <td className="c-date">
         <b>{b.stayDays}</b> 天
-      </div>
-    </div>
+      </td>
+    </tr>
   );
 
   return (
@@ -238,14 +256,20 @@ export default function ReportsPage({
               {report.deliveries.objectives.length === 0 ? (
                 <div className="empty compact-empty">该范围内没有完成的任务，也没有新生效的交付物</div>
               ) : (
-                <table className="rp-table">
-                  <ReportTableCols />
+                /* 交付物是本节的核心：放首列、逐份成行加粗；任务只作简写的出处，负责人与状态／日期居后。 */
+                <table className="rp-table rp-deliv">
+                  <colgroup>
+                    <col />
+                    <col style={{ width: 200 }} />
+                    <col style={{ width: 84 }} />
+                    <col style={{ width: 112 }} />
+                  </colgroup>
                   <thead>
                     <tr>
+                      <th>交付物</th>
                       <th>任务</th>
                       <th>负责人</th>
-                      <th>状态</th>
-                      <th>完成日期</th>
+                      <th>状态／日期</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -259,20 +283,22 @@ export default function ReportsPage({
                         {o.keyResults.flatMap((k) =>
                           k.tasks.map((t) => (
                             <tr key={t.taskId}>
-                              <td className="c-task">
-                                <span className="rp-code">{t.code}</span> {t.name}
-                                {t.files.length > 0 && (
-                                  <div className="rp-files">
-                                    交付物：{t.files.map((f) => f.fileName).join("、")}
-                                  </div>
+                              <td className="c-files">
+                                {t.files.length > 0 ? (
+                                  t.files.map((f) => <div key={f.fileName}>{f.fileName}</div>)
+                                ) : (
+                                  <span className="rp-muted">无交付物文件</span>
                                 )}
                               </td>
-                              <td>{t.ownerName}</td>
-                              <td>
-                                <span className={`status-pill ${STATUS_CLASS[t.status]}`}>{t.statusLabel}</span>
+                              <td className="c-task rp-brief">
+                                <span className="rp-code">{t.code}</span> {t.name}
                               </td>
+                              <td>{t.ownerName}</td>
                               <td className="c-date">
-                                {t.completedAt ? md(t.completedAt) : t.progress != null ? `进度 ${t.progress}%` : "—"}
+                                <span className={`status-pill ${STATUS_CLASS[t.status]}`}>{t.statusLabel}</span>
+                                <div className="rp-muted">
+                                  {t.completedAt ? md(t.completedAt) : t.progress != null ? `进度 ${t.progress}%` : "—"}
+                                </div>
                               </td>
                             </tr>
                           )),
@@ -294,7 +320,23 @@ export default function ReportsPage({
               {report.blockers.open.length === 0 ? (
                 <div className="empty compact-empty">当前没有开放的卡点</div>
               ) : (
-                <div className="rp-blk-list">{report.blockers.open.map(renderOpenBlocker)}</div>
+                <table className="rp-table">
+                  <colgroup>
+                    <col />
+                    <col style={{ width: 188 }} />
+                    <col style={{ width: 112 }} />
+                    <col style={{ width: 72 }} />
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th>任务</th>
+                      <th>卡点</th>
+                      <th>待行动</th>
+                      <th>已停留</th>
+                    </tr>
+                  </thead>
+                  <tbody>{report.blockers.open.map(renderOpenBlocker)}</tbody>
+                </table>
               )}
               {report.blockers.resolved.length > 0 && (
                 <div className="rp-blk-resolved">
@@ -340,13 +382,7 @@ export default function ReportsPage({
                           <span className={`status-pill ${STATUS_CLASS[n.status]}`}>{n.statusLabel}</span>
                         </td>
                         <td className="c-date">
-                          {n.overdueDays != null ? (
-                            <span className="rp-red">
-                              {md(n.endDate)} 超期 {n.overdueDays} 天
-                            </span>
-                          ) : (
-                            `${md(n.endDate)}${n.dueInDays === 0 ? " 今天" : ""}`
-                          )}
+                          <DueDate endDate={n.endDate} overdueDays={n.overdueDays} dueInDays={n.dueInDays} />
                         </td>
                       </tr>
                     ))}
@@ -393,7 +429,7 @@ export default function ReportsPage({
                 <table className="rp-table rp-okr">
                   <colgroup>
                     <col />
-                    <col style={{ width: 64 }} />
+                    <col style={{ width: 76 }} />
                     <col style={{ width: 160 }} />
                     <col style={{ width: 52 }} />
                   </colgroup>
