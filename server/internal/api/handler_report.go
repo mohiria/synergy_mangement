@@ -110,8 +110,11 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 		writeInternalError(w, r, err)
 		return Report{}, false
 	}
+	displayStatusOf := func(t store.ListProjectTasksRow) string {
+		return domain.DeriveDisplayStatus(t.Status, unreadyNoteByTask[t.ID] != "")
+	}
 	displayOf := func(t store.ListProjectTasksRow) (TaskStatus, string) {
-		display := domain.DeriveDisplayStatus(t.Status, unreadyNoteByTask[t.ID] != "")
+		display := displayStatusOf(t)
 		return TaskStatus(display), domain.StatusLabel(display, reviewStageByTask[t.ID], uid, finalReviewers, reviewersByTask[t.ID])
 	}
 
@@ -356,7 +359,8 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 			}
 			due = append(due, item)
 		}
-		if domain.ReportUpcomingStart(start, t.Status, now, horizon) {
+		// 即将启动按派生态判断：必要输入未就绪的「等待输入」任务不算能启动（与下一步到期条目同口径）。
+		if domain.ReportUpcomingStart(start, displayStatusOf(t), now, horizon) {
 			status, label := displayOf(t)
 			upcoming = append(upcoming, ReportUpcomingTask{
 				TaskId:               t.ID,

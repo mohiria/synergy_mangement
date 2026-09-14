@@ -3750,6 +3750,32 @@ func TestProjectReport(t *testing.T) {
 		t.Fatalf("已完成任务因文件进入本期成果时仍应显示完成时刻: %+v", got)
 	}
 
+	// 即将启动只列真正能启动的任务：D 两天后开始但必要输入（来自 C）未就绪，派生态是「等待输入」，
+	// 不算即将启动；E 同日开始、无输入依赖，应列出。
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "等输入的待启动任务", OwnerId: bobUser.ID, StartDate: soon, EndDate: far},
+			{KeyResultId: kr1, Name: "即将启动任务", OwnerId: bobUser.ID, StartDate: soon, EndDate: far},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	var taskD api.Task
+	for _, task := range decodeBody[[]api.Task](t, resp) {
+		if task.Name == "等输入的待启动任务" {
+			taskD = task
+		}
+	}
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, taskD.Id),
+		api.CreateTaskInputRequest{Necessity: api.Required, SourceTaskIds: []int64{taskC.Id}})
+	wantStructureAccepted(t, resp)
+	resp = doJSON(t, alice, http.MethodGet, reportURL+"?range=week", nil)
+	wantStatus(t, resp, http.StatusOK)
+	week = decodeBody[api.Report](t, resp)
+	if len(week.NextSteps.Upcoming) != 1 || week.NextSteps.Upcoming[0].TaskName != "即将启动任务" ||
+		week.NextSteps.Upcoming[0].Status != api.TaskStatusNotStarted || week.NextSteps.Upcoming[0].StatusLabel != "未开始" {
+		t.Fatalf("必要输入未就绪的任务不应列为即将启动: %+v", week.NextSteps.Upcoming)
+	}
+
 	// 项目整体（默认 all）与非法范围
 	resp = doJSON(t, alice, http.MethodGet, reportURL, nil)
 	wantStatus(t, resp, http.StatusOK)
