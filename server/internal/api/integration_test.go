@@ -3680,6 +3680,58 @@ func TestProjectReport(t *testing.T) {
 		t.Fatalf("下一步未就绪注记异常: %q", derefStr(nextB.UnreadyNote))
 	}
 
+	// AC-66 成果更新不改变「完成」口径：再次终审通过不算新完成、完成时刻仍取首次通过；
+	// 退回也不撤销原完成。两次更新都在今天范围内，本期成果始终只有 A 这一件。
+	firstCompletedAt := *delivered.CompletedAt
+	resultUpdateURL := fmt.Sprintf("%s/%d/result-update", tasksURL, taskA.Id)
+	resp = doJSON(t, bob, http.MethodPost, resultUpdateURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	uploadCandidate(t, bob, tasksURL, taskA.Id, dA, api.UploadCandidateRequest{FileName: "验收方案V2.docx"}, "v2-bytes")
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskA.Id),
+		api.SubmitCompletionRequest{Note: "成果更新"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskA.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail = decodeBody[api.TaskDetail](t, resp)
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, taskA.Id, detail.CompletionReviews[0].Id),
+		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodGet, reportURL+"?range=today", nil)
+	wantStatus(t, resp, http.StatusOK)
+	afterUpdate := decodeBody[api.Report](t, resp)
+	if afterUpdate.Deliveries.CompletedTasks != 1 || afterUpdate.OkrProgress[0].KeyResults[0].CompletedInRange != 1 ||
+		len(afterUpdate.Deliveries.Objectives) != 1 || len(afterUpdate.Deliveries.Objectives[0].KeyResults[0].Tasks) != 1 {
+		t.Fatalf("成果更新通过后不应多算一次完成: %+v", afterUpdate.Deliveries)
+	}
+	if got := afterUpdate.Deliveries.Objectives[0].KeyResults[0].Tasks[0]; got.CompletedAt == nil || !got.CompletedAt.Equal(firstCompletedAt) {
+		t.Fatalf("完成时刻应取首次终审通过: %v != %v", got.CompletedAt, firstCompletedAt)
+	}
+	resp = doJSON(t, bob, http.MethodPost, resultUpdateURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	uploadCandidate(t, bob, tasksURL, taskA.Id, dA, api.UploadCandidateRequest{FileName: "验收方案V3.docx"}, "v3-bytes")
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskA.Id),
+		api.SubmitCompletionRequest{Note: "再更新一版"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskA.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail = decodeBody[api.TaskDetail](t, resp)
+	opinion := "还需补充"
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, taskA.Id, detail.CompletionReviews[0].Id),
+		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionRejected, Opinion: &opinion})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodGet, reportURL+"?range=today", nil)
+	wantStatus(t, resp, http.StatusOK)
+	afterReject := decodeBody[api.Report](t, resp)
+	if afterReject.Deliveries.CompletedTasks != 1 || afterReject.OkrProgress[0].KeyResults[0].CompletedInRange != 1 || afterReject.Blockers.PendingCompletions != 0 {
+		t.Fatalf("成果更新退回不应撤销原完成: %+v / %+v", afterReject.Deliveries, afterReject.Blockers)
+	}
+
 	// 项目整体（默认 all）与非法范围
 	resp = doJSON(t, alice, http.MethodGet, reportURL, nil)
 	wantStatus(t, resp, http.StatusOK)

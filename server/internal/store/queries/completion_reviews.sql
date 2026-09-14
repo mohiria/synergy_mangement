@@ -83,6 +83,17 @@ JOIN objectives o ON o.id = k.objective_id
 WHERE o.project_id = $1
 ORDER BY cr.task_id, cr.id DESC;
 
+-- name: FirstApprovedCompletionReviewsByProject :many
+-- 每个任务首次终审通过的记录（报告「本期成果」按任务完成时刻计数用）：
+-- 成果更新（AC-66）再次通过不构成新的完成，退回也不撤销原完成。
+SELECT DISTINCT ON (cr.task_id) cr.task_id, cr.decided_at
+FROM completion_reviews cr
+JOIN tasks t ON t.id = cr.task_id
+JOIN key_results k ON k.id = t.key_result_id
+JOIN objectives o ON o.id = k.objective_id
+WHERE o.project_id = $1 AND cr.state = 'approved'
+ORDER BY cr.task_id, cr.id ASC;
+
 -- name: IntermediateReviewerNamesByProject :many
 -- 或签中任务的当前审核组（AC-04 statusLabel 派生用；#186 带 user_id 供“待我审批”比对）。
 SELECT cr.task_id, crr.user_id, u.display_name

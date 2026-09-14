@@ -177,6 +177,43 @@ func (q *Queries) DecideCompletionReview(ctx context.Context, arg DecideCompleti
 	return i, err
 }
 
+const firstApprovedCompletionReviewsByProject = `-- name: FirstApprovedCompletionReviewsByProject :many
+SELECT DISTINCT ON (cr.task_id) cr.task_id, cr.decided_at
+FROM completion_reviews cr
+JOIN tasks t ON t.id = cr.task_id
+JOIN key_results k ON k.id = t.key_result_id
+JOIN objectives o ON o.id = k.objective_id
+WHERE o.project_id = $1 AND cr.state = 'approved'
+ORDER BY cr.task_id, cr.id ASC
+`
+
+type FirstApprovedCompletionReviewsByProjectRow struct {
+	TaskID    int64
+	DecidedAt pgtype.Timestamptz
+}
+
+// 每个任务首次终审通过的记录（报告「本期成果」按任务完成时刻计数用）：
+// 成果更新（AC-66）再次通过不构成新的完成，退回也不撤销原完成。
+func (q *Queries) FirstApprovedCompletionReviewsByProject(ctx context.Context, projectID int64) ([]FirstApprovedCompletionReviewsByProjectRow, error) {
+	rows, err := q.db.Query(ctx, firstApprovedCompletionReviewsByProject, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []FirstApprovedCompletionReviewsByProjectRow
+	for rows.Next() {
+		var i FirstApprovedCompletionReviewsByProjectRow
+		if err := rows.Scan(&i.TaskID, &i.DecidedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getCompletionReview = `-- name: GetCompletionReview :one
 SELECT id, task_id, submitted_by, note, state, opinion, submitted_at, decided_by, decided_at, intermediate_by, intermediate_at, intermediate_opinion FROM completion_reviews
 WHERE id = $1 AND task_id = $2

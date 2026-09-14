@@ -58,6 +58,11 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 		writeInternalError(w, r, err)
 		return Report{}, false
 	}
+	firstApproved, err := s.q.FirstApprovedCompletionReviewsByProject(ctx, projectId)
+	if err != nil {
+		writeInternalError(w, r, err)
+		return Report{}, false
+	}
 	taskRows, err := s.q.ListProjectTasks(ctx, projectId)
 	if err != nil {
 		writeInternalError(w, r, err)
@@ -111,15 +116,18 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 	}
 
 	// 一、本期成果：范围内终审通过的任务 ∪ 范围内有当前交付内容生效的任务，按 O → KR → 任务归组。
+	// 完成时刻取首次终审通过：成果更新（AC-66）再次通过不算新完成，退回也不撤销原完成。
 	completedAt := map[int64]time.Time{}
 	completedByKr := map[int64]int{}
-	pendingCompletions := 0
-	for _, cr := range completionRows {
-		switch {
-		case cr.State == domain.CompletionApproved && cr.DecidedAt.Valid && inRange(cr.DecidedAt.Time):
+	for _, cr := range firstApproved {
+		if cr.DecidedAt.Valid && inRange(cr.DecidedAt.Time) {
 			completedAt[cr.TaskID] = cr.DecidedAt.Time
 			completedByKr[taskByID[cr.TaskID].KeyResultID]++
-		case cr.State == domain.CompletionIntermediate || cr.State == domain.CompletionPendingFinal:
+		}
+	}
+	pendingCompletions := 0
+	for _, cr := range completionRows {
+		if cr.State == domain.CompletionIntermediate || cr.State == domain.CompletionPendingFinal {
 			pendingCompletions++
 		}
 	}
