@@ -183,8 +183,10 @@ func TestMyWorkWaitingApprovalCopy(t *testing.T) {
 
 // AC-19：报告时间范围解析。
 func TestReportRangeFrom(t *testing.T) {
-	now := time.Date(2026, 9, 10, 15, 30, 0, 0, time.UTC)
-	if from, err := ReportRangeFrom("today", now); err != nil || from == nil || !from.Equal(time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)) {
+	// 服务器按 UTC 跑，now 为 UTC 2026-09-10 20:30 ＝ 项目时区（UTC+8）9 月 11 日 04:30，
+	// 「今天」须按项目时区取 9 月 11 日零点，而不是服务器时区的 9 月 10 日零点。
+	now := time.Date(2026, 9, 10, 20, 30, 0, 0, time.UTC)
+	if from, err := ReportRangeFrom("today", now); err != nil || from == nil || !from.Equal(time.Date(2026, 9, 11, 0, 0, 0, 0, ProjectLocation)) {
 		t.Fatalf("today 解析异常: %v %v", from, err)
 	}
 	if from, err := ReportRangeFrom("week", now); err != nil || from == nil || !from.Equal(now.AddDate(0, 0, -7)) {
