@@ -6,7 +6,7 @@ import (
 )
 
 // 时间型卡点的真实发生时刻（ADR 0001）：审批超时在「进入环节 + N×24h」那一刻发生，
-// 任务超期在截止时间那一刻发生；两者都与派生时刻无关，重复派生得到同一个时间戳。
+// 任务超期在截止日次日零点（项目时区）那一刻发生；两者都与派生时刻无关，重复派生得到同一个时间戳。
 func TestBlockerOccurredAt(t *testing.T) {
 	start := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)
@@ -37,8 +37,9 @@ func TestBlockerOccurredAt(t *testing.T) {
 	if got := first[BlockerApprovalTimeout].OccurredAt; !got.Equal(wantTimeout) {
 		t.Fatalf("审批超时发生时刻 = %v, want %v", got, wantTimeout)
 	}
-	if got := first[BlockerTaskOverdue].OccurredAt; !got.Equal(end) {
-		t.Fatalf("任务超期发生时刻 = %v, want %v", got, end)
+	wantOverdue := time.Date(2026, 9, 11, 0, 0, 0, 0, ProjectLocation)
+	if got := first[BlockerTaskOverdue].OccurredAt; !got.Equal(wantOverdue) {
+		t.Fatalf("任务超期发生时刻 = %v, want %v", got, wantOverdue)
 	}
 	for _, kind := range []string{BlockerApprovalTimeout, BlockerTaskOverdue} {
 		if !first[kind].OccurredAt.Equal(later[kind].OccurredAt) {

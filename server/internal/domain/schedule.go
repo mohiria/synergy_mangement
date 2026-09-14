@@ -13,12 +13,17 @@ func dayStart(d time.Time) time.Time {
 	return time.Date(y, m, day, 0, 0, 0, 0, ProjectLocation)
 }
 
+// OverdueSince 截止日过期的起算时刻：截止日次日零点（项目时区）。
+func OverdueSince(due time.Time) time.Time {
+	return dayStart(due).AddDate(0, 0, 1)
+}
+
 // Overdue 判定截止日是否已过：截止日当天不算，次日零点（项目时区）起算超期。
 func Overdue(due *time.Time, now time.Time) bool {
 	if due == nil {
 		return false
 	}
-	return !now.Before(dayStart(*due).AddDate(0, 0, 1))
+	return !now.Before(OverdueSince(*due))
 }
 
 // DueToday 判定是否今天到期（项目时区同一自然日）。

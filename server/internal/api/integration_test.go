@@ -4728,7 +4728,9 @@ func TestTimeBlockerActivitySweep(t *testing.T) {
 		t.Fatalf("只读派生不应产生动态: %+v", got)
 	}
 
-	// ticker 扫描一次：补记「卡点出现」，时间戳取真实发生时刻（截止日），不是扫描时刻
+	// ticker 扫描一次：补记「卡点出现」，时间戳取真实发生时刻（截止日次日零点，
+	// 与 Overdue 的口径一致），不是扫描时刻
+	overdueSince := time.Now().In(domain.ProjectLocation).AddDate(0, 0, -4).Format("2006-01-02") + " 00:00:00"
 	sweeper := api.NewServer(pool, nil)
 	sweeper.SweepBlockerActivities(context.Background())
 	got := blockerActivities(alice)
@@ -4738,8 +4740,8 @@ func TestTimeBlockerActivitySweep(t *testing.T) {
 	if got[0].Summary != "卡点出现：任务超期 · 缺 按期完成任务" {
 		t.Fatalf("补记文案异常: %q", got[0].Summary)
 	}
-	if got[0].OccurredAt.In(domain.ProjectLocation).Format("2006-01-02") != overdueOn {
-		t.Fatalf("时间戳应取真实发生时刻 %s: %v", overdueOn, got[0].OccurredAt)
+	if got[0].OccurredAt.In(domain.ProjectLocation).Format("2006-01-02 15:04:05") != overdueSince {
+		t.Fatalf("时间戳应取真实发生时刻 %s: %v", overdueSince, got[0].OccurredAt)
 	}
 	if got[0].ActorName != nil {
 		t.Fatalf("系统派生事件不应有行动人: %+v", got[0])
