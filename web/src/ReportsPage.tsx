@@ -1,10 +1,11 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Alert, Button, Spin, message } from "antd";
+import dayjs from "dayjs";
 import { client } from "./api/client";
 import type { components } from "./api/schema";
 import ProjectShell from "./ProjectShell";
-import { STATUS_CLASS, fmtTime } from "./task-drawer/shared";
+import { STATUS_CLASS } from "./task-drawer/shared";
 
 type CurrentUser = components["schemas"]["CurrentUser"];
 type Project = components["schemas"]["Project"];
@@ -26,7 +27,11 @@ const RISK_LABEL: Record<RiskLevel, string> = {
 };
 
 // 月-日短格式：报告纸内的日期都以 MM-DD 呈现，年份由眉题的完整时间给出。
+// md 只用于纯日期（YYYY-MM-DD，无时区）；带时区的时间戳须经 dayjs 转成本地时间再格式化，
+// 直接截 UTC 串会把晚间的时刻显示成前一天／差 8 小时。
 const md = (s?: string) => (s ? s.slice(5, 10) : "");
+const mdTime = (s?: string) => (s ? dayjs(s).format("MM-DD") : "");
+const fmtTime = (s?: string) => (s ? dayjs(s).format("YYYY-MM-DD HH:mm") : "");
 
 const RiskPill = ({ level }: { level: RiskLevel }) => (
   <span className={`status-pill risk-${level}`}>{RISK_LABEL[level]}</span>
@@ -205,7 +210,7 @@ export default function ReportsPage({
               ))}
             </div>
             <span className="rp-muted">
-              {report.from ? `${md(report.from)} ~ ${md(report.generatedAt)}` : "项目整体"} · 生成于{" "}
+              {report.from ? `${mdTime(report.from)} ~ ${mdTime(report.generatedAt)}` : "项目整体"} · 生成于{" "}
               {fmtTime(report.generatedAt)}
             </span>
           </div>
@@ -216,7 +221,7 @@ export default function ReportsPage({
               <h2>{project.name} · 项目报告</h2>
               <p>
                 {RANGE_LABEL[report.range]}
-                {report.from && `（${md(report.from)} ~ ${md(report.generatedAt)}）`} · 生成时间{" "}
+                {report.from && `（${mdTime(report.from)} ~ ${mdTime(report.generatedAt)}）`} · 生成时间{" "}
                 {fmtTime(report.generatedAt)}
               </p>
             </div>
@@ -297,7 +302,7 @@ export default function ReportsPage({
                               <td className="c-date">
                                 <span className={`status-pill ${STATUS_CLASS[t.status]}`}>{t.statusLabel}</span>
                                 <div className="rp-muted">
-                                  {t.completedAt ? md(t.completedAt) : t.progress != null ? `进度 ${t.progress}%` : "—"}
+                                  {t.completedAt ? mdTime(t.completedAt) : t.progress != null ? `进度 ${t.progress}%` : "—"}
                                 </div>
                               </td>
                             </tr>
@@ -344,7 +349,7 @@ export default function ReportsPage({
                   {report.blockers.resolved.map((b, i) => (
                     <Fragment key={`${b.taskId}-${b.kind}-${b.resolvedAt}`}>
                       {i > 0 && "；"}
-                      <span className="rp-code">{b.code}</span> {b.taskName}（{b.kindLabel}，{md(b.resolvedAt)} 解除）
+                      <span className="rp-code">{b.code}</span> {b.taskName}（{b.kindLabel}，{mdTime(b.resolvedAt)} 解除）
                     </Fragment>
                   ))}
                 </div>
