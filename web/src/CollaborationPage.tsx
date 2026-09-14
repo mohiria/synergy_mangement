@@ -1190,14 +1190,18 @@ export default function CollaborationPage({
   const openEdgeFile = async (fileId: number, fileName: string | undefined, wantPreview: boolean) => {
     const ext = fileName?.split(".").pop()?.toLowerCase();
     const preview = wantPreview && !!ext && PREVIEWABLE.has(ext);
+    // 预览窗口须在用户手势同步阶段打开，等 await 之后再 window.open 会被部分浏览器当弹窗拦截；
+    // 先开空白页，拿到地址后再导航；被拦截（返回 null）时退回当前页跳转。
+    const win = preview ? window.open("", "_blank") : null;
     const res = await client.GET("/projects/{projectId}/files/{fileId}/download-url", {
       params: { path: { projectId, fileId }, query: preview ? { disposition: "inline" } : {} },
     });
     if (!res.data) {
+      win?.close();
       message.error(res.error?.message ?? "获取下载地址失败");
       return;
     }
-    if (preview) window.open(res.data.url, "_blank");
+    if (win) win.location.href = res.data.url;
     else window.location.assign(res.data.url);
   };
 
