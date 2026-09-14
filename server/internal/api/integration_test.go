@@ -4763,6 +4763,59 @@ func TestTimeBlockerActivitySweep(t *testing.T) {
 	if again := blockerActivities(alice); len(again) != 1 {
 		t.Fatalf("写触发 diff 不应与 ticker 重复记账: %+v", again)
 	}
+
+	// 两次扫描之间超期又被关闭的任务：ticker 没来得及记「出现」，写路径解除时要成对补记，
+	// 否则解除因「没有开放中的出现」被丢弃，报告的「已解除」看不到它
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "扫描间隙超期的任务", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	var task2 api.Task
+	for _, item := range decodeBody[[]api.Task](t, resp) {
+		if item.Name == "扫描间隙超期的任务" {
+			task2 = item
+		}
+	}
+	if task2.Id == 0 {
+		t.Fatal("批量创建返回里找不到第二个任务")
+	}
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, task2.Id),
+		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	if _, err := pool.Exec(context.Background(),
+		"UPDATE tasks SET start_date = $2, end_date = $2 WHERE id = $1", task2.Id, overdueOn); err != nil {
+		t.Fatalf("模拟超期失败: %v", err)
+	}
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/cancellation", tasksURL, task2.Id),
+		api.CloseTaskRequest{Reason: "需求取消"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, task2.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	var opened, resolved []api.TaskActivity
+	for _, a := range decodeBody[api.TaskDetail](t, resp).Activities {
+		switch a.Kind {
+		case api.BlockerOpened:
+			opened = append(opened, a)
+		case api.BlockerResolved:
+			resolved = append(resolved, a)
+		}
+	}
+	if len(opened) != 1 || len(resolved) != 1 {
+		t.Fatalf("关闭扫描间隙超期的任务应成对留痕（出现 1 + 解除 1）: 出现 %+v 解除 %+v", opened, resolved)
+	}
+	if opened[0].OccurredAt.In(domain.ProjectLocation).Format("2006-01-02 15:04:05") != overdueSince {
+		t.Fatalf("补记的出现应取真实发生时刻 %s: %v", overdueSince, opened[0].OccurredAt)
+	}
+	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/report?range=all", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	blockers := decodeBody[api.Report](t, resp).Blockers
+	if blockers.ResolvedInRange != 1 || len(blockers.Resolved) != 1 || blockers.Resolved[0].TaskId != task2.Id {
+		t.Fatalf("报告「已解除」应含扫描间隙超期又关闭的任务: %+v", blockers)
+	}
 }
 
 // 读边界（PRD §3.3 / AC-21）：非项目成员看不到项目，也读不到项目内任何内容。

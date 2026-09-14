@@ -18,6 +18,8 @@ func TestBlockerActivityDiff(t *testing.T) {
 	}
 	a := mk("upstream_unready:edge:1", BlockerUpstreamUnready, "接口清单", "warning")
 	b := mk("task_overdue:7", BlockerTaskOverdue, "按期完成任务", "high_risk")
+	overdueEarlier := b
+	overdueEarlier.OccurredAt = now.Add(-3 * time.Hour)
 
 	cases := []struct {
 		name   string
@@ -45,6 +47,17 @@ func TestBlockerActivityDiff(t *testing.T) {
 			after:  nil,
 			want: []TaskActivity{
 				{TaskID: 7, Kind: ActivityBlockerResolved, Summary: "卡点解除：上游未就绪 · 缺 接口清单", OccurredAt: now},
+			},
+		},
+		{
+			// 时间型卡点可能在两次小时扫描之间出现又被写操作解除，留痕里没有「出现」；
+			// 解除必须成对，先按真实发生时刻补记出现（落库按「已开放」去重），再记解除。
+			name:   "消失的时间型卡点先补记出现再记解除",
+			before: []Blocker{overdueEarlier},
+			after:  nil,
+			want: []TaskActivity{
+				{TaskID: 7, Kind: ActivityBlockerOpened, Summary: "卡点出现：任务超期 · 缺 按期完成任务", OccurredAt: now.Add(-3 * time.Hour)},
+				{TaskID: 7, Kind: ActivityBlockerResolved, Summary: "卡点解除：任务超期 · 缺 按期完成任务", OccurredAt: now},
 			},
 		},
 		{

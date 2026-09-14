@@ -99,9 +99,10 @@ func TestBlockerActivityDiffUsesOccurredAt(t *testing.T) {
 		same[0].Summary != opened[0].Summary {
 		t.Fatalf("两条路径应产出同一条事实: %+v vs %+v", same, opened)
 	}
-	// 解除没有可计算的发生时刻，取本次比对时刻。
+	// 解除没有可计算的发生时刻，取本次比对时刻；时间型卡点的解除前面成对带一条真实时刻的出现。
 	resolved := BlockerActivityDiff([]Blocker{b}, nil, now)
-	if len(resolved) != 1 || !resolved[0].OccurredAt.Equal(now) {
-		t.Fatalf("解除动态应取比对时刻: %+v", resolved)
+	if len(resolved) != 2 || resolved[0].Kind != ActivityBlockerOpened || !resolved[0].OccurredAt.Equal(occurred) ||
+		resolved[1].Kind != ActivityBlockerResolved || !resolved[1].OccurredAt.Equal(now) {
+		t.Fatalf("解除动态应成对：出现取真实时刻、解除取比对时刻: %+v", resolved)
 	}
 }
