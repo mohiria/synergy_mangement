@@ -178,7 +178,9 @@ func DeriveBlockers(f BlockerFacts) []Blocker {
 			ActionOwnerNames: []string{t.OwnerName},
 			Level:            "high_risk",
 			Since:            *t.EndDate,
-			OccurredAt:       *t.EndDate,
+			// 超期在截止日次日零点才成立（Overdue 的同一口径）；取截止日会让刚超期的卡点
+			// 在报告里被算成上期遗留、停留天数多一天（ADR 0001）。
+			OccurredAt: OverdueSince(*t.EndDate),
 		})
 	}
 

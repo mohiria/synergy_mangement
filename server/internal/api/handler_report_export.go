@@ -12,6 +12,9 @@ import (
 	"os"
 	"time"
 
+	openapi_types "github.com/oapi-codegen/runtime/types"
+
+	"synergy/server/internal/domain"
 	"synergy/server/internal/store"
 )
 
@@ -112,60 +115,161 @@ func (s *Server) ExportReport(w http.ResponseWriter, r *http.Request, projectId 
 	_, _ = io.Copy(w, resp.Body)
 }
 
+// 模板结构与前端报告页一致（PRD §7.8）：摘要条 + 正文三段 本期成果／风险与卡点／下一步，O／KR 进展作附录；
+// 面向领导阅读，只保留结论级字段（不列文件生效日期、卡点原因与缺失项、KR 行与未就绪注记）。
+// 本期成果以交付物为首列，任务只作简写出处；卡点表任务在首列、卡点加粗、阶段标签随后；
+// 截止日与「超期 N 天」分两行，长图 480px 宽也不溢出列宽。
 const reportTemplateText = `<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <style>
-body { font-family: "PingFang SC", "Microsoft YaHei", sans-serif; color: #1f2937; margin: 24px; font-size: 14px; }
+body { font-family: "PingFang SC", "Microsoft YaHei", sans-serif; color: #1f2937; margin: 24px; font-size: 14px; line-height: 1.5; }
 h1 { font-size: 20px; margin: 0 0 4px; }
-.meta { color: #6b778c; font-size: 12px; margin-bottom: 18px; }
-h2 { font-size: 15px; margin: 18px 0 8px; border-left: 3px solid #5267df; padding-left: 8px; }
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th, td { border: 1px solid #dfe5ec; padding: 6px 8px; text-align: left; }
-th { background: #f7f9fb; color: #657184; font-size: 12px; }
-.item { border: 1px solid #dfe5ec; border-radius: 6px; padding: 8px 10px; margin-bottom: 6px; }
-.item small { color: #6b778c; display: block; font-size: 12px; }
-.pill { display: inline-block; border-radius: 4px; padding: 1px 6px; font-size: 12px; }
+.meta { color: #6b778c; font-size: 12px; margin-bottom: 14px; }
+h2 { font-size: 15px; margin: 22px 0 8px; border-left: 3px solid #5267df; padding-left: 8px; display: flex; align-items: center; gap: 10px; }
+.sub { margin-left: auto; font-size: 12px; font-weight: 500; color: #6b7588; }
+.summary { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid #e2e6ed; border-radius: 4px; overflow: hidden; margin: 12px 0 4px; }
+.summary > div { padding: 10px 12px; border-right: 1px solid #e2e6ed; background: #fafbfc; }
+.summary > div:last-child { border-right: 0; }
+.summary small { display: block; font-size: 12px; color: #6b7588; font-weight: 600; }
+.summary b { display: block; margin-top: 2px; font-size: 20px; font-weight: 650; color: #1f2a44; }
+.summary b.warn { color: #c83f50; }
+.summary span { display: block; font-size: 12px; color: #6b7588; }
+table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 13px; }
+th, td { border: 1px solid #dfe5ec; padding: 6px 8px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+th { background: #f7f9fb; color: #657184; font-size: 12px; white-space: nowrap; }
+tr.group td { background: #f3f5f8; font-weight: 650; color: #3e4b61; }
+td.date { white-space: nowrap; }
+.code { font-family: Menlo, Consolas, monospace; font-size: 12px; color: #42526b; background: #eef1f5; border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
+.tag { display: inline-block; border-radius: 4px; padding: 1px 7px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.tag.new { background: #fdecef; color: #c83f50; }
+.tag.carried { background: #fff3da; color: #ad6e13; }
+.tag.gray { background: #eef1f5; color: #677287; font-weight: 500; }
+.pill { display: inline-block; border-radius: 4px; padding: 1px 6px; font-size: 12px; white-space: nowrap; }
 .warning { background: #fff6df; color: #a66a12; }
 .high_risk { background: #fff0f1; color: #c44752; }
 .normal { background: #ebf7f0; color: #377d5b; }
-.empty { color: #6b778c; font-size: 12px; }
+.empty { color: #6b778c; font-size: 12px; margin-left: 12px; }
+.muted { color: #6b7588; font-size: 12px; }
+td.files { font-weight: 600; color: #1f2a44; }
+td.files > div + div { margin-top: 2px; }
+td.brief { font-size: 12px; color: #6b7588; }
+td.kind b { display: block; font-weight: 650; color: #1f2a44; }
+td.kind .tag, td.kind .pill { display: inline-block; margin-top: 3px; }
+td.date b { font-weight: 650; }
+.resolved-line { margin-top: 8px; padding: 6px 10px; border-radius: 4px; background: #f4faf7; font-size: 13px; line-height: 1.7; }
+.resolved-line > b { color: #247a5a; }
+.section-sub { margin: 12px 0 4px; font-weight: 650; font-size: 12px; color: #6b7588; }
+tr.overdue td:first-child, tr.high_risk td:first-child { box-shadow: inset 3px 0 #c83f50; }
+.red { color: #c83f50; font-weight: 600; }
+.today { color: #ad6e13; font-weight: 600; }
+.bar { display: inline-block; width: 100px; height: 6px; background: #eef1f5; border-radius: 3px; vertical-align: middle; }
+.bar i { display: block; height: 100%; background: #5267df; border-radius: 3px; }
 </style></head><body>
 <h1>{{.ProjectName}} · 项目报告</h1>
-<div class="meta">范围：{{.RangeLabel}} · 生成于 {{.GeneratedAt}}</div>
-<h2>O／KR 进展</h2>
-<table><tr><th>KR</th><th>风险</th><th>进度覆盖度</th><th>范围内终审通过</th></tr>
-{{range .Report.KrProgress}}<tr><td>{{.Description}}</td><td><span class="pill {{.RiskLevel}}">{{riskLabel .RiskLevel}}</span></td>
-<td>{{.FilledTasks}}／{{.TotalTasks}} 已填进度{{if .AverageProgress}}，平均 {{.AverageProgress}}%{{end}}</td>
-<td>{{.CompletedInRange}} 项</td></tr>{{end}}</table>
-<h2>完成成果</h2>
-{{if not .Report.CompletedDeliverables}}<div class="empty">该范围内没有新生效的当前成果</div>{{end}}
-{{range .Report.CompletedDeliverables}}<div class="item"><b>{{.TaskName}} / {{.DeliverableName}}</b><small>{{.FileName}}</small></div>{{end}}
-<h2>风险与卡点</h2>
-{{if not .Report.Blockers}}<div class="empty">没有需要关注的卡点</div>{{end}}
-{{range .Report.Blockers}}<div class="item"><b>{{.TaskName}}：缺 {{.Missing}}</b> <span class="pill {{.Level}}">{{riskLabel .Level}}</span><small>{{.Reason}}{{if .ActionOwnerName}} · 待行动人 {{.ActionOwnerName}}{{end}}</small></div>{{end}}
-<h2>待决策</h2>
-<div class="item">完成审核 {{.Report.PendingApprovals.Completions}} 件仍停留在审批队列。</div>
-<h2>下一步（临近截止／已超期）</h2>
-{{if not .Report.NextSteps}}<div class="empty">未来 7 天内没有临近截止的任务</div>{{end}}
-{{range .Report.NextSteps}}<div class="item"><b>{{.TaskName}}</b>{{if .Overdue}}{{if deref .Overdue}} <span class="pill high_risk">已超期</span>{{end}}{{end}}<small>{{.OwnerName}}{{if .EndDate}} · 截止 {{.EndDate}}{{end}}</small></div>{{end}}
+<div class="meta">{{.RangeLabel}}{{if .From}}（{{.From}} ~ {{.GeneratedAt}}）{{end}} · 生成时间 {{.GeneratedAt}}</div>
+
+<div class="summary">
+<div><small>本期成果</small><b>{{.Report.Deliveries.CompletedTasks}} 项</b><span>任务完成 · {{.Report.Deliveries.EffectiveFiles}} 份交付物生效</span></div>
+<div><small>开放卡点</small><b{{if .Report.Blockers.Open}} class="warn"{{end}}>{{len .Report.Blockers.Open}} 项</b><span>{{if .From}}本期新增 {{.Report.Blockers.NewInRange}} · 解除 {{.Report.Blockers.ResolvedInRange}}{{else}}项目整体累计{{end}}</span></div>
+<div><small>到期／超期</small><b{{if .OverdueCount}} class="warn"{{end}}>{{len .Report.NextSteps.Due}} 项</b><span>其中超期 {{.OverdueCount}} 项</span></div>
+<div><small>即将启动</small><b>{{len .Report.NextSteps.Upcoming}} 项</b><span>未来 {{.Report.NextSteps.HorizonDays}} 天内</span></div>
+</div>
+
+<h2>一、本期成果</h2>
+{{if not .Report.Deliveries.Objectives}}<div class="empty">该范围内没有终审通过的任务，也没有新生效的交付内容</div>{{else}}
+<table><colgroup><col><col style="width:150px"><col style="width:64px"><col style="width:90px"></colgroup>
+<tr><th>交付物</th><th>任务</th><th>负责人</th><th>状态／日期</th></tr>
+{{range .Report.Deliveries.Objectives}}<tr class="group"><td colspan="4"><span class="code">{{.Code}}</span> {{.Title}}</td></tr>
+{{range .KeyResults}}{{range .Tasks}}<tr><td class="files">{{if .Files}}{{range .Files}}<div>{{.FileName}}</div>{{end}}{{else}}<span class="muted">无交付物文件</span>{{end}}</td>
+<td class="brief"><span class="code">{{.Code}}</span> {{.Name}}</td><td>{{.OwnerName}}</td>
+<td class="date">{{.StatusLabel}}<div class="muted">{{if .CompletedAt}}{{date .CompletedAt}}{{else if .Progress}}进度 {{.Progress}}%{{else}}—{{end}}</div></td></tr>{{end}}{{end}}{{end}}
+</table>{{end}}
+
+<h2>二、风险与卡点{{if .Report.Blockers.PendingCompletions}}<span class="sub">另有 {{.Report.Blockers.PendingCompletions}} 件完成审核仍在审批队列</span>{{end}}</h2>
+{{if not .Report.Blockers.Open}}<div class="empty">当前没有开放的卡点</div>{{else}}
+<table><colgroup><col><col style="width:140px"><col style="width:84px"><col style="width:56px"></colgroup>
+<tr><th>任务</th><th>卡点</th><th>待行动</th><th>已停留</th></tr>
+{{range .Report.Blockers.Open}}<tr{{if eq .Level "high_risk"}} class="high_risk"{{end}}><td><span class="code">{{.Code}}</span> {{.TaskName}}</td>
+<td class="kind"><b>{{.KindLabel}}</b>{{if .PhaseLabel}}<span class="tag {{.Phase}}">{{.PhaseLabel}}</span>{{else}}<span class="pill {{.Level}}">{{riskLabel .Level}}</span>{{end}}</td>
+<td>{{if .ActionOwnerName}}{{.ActionOwnerName}}{{else}}—{{end}}</td>
+<td class="date"><b>{{.StayDays}}</b> 天</td></tr>{{end}}
+</table>{{end}}
+{{if .Report.Blockers.Resolved}}<div class="resolved-line"><b>本期解除 {{len .Report.Blockers.Resolved}} 项</b> {{range $i, $b := .Report.Blockers.Resolved}}{{if $i}}；{{end}}<span class="code">{{$b.Code}}</span> {{$b.TaskName}}（{{$b.KindLabel}}，{{date $b.ResolvedAt}} 解除）{{end}}</div>{{end}}
+
+<h2>三、下一步<span class="sub">未来 {{.Report.NextSteps.HorizonDays}} 天</span></h2>
+<div class="section-sub">到期／超期</div>
+{{if not .Report.NextSteps.Due}}<div class="empty">窗口内没有到期或超期的任务</div>{{else}}
+<table><colgroup><col><col style="width:64px"><col style="width:92px"><col style="width:90px"></colgroup>
+<tr><th>任务</th><th>负责人</th><th>状态</th><th>截止日期</th></tr>
+{{range .Report.NextSteps.Due}}<tr{{if .OverdueDays}} class="overdue"{{end}}><td><span class="code">{{.Code}}</span> {{.TaskName}}</td>
+<td>{{.OwnerName}}</td><td>{{.StatusLabel}}</td>
+<td class="date"><div>{{date .EndDate}}</div>{{if .OverdueDays}}<div class="red">超期 {{.OverdueDays}} 天</div>{{else if eq (intv .DueInDays) 0}}<div class="today">今天</div>{{end}}</td></tr>{{end}}
+</table>{{end}}
+{{if .Report.NextSteps.Upcoming}}<div class="section-sub">即将启动</div>
+<table><colgroup><col><col style="width:64px"><col style="width:92px"><col style="width:90px"></colgroup>
+<tr><th>任务</th><th>负责人</th><th>状态</th><th>计划启动</th></tr>
+{{range .Report.NextSteps.Upcoming}}<tr><td><span class="code">{{.Code}}</span> {{.TaskName}}</td>
+<td>{{.OwnerName}}</td><td>{{.StatusLabel}}</td><td class="date">{{date .StartDate}}</td></tr>{{end}}
+</table>{{end}}
+
+<h2>附、O／KR 进展</h2>
+{{if not .Report.OkrProgress}}<div class="empty">尚无 O／KR</div>{{else}}
+<table><colgroup><col><col style="width:64px"><col style="width:120px"><col style="width:52px"></colgroup>
+{{range .Report.OkrProgress}}<tr class="group"><td colspan="4"><span class="code">{{.Code}}</span> {{.Title}}</td></tr>
+{{range .KeyResults}}<tr><td><span class="code">{{.Code}}</span> {{.Description}}</td><td><span class="pill {{.RiskLevel}}">{{riskLabel .RiskLevel}}</span></td>
+<td><span class="bar"><i style="width:{{intv .AverageProgress}}%"></i></span></td>
+<td class="date">{{if .AverageProgress}}{{.AverageProgress}}%{{else}}<span class="muted">未填</span>{{end}}</td></tr>{{end}}{{end}}
+</table>{{end}}
 </body></html>`
 
 func renderReportHTML(proj store.GetProjectRow, report Report) (string, error) {
 	rangeLabels := map[string]string{"today": "今天", "week": "近 7 天", "month": "近 30 天", "all": "项目整体"}
 	riskLabels := map[string]string{"normal": "正常", "warning": "预警", "high_risk": "高风险"}
+	fmtTime := func(t time.Time) string { return t.In(domain.ProjectLocation).Format("2006-01-02 15:04") }
 	tmpl, err := template.New("report").Funcs(template.FuncMap{
 		"riskLabel": func(r RiskLevel) string { return riskLabels[string(r)] },
-		"deref":     func(b *bool) bool { return b != nil && *b },
+		// date 统一输出 YYYY-MM-DD：日期型字段直接取日，时间戳按项目时区取日。
+		"date": func(t any) string {
+			switch v := t.(type) {
+			case openapi_types.Date:
+				return v.Time.Format("2006-01-02")
+			case time.Time:
+				return v.In(domain.ProjectLocation).Format("2006-01-02")
+			case *time.Time:
+				if v != nil {
+					return v.In(domain.ProjectLocation).Format("2006-01-02")
+				}
+			}
+			return ""
+		},
+		"intv": func(p *int) int {
+			if p == nil {
+				return 0
+			}
+			return *p
+		},
 	}).Parse(reportTemplateText)
 	if err != nil {
 		return "", err
 	}
+	from := ""
+	if report.From != nil {
+		from = fmtTime(*report.From)
+	}
+	overdue := 0
+	for _, n := range report.NextSteps.Due {
+		if n.OverdueDays != nil {
+			overdue++
+		}
+	}
 	var buf bytes.Buffer
 	err = tmpl.Execute(&buf, map[string]any{
-		"ProjectName": proj.Name,
-		"RangeLabel":  rangeLabels[string(report.Range)],
-		"GeneratedAt": report.GeneratedAt.Format("2006-01-02 15:04"),
-		"Report":      report,
+		"ProjectName":  proj.Name,
+		"RangeLabel":   rangeLabels[string(report.Range)],
+		"From":         from,
+		"GeneratedAt":  fmtTime(report.GeneratedAt),
+		"OverdueCount": overdue,
+		"Report":       report,
 	})
 	if err != nil {
 		return "", err

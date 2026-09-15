@@ -319,6 +319,24 @@ func TestDeriveBlockersInterlockAndImpact(t *testing.T) {
 	}
 }
 
+// 任务超期在截止日次日零点（项目时区）才成立，出现时刻取那一刻而不是截止日本身：
+// 报告按出现时刻判「本期新出现／上期遗留」与停留天数，取截止日会把刚超期的卡点算成上期遗留、多算一天。
+func TestOverdueBlockerOccursAtDayAfterDeadline(t *testing.T) {
+	f := baseBlockerFacts()
+	f.Tasks[0].EndDate = blockerDay(-1) // 2026-08-25
+	b := findBlocker(DeriveBlockers(f), "task_overdue:1")
+	if b == nil {
+		t.Fatal("截止日已过应派生任务超期卡点")
+	}
+	want := time.Date(2026, 8, 26, 0, 0, 0, 0, ProjectLocation)
+	if !b.OccurredAt.Equal(want) {
+		t.Fatalf("出现时刻应为截止日次日零点 %v，实际 %v", want, b.OccurredAt)
+	}
+	if !b.Since.Equal(*blockerDay(-1)) {
+		t.Fatalf("Since 仍取截止日（我的工作按它算超期天数），实际 %v", b.Since)
+	}
+}
+
 // 一键提醒：待行动人本人不提醒自己；任务负责人、可编辑项目者可提醒；访客不可
 // （裁决 12，#183：KR 无负责人，原 KR 负责人可提醒分支删除）。
 func TestCanRemindBlocker(t *testing.T) {

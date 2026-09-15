@@ -1,6 +1,6 @@
 package api_test
 
-// 集成测试：httptest + 真实 Postgres（docker compose up -d postgres）。
+// 集成测试：httptest + 真实 Postgres（本地开发经 SSH 隧道用腾讯云开发库，载入仓库根 .env.tunnel 即可，见 CLAUDE.md「本地中间件」）。
 // 每次运行建独立数据库并用 goose 跑迁移，结束后删除。
 // 无 Postgres 环境用 go test -short ./... 跳过。
 
@@ -68,7 +68,7 @@ var (
 	testServer    *api.Server
 )
 
-// putObject 直传对象；MinIO 与 Postgres 一样是集成测试的前置依赖（docker compose up -d minio）。
+// putObject 直传对象；MinIO 与 Postgres 一样是集成测试的前置依赖（同样经隧道，凭据取 .env.tunnel 的 MINIO_ROOT_USER／MINIO_ROOT_PASSWORD）。
 func putObject(t *testing.T, url, content string) {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodPut, url, strings.NewReader(content))
@@ -77,7 +77,7 @@ func putObject(t *testing.T, url, content string) {
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		t.Fatalf("MinIO 不可达（docker compose up -d minio）: %v", err)
+		t.Fatalf("MinIO 不可达（隧道在？已载入 .env.tunnel？）: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
@@ -160,7 +160,7 @@ func setupDB(t *testing.T) (*store.Queries, *pgxpool.Pool) {
 		t.Fatalf("open admin db: %v", err)
 	}
 	if err := adminDB.Ping(); err != nil {
-		t.Fatalf("Postgres 不可达（docker compose up -d postgres）: %v", err)
+		t.Fatalf("Postgres 不可达（隧道在？已载入 .env.tunnel？）: %v", err)
 	}
 
 	dbName := fmt.Sprintf("synergy_test_%d", time.Now().UnixNano())
@@ -2944,9 +2944,9 @@ func TestDerivedBlockersAndRemind(t *testing.T) {
 
 	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/report?range=all", base, created.Id), nil)
 	wantStatus(t, resp, http.StatusOK)
-	reportKrs := decodeBody[api.Report](t, resp).KrProgress
-	if len(reportKrs) != 1 || reportKrs[0].RiskLevel != derivedKr.RiskLevel {
-		t.Fatalf("报告的 KR 风险等级应与总览同源: %+v", reportKrs)
+	reportOkr := decodeBody[api.Report](t, resp).OkrProgress
+	if len(reportOkr) != 1 || len(reportOkr[0].KeyResults) != 1 || reportOkr[0].KeyResults[0].RiskLevel != derivedKr.RiskLevel {
+		t.Fatalf("报告的 KR 风险等级应与总览同源: %+v", reportOkr)
 	}
 
 	// 任务列表按派生结果给出卡点计数（下游两条：上游未就绪 + 超期）。
@@ -3574,7 +3574,7 @@ func TestProjectReport(t *testing.T) {
 	kr1 := okr[0].KeyResults[0].Id
 	tasksURL := fmt.Sprintf("%s/projects/%d/tasks", base, created.Id)
 	start := openapiDate(t, "2026-08-01")
-	soon := openapiDate(t, time.Now().AddDate(0, 0, 2).Format("2006-01-02"))
+	soon := openapiDate(t, time.Now().In(domain.ProjectLocation).AddDate(0, 0, 2).Format("2006-01-02"))
 
 	// 任务 A：走完整链路到完成（产生完成成果与 completedInRange）；任务 B：临近截止（下一步）；
 	// 任务 C：B 的上游，始终不完成，用于让 B 的必要输入未就绪。
@@ -3623,48 +3623,165 @@ func TestProjectReport(t *testing.T) {
 	resp.Body.Close()
 
 	reportURL := fmt.Sprintf("%s/projects/%d/report", base, created.Id)
-	// 今天范围：完成成果与 completedInRange 均可见（刚刚发生）
+	// 今天范围：本期成果与 completedInRange 均可见（刚刚发生）
 	resp = doJSON(t, alice, http.MethodGet, reportURL+"?range=today", nil)
 	wantStatus(t, resp, http.StatusOK)
 	rep := decodeBody[api.Report](t, resp)
-	if rep.Range != api.ReportRangeToday || len(rep.KrProgress) != 1 {
+	if rep.Range != api.ReportRangeToday || rep.From == nil || len(rep.OkrProgress) != 1 || len(rep.OkrProgress[0].KeyResults) != 1 {
 		t.Fatalf("报告基本结构异常: %+v", rep.Range)
 	}
-	if rep.KrProgress[0].CompletedInRange != 1 {
-		t.Fatalf("范围内完成任务数异常: %+v", rep.KrProgress[0])
+	if kr := rep.OkrProgress[0].KeyResults[0]; kr.CompletedInRange != 1 || kr.Code != "KR1.1" {
+		t.Fatalf("范围内完成任务数异常: %+v", kr)
 	}
-	if len(rep.CompletedDeliverables) != 1 || rep.CompletedDeliverables[0].FileName != "验收方案V1.docx" {
-		t.Fatalf("完成成果异常: %+v", rep.CompletedDeliverables)
+	// 一、本期成果：按 O → KR → 任务归组，只含有成果的分支；A 终审通过且其交付内容在范围内生效。
+	if rep.Deliveries.CompletedTasks != 1 || rep.Deliveries.EffectiveFiles != 1 ||
+		len(rep.Deliveries.Objectives) != 1 || len(rep.Deliveries.Objectives[0].KeyResults) != 1 ||
+		len(rep.Deliveries.Objectives[0].KeyResults[0].Tasks) != 1 {
+		t.Fatalf("本期成果归组异常: %+v", rep.Deliveries)
 	}
-	// B 的必要输入未就绪且已到开始时间 ⇒ 派生一条上游未就绪卡点（AC-11）。
-	if len(rep.Blockers) != 1 || rep.Blockers[0].Kind != api.UpstreamUnready ||
-		rep.Blockers[0].ActionOwnerName == nil || *rep.Blockers[0].ActionOwnerName != "李四" {
-		t.Fatalf("卡点异常: %+v", rep.Blockers)
+	delivered := rep.Deliveries.Objectives[0].KeyResults[0].Tasks[0]
+	if delivered.Name != "输出验收方案" || delivered.Code != "T1.1.1" || delivered.CompletedAt == nil || delivered.Progress != nil ||
+		len(delivered.Files) != 1 || delivered.Files[0].FileName != "验收方案V1.docx" || delivered.Files[0].DeliverableName != "验收方案" {
+		t.Fatalf("本期成果任务异常: %+v", delivered)
 	}
-	if len(rep.NextSteps) == 0 {
-		t.Fatalf("下一步为空: %+v", rep.NextSteps)
+	// 二、风险与卡点：B 的必要输入未就绪且已到开始时间 ⇒ 派生一条上游未就绪卡点（AC-11），
+	// 出现时刻取 B 的计划开始日（8 月 1 日），早于今天范围起点 ⇒ 上期遗留，停留天数按自然日差。
+	if len(rep.Blockers.Open) != 1 || rep.Blockers.Open[0].Kind != api.UpstreamUnready || rep.Blockers.Open[0].KindLabel != "上游未就绪" ||
+		rep.Blockers.Open[0].ActionOwnerName == nil || *rep.Blockers.Open[0].ActionOwnerName != "李四" {
+		t.Fatalf("卡点异常: %+v", rep.Blockers.Open)
+	}
+	if b := rep.Blockers.Open[0]; !strings.HasPrefix(b.Key, "upstream_unready:edge:") || b.Code != "T1.1.2" || b.Phase == nil || *b.Phase != api.Carried || b.PhaseLabel == nil || *b.PhaseLabel != "上期遗留" ||
+		b.Since == nil || b.StayDays != domain.DaysBetween(*b.Since, time.Now()) || b.StayDays < 1 {
+		t.Fatalf("卡点阶段异常: %+v", b)
+	}
+	if rep.Blockers.NewInRange != 0 || rep.Blockers.ResolvedInRange != 0 || len(rep.Blockers.Resolved) != 0 || rep.Blockers.PendingCompletions != 0 {
+		t.Fatalf("卡点计数异常: %+v", rep.Blockers)
+	}
+	// 三、下一步：今天范围窗口 1 天，B 两天后截止不入窗口；近 7 天窗口应含 B。
+	if rep.NextSteps.HorizonDays != 1 || len(rep.NextSteps.Due) != 0 {
+		t.Fatalf("今天范围的下一步窗口异常: %+v", rep.NextSteps)
+	}
+	resp = doJSON(t, alice, http.MethodGet, reportURL+"?range=week", nil)
+	wantStatus(t, resp, http.StatusOK)
+	week := decodeBody[api.Report](t, resp)
+	if week.NextSteps.HorizonDays != 7 || len(week.NextSteps.Due) != 1 {
+		t.Fatalf("近 7 天的下一步异常: %+v", week.NextSteps)
 	}
 	// AC-04 + §5.1：下一步条目输出面向用户的状态文案，且与任务列表同口径——
 	// B 的必要输入未就绪，存储态仍是未开始，报告须显示「等待输入」。
-	var nextB *api.ReportNextStep
-	for i := range rep.NextSteps {
-		if rep.NextSteps[i].TaskName == "临近截止任务" {
-			nextB = &rep.NextSteps[i]
-		}
-	}
-	if nextB == nil || nextB.Status != api.TaskStatusWaitingInput || nextB.StatusLabel != "等待输入" {
-		t.Fatalf("下一步显示状态异常: %+v", rep.NextSteps)
+	nextB := week.NextSteps.Due[0]
+	if nextB.TaskName != "临近截止任务" || nextB.Status != api.TaskStatusWaitingInput || nextB.StatusLabel != "等待输入" ||
+		nextB.OverdueDays != nil || nextB.DueInDays == nil || *nextB.DueInDays != 2 ||
+		nextB.KeyResultCode == nil || *nextB.KeyResultCode != "KR1.1" {
+		t.Fatalf("下一步显示状态异常: %+v", nextB)
 	}
 	// 「等待输入」还要说清缺哪一项（与我的工作同一口径）。
 	if nextB.UnreadyNote == nil || *nextB.UnreadyNote != "上游未就绪：缺 上游未完成任务" {
 		t.Fatalf("下一步未就绪注记异常: %q", derefStr(nextB.UnreadyNote))
 	}
 
+	// AC-66 成果更新不改变「完成」口径：再次终审通过不算新完成、完成时刻仍取首次通过；
+	// 退回也不撤销原完成。两次更新都在今天范围内，本期成果始终只有 A 这一件。
+	firstCompletedAt := *delivered.CompletedAt
+	resultUpdateURL := fmt.Sprintf("%s/%d/result-update", tasksURL, taskA.Id)
+	resp = doJSON(t, bob, http.MethodPost, resultUpdateURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	uploadCandidate(t, bob, tasksURL, taskA.Id, dA, api.UploadCandidateRequest{FileName: "验收方案V2.docx"}, "v2-bytes")
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskA.Id),
+		api.SubmitCompletionRequest{Note: "成果更新"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskA.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail = decodeBody[api.TaskDetail](t, resp)
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, taskA.Id, detail.CompletionReviews[0].Id),
+		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionApproved})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodGet, reportURL+"?range=today", nil)
+	wantStatus(t, resp, http.StatusOK)
+	afterUpdate := decodeBody[api.Report](t, resp)
+	if afterUpdate.Deliveries.CompletedTasks != 1 || afterUpdate.OkrProgress[0].KeyResults[0].CompletedInRange != 1 ||
+		len(afterUpdate.Deliveries.Objectives) != 1 || len(afterUpdate.Deliveries.Objectives[0].KeyResults[0].Tasks) != 1 {
+		t.Fatalf("成果更新通过后不应多算一次完成: %+v", afterUpdate.Deliveries)
+	}
+	if got := afterUpdate.Deliveries.Objectives[0].KeyResults[0].Tasks[0]; got.CompletedAt == nil || !got.CompletedAt.Equal(firstCompletedAt) {
+		t.Fatalf("完成时刻应取首次终审通过: %v != %v", got.CompletedAt, firstCompletedAt)
+	}
+	resp = doJSON(t, bob, http.MethodPost, resultUpdateURL, nil)
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	uploadCandidate(t, bob, tasksURL, taskA.Id, dA, api.UploadCandidateRequest{FileName: "验收方案V3.docx"}, "v3-bytes")
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews", tasksURL, taskA.Id),
+		api.SubmitCompletionRequest{Note: "再更新一版"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, bob, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, taskA.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	detail = decodeBody[api.TaskDetail](t, resp)
+	opinion := "还需补充"
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/completion-reviews/%d/decision", tasksURL, taskA.Id, detail.CompletionReviews[0].Id),
+		api.CompletionDecisionRequest{Decision: api.CompletionDecisionRequestDecisionRejected, Opinion: &opinion})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodGet, reportURL+"?range=today", nil)
+	wantStatus(t, resp, http.StatusOK)
+	afterReject := decodeBody[api.Report](t, resp)
+	if afterReject.Deliveries.CompletedTasks != 1 || afterReject.OkrProgress[0].KeyResults[0].CompletedInRange != 1 || afterReject.Blockers.PendingCompletions != 0 {
+		t.Fatalf("成果更新退回不应撤销原完成: %+v / %+v", afterReject.Deliveries, afterReject.Blockers)
+	}
+
+	// 完成时刻不受范围限制：A 的首次终审通过若发生在范围之前，而成果更新的文件在范围内生效，
+	// A 仍因文件进入本期成果，但不计本期完成，且行上仍显示原完成时刻，不能退回成进度。
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE completion_reviews SET decided_at = decided_at - interval '2 days'
+		 WHERE id = (SELECT id FROM completion_reviews WHERE task_id = $1 AND state = 'approved' ORDER BY id LIMIT 1)`, taskA.Id); err != nil {
+		t.Fatalf("模拟首次完成早于范围失败: %v", err)
+	}
+	resp = doJSON(t, alice, http.MethodGet, reportURL+"?range=today", nil)
+	wantStatus(t, resp, http.StatusOK)
+	earlier := decodeBody[api.Report](t, resp)
+	if earlier.Deliveries.CompletedTasks != 0 || earlier.OkrProgress[0].KeyResults[0].CompletedInRange != 0 ||
+		len(earlier.Deliveries.Objectives) != 1 || len(earlier.Deliveries.Objectives[0].KeyResults[0].Tasks) != 1 {
+		t.Fatalf("首次完成早于范围时不应计入本期完成: %+v", earlier.Deliveries)
+	}
+	if got := earlier.Deliveries.Objectives[0].KeyResults[0].Tasks[0]; got.CompletedAt == nil || !got.CompletedAt.Equal(firstCompletedAt.AddDate(0, 0, -2)) || got.Progress != nil {
+		t.Fatalf("已完成任务因文件进入本期成果时仍应显示完成时刻: %+v", got)
+	}
+
+	// 即将启动只列真正能启动的任务：D 两天后开始但必要输入（来自 C）未就绪，派生态是「等待输入」，
+	// 不算即将启动；E 同日开始、无输入依赖，应列出。
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "等输入的待启动任务", OwnerId: bobUser.ID, StartDate: soon, EndDate: far},
+			{KeyResultId: kr1, Name: "即将启动任务", OwnerId: bobUser.ID, StartDate: soon, EndDate: far},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	var taskD api.Task
+	for _, task := range decodeBody[[]api.Task](t, resp) {
+		if task.Name == "等输入的待启动任务" {
+			taskD = task
+		}
+	}
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/inputs", tasksURL, taskD.Id),
+		api.CreateTaskInputRequest{Necessity: api.Required, SourceTaskIds: []int64{taskC.Id}})
+	wantStructureAccepted(t, resp)
+	resp = doJSON(t, alice, http.MethodGet, reportURL+"?range=week", nil)
+	wantStatus(t, resp, http.StatusOK)
+	week = decodeBody[api.Report](t, resp)
+	if len(week.NextSteps.Upcoming) != 1 || week.NextSteps.Upcoming[0].TaskName != "即将启动任务" ||
+		week.NextSteps.Upcoming[0].Status != api.TaskStatusNotStarted || week.NextSteps.Upcoming[0].StatusLabel != "未开始" {
+		t.Fatalf("必要输入未就绪的任务不应列为即将启动: %+v", week.NextSteps.Upcoming)
+	}
+
 	// 项目整体（默认 all）与非法范围
 	resp = doJSON(t, alice, http.MethodGet, reportURL, nil)
 	wantStatus(t, resp, http.StatusOK)
-	if rep := decodeBody[api.Report](t, resp); rep.Range != api.ReportRangeAll {
-		t.Fatalf("默认范围应为 all: %+v", rep.Range)
+	if rep := decodeBody[api.Report](t, resp); rep.Range != api.ReportRangeAll || rep.From != nil ||
+		len(rep.Blockers.Open) != 1 || rep.Blockers.Open[0].Phase != nil || rep.Blockers.NewInRange != 0 || rep.NextSteps.HorizonDays != 30 {
+		t.Fatalf("默认范围应为 all 且不区分卡点阶段: %+v", rep)
 	}
 	resp = doJSON(t, alice, http.MethodGet, reportURL+"?range=year", nil)
 	wantStatus(t, resp, http.StatusUnprocessableEntity)
@@ -3682,7 +3799,7 @@ func TestReportExport(t *testing.T) {
 		gt = "http://localhost:3000"
 	}
 	if resp, err := http.Get(gt + "/health"); err != nil {
-		t.Skipf("Gotenberg 不可达（docker compose up -d gotenberg）: %v", err)
+		t.Skipf("Gotenberg 不可达（隧道未转发 3000 或未载入 .env.tunnel）: %v", err)
 	} else {
 		resp.Body.Close()
 	}
@@ -4611,7 +4728,9 @@ func TestTimeBlockerActivitySweep(t *testing.T) {
 		t.Fatalf("只读派生不应产生动态: %+v", got)
 	}
 
-	// ticker 扫描一次：补记「卡点出现」，时间戳取真实发生时刻（截止日），不是扫描时刻
+	// ticker 扫描一次：补记「卡点出现」，时间戳取真实发生时刻（截止日次日零点，
+	// 与 Overdue 的口径一致），不是扫描时刻
+	overdueSince := time.Now().In(domain.ProjectLocation).AddDate(0, 0, -4).Format("2006-01-02") + " 00:00:00"
 	sweeper := api.NewServer(pool, nil)
 	sweeper.SweepBlockerActivities(context.Background())
 	got := blockerActivities(alice)
@@ -4621,8 +4740,8 @@ func TestTimeBlockerActivitySweep(t *testing.T) {
 	if got[0].Summary != "卡点出现：任务超期 · 缺 按期完成任务" {
 		t.Fatalf("补记文案异常: %q", got[0].Summary)
 	}
-	if got[0].OccurredAt.In(domain.ProjectLocation).Format("2006-01-02") != overdueOn {
-		t.Fatalf("时间戳应取真实发生时刻 %s: %v", overdueOn, got[0].OccurredAt)
+	if got[0].OccurredAt.In(domain.ProjectLocation).Format("2006-01-02 15:04:05") != overdueSince {
+		t.Fatalf("时间戳应取真实发生时刻 %s: %v", overdueSince, got[0].OccurredAt)
 	}
 	if got[0].ActorName != nil {
 		t.Fatalf("系统派生事件不应有行动人: %+v", got[0])
@@ -4643,6 +4762,62 @@ func TestTimeBlockerActivitySweep(t *testing.T) {
 	resp.Body.Close()
 	if again := blockerActivities(alice); len(again) != 1 {
 		t.Fatalf("写触发 diff 不应与 ticker 重复记账: %+v", again)
+	}
+
+	// 两次扫描之间超期又被关闭的任务：ticker 没来得及记「出现」，写路径解除时要成对补记，
+	// 否则解除因「没有开放中的出现」被丢弃，报告的「已解除」看不到它
+	resp = doJSON(t, alice, http.MethodPost, tasksURL, api.CreateTaskBatchRequest{
+		Items: []api.CreateTaskItem{
+			{KeyResultId: kr1, Name: "扫描间隙超期的任务", OwnerId: bobUser.ID, StartDate: start, EndDate: end},
+		},
+	})
+	wantStatus(t, resp, http.StatusCreated)
+	var task2 api.Task
+	for _, item := range decodeBody[[]api.Task](t, resp) {
+		if item.Name == "扫描间隙超期的任务" {
+			task2 = item
+		}
+	}
+	if task2.Id == 0 {
+		t.Fatal("批量创建返回里找不到第二个任务")
+	}
+	resp = doJSON(t, bob, http.MethodPost, fmt.Sprintf("%s/%d/update-status", tasksURL, task2.Id),
+		api.UpdateTaskStatusRequest{Status: api.UpdateTaskStatusRequestStatusInProgress})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	if _, err := pool.Exec(context.Background(),
+		"UPDATE tasks SET start_date = $2, end_date = $2 WHERE id = $1", task2.Id, overdueOn); err != nil {
+		t.Fatalf("模拟超期失败: %v", err)
+	}
+	resp = doJSON(t, alice, http.MethodPost, fmt.Sprintf("%s/%d/cancellation", tasksURL, task2.Id),
+		api.CloseTaskRequest{Reason: "需求取消"})
+	wantStatus(t, resp, http.StatusOK)
+	resp.Body.Close()
+	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/%d", tasksURL, task2.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	var opened, resolved []api.TaskActivity
+	for _, a := range decodeBody[api.TaskDetail](t, resp).Activities {
+		switch a.Kind {
+		case api.BlockerOpened:
+			opened = append(opened, a)
+		case api.BlockerResolved:
+			resolved = append(resolved, a)
+		}
+	}
+	if len(opened) != 1 || len(resolved) != 1 {
+		t.Fatalf("关闭扫描间隙超期的任务应成对留痕（出现 1 + 解除 1）: 出现 %+v 解除 %+v", opened, resolved)
+	}
+	if opened[0].OccurredAt.In(domain.ProjectLocation).Format("2006-01-02 15:04:05") != overdueSince {
+		t.Fatalf("补记的出现应取真实发生时刻 %s: %v", overdueSince, opened[0].OccurredAt)
+	}
+	resp = doJSON(t, alice, http.MethodGet, fmt.Sprintf("%s/projects/%d/report?range=all", base, created.Id), nil)
+	wantStatus(t, resp, http.StatusOK)
+	blockers := decodeBody[api.Report](t, resp).Blockers
+	if blockers.ResolvedInRange != 1 || len(blockers.Resolved) != 1 || blockers.Resolved[0].TaskId != task2.Id {
+		t.Fatalf("报告「已解除」应含扫描间隙超期又关闭的任务: %+v", blockers)
+	}
+	if want := fmt.Sprintf("task_overdue:%d", task2.Id); blockers.Resolved[0].Key != want {
+		t.Fatalf("已解除卡点应带出现时的合成键 %s: %+v", want, blockers.Resolved[0])
 	}
 }
 

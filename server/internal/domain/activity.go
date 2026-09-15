@@ -69,6 +69,8 @@ func ActivityKindLabel(kind string) string {
 // （ADR 0001／0002；模块 PRD §8.7）。卡点没有持久身份，只能按合成键认同一条：
 // 键在 after 里新出现记「卡点出现」，在 after 里消失记「卡点解除」；
 // 键两侧都在的（哪怕等级变了）不是新事实，不记。出现在前、解除在后，各自保持入参顺序。
+// 消失的时间型卡点在解除前成对补一条出现：它可能在两次小时扫描之间出现又被这次写操作解除，
+// 留痕里还没有「出现」，孤立的解除会被落库丢弃；出现已记过时由落库按「已开放」去重。
 func BlockerActivityDiff(before, after []Blocker, now time.Time) []TaskActivity {
 	beforeKeys := make(map[string]struct{}, len(before))
 	for _, b := range before {
@@ -85,9 +87,13 @@ func BlockerActivityDiff(before, after []Blocker, now time.Time) []TaskActivity 
 		}
 	}
 	for _, b := range before {
-		if _, still := afterKeys[b.Key]; !still {
-			out = append(out, blockerActivity(b, ActivityBlockerResolved, now))
+		if _, still := afterKeys[b.Key]; still {
+			continue
 		}
+		if IsTimeTriggeredBlocker(b.Kind) {
+			out = append(out, blockerActivity(b, ActivityBlockerOpened, now))
+		}
+		out = append(out, blockerActivity(b, ActivityBlockerResolved, now))
 	}
 	return out
 }

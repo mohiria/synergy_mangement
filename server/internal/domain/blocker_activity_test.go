@@ -6,7 +6,7 @@ import (
 )
 
 // 时间型卡点的真实发生时刻（ADR 0001）：审批超时在「进入环节 + N×24h」那一刻发生，
-// 任务超期在截止时间那一刻发生；两者都与派生时刻无关，重复派生得到同一个时间戳。
+// 任务超期在截止日次日零点（项目时区）那一刻发生；两者都与派生时刻无关，重复派生得到同一个时间戳。
 func TestBlockerOccurredAt(t *testing.T) {
 	start := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC)
@@ -37,8 +37,9 @@ func TestBlockerOccurredAt(t *testing.T) {
 	if got := first[BlockerApprovalTimeout].OccurredAt; !got.Equal(wantTimeout) {
 		t.Fatalf("审批超时发生时刻 = %v, want %v", got, wantTimeout)
 	}
-	if got := first[BlockerTaskOverdue].OccurredAt; !got.Equal(end) {
-		t.Fatalf("任务超期发生时刻 = %v, want %v", got, end)
+	wantOverdue := time.Date(2026, 9, 11, 0, 0, 0, 0, ProjectLocation)
+	if got := first[BlockerTaskOverdue].OccurredAt; !got.Equal(wantOverdue) {
+		t.Fatalf("任务超期发生时刻 = %v, want %v", got, wantOverdue)
 	}
 	for _, kind := range []string{BlockerApprovalTimeout, BlockerTaskOverdue} {
 		if !first[kind].OccurredAt.Equal(later[kind].OccurredAt) {
@@ -98,9 +99,10 @@ func TestBlockerActivityDiffUsesOccurredAt(t *testing.T) {
 		same[0].Summary != opened[0].Summary {
 		t.Fatalf("两条路径应产出同一条事实: %+v vs %+v", same, opened)
 	}
-	// 解除没有可计算的发生时刻，取本次比对时刻。
+	// 解除没有可计算的发生时刻，取本次比对时刻；时间型卡点的解除前面成对带一条真实时刻的出现。
 	resolved := BlockerActivityDiff([]Blocker{b}, nil, now)
-	if len(resolved) != 1 || !resolved[0].OccurredAt.Equal(now) {
-		t.Fatalf("解除动态应取比对时刻: %+v", resolved)
+	if len(resolved) != 2 || resolved[0].Kind != ActivityBlockerOpened || !resolved[0].OccurredAt.Equal(occurred) ||
+		resolved[1].Kind != ActivityBlockerResolved || !resolved[1].OccurredAt.Equal(now) {
+		t.Fatalf("解除动态应成对：出现取真实时刻、解除取比对时刻: %+v", resolved)
 	}
 }

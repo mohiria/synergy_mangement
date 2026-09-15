@@ -430,7 +430,9 @@ func (errReportRange) Error() string { return "报告时间范围不合法" }
 func ReportRangeFrom(name string, now time.Time) (*time.Time, error) {
 	switch name {
 	case "today":
-		from := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		// 「当日」按项目时区（UTC+8）界定，服务器时区（生产为 UTC）不参与。
+		n := now.In(ProjectLocation)
+		from := time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, ProjectLocation)
 		return &from, nil
 	case "week":
 		from := now.AddDate(0, 0, -7)

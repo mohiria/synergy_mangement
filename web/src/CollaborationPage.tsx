@@ -1190,14 +1190,18 @@ export default function CollaborationPage({
   const openEdgeFile = async (fileId: number, fileName: string | undefined, wantPreview: boolean) => {
     const ext = fileName?.split(".").pop()?.toLowerCase();
     const preview = wantPreview && !!ext && PREVIEWABLE.has(ext);
+    // 预览窗口须在用户手势同步阶段打开，等 await 之后再 window.open 会被部分浏览器当弹窗拦截；
+    // 先开空白页，拿到地址后再导航；被拦截（返回 null）时退回当前页跳转。
+    const win = preview ? window.open("", "_blank") : null;
     const res = await client.GET("/projects/{projectId}/files/{fileId}/download-url", {
       params: { path: { projectId, fileId }, query: preview ? { disposition: "inline" } : {} },
     });
     if (!res.data) {
+      win?.close();
       message.error(res.error?.message ?? "获取下载地址失败");
       return;
     }
-    if (preview) window.open(res.data.url, "_blank");
+    if (win) win.location.href = res.data.url;
     else window.location.assign(res.data.url);
   };
 
@@ -1324,7 +1328,12 @@ export default function CollaborationPage({
             (selectedEdgeObj.sourceCurrentFiles ?? []).map((f) => (
               <div key={f.fileId} className="gi-file">
                 <span title={f.fileName}>
-                  <b>{f.fileName}</b>
+                  <b
+                    className="file-link"
+                    onClick={() => openEdgeFile(f.fileId, f.fileName, previewable(f.fileName))}
+                  >
+                    {f.fileName}
+                  </b>
                   <small>
                     {f.fileTypeLabel}
                     {f.fileSize > 0 ? ` · ${formatFileSize(f.fileSize)}` : ""}
@@ -1493,11 +1502,24 @@ export default function CollaborationPage({
             </div>
             {inspectorDetail.deliverables.map((d) => (
               <div key={d.id} className="gi-file">
-                <span title={`${d.name} · ${d.contentStateLabel}`}>
-                  <b>{d.name}</b>
+                <span title={`${(d.current ?? d.candidate)?.fileName ?? d.name} · ${d.contentStateLabel}`}>
+                  {(() => {
+                    // 与任务抽屉同一规则：有当前文件显示当前文件，只有候选时显示候选文件，都没有才退回项名。
+                    const shown = d.current ?? d.candidate;
+                    return shown ? (
+                      <b
+                        className="file-link"
+                        onClick={() => openEdgeFile(shown.id, shown.fileName, previewable(shown.fileName))}
+                      >
+                        {shown.fileName}
+                      </b>
+                    ) : (
+                      <b>{d.name}</b>
+                    );
+                  })()}
                   <small>
                     {d.contentStateLabel}
-                    {d.current?.fileSize ? ` · ${formatFileSize(d.current.fileSize)}` : ""}
+                    {(d.current ?? d.candidate)?.fileSize ? ` · ${formatFileSize((d.current ?? d.candidate)!.fileSize!)}` : ""}
                   </small>
                 </span>
                 {d.current && (
