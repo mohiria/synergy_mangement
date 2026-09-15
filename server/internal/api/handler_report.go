@@ -309,6 +309,7 @@ func (s *Server) buildReport(w http.ResponseWriter, r *http.Request, projectId i
 			openedAt = row.OpenedAt.Time
 		}
 		resolved = append(resolved, ReportResolvedBlocker{
+			Key:          row.BlockerKey.String,
 			TaskId:       row.TaskID,
 			Code:         domain.TaskCode(int(row.ObjectiveCodeSeq), int(row.KrCodeSeq), int(row.CodeSeq)),
 			TaskName:     row.TaskName,

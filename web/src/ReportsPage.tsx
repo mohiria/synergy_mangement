@@ -350,7 +350,7 @@ export default function ReportsPage({
                 <div className="rp-blk-resolved">
                   <b>本期解除 {report.blockers.resolved.length} 项</b>{" "}
                   {report.blockers.resolved.map((b, i) => (
-                    <Fragment key={`${b.taskId}-${b.kind}-${b.resolvedAt}`}>
+                    <Fragment key={`${b.taskId}-${b.key}-${b.resolvedAt}`}>
                       {i > 0 && "；"}
                       <span className="rp-code">{b.code}</span> {b.taskName}（{b.kindLabel}，{mdTime(b.resolvedAt)} 解除）
                     </Fragment>

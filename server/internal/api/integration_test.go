@@ -4816,6 +4816,9 @@ func TestTimeBlockerActivitySweep(t *testing.T) {
 	if blockers.ResolvedInRange != 1 || len(blockers.Resolved) != 1 || blockers.Resolved[0].TaskId != task2.Id {
 		t.Fatalf("报告「已解除」应含扫描间隙超期又关闭的任务: %+v", blockers)
 	}
+	if want := fmt.Sprintf("task_overdue:%d", task2.Id); blockers.Resolved[0].Key != want {
+		t.Fatalf("已解除卡点应带出现时的合成键 %s: %+v", want, blockers.Resolved[0])
+	}
 }
 
 // 读边界（PRD §3.3 / AC-21）：非项目成员看不到项目，也读不到项目内任何内容。

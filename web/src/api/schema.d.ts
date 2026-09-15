@@ -2574,6 +2574,8 @@ export interface components {
         };
         /** @description 范围内解除的卡点（来自卡点出现／解除动态，按解除时间升序） */
         ReportResolvedBlocker: {
+            /** @description 该卡点出现时的合成键（与开放卡点的 key 同一口径）；同一任务同类多个卡点同时解除时以 taskId + key + resolvedAt 区分 */
+            key: string;
             /** Format: int64 */
             taskId: number;
             code: string;
